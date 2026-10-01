@@ -1,0 +1,77 @@
+@import 'tailwindcss';
+
+@theme inline {
+  --font-display: var(--ff-display), system-ui, sans-serif;
+  --font-sans: var(--ff-sans), system-ui, sans-serif;
+  --font-mono: var(--ff-mono), ui-monospace, monospace;
+}
+@theme {
+  --color-plaster: #edefea;
+  --color-paper: #f7f8f4;
+  --color-grout: #d3d8cf;
+  --color-ink: #161b25;
+  --color-slate: #556070;
+  --color-lapis: #2b44d9;
+  --color-verdigris: #12786a;
+  --color-saffron: #f4b13a;
+  --color-madder: #c93450;
+  --container-page: 1240px;
+}
+
+@layer base {
+  html { background: var(--color-plaster); color: var(--color-ink); scroll-behavior: smooth; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
+  body { font-family: var(--font-sans); line-height: 1.625; overflow-x: hidden; }
+  ::selection { background: var(--color-lapis); color: #fff; }
+  :focus-visible { outline: 2px solid var(--color-lapis); outline-offset: 3px; border-radius: 4px; }
+  .on-ink :focus-visible { outline-color: var(--color-saffron); }
+}
+
+@layer components {
+  .page-x { margin-inline: auto; width: 100%; max-width: var(--container-page); padding-inline: 1.25rem; @media (width >= 40rem) { padding-inline: 2rem; } }
+  .h1, .h2 { font-family: var(--font-display); font-weight: 700; text-wrap: balance; }
+  .h1 { font-size: clamp(2.3rem, 4.4vw, 3.6rem); letter-spacing: -0.035em; line-height: 1.04; }
+  .h2 { font-size: clamp(1.8rem, 3.1vw, 2.6rem); letter-spacing: -0.03em; line-height: 1.08; }
+
+  .btn { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; border-radius: 9999px; padding-inline: 1.5rem; font-size: 15px; font-weight: 600; transition: color 150ms, background-color 150ms, border-color 150ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+  .btn-lapis { background: var(--color-lapis); color: #fff; &:hover { background: #2237b8; } }
+  .btn-saffron { background: var(--color-saffron); color: var(--color-ink); &:hover { background: #ffc255; } }
+  .btn-line { border: 1px solid rgb(22 27 37 / 0.25); color: var(--color-ink); &:hover { border-color: var(--color-ink); background: var(--color-ink); color: var(--color-paper); } }
+  .btn-line-light { border: 1px solid rgb(255 255 255 / 0.3); color: #fff; &:hover { border-color: #fff; background: #fff; color: var(--color-ink); } }
+
+  .prose-page {
+    h2 { margin: 2.5rem 0 0.75rem; font: 700 1.5rem / 2rem var(--font-display); letter-spacing: -0.025em; }
+    p, li { color: var(--color-slate); }
+    ul { margin-top: 0.5rem; list-style: disc; padding-left: 1.25rem; & > li + li { margin-top: 0.25rem; } }
+    a { font-weight: 600; color: var(--color-lapis); text-decoration: underline; text-underline-offset: 4px; }
+  }
+
+  /* Demo desktops: a 1280 px canvas scaled to its box with CSS alone (tan(atan2(w, 1280px)) = w / 1280). */
+  .desk { position: relative; width: 100%; overflow: hidden; aspect-ratio: 1280 / 800; container-type: inline-size; }
+  .desk-in { position: absolute; inset: 0 auto auto 0; width: 1280px; height: 800px; transform-origin: 0 0; transform: scale(tan(atan2(100cqw, 1280px))); }
+  .win { position: absolute; left: var(--l); top: var(--t); width: var(--w); height: var(--h); transform-origin: 50% 50%; transform: translate(var(--x), var(--y)) scale(var(--sx), var(--sy)); will-change: transform; contain: layout style; }
+  @media (width <= 640px) {
+    /* phones get a taller desktop */
+    .desk-tall { aspect-ratio: 1280 / 960; .desk-in { height: 960px; } }
+    .desk-tall .win { top: var(--tt); height: var(--ht); transform: translate(var(--x), var(--yt)) scale(var(--sx), var(--syt)); }
+  }
+  .dim { position: absolute; pointer-events: none; background: #0a0d14; transition: opacity 0.5s; }
+  .stage-shadow { box-shadow: 0 30px 80px -30px rgb(22 27 37 / 0.7); }
+  .wallpaper {
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect x='2' y='2' width='36' height='36' rx='7' fill='none' stroke='%23fff' stroke-opacity='.045'/%3E%3C/svg%3E"),
+      radial-gradient(700px 420px at 12% 8%, rgb(43 68 217 / 0.22), transparent 70%), radial-gradient(640px 400px at 92% 96%, rgb(18 120 106 / 0.2), transparent 70%), #12151b;
+  }
+  .switcher-bg { background-image: radial-gradient(520px 320px at 15% 0%, rgb(43 68 217 / 0.28), transparent 70%), radial-gradient(480px 300px at 100% 100%, rgb(18 120 106 / 0.26), transparent 70%); }
+  .chat-fade { mask-image: linear-gradient(to bottom, transparent 0, #000 28px); } /* older messages fade out under the header */
+  .ic { flex-shrink: 0; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+  /* syntax colours in the code views */
+  .sk { color: #f78fa7; } .sf { color: #7c93ff; } .ss { color: #5fd3b6; } .sn { color: #f4b13a; } .sc { color: #5c6578; } .sv { color: #c792ea; } .sm { color: #6b7487; }
+  .blink { animation: blink 1.1s steps(1) infinite; }
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .blink { animation: none; }
+  .win, .dim { transition: none !important; }
+}
