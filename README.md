@@ -1,25 +1,98 @@
-# Mosaïk marketing site
+<div align="center">
 
-Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4 and TypeScript. No animation library: the demo moves with CSS transitions.
+<h1>Mosaik</h1>
 
-This folder is written by `v1.sh`, which is the source of truth. Change the settings at the top of that script and run it
-again; the site updates in place and only changed files are touched.
+<h3>Workspace organizer that adapts to workflow patterns</h3>
 
-```bash
-./v1.sh              # install or update, then start the dev server
-./v1.sh --deploy     # type-check, then deploy to production on Vercel
-./v1.sh --help       # every option
+[![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://rust-lang.org)
+[![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![React](https://img.shields.io/badge/React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://reactjs.org)
+
+<hr>
+
+<h2>About</h2>
+
+<p>Mosaik watches how you actually work and reorganizes your workspace around those patterns.<br>
+If you keep opening the same three files whenever you start on a specific project,<br>
+it notices, and the next time you start that kind of work it sets things up for you.</p>
+
+<p>Files you use together get grouped. Apps you reach for in sequence become a workflow.<br>
+Daily rhythms get picked up on, so the workspace you get in the morning<br>
+is different from the one in the evening.</p>
+
+<p><b>Everything runs locally. No accounts, no telemetry, no data leaving your machine.</b></p>
+
+<hr>
+
+<h2>Patterns</h2>
+
+<table align="center">
+<tr>
+<td align="center" width="33%">
+
+<h3>Files</h3>
+
+Groups related files<br>
+Detects project context
+
+</td>
+<td align="center" width="33%">
+
+<h3>Apps</h3>
+
+Learns tool combinations<br>
+Builds workflow profiles
+
+</td>
+<td align="center" width="33%">
+
+<h3>Time</h3>
+
+Daily rhythms<br>
+Focus periods
+
+</td>
+</tr>
+</table>
+
+<hr>
+
+<h2>Example</h2>
+
+```python
+if user.opens("VS Code") and user.recent_files(".py"):
+    mosaik.suggest_workspace("Python Project")
+    mosaik.group_files(["*.py", "*.txt", "*.md"])
+    mosaik.recommend_apps(["Terminal", "Browser"])
 ```
 
-## Where things live
+<hr>
 
-- `lib/data.ts`: the four demo workspaces and the desktop geometry (grid slots, the messy layout).
-- `components/apps.tsx`: the pretend apps drawn inside the demo (editor, terminal, browser, chat, design, notes, reader, charts, broadcast).
-- `components/desk.tsx`: the interactive desktop in the hero, the feature illustrations and the workspace thumbnails.
-- `components/ui.tsx`: header, footer, wordmark, icons and the platform list.
-- `app/`: the pages, plus the favicon (`icon.svg`, `favicon.ico`, `apple-icon.png`), `robots.txt` and `sitemap.xml`.
+<h2>Stack</h2>
 
-## Before launch
+```javascript
+const tech = {
+  core: "Rust",
+  ai: "Python + scikit-learn",
+  ui: "Tauri + React",
+  storage: "Local SQLite"
+};
+```
 
-- Set `SITE_URL` in `v1.sh` to the real domain.
-- Have the copy on `/conditions` reviewed before the app collects any data.
+<hr>
+
+<h2>Install</h2>
+
+```bash
+# macOS/Linux
+curl -fsSL https://mosaik.dev/install.sh | sh
+
+# Windows
+powershell -c "irm mosaik.dev/install.ps1 | iex"
+```
+
+<hr>
+
+[![Download](https://img.shields.io/badge/Download-000000?style=for-the-badge&logo=download&logoColor=white)](https://mosaik.dev)
+
+</div>
