@@ -91,9 +91,11 @@ name = "mosaik-ipc"
 version = "0.1.0"
 dependencies = [
  "mosaik-core",
+ "mosaik-win",
  "serde",
  "serde_json",
  "thiserror",
+ "windows",
 ]
 
 [[package]]
