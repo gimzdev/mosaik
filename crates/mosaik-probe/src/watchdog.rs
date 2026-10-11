@@ -1,6 +1,7 @@
 //! Recovery after the main process dies: a stand-in main process hides four windows (one with
-//! each method, plus a real app shell-cloaked), records them in the journal, starts the real
-//! watchdog and waits. The probe kills it and times how long until every window is back.
+//! each method, plus a real app shell-cloaked), records them in the journal and waits. The probe
+//! starts the real watchdog on it, kills the stand-in, and times how long until every window is
+//! back, with the watchdog's exit code and log.
 
 use std::time::Instant;
 
@@ -25,6 +26,11 @@ fn journal_dir() -> std::path::PathBuf {
 /// Where the stand-in writes what went wrong, since nobody reads its console.
 fn error_file() -> std::path::PathBuf {
     journal_dir().join("stand-in-error.txt")
+}
+
+/// Written by the stand-in once everything is hidden and recorded.
+fn ready_file() -> std::path::PathBuf {
+    journal_dir().join("stand-in-ready.txt")
 }
 
 fn method_named(m: &str) -> Option<HideMethod> {
@@ -77,24 +83,50 @@ fn stand_in(args: &[String]) -> Result<Value, String> {
         });
         store.save(&journal).map_err(|e| e.to_string())?;
     }
-    let watchdog = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .with_file_name("mosaik-watchdog.exe");
-    let journal_path = journal_dir().join("hidden-windows.json");
-    spawn(
-        &watchdog.to_string_lossy(),
-        &format!("--watch {} --journal \"{}\"", own_pid(), journal_path.display()),
-    )
-    .map_err(|e| e.to_string())?;
+    std::fs::write(ready_file(), own_pid().to_string()).map_err(|e| e.to_string())?;
     // Wait to be killed.
     loop {
         std::thread::sleep(std::time::Duration::from_secs(60));
     }
 }
 
+fn watchdog_exe() -> Result<std::path::PathBuf, String> {
+    Ok(std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .with_file_name("mosaik-watchdog.exe"))
+}
+
+/// The watchdog on its own first: `--rescue` with nothing to do must exit 0 and log.
+fn smoke_test() -> Result<(), String> {
+    let dir = journal_dir().join("smoke");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let w = spawn(
+        &watchdog_exe()?.to_string_lossy(),
+        &format!(
+            "--rescue --journal \"{}\"",
+            dir.join("hidden-windows.json").display()
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    if !w.wait(10_000) {
+        let _ = w.kill();
+        return Err("the watchdog did not finish a rescue with nothing to do within 10 s".into());
+    }
+    let code = w.exit_code();
+    let log = std::fs::read_to_string(dir.join("watchdog.log")).unwrap_or_default();
+    println!("smoke test: exit {code:?}, log {} line(s)", log.lines().count());
+    if code != Some(0) || log.is_empty() {
+        return Err(format!(
+            "the watchdog's smoke test failed: exit {code:?}, log {log:?}"
+        ));
+    }
+    Ok(())
+}
+
 pub fn run() -> Result<Value, String> {
     let _ = std::fs::remove_dir_all(journal_dir());
     std::fs::create_dir_all(journal_dir()).map_err(|e| e.to_string())?;
+    smoke_test()?;
     let work = mosaik_win::monitors::topology()
         .map_err(|e| e.to_string())?
         .primary()
@@ -141,9 +173,10 @@ pub fn run() -> Result<Value, String> {
             .all(|(h, m)| method_named(m).is_some_and(|m| is_hidden(*h, m)))
     };
     let ready = mosaik_win::events::pump_until(15_000, || {
-        store
-            .load::<Journal>()
-            .is_ok_and(|j| j.value.hidden.len() == windows.len())
+        ready_file().exists()
+            && store
+                .load::<Journal>()
+                .is_ok_and(|j| j.value.hidden.len() == windows.len())
             && hidden_each()
     });
     if !ready {
@@ -169,11 +202,24 @@ pub fn run() -> Result<Value, String> {
             "the stand-in main process did not hide every window ({why})"
         ));
     }
+    let journal_path = journal_dir().join("hidden-windows.json");
+    let watchdog = spawn(
+        &watchdog_exe()?.to_string_lossy(),
+        &format!("--watch {} --journal \"{}\"", main.pid, journal_path.display()),
+    )
+    .map_err(|e| e.to_string())?;
     mosaik_win::events::pump_until(500, || false);
+    let watching = !watchdog.wait(0);
     let killed = Instant::now();
     main.kill().map_err(|e| e.to_string())?;
     let all_back = mosaik_win::events::pump_until(30_000, || windows.iter().all(|(h, _)| is_shown(*h)));
     let restore_ms = killed.elapsed().as_secs_f64() * 1000.0;
+    let watchdog_exited = watchdog.wait(5_000);
+    let watchdog_ms = killed.elapsed().as_secs_f64() * 1000.0;
+    let watchdog_exit = watchdog.exit_code();
+    if !watchdog_exited {
+        let _ = watchdog.kill();
+    }
     mosaik_win::events::pump_until(300, || false);
     let rows: Vec<Value> = windows
         .iter()
@@ -204,11 +250,22 @@ pub fn run() -> Result<Value, String> {
         "watchdog_log": log.lines().collect::<Vec<_>>(),
         "all_restored": all_back,
         "kill_to_all_visible_ms": round2(restore_ms),
+        "watchdog_was_watching": watching,
+        "watchdog_exit_code": watchdog_exit,
+        "watchdog_exited_within_ms": watchdog_exited.then_some(round2(watchdog_ms)),
         "windows": rows,
         "journal_entries_left": journal_after,
     });
     println!(
         "all restored: {all_back} in {restore_ms:.0} ms after the kill; journal entries left: {journal_after}"
+    );
+    println!(
+        "watchdog: watching before the kill {watching}, exit code {watchdog_exit:?}{}",
+        if watchdog_exited {
+            ""
+        } else {
+            " (still running; stopped)"
+        }
     );
     for r in &rows {
         println!("  {r}");

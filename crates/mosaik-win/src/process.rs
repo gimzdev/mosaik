@@ -7,9 +7,9 @@ use windows::Win32::System::ProcessStatus::{
     GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
 };
 use windows::Win32::System::Threading::{
-    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetCurrentProcessId, GetProcessTimes, OpenProcess,
-    PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
-    STARTUPINFOW, TerminateProcess, WaitForSingleObject,
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes,
+    OpenProcess, PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    PROCESS_TERMINATE, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -59,6 +59,15 @@ impl Process {
     pub fn wait(&self, ms: u32) -> bool {
         // SAFETY: valid process handle with SYNCHRONIZE access.
         unsafe { WaitForSingleObject(self.handle, ms) == WAIT_OBJECT_0 }
+    }
+
+    /// The exit code once the process has ended; `None` while it runs.
+    pub fn exit_code(&self) -> Option<u32> {
+        let mut code = 0u32;
+        // SAFETY: valid process handle with query access; out pointer to a local.
+        unsafe { GetExitCodeProcess(self.handle, &mut code) }.ok()?;
+        // STILL_ACTIVE (259) means it has not ended.
+        (code != 259).then_some(code)
     }
 
     pub fn kill(&self) -> Result<()> {
