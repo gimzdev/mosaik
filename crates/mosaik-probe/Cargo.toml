@@ -1,0 +1,15 @@
+[package]
+name = "mosaik-probe"
+description = "Measurements behind Mosaïk's design decisions (docs/adr). Re-run before each release."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+mosaik-core.workspace = true
+
+[lints]
+workspace = true

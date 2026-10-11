@@ -1,9 +1,23 @@
-node_modules
-.next
-out
-.vercel
-.env*.local
+# Rust
+/target/
+
+# Node, Next.js, Vite, Playwright
+node_modules/
+.next/
+out/
+dist/
 *.tsbuildinfo
 next-env.d.ts
 npm-debug.log*
+playwright-report/
+test-results/
+
+# Tauri
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# Local only
+.vercel/
+.env*.local
+.agent/
 .DS_Store

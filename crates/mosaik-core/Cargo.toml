@@ -1,0 +1,24 @@
+[package]
+name = "mosaik-core"
+description = "Mosaïk's pure logic: geometry, monitors, zones, layouts, workspaces, matching and the saved-file schema. No Win32."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# The Topology fixture library, for tests in this and other crates.
+fixtures = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
