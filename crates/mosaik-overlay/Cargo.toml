@@ -10,7 +10,9 @@ publish.workspace = true
 
 [dependencies]
 mosaik-core.workspace = true
-thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+mosaik-win.workspace = true
 
 [target.'cfg(windows)'.dependencies.windows]
 workspace = true
