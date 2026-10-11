@@ -44,6 +44,8 @@ pub enum Command {
     /// Bring back every hidden window now.
     Rescue,
     ShowSwitcher,
+    /// Open the settings window (what a second launch of Mosaïk asks the running one).
+    ShowSettings,
     Quit,
 }
 

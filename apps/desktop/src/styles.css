@@ -1,0 +1,98 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/bricolage-grotesque';
+@import '@fontsource-variable/instrument-sans';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* Mosaïk's palette, shared with the site. */
+@theme {
+  --color-plaster: #edefea;
+  --color-paper: #f7f8f4;
+  --color-grout: #d3d8cf;
+  --color-ink: #161b25;
+  --color-slate: #556070;
+  --color-lapis: #2b44d9;
+  --color-verdigris: #12786a;
+  --color-saffron: #f4b13a;
+  --color-madder: #c93450;
+  --font-display: 'Bricolage Grotesque Variable', system-ui, sans-serif;
+  --font-sans: 'Instrument Sans Variable', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+}
+
+/* Surfaces and text by theme. Light is the default; dark follows Windows unless the user picks one;
+   high contrast uses the system's own colours. */
+:root {
+  color-scheme: light;
+  --bg: var(--color-plaster);
+  --surface: var(--color-paper);
+  --line: var(--color-grout);
+  --text: var(--color-ink);
+  --muted: var(--color-slate);
+  --accent: var(--color-lapis);
+  --focus: var(--color-lapis);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #0f1218;
+    --surface: #161b25;
+    --line: #2a3140;
+    --text: #edefea;
+    --muted: #a3acba;
+    --accent: #7c8fff;
+    --focus: #f4b13a;
+  }
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1218;
+  --surface: #161b25;
+  --line: #2a3140;
+  --text: #edefea;
+  --muted: #a3acba;
+  --accent: #7c8fff;
+  --focus: #f4b13a;
+}
+@media (forced-colors: active) {
+  :root {
+    --bg: Canvas;
+    --surface: Canvas;
+    --line: CanvasText;
+    --text: CanvasText;
+    --muted: CanvasText;
+    --accent: Highlight;
+    --focus: Highlight;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

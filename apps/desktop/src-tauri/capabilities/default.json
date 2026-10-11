@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What Mosaïk's own windows may call: its engine commands and window events, nothing else.",
+  "windows": ["switcher", "settings"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-hide"]
+}

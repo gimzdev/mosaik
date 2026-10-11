@@ -7,6 +7,8 @@ members = [
     "crates/mosaik-overlay",
     "crates/mosaik-watchdog",
     "crates/mosaik-probe",
+    "crates/mosaik-engine",
+    "apps/desktop/src-tauri",
 ]
 # The crates above build everywhere; the Windows-only ones compile to empty libraries elsewhere,
 # so `cargo test` works on Linux and macOS for the pure logic.
@@ -25,6 +27,7 @@ mosaik-core = { path = "crates/mosaik-core" }
 mosaik-ipc = { path = "crates/mosaik-ipc" }
 mosaik-win = { path = "crates/mosaik-win" }
 mosaik-overlay = { path = "crates/mosaik-overlay" }
+mosaik-engine = { path = "crates/mosaik-engine" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 thiserror = "2.0.21"

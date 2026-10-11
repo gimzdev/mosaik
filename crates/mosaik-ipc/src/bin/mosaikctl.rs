@@ -7,6 +7,8 @@
 //! mosaikctl save [<workspace>]    save the current arrangement
 //! mosaikctl rescue                bring back every window Mosaïk hid (works even if it is not running)
 //! mosaikctl switcher              open the switcher
+//! mosaikctl settings              open the settings window
+//! mosaikctl quit                  close Mosaïk (every window it hid comes back first)
 //! mosaikctl version
 //! ```
 //!
@@ -41,7 +43,7 @@ mod windows_main {
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
     const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-    const USAGE: &str = "usage: mosaikctl <state [--json] | workspaces | switch <workspace> | save [<workspace>] | rescue | switcher | version>";
+    const USAGE: &str = "usage: mosaikctl <state [--json] | workspaces | switch <workspace> | save [<workspace>] | rescue | switcher | settings | quit | version>";
 
     pub fn run(args: Vec<String>) -> i32 {
         let Some(command) = args.first().map(String::as_str) else {
@@ -67,6 +69,8 @@ mod windows_main {
             },
             ("rescue", []) => Command::Rescue,
             ("switcher", []) => Command::ShowSwitcher,
+            ("settings", []) => Command::ShowSettings,
+            ("quit", []) => Command::Quit,
             ("version", []) => {
                 println!("mosaikctl {}", env!("CARGO_PKG_VERSION"));
                 return 0;

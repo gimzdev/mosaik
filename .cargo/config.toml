@@ -1,0 +1,4 @@
+# Link the C runtime into every Windows binary, so installing Mosaïk never needs the Visual C++
+# Redistributable (ADR 0002: nothing to install but Mosaïk itself).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
