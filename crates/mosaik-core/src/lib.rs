@@ -5,8 +5,14 @@
 pub mod classify;
 pub mod geometry;
 pub mod hotkey;
+pub mod journal;
 pub mod layout;
 pub mod matching;
+pub mod place;
+pub mod settings;
+pub mod snap;
+pub mod store;
+pub mod tabs;
 pub mod topology;
 pub mod window;
 pub mod zone;
