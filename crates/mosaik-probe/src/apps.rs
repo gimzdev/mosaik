@@ -13,71 +13,90 @@ use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
 pub struct App {
     pub name: &'static str,
     pub target: String,
-    pub args: &'static str,
+    pub args: String,
     /// The program that owns the window, lower case.
     pub exe: &'static str,
     /// The window class, when the program owns several kinds of windows.
     pub class: Option<&'static str>,
 }
 
+/// A page that changes colour four times a second (Mosaïk's zone colours), so a browser that has
+/// stopped drawing shows up as a frozen capture.
+const ANIMATED_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>Mosaik probe page</title>\
+<style>html,body{margin:0;height:100%}body{animation:c 1s steps(1,end) infinite}\
+@keyframes c{0%{background:#c93450}25%{background:#12786a}50%{background:#2b44d9}75%{background:#f4b13a}}</style>";
+
+/// Writes the animated page to the temp folder and returns its address.
+fn animated_page() -> String {
+    let dir = std::env::temp_dir().join("mosaik-probe");
+    let path = dir.join("animated.html");
+    if std::fs::create_dir_all(&dir).is_err() || std::fs::write(&path, ANIMATED_PAGE).is_err() {
+        return "about:blank".into();
+    }
+    let p = path.to_string_lossy().replace('\\', "/").replace(' ', "%20");
+    format!("file:///{p}")
+}
+
 /// Chrome, Edge, VS Code (Electron), Windows Terminal, Explorer, Word (Office), Calculator (UWP)
-/// and Notepad. Browsers open private windows so no session or history is touched.
+/// and Notepad. Browsers open private windows so no session or history is touched, on a page
+/// that keeps drawing.
 pub fn catalog() -> Vec<App> {
     let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let page = animated_page();
     vec![
         App {
             name: "Notepad",
             target: "notepad.exe".into(),
-            args: "",
+            args: String::new(),
             exe: "notepad.exe",
             class: None,
         },
         App {
             name: "Edge",
             target: "msedge.exe".into(),
-            args: "--inprivate --new-window about:blank",
+            args: format!("--inprivate --new-window {page}"),
             exe: "msedge.exe",
             class: None,
         },
         App {
             name: "Chrome",
             target: "chrome.exe".into(),
-            args: "--incognito --new-window about:blank",
+            args: format!("--incognito --new-window {page}"),
             exe: "chrome.exe",
             class: None,
         },
         App {
             name: "VS Code",
             target: format!("{local}\\Programs\\Microsoft VS Code\\Code.exe"),
-            args: "--new-window",
+            args: "--new-window".into(),
             exe: "code.exe",
             class: None,
         },
         App {
             name: "Windows Terminal",
             target: "wt.exe".into(),
-            args: "-w new",
+            args: "-w new".into(),
             exe: "windowsterminal.exe",
             class: None,
         },
         App {
             name: "Explorer",
             target: "explorer.exe".into(),
-            args: "C:\\Windows",
+            args: "C:\\Windows".into(),
             exe: "explorer.exe",
             class: Some("CabinetWClass"),
         },
         App {
             name: "Word",
             target: "winword.exe".into(),
-            args: "/q /w",
+            args: "/q /w".into(),
             exe: "winword.exe",
             class: Some("OpusApp"),
         },
         App {
             name: "Calculator (UWP)",
             target: "calc.exe".into(),
-            args: "",
+            args: String::new(),
             exe: "applicationframehost.exe",
             class: Some("ApplicationFrameWindow"),
         },
@@ -95,7 +114,7 @@ pub struct Opened {
 pub fn open(app: &App, scanner: &mut Scanner) -> Result<Opened, String> {
     let before: HashSet<u64> = top_level().into_iter().map(|h| handle(h).0).collect();
     let start = Instant::now();
-    shell_open(&app.target, app.args).map_err(|e| e.to_string())?;
+    shell_open(&app.target, &app.args).map_err(|e| e.to_string())?;
     while start.elapsed() < Duration::from_secs(25) {
         mosaik_win::events::pump_until(150, || false);
         for h in top_level() {

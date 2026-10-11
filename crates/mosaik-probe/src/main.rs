@@ -19,6 +19,8 @@
 #[cfg(windows)]
 mod apps;
 #[cfg(windows)]
+mod backdrop;
+#[cfg(windows)]
 mod capture;
 #[cfg(windows)]
 mod classify;
@@ -37,7 +39,11 @@ mod kbd;
 #[cfg(windows)]
 mod matrix;
 #[cfg_attr(not(windows), allow(dead_code))]
+mod pixels;
+#[cfg_attr(not(windows), allow(dead_code))]
 mod report;
+#[cfg(windows)]
+mod state;
 #[cfg(windows)]
 mod watchdog;
 

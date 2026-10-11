@@ -76,15 +76,19 @@ fn press(keys: &[u16]) -> (bool, Option<f64>, Vec<u32>) {
     )
 }
 
+/// The language half of a layout handle names the language, not the key arrangement (English
+/// (Canada) can be the US layout or Canadian Multilingual Standard), so the whole handle is kept.
 fn layout_name(hkl: HKL) -> String {
-    let id = (hkl.0 as usize) & 0xFFFF;
-    match id {
-        0x0409 => "English (US)".into(),
-        0x040C => "French (AZERTY)".into(),
-        0x1009 => "Canadian French / Multilingual".into(),
-        0x0407 => "German (QWERTZ)".into(),
-        other => format!("layout {other:04X}"),
-    }
+    let raw = hkl.0 as usize & 0xFFFF_FFFF;
+    let language = match raw & 0xFFFF {
+        0x0409 => "English (US)",
+        0x1009 => "English (Canada)",
+        0x0C0C => "French (Canada)",
+        0x040C => "French (France)",
+        0x0407 => "German (Germany)",
+        _ => "other language",
+    };
+    format!("{language} [HKL {raw:08X}]")
 }
 
 pub fn run() -> Result<Value, String> {

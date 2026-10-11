@@ -5,11 +5,12 @@ use mosaik_core::geometry::Rect;
 use mosaik_win::own::{WindowClass, plain_wndproc};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MSG, SW_SHOWNOACTIVATE, ShowWindow, TranslateMessage, WINDOW_EX_STYLE,
-    WS_OVERLAPPEDWINDOW,
+    WS_EX_TOPMOST, WS_OVERLAPPEDWINDOW,
 };
 
-/// `mosaik-probe dummy --title T --rect l,t,r,b`: shows the window and runs until it is closed
-/// or the process is killed.
+/// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost]`: shows the window and runs until it
+/// is closed or the process is killed. `--topmost` keeps it above the user's windows, so a probe
+/// that presses the mouse on its title bar never lands on something else.
 pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
     let title = args
         .iter()
@@ -26,9 +27,14 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
             (v.len() == 4).then(|| Rect::new(v[0], v[1], v[2], v[3]))
         })
         .unwrap_or(Rect::from_origin_size(200, 200, 640, 420));
+    let ex = if args.iter().any(|a| a == "--topmost") {
+        WS_EX_TOPMOST
+    } else {
+        WINDOW_EX_STYLE(0)
+    };
     let class = WindowClass::register("MosaikProbeDummy", Some(dummy_proc)).map_err(|e| e.to_string())?;
     let hwnd = class
-        .create(&title, WS_OVERLAPPEDWINDOW, WINDOW_EX_STYLE(0), rect, None)
+        .create(&title, WS_OVERLAPPEDWINDOW, ex, rect, None)
         .map_err(|e| e.to_string())?;
     // SAFETY: our own window; standard message loop until WM_QUIT.
     unsafe {
@@ -61,12 +67,16 @@ unsafe extern "system" fn dummy_proc(
 pub fn spawn(
     title: &str,
     rect: Rect,
+    topmost: bool,
 ) -> Result<(mosaik_win::process::Process, windows::Win32::Foundation::HWND), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let args = format!(
+    let mut args = format!(
         "dummy --title \"{title}\" --rect {},{},{},{}",
         rect.left, rect.top, rect.right, rect.bottom
     );
+    if topmost {
+        args.push_str(" --topmost");
+    }
     let process = mosaik_win::process::spawn(&exe.to_string_lossy(), &args).map_err(|e| e.to_string())?;
     let pid = process.pid;
     let mut found = None;

@@ -87,7 +87,7 @@ pub fn run() -> Result<Value, String> {
         640,
         420,
     );
-    let (process, hwnd) = dummy::spawn("Mosaïk drag probe", start)?;
+    let (process, hwnd) = dummy::spawn("Mosaïk drag probe", start, true)?;
     let me = handle(hwnd);
     let mut overlay = LayeredWindow::new("MosaikProbeOverlay", true).map_err(|e| e.to_string())?;
     let hooks = events::hook(

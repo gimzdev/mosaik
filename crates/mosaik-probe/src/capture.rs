@@ -1,5 +1,6 @@
 //! Screen captures of small regions, compared numerically (never saved): used to check that a
-//! window shown again repaints at once instead of flashing stale or black content.
+//! window shown again repaints at once instead of flashing stale or black content. The analysis
+//! is in `pixels`.
 
 use mosaik_core::geometry::Rect;
 use windows::Win32::Graphics::Gdi::{
@@ -50,22 +51,4 @@ pub fn capture(r: Rect) -> Option<Vec<u32>> {
         ReleaseDC(None, screen);
         result
     }
-}
-
-/// Mean absolute difference per colour channel, 0 (identical) to 255.
-pub fn difference(a: &[u32], b: &[u32]) -> f64 {
-    if a.len() != b.len() || a.is_empty() {
-        return 255.0;
-    }
-    let total: u64 = a
-        .iter()
-        .zip(b)
-        .map(|(x, y)| {
-            let d = |s: u32| u64::from(((x >> s) & 0xFF).abs_diff((y >> s) & 0xFF));
-            d(16) + d(8) + d(0)
-        })
-        .sum();
-    #[allow(clippy::cast_precision_loss)]
-    let mean = total as f64 / (a.len() as f64 * 3.0);
-    mean
 }

@@ -7,29 +7,45 @@ use std::time::Instant;
 use mosaik_core::geometry::Rect;
 use mosaik_core::journal::{HiddenWindow, HideMethod, Journal};
 use mosaik_core::store::Store;
-use mosaik_core::window::{Cloak, WindowHandle};
+use mosaik_core::window::WindowHandle;
 use mosaik_win::hide::Hider;
 use mosaik_win::process::{Process, own_pid, spawn};
-use mosaik_win::window::{Scanner, cloak, frame_rect, handle, hwnd, pid, title};
+use mosaik_win::window::{Scanner, frame_rect, handle, hwnd, pid, title};
 use serde_json::{Value, json};
-use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible};
 
 use crate::apps::{catalog, close, open};
 use crate::dummy;
 use crate::report::round2;
+use crate::state::{is_hidden, is_shown};
 
 fn journal_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("mosaik-probe-watchdog")
 }
 
-fn visible(h: windows::Win32::Foundation::HWND) -> bool {
-    // SAFETY: read-only.
-    let shown = unsafe { IsWindowVisible(h).as_bool() && !IsIconic(h).as_bool() };
-    shown && cloak(h) == Cloak::None
+/// Where the stand-in writes what went wrong, since nobody reads its console.
+fn error_file() -> std::path::PathBuf {
+    journal_dir().join("stand-in-error.txt")
+}
+
+fn method_named(m: &str) -> Option<HideMethod> {
+    match m {
+        "cloak" => Some(HideMethod::ShellCloak),
+        "minimize" => Some(HideMethod::Minimize),
+        "park" => Some(HideMethod::Park),
+        _ => None,
+    }
 }
 
 /// The stand-in main process: `watchdog-main --windows h1,h2,.. --methods m1,m2,..`.
 pub fn main_process(args: &[String]) -> Result<Value, String> {
+    let result = stand_in(args);
+    if let Err(e) = &result {
+        let _ = std::fs::write(error_file(), e);
+    }
+    result
+}
+
+fn stand_in(args: &[String]) -> Result<Value, String> {
     let get = |k: &str| {
         args.iter()
             .position(|a| a == k)
@@ -41,21 +57,15 @@ pub fn main_process(args: &[String]) -> Result<Value, String> {
         .split(',')
         .filter_map(|s| s.parse().ok())
         .collect();
-    let methods: Vec<HideMethod> = get("--methods")
-        .split(',')
-        .filter_map(|m| match m {
-            "cloak" => Some(HideMethod::ShellCloak),
-            "minimize" => Some(HideMethod::Minimize),
-            "park" => Some(HideMethod::Park),
-            _ => None,
-        })
-        .collect();
+    let methods: Vec<HideMethod> = get("--methods").split(',').filter_map(method_named).collect();
     let store = Store::new(journal_dir());
     let mut journal = Journal::new(own_pid());
     let mut hider = Hider::new();
     for (h, m) in handles.iter().zip(methods) {
         let w = hwnd(WindowHandle(*h));
-        let hidden = hider.hide(w, m).map_err(|e| e.to_string())?;
+        let hidden = hider
+            .hide(w, m)
+            .map_err(|e| format!("hiding window {h} with {m:?}: {e}"))?;
         journal.record(HiddenWindow {
             handle: WindowHandle(*h),
             pid: pid(w),
@@ -96,6 +106,7 @@ pub fn run() -> Result<Value, String> {
         let (p, h) = dummy::spawn(
             &format!("Mosaïk watchdog probe {method}"),
             Rect::from_origin_size(work.left + 100 + off, work.top + 100 + off, 500, 340),
+            false,
         )?;
         processes.push(p);
         windows.push((h, *method));
@@ -124,20 +135,44 @@ pub fn run() -> Result<Value, String> {
     .map_err(|e| e.to_string())?;
     // Wait until the stand-in has hidden everything and started its watchdog.
     let store = Store::new(journal_dir());
+    let hidden_each = || {
+        windows
+            .iter()
+            .all(|(h, m)| method_named(m).is_some_and(|m| is_hidden(*h, m)))
+    };
     let ready = mosaik_win::events::pump_until(15_000, || {
         store
             .load::<Journal>()
             .is_ok_and(|j| j.value.hidden.len() == windows.len())
-            && windows.iter().all(|(h, _)| !visible(*h))
+            && hidden_each()
     });
     if !ready {
         let _ = main.kill();
-        return Err("the stand-in main process did not hide every window".into());
+        let why = std::fs::read_to_string(error_file()).unwrap_or_else(|_| {
+            let still: Vec<&str> = windows
+                .iter()
+                .filter(|(h, m)| !method_named(m).is_some_and(|m| is_hidden(*h, m)))
+                .map(|(_, m)| *m)
+                .collect();
+            format!("windows not hidden: {still:?}")
+        });
+        // Whatever happened, give every window back before failing.
+        let journal = store
+            .load::<Journal>()
+            .map(|j| j.value)
+            .unwrap_or_else(|_| Journal::new(0));
+        let _ = mosaik_win::rescue::restore_all(&journal);
+        for (h, _) in &windows {
+            close(*h);
+        }
+        return Err(format!(
+            "the stand-in main process did not hide every window ({why})"
+        ));
     }
     mosaik_win::events::pump_until(500, || false);
     let killed = Instant::now();
     main.kill().map_err(|e| e.to_string())?;
-    let all_back = mosaik_win::events::pump_until(10_000, || windows.iter().all(|(h, _)| visible(*h)));
+    let all_back = mosaik_win::events::pump_until(10_000, || windows.iter().all(|(h, _)| is_shown(*h)));
     let restore_ms = killed.elapsed().as_secs_f64() * 1000.0;
     mosaik_win::events::pump_until(300, || false);
     let rows: Vec<Value> = windows
@@ -147,7 +182,7 @@ pub fn run() -> Result<Value, String> {
             let after = frame_rect(*h);
             json!({
                 "method": m,
-                "visible": visible(*h),
+                "shown": is_shown(*h),
                 "frame_error_px": before.zip(after).map(|(b, a)| mosaik_win::place::edge_error(b, a)),
             })
         })
