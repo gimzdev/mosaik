@@ -20,6 +20,8 @@ pub struct Report {
     pub restored: Vec<String>,
     pub gone: usize,
     pub failed: Vec<String>,
+    /// Journal entries whose window could not be restored: keep them for the next attempt.
+    pub remaining: Vec<HiddenWindow>,
 }
 
 impl Report {
@@ -71,7 +73,9 @@ pub fn restore_all(journal: &Journal) -> Report {
             report.gone += 1;
             continue;
         }
-        restore_one(&mut hider, h, entry, &mut report);
+        if !restore_one(&mut hider, h, entry, &mut report) {
+            report.remaining.push(entry.clone());
+        }
         done.push(entry.handle.0);
     }
     for h in top_level() {
@@ -90,13 +94,16 @@ pub fn restore_all(journal: &Journal) -> Report {
                 exe: None,
                 title: crate::window::title(h),
             };
-            restore_one(&mut hider, h, &entry, &mut report);
+            if !restore_one(&mut hider, h, &entry, &mut report) {
+                report.remaining.push(entry);
+            }
         }
     }
     report
 }
 
-fn restore_one(hider: &mut Hider, h: HWND, entry: &HiddenWindow, report: &mut Report) {
+/// True when the window is back.
+fn restore_one(hider: &mut Hider, h: HWND, entry: &HiddenWindow, report: &mut Report) -> bool {
     let hidden = Hidden {
         method: entry.method,
         restore_rect: if entry.method == HideMethod::Park {
@@ -112,8 +119,14 @@ fn restore_one(hider: &mut Hider, h: HWND, entry: &HiddenWindow, report: &mut Re
         entry.title.clone()
     };
     match hider.show(h, &hidden) {
-        Ok(()) => report.restored.push(label),
-        Err(e) => report.failed.push(format!("{label}: {e}")),
+        Ok(()) => {
+            report.restored.push(label);
+            true
+        }
+        Err(e) => {
+            report.failed.push(format!("{label}: {e}"));
+            false
+        }
     }
 }
 

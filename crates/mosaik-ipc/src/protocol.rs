@@ -11,8 +11,8 @@ use thiserror::Error;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// The longest message accepted, so a broken or hostile client cannot make Mosaïk allocate
-/// without bound.
+/// The longest message accepted, newline included, so a broken or hostile client cannot make
+/// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
 pub const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -85,6 +85,9 @@ pub enum ErrorCode {
     NotFound,
     Busy,
     Failed,
+    /// A code from a newer Mosaïk: the message still says what went wrong.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -190,11 +193,21 @@ impl Response {
 /// One message as a line of JSON.
 pub fn encode<T: Serialize>(message: &T) -> Result<Vec<u8>, ProtocolError> {
     let mut bytes = serde_json::to_vec(message).map_err(|e| ProtocolError::Invalid(e.to_string()))?;
-    if bytes.len() >= MAX_MESSAGE_BYTES {
+    if bytes.len() + 1 > MAX_MESSAGE_BYTES {
         return Err(ProtocolError::TooLarge);
     }
     bytes.push(b'\n');
     Ok(bytes)
+}
+
+/// The id of a request that could not be decoded, when it has one, so the error reply can be
+/// matched to it.
+pub fn request_id(line: &[u8]) -> u64 {
+    #[derive(Deserialize)]
+    struct Id {
+        id: u64,
+    }
+    serde_json::from_slice::<Id>(line).map_or(0, |i| i.id)
 }
 
 /// Parses a request line, refusing versions this server does not know.
@@ -218,26 +231,43 @@ pub fn decode_response(line: &[u8]) -> Result<Response, ProtocolError> {
 }
 
 /// Collects bytes from a stream and hands out complete lines.
+///
+/// A line longer than [`MAX_MESSAGE_BYTES`] (newline included) is an error, and so is a partial
+/// line that can no longer fit; after an error the stream cannot be trusted to be in step, so
+/// the connection must be closed.
 #[derive(Default)]
 pub struct LineBuffer {
     buf: Vec<u8>,
+    /// Bytes already searched for a newline, so each byte is scanned once.
+    scanned: usize,
 }
 
 impl LineBuffer {
-    pub fn push(&mut self, bytes: &[u8]) -> Result<(), ProtocolError> {
+    pub fn push(&mut self, bytes: &[u8]) {
         self.buf.extend_from_slice(bytes);
-        if self.buf.len() > MAX_MESSAGE_BYTES && !self.buf.contains(&b'\n') {
+    }
+
+    /// The next complete line, without its newline; `Ok(None)` until one has arrived.
+    pub fn next_line(&mut self) -> Result<Option<Vec<u8>>, ProtocolError> {
+        let found = self.buf[self.scanned..].iter().position(|&b| b == b'\n');
+        let Some(offset) = found else {
+            self.scanned = self.buf.len();
+            if self.buf.len() >= MAX_MESSAGE_BYTES {
+                self.buf.clear();
+                self.scanned = 0;
+                return Err(ProtocolError::TooLarge);
+            }
+            return Ok(None);
+        };
+        let end = self.scanned + offset;
+        self.scanned = 0;
+        if end + 1 > MAX_MESSAGE_BYTES {
             self.buf.clear();
             return Err(ProtocolError::TooLarge);
         }
-        Ok(())
-    }
-
-    /// The next complete line, without its newline.
-    pub fn next_line(&mut self) -> Option<Vec<u8>> {
-        let end = self.buf.iter().position(|&b| b == b'\n')?;
-        let line: Vec<u8> = self.buf.drain(..=end).take(end).collect();
-        Some(line)
+        let line = self.buf[..end].to_vec();
+        self.buf.drain(..=end);
+        Ok(Some(line))
     }
 }
 
@@ -308,14 +338,119 @@ mod tests {
     }
 
     #[test]
-    fn line_buffer_splits_and_limits() {
+    fn line_buffer_splits_lines_across_reads() {
         let mut b = LineBuffer::default();
-        b.push(b"{\"a\":1}\n{\"b\"").unwrap();
-        assert_eq!(b.next_line().as_deref(), Some(&b"{\"a\":1}"[..]));
-        assert_eq!(b.next_line(), None);
-        b.push(b":2}\n").unwrap();
-        assert_eq!(b.next_line().as_deref(), Some(&b"{\"b\":2}"[..]));
-        let huge = vec![b'x'; MAX_MESSAGE_BYTES + 1];
-        assert_eq!(b.push(&huge), Err(ProtocolError::TooLarge));
+        b.push(b"{\"a\":1}\n{\"b\"");
+        assert_eq!(b.next_line().unwrap().as_deref(), Some(&b"{\"a\":1}"[..]));
+        assert_eq!(b.next_line().unwrap(), None);
+        b.push(b":2}\n");
+        assert_eq!(b.next_line().unwrap().as_deref(), Some(&b"{\"b\":2}"[..]));
+        assert_eq!(b.next_line().unwrap(), None);
+    }
+
+    #[test]
+    fn line_buffer_limit_is_exact() {
+        // The longest line allowed: MAX_MESSAGE_BYTES including its newline.
+        let mut b = LineBuffer::default();
+        let mut longest = vec![b'x'; MAX_MESSAGE_BYTES - 1];
+        longest.push(b'\n');
+        b.push(&longest);
+        assert_eq!(
+            b.next_line().unwrap().map(|l| l.len()),
+            Some(MAX_MESSAGE_BYTES - 1)
+        );
+        // One byte more is refused, whether the newline has arrived or not.
+        let mut b = LineBuffer::default();
+        let mut too_long = vec![b'x'; MAX_MESSAGE_BYTES];
+        too_long.push(b'\n');
+        b.push(&too_long);
+        assert_eq!(b.next_line(), Err(ProtocolError::TooLarge));
+        let mut b = LineBuffer::default();
+        for _ in 0..(MAX_MESSAGE_BYTES / 8192) {
+            b.push(&[b'x'; 8192]);
+            if b.next_line().is_err() {
+                return;
+            }
+        }
+        panic!("a partial line that can no longer fit was not refused");
+    }
+
+    #[test]
+    fn encode_refuses_what_the_reader_would_refuse() {
+        let big = Response::new(
+            1,
+            Reply::Done {
+                message: "x".repeat(MAX_MESSAGE_BYTES),
+            },
+        );
+        assert_eq!(encode(&big), Err(ProtocolError::TooLarge));
+    }
+
+    #[test]
+    fn unknown_error_codes_from_a_newer_mosaik_still_decode() {
+        let r = decode_response(
+            br#"{"v":1,"id":3,"reply":"error","code":"quota_exceeded","message":"Too many workspaces","hint":null}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            r.reply,
+            Reply::Error {
+                code: ErrorCode::Unknown,
+                message: "Too many workspaces".into(),
+                hint: None
+            }
+        );
+    }
+
+    #[test]
+    fn broken_requests_keep_their_id_when_they_have_one() {
+        assert_eq!(request_id(br#"{"v":1,"id":41,"cmd":"format_disk"}"#), 41);
+        assert_eq!(request_id(b"garbage"), 0);
+    }
+
+    #[test]
+    fn state_replies_round_trip() {
+        use mosaik_core::geometry::Rect;
+        let state = StateSnapshot {
+            app_version: "1.0.0".into(),
+            protocol: PROTOCOL_VERSION,
+            safe_mode: false,
+            topology_fingerprint: "ab12".into(),
+            monitors: vec![MonitorState {
+                id: "m1".into(),
+                name: "Display 1".into(),
+                primary: true,
+                bounds: Rect::new(0, 0, 1920, 1080),
+                work_area: Rect::new(0, 0, 1920, 1032),
+                dpi: 96,
+                scale_percent: 100,
+            }],
+            windows: vec![WindowState {
+                handle: WindowHandle(0x1234),
+                pid: 99,
+                exe: Some("code.exe".into()),
+                class: "Chrome_WidgetWin_1".into(),
+                title: "main.rs".into(),
+                window_rect: Rect::new(-7, 0, 967, 1039),
+                frame_rect: Rect::new(0, 0, 960, 1032),
+                dpi: 96,
+                verdict: Verdict::Manage,
+                elevation: Elevation::Same,
+                zone: Some(ZoneId::new("code")),
+                slot: None,
+                tab_group: None,
+                hidden: None,
+            }],
+            active_workspace: None,
+            hotkey: HotkeyState {
+                shortcut: "Win+Alt+Space".into(),
+                registered: true,
+                problem: None,
+            },
+            hidden: vec![],
+        };
+        let r = Response::new(9, Reply::State(Box::new(state)));
+        let bytes = encode(&r).unwrap();
+        assert_eq!(decode_response(&bytes[..bytes.len() - 1]).unwrap(), r);
     }
 }

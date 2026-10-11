@@ -91,6 +91,10 @@ impl ShellViews {
             .ok()
             .ctx("GetViewForHwnd")?;
         let view = view.ok_or_else(|| Error::Other("this window has no shell view".into()))?;
+        // The collection hands back its own idea of a view: make sure the object really is the
+        // interface (and so the method layout) declared above before calling into it, so a
+        // future Windows that changes it fails here instead of calling the wrong method.
+        let view: IApplicationView = view.cast().ctx("QueryInterface(IApplicationView)")?;
         // SAFETY: SetCloak(1, 2) cloaks and SetCloak(1, 0) uncloaks a view.
         unsafe { view.set_cloak(1, if on { 2 } else { 0 }) }
             .ok()

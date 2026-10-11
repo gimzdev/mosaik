@@ -124,7 +124,8 @@ pub fn pump() -> bool {
 }
 
 /// Pumps messages until `done` returns true or `timeout_ms` passes. Returns whether `done`
-/// became true. Sleeps between messages, so it costs nothing while waiting.
+/// became true. Sleeps between messages, waking at least every 10 ms to check `done` (which
+/// may watch something that sends no message, like another process exiting).
 pub fn pump_until(timeout_ms: u32, mut done: impl FnMut() -> bool) -> bool {
     let start = time::now();
     loop {
@@ -142,7 +143,7 @@ pub fn pump_until(timeout_ms: u32, mut done: impl FnMut() -> bool) -> bool {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let left = (f64::from(timeout_ms) - elapsed_ms).ceil().max(1.0) as u32;
         // SAFETY: waits for input on this thread's queue or the timeout.
-        let r = unsafe { MsgWaitForMultipleObjects(None, false, left, QS_ALLINPUT) };
+        let r = unsafe { MsgWaitForMultipleObjects(None, false, left.min(10), QS_ALLINPUT) };
         if r == WAIT_TIMEOUT && done() {
             return true;
         }

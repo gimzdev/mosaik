@@ -10,7 +10,10 @@
 //! mosaikctl version
 //! ```
 //!
-//! Exit codes: 0 done, 1 Mosaïk reported a problem, 2 wrong usage, 3 Mosaïk is not running.
+//! Exit codes: 0 done, 1 something went wrong (the message says what to do), 2 wrong usage,
+//! 3 Mosaïk is not running.
+//!
+//! Only talks to a Mosaïk that passes the connection checks in `mosaik_ipc::pipe`.
 
 // A command-line tool: printing is its output.
 #![allow(clippy::print_stdout)]
@@ -32,8 +35,11 @@ mod windows_main {
 
     use mosaik_core::journal::Journal;
     use mosaik_core::store::Store;
-    use mosaik_ipc::pipe::{Client, ConnectError, pipe_name};
-    use mosaik_ipc::protocol::{Command, ErrorCode, Reply, StateSnapshot};
+    use mosaik_ipc::pipe::{Client, PipeError, Program, pipe_name};
+    use mosaik_ipc::protocol::{Command, Reply, StateSnapshot};
+
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+    const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
     const USAGE: &str = "usage: mosaikctl <state [--json] | workspaces | switch <workspace> | save [<workspace>] | rescue | switcher | version>";
 
@@ -70,64 +76,93 @@ mod windows_main {
                 return 2;
             }
         };
-        let name = match pipe_name() {
-            Ok(n) => n,
-            Err(e) => {
-                eprintln!("mosaikctl: {e}");
-                return 1;
-            }
-        };
-        let mut client = match Client::connect(&name, Duration::from_secs(5)) {
-            Ok(c) => c,
-            Err(ConnectError::NotRunning) if matches!(cmd, Command::Rescue) => return rescue_locally(),
-            Err(ConnectError::NotRunning) => {
-                eprintln!("Mosaïk is not running. Start it from the Start menu, then try again.");
-                return 3;
-            }
-            Err(e) => {
-                eprintln!("mosaikctl: {e}");
-                return 1;
-            }
-        };
-        let _ = client.request(Command::Hello {
-            client: format!("mosaikctl {}", env!("CARGO_PKG_VERSION")),
+        let rescue = matches!(cmd, Command::Rescue);
+        let reply = pipe_name().and_then(|name| {
+            let mut client = Client::connect(&name, &Program::mosaik(), CONNECT_TIMEOUT)?;
+            client.request(
+                Command::Hello {
+                    client: format!("mosaikctl {}", env!("CARGO_PKG_VERSION")),
+                },
+                REQUEST_TIMEOUT,
+            )?;
+            client.request(cmd, REQUEST_TIMEOUT)
         });
-        match client.request(cmd) {
+        match reply {
             Ok(response) => print_reply(&response.reply, json),
+            // Without an answer from Mosaïk, a rescue is done here: bringing windows back must
+            // never depend on the app that hid them.
+            Err(e) if rescue => {
+                if !matches!(e, PipeError::NotRunning) {
+                    eprintln!("Mosaïk did not answer ({e}); restoring windows directly.");
+                }
+                rescue_locally()
+            }
             Err(e) => {
-                eprintln!("mosaikctl: {e}");
+                eprintln!("{}", explain(&e));
+                if matches!(e, PipeError::NotRunning) { 3 } else { 1 }
+            }
+        }
+    }
+
+    /// What happened and what to do about it.
+    fn explain(e: &PipeError) -> String {
+        match e {
+            PipeError::NotRunning => {
+                "Mosaïk is not running. Start it from the Start menu, then try again.".into()
+            }
+            PipeError::Busy => "Mosaïk is busy with other requests. Try again in a moment.".into(),
+            PipeError::TimedOut(_) | PipeError::Closed => format!(
+                "Mosaïk did not answer ({e}); it may be stuck. Run `mosaikctl rescue` to bring hidden windows back, then restart Mosaïk."
+            ),
+            PipeError::Impostor(_) | PipeError::NameTaken { .. } => format!(
+                "Not talking to it: {e}. Close that program or restart Windows, then start Mosaïk again."
+            ),
+            PipeError::Denied => {
+                format!("{e}. If Mosaïk runs as administrator, run this command as administrator too.")
+            }
+            PipeError::Protocol(p) => format!("Mosaïk and mosaikctl do not understand each other: {p}"),
+            PipeError::Stopped | PipeError::Win32 { .. } => format!("mosaikctl: {e}"),
+        }
+    }
+
+    fn print_json(value: &impl serde::Serialize) -> i32 {
+        match serde_json::to_string_pretty(value) {
+            Ok(text) => {
+                println!("{text}");
+                0
+            }
+            Err(e) => {
+                eprintln!("mosaikctl: could not write JSON: {e}");
                 1
             }
         }
     }
 
+    /// Window titles come from other apps: never let one send control characters (terminal
+    /// escape sequences) to the user's terminal.
+    fn printable(text: &str) -> String {
+        text.chars().filter(|c| !c.is_control()).collect()
+    }
+
     fn print_reply(reply: &Reply, json: bool) -> i32 {
         match reply {
-            Reply::State(state) if json => {
-                println!("{}", serde_json::to_string_pretty(state).unwrap_or_default());
-                0
-            }
+            Reply::State(state) if json => print_json(state),
             Reply::State(state) => {
                 print_state(state);
                 0
             }
             Reply::Workspaces { workspaces, active } => {
                 if json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(
-                            &serde_json::json!({ "workspaces": workspaces, "active": active })
-                        )
-                        .unwrap_or_default()
-                    );
-                } else if workspaces.is_empty() {
+                    return print_json(&serde_json::json!({ "workspaces": workspaces, "active": active }));
+                }
+                if workspaces.is_empty() {
                     println!("No workspaces yet. Open the switcher and press S to save one.");
                 } else {
                     for w in workspaces {
                         let mark = if active.as_ref() == Some(&w.id) { "*" } else { " " };
                         println!(
                             "{mark} {:<28} {} windows, {} zones{}",
-                            w.name,
+                            printable(&w.name),
                             w.windows,
                             w.zones,
                             w.hotkey.as_ref().map(|h| format!(", {h}")).unwrap_or_default()
@@ -140,19 +175,15 @@ mod windows_main {
             | Reply::Hello {
                 app_version: message, ..
             } => {
-                println!("{message}");
+                println!("{}", printable(message));
                 0
             }
-            Reply::Error { code, message, hint } => {
-                eprintln!("{message}");
+            Reply::Error { message, hint, .. } => {
+                eprintln!("{}", printable(message));
                 if let Some(h) = hint {
-                    eprintln!("{h}");
+                    eprintln!("{}", printable(h));
                 }
-                if *code == ErrorCode::UnsupportedVersion {
-                    2
-                } else {
-                    1
-                }
+                1
             }
         }
     }
@@ -180,7 +211,7 @@ mod windows_main {
         for m in &s.monitors {
             println!(
                 "  {}{}  {}x{} at ({}, {})  work {}x{} at ({}, {})  {}%",
-                m.name,
+                printable(&m.name),
                 if m.primary { " (primary)" } else { "" },
                 m.bounds.width(),
                 m.bounds.height(),
@@ -197,13 +228,13 @@ mod windows_main {
         for w in &s.windows {
             println!(
                 "  {:<24} {:>5}x{:<5} at ({:>5}, {:>5})  {:<10} {}",
-                w.exe.as_deref().unwrap_or("?"),
+                printable(w.exe.as_deref().unwrap_or("?")),
                 w.frame_rect.width(),
                 w.frame_rect.height(),
                 w.frame_rect.left,
                 w.frame_rect.top,
-                w.zone.as_ref().map_or("", |z| z.0.as_str()),
-                w.title
+                printable(w.zone.as_ref().map_or("", |z| z.0.as_str())),
+                printable(&w.title)
             );
         }
         if !s.hidden.is_empty() {
@@ -211,11 +242,14 @@ mod windows_main {
         }
     }
 
-    /// Mosaïk is not running: restore what its journal lists, here and now.
+    /// Without Mosaïk: restore what its journal lists and every window carrying its marker,
+    /// here and now. Windows that could not be restored stay in the journal for the next try.
     fn rescue_locally() -> i32 {
         let Ok(appdata) = std::env::var("APPDATA") else {
-            eprintln!("APPDATA is not set; cannot find Mosaïk's data folder.");
-            return 1;
+            eprintln!(
+                "APPDATA is not set, so Mosaïk's data folder cannot be found. Restoring marked windows only."
+            );
+            return finish(mosaik_win::rescue::restore_all(&Journal::default()), None);
         };
         mosaik_win::dpi::make_process_per_monitor_v2();
         // SAFETY: initialises COM once for this thread before the shell-cloak calls.
@@ -226,12 +260,33 @@ mod windows_main {
             )
         };
         let store = Store::new(std::path::Path::new(&appdata).join("Mosaik"));
-        let journal = store.load::<Journal>().map(|l| l.value).unwrap_or_default();
+        let journal = match store.load::<Journal>() {
+            Ok(loaded) => loaded.value,
+            Err(e) => {
+                eprintln!("{e}\nRestoring the windows Mosaïk marked instead.");
+                Journal::default()
+            }
+        };
         let report = mosaik_win::rescue::restore_all(&journal);
-        if !journal.hidden.is_empty() {
-            let _ = store.save(&Journal::new(journal.owner_pid));
+        let mut left = Journal::new(journal.owner_pid);
+        left.hidden.clone_from(&report.remaining);
+        let saved = if journal.hidden.is_empty() && left.hidden.is_empty() {
+            None
+        } else {
+            Some(store.save(&left))
+        };
+        finish(report, saved)
+    }
+
+    fn finish(
+        report: mosaik_win::rescue::Report,
+        saved: Option<Result<(), mosaik_core::store::StoreError>>,
+    ) -> i32 {
+        println!("{}", printable(&report.summary()));
+        if let Some(Err(e)) = saved {
+            eprintln!("The list of hidden windows could not be updated: {e}");
+            return 1;
         }
-        println!("{}", report.summary());
         i32::from(!report.failed.is_empty())
     }
 }

@@ -24,10 +24,12 @@ mod windows_main {
     use std::path::PathBuf;
 
     use mosaik_core::journal::Journal;
-    use mosaik_core::store::Store;
+    use mosaik_core::store::{Store, StoreError};
     use mosaik_win::process::Process;
     use mosaik_win::rescue::{Report, restore_all};
     use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+    use windows::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MessageBoxW};
+    use windows::core::PCWSTR;
 
     pub fn run(args: Vec<String>) -> i32 {
         let mut watch: Option<u32> = None;
@@ -56,7 +58,10 @@ mod windows_main {
         } else if !rescue {
             return 2;
         }
-        let report = rescue_from(&journal);
+        let (report, saved) = rescue_from(&journal);
+        if !report.failed.is_empty() || saved.is_err() {
+            tell_user(&report, saved.err());
+        }
         if report.restored.is_empty() && report.failed.is_empty() {
             0
         } else if report.failed.is_empty() {
@@ -66,16 +71,52 @@ mod windows_main {
         }
     }
 
-    /// Restores everything the journal lists and clears it. The exit code tells the caller what
-    /// happened: 0 nothing to do, 1 windows restored, 3 some could not be restored.
-    fn rescue_from(journal_path: &std::path::Path) -> Report {
+    /// Restores everything the journal lists (or, if the journal cannot be read, every window
+    /// carrying Mosaïk's marker) and keeps only what could not be restored. The exit code tells
+    /// the caller what happened: 0 nothing to do, 1 windows restored, 3 some could not be
+    /// restored.
+    fn rescue_from(journal_path: &std::path::Path) -> (Report, Result<(), StoreError>) {
         let dir = journal_path.parent().map(PathBuf::from).unwrap_or_default();
         let store = Store::new(dir);
+        // A damaged journal is kept aside by the store; the markers still find the windows.
         let journal = store.load::<Journal>().map(|l| l.value).unwrap_or_default();
         let report = restore_all(&journal);
-        if !journal.hidden.is_empty() {
-            let _ = store.save(&Journal::new(journal.owner_pid));
+        let mut saved = Ok(());
+        if !journal.hidden.is_empty() || !report.remaining.is_empty() {
+            let mut left = Journal::new(journal.owner_pid);
+            left.hidden.clone_from(&report.remaining);
+            saved = store.save(&left);
         }
-        report
+        (report, saved)
+    }
+
+    /// The watchdog has no window of its own: when something could not be put right, it says
+    /// so in a message box, with what to do next.
+    fn tell_user(report: &Report, save_error: Option<StoreError>) {
+        let mut text = format!(
+            "Mosaïk stopped unexpectedly and brought your windows back.\n\n{}.",
+            report.summary()
+        );
+        if !report.failed.is_empty() {
+            text.push_str(
+                "\n\nWindows that could not be restored stay listed: start Mosaïk and choose Rescue windows in its tray menu, or run \"mosaikctl rescue\".",
+            );
+        }
+        if let Some(e) = save_error {
+            text.push_str(&format!(
+                "\n\nThe list of hidden windows could not be updated: {e}"
+            ));
+        }
+        let text = mosaik_win::text::wide(&text);
+        let title = mosaik_win::text::wide("Mosaïk");
+        // SAFETY: both strings outlive the call; no owner window.
+        unsafe {
+            MessageBoxW(
+                None,
+                PCWSTR(text.as_ptr()),
+                PCWSTR(title.as_ptr()),
+                MB_OK | MB_ICONWARNING | MB_SETFOREGROUND,
+            );
+        }
     }
 }

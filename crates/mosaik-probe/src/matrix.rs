@@ -263,7 +263,9 @@ fn cycle(
         let taken = ms_since(t_show);
         let Some(now) = capture(frame) else { continue };
         let c = composition(&now, Some(&reference));
-        if first_drawn_ms.is_none() && c.backdrop < 0.02 && c.black < 0.05 {
+        // Drawn: none of the backdrop shows through and no more black than before hiding (a
+        // dark terminal is mostly near-black to begin with).
+        if first_drawn_ms.is_none() && c.backdrop < 0.02 && c.black <= before.black + 0.05 {
             first_drawn_ms = Some(round2(taken));
         }
         samples.push(json!({ "ms": round2(taken), "shows": comp_json(&c) }));
