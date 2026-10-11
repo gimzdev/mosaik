@@ -172,7 +172,7 @@ pub fn run() -> Result<Value, String> {
     mosaik_win::events::pump_until(500, || false);
     let killed = Instant::now();
     main.kill().map_err(|e| e.to_string())?;
-    let all_back = mosaik_win::events::pump_until(10_000, || windows.iter().all(|(h, _)| is_shown(*h)));
+    let all_back = mosaik_win::events::pump_until(30_000, || windows.iter().all(|(h, _)| is_shown(*h)));
     let restore_ms = killed.elapsed().as_secs_f64() * 1000.0;
     mosaik_win::events::pump_until(300, || false);
     let rows: Vec<Value> = windows
@@ -199,7 +199,9 @@ pub fn run() -> Result<Value, String> {
             let _ = p.kill();
         }
     }
+    let log = std::fs::read_to_string(journal_dir().join("watchdog.log")).unwrap_or_default();
     let result = json!({
+        "watchdog_log": log.lines().collect::<Vec<_>>(),
         "all_restored": all_back,
         "kill_to_all_visible_ms": round2(restore_ms),
         "windows": rows,
@@ -210,6 +212,10 @@ pub fn run() -> Result<Value, String> {
     );
     for r in &rows {
         println!("  {r}");
+    }
+    println!("watchdog log:");
+    for line in log.lines() {
+        println!("  {line}");
     }
     Ok(result)
 }

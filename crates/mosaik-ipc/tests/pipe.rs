@@ -274,35 +274,38 @@ fn malformed_and_foreign_versions_get_plain_errors() {
 fn an_oversized_message_is_refused_and_the_connection_closed() {
     let name = unique_name("oversized");
     let (stop, server) = spawn_server(&name, Limits::default());
-    let pipe = std::fs::OpenOptions::new()
+    // One thread does both: a synchronous pipe handle serialises its reads and writes, so a
+    // read waiting on one thread would hold up writes from another.
+    let mut pipe = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(&name)
         .unwrap();
-    let mut writer = pipe.try_clone().unwrap();
-    let sender = std::thread::spawn(move || {
-        let chunk = vec![b'x'; 64 * 1024];
-        let mut sent = 0;
-        // Keeps sending until the server closes the connection.
-        while sent <= MAX_MESSAGE_BYTES + chunk.len() {
-            if writer.write_all(&chunk).is_err() {
-                return;
-            }
-            sent += chunk.len();
+    let chunk = vec![b'x'; 64 * 1024];
+    let mut sent = 0;
+    // The server reads everything as it comes, refuses the line once it passes the limit, and
+    // discards the rest; a little more than the limit is enough.
+    while sent < MAX_MESSAGE_BYTES + 2 * chunk.len() {
+        if pipe.write_all(&chunk).is_err() {
+            break;
         }
-    });
+        sent += chunk.len();
+    }
     let mut reader = BufReader::new(pipe);
     let mut reply = String::new();
     reader.read_line(&mut reply).unwrap();
     let response = decode_response(reply.trim_end().as_bytes()).unwrap();
-    assert!(matches!(
-        response.reply,
-        Reply::Error {
-            code: ErrorCode::BadRequest,
-            ..
-        }
-    ));
-    sender.join().unwrap();
+    assert!(
+        matches!(
+            response.reply,
+            Reply::Error {
+                code: ErrorCode::BadRequest,
+                ..
+            }
+        ),
+        "{response:?}"
+    );
+    drop(reader);
     stop.stop();
     let ended = server.join().unwrap();
     assert!(ended.iter().any(|e| matches!(e, Ended::Dropped(_))), "{ended:?}");

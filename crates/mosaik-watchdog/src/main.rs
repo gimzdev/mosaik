@@ -6,6 +6,9 @@
 //! mosaik-watchdog --watch <pid> --journal <path>   wait for <pid>, then restore what is left
 //! mosaik-watchdog --rescue --journal <path>        restore now
 //! ```
+//!
+//! Each run appends a few lines to `watchdog.log` next to the journal (timings and results, never
+//! window titles), so a rescue that went wrong can be understood afterwards.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
@@ -23,11 +26,15 @@ fn main() {
 mod windows_main {
     use std::path::PathBuf;
 
+    use std::io::Write;
+    use std::time::Instant;
+
     use mosaik_core::journal::Journal;
     use mosaik_core::store::{Store, StoreError};
     use mosaik_win::process::Process;
     use mosaik_win::rescue::{Report, restore_all};
     use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+    use windows::Win32::System::SystemInformation::GetLocalTime;
     use windows::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MessageBoxW};
     use windows::core::PCWSTR;
 
@@ -45,20 +52,41 @@ mod windows_main {
             }
         }
         let Some(journal) = journal else { return 2 };
+        let mut log = Log::open(journal.parent().unwrap_or(std::path::Path::new(".")));
         mosaik_win::dpi::make_process_per_monitor_v2();
-        // SAFETY: initialises COM for this thread once, before any COM call (shell cloak).
-        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
 
         if let Some(pid) = watch {
             // Wait for the main process to end, however it ends. If it is already gone,
             // restore straight away.
-            if let Ok(p) = Process::open(pid) {
-                while !p.wait(u32::MAX) {}
+            log.line(&format!("watching process {pid}"));
+            match Process::open(pid) {
+                Ok(p) => {
+                    while !p.wait(u32::MAX) {}
+                    log.line(&format!("process {pid} ended"));
+                }
+                Err(e) => log.line(&format!("process {pid} not found ({e}); restoring now")),
             }
-        } else if !rescue {
+        } else if rescue {
+            log.line("rescue requested");
+        } else {
             return 2;
         }
-        let (report, saved) = rescue_from(&journal);
+        // COM only now: a single-threaded apartment must pump messages, and nothing is pumped
+        // while waiting above.
+        // SAFETY: initialises COM for this thread once, before any COM call (shell cloak).
+        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        log.line("COM ready");
+        let (report, saved) = rescue_from(&journal, &mut log);
+        log.line(&format!(
+            "done: {} restored, {} gone, {} failed{}",
+            report.restored.len(),
+            report.gone,
+            report.failed.len(),
+            match &saved {
+                Ok(()) => String::new(),
+                Err(e) => format!("; journal not updated: {e}"),
+            }
+        ));
         if !report.failed.is_empty() || saved.is_err() {
             tell_user(&report, saved.err());
         }
@@ -75,11 +103,18 @@ mod windows_main {
     /// carrying Mosaïk's marker) and keeps only what could not be restored. The exit code tells
     /// the caller what happened: 0 nothing to do, 1 windows restored, 3 some could not be
     /// restored.
-    fn rescue_from(journal_path: &std::path::Path) -> (Report, Result<(), StoreError>) {
+    fn rescue_from(journal_path: &std::path::Path, log: &mut Log) -> (Report, Result<(), StoreError>) {
         let dir = journal_path.parent().map(PathBuf::from).unwrap_or_default();
         let store = Store::new(dir);
         // A damaged journal is kept aside by the store; the markers still find the windows.
-        let journal = store.load::<Journal>().map(|l| l.value).unwrap_or_default();
+        let journal = match store.load::<Journal>() {
+            Ok(loaded) => loaded.value,
+            Err(e) => {
+                log.line(&format!("journal unreadable ({e}); using window markers"));
+                Journal::default()
+            }
+        };
+        log.line(&format!("journal lists {} window(s)", journal.hidden.len()));
         let report = restore_all(&journal);
         let mut saved = Ok(());
         if !journal.hidden.is_empty() || !report.remaining.is_empty() {
@@ -117,6 +152,45 @@ mod windows_main {
                 PCWSTR(title.as_ptr()),
                 MB_OK | MB_ICONWARNING | MB_SETFOREGROUND,
             );
+        }
+    }
+
+    /// The watchdog's log: a few lines per run, appended, restarted when it grows past 64 KB.
+    struct Log {
+        file: Option<std::fs::File>,
+        start: Instant,
+    }
+
+    impl Log {
+        fn open(dir: &std::path::Path) -> Self {
+            let path = dir.join("watchdog.log");
+            let too_big = std::fs::metadata(&path).is_ok_and(|m| m.len() > 64 * 1024);
+            let file = std::fs::create_dir_all(dir).ok().and_then(|()| {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(!too_big)
+                    .write(true)
+                    .truncate(too_big)
+                    .open(&path)
+                    .ok()
+            });
+            Self {
+                file,
+                start: Instant::now(),
+            }
+        }
+
+        fn line(&mut self, text: &str) {
+            // SAFETY: GetLocalTime only fills the returned struct.
+            let t = unsafe { GetLocalTime() };
+            let elapsed = self.start.elapsed().as_millis();
+            if let Some(f) = &mut self.file {
+                let _ = writeln!(
+                    f,
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03} +{elapsed} ms  {text}",
+                    t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds
+                );
+            }
         }
     }
 }
