@@ -6,6 +6,7 @@
 //! handle (`Scope::windows`), so the user's own windows of the same apps are never touched.
 
 use mosaik_core::geometry::{Point, Rect};
+use mosaik_core::place::fit_size;
 use mosaik_engine::{Engine, Scope};
 use mosaik_ipc::protocol::{StateSnapshot, TabStripState};
 use mosaik_win::events::pump_until;
@@ -124,6 +125,24 @@ fn error_in(st: &StateSnapshot, w: HWND, zone: Rect, t: &Targets) -> Option<i32>
     frame_rect(w).map(|f| edge_error(f, t.styles.area(zone, wears_above(st, w))))
 }
 
+/// For a window whose app kept a size of its own (a minimum larger than the room it was given):
+/// that size, and how far the window is from where the engine fits it (`fit_size`: on screen,
+/// covering as much of its place as it can). `null` when it took the size it was given.
+fn kept_size(st: &StateSnapshot, w: HWND, zone: Rect, t: &Targets) -> Value {
+    let Some(f) = frame_rect(w) else {
+        return Value::Null;
+    };
+    let area = t.styles.area(zone, wears_above(st, w));
+    if f.size() == area.size() {
+        return Value::Null;
+    }
+    json!({
+        "size": [f.width(), f.height()],
+        "given": [area.width(), area.height()],
+        "error_px": edge_error(f, fit_size(area, f.size(), t.work)),
+    })
+}
+
 /// What Windows reported for `w`'s process during `drag`: the mouse captured or let go (an app
 /// that handles a press itself captures the mouse) and its move-size loop, by window class.
 fn watched(w: HWND, drag: impl FnOnce() -> Result<(), String>) -> Result<Value, String> {
@@ -175,18 +194,21 @@ fn drag_by_title(w: HWND, to: Point) -> Result<Value, String> {
             tries.push(json!({ "grab": null }));
             continue;
         };
-        // What is under the grab point, and the pointer Windows shows there.
+        // What is under the grab point, what the window answers there (asked as real input is,
+        // and as the engine asks when reading title bars) and the pointer Windows shows, all
+        // before the drag moves the window away from the point.
         // SAFETY: read-only hit test.
         let under = unsafe { WindowFromPoint(POINT { x: grab.x, y: grab.y }) };
+        let answer = hit(grab, w);
+        let read_as = mosaik_win::titlebar::hit_code(w, grab);
         mosaik_win::input::move_to(grab);
         pump_until(150, || false);
         let pointer = mosaik_win::input::pointer();
         let mut t = watched(w, || drag_path(&[grab, to], w))?;
         t["grab"] = json!([grab.x - frame.left, grab.y - frame.top]);
         t["under"] = json!(mosaik_win::window::class_name(under));
-        t["hit"] = json!(hit(grab, w));
-        // The same point asked as the engine asks it when reading title bars.
-        t["read_as"] = json!(mosaik_win::titlebar::hit_code(w, grab));
+        t["hit"] = json!(answer);
+        t["read_as"] = json!(read_as);
         t["pointer"] = json!(format!("{pointer:?}"));
         let started = t["move_loop"] == json!(true);
         tries.push(t);
@@ -217,6 +239,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     out["into_zone"] = json!({
         "drag": drag,
         "error_px": error_in(&st, w, t.zone, t),
+        "kept_size": kept_size(&st, w, t.zone, t),
         "tag_above": wears_above(&st, w),
         "tag": tag_place(&st, w),
         "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
@@ -268,6 +291,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         "drag": drag,
         "in_a_strip": strip_with(&st, w).is_some(),
         "error_px": error_in(&st, w, t.zone, t),
+        "kept_size": kept_size(&st, w, t.zone, t),
         "tag_above": wears_above(&st, w),
         "tag": tag_place(&st, w),
         "tag_owner_hidden": hidden(&st, t.code),

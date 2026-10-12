@@ -20,7 +20,7 @@ use mosaik_core::layout::{Place, TabGroupId};
 use mosaik_core::snap::{self, DragKind, LiveZone as SnapZone};
 use mosaik_core::window::WindowHandle;
 use mosaik_overlay::canvas::Canvas;
-use mosaik_overlay::frame::{Frame, FrameLook, Preview, ZoneView};
+use mosaik_overlay::frame::{Frame, FrameLook, Preview, TagPlace, ZoneView};
 use mosaik_overlay::layered::Stack;
 use mosaik_overlay::tabbar::{self, BarLook, BarPlace, TabBar, TabView};
 use mosaik_win::events::{self, Hooks, WinEvent};
@@ -480,22 +480,30 @@ impl Engine {
             return None;
         }
         let zone = active.zone_for(g.frame, style)?.clone();
-        // The tag goes in the window's title bar, or above it; not at all for the moment its
-        // title bar is being read.
-        let (tag, tag_in, drop_area) = if tag {
+        // The tag goes in the window's title bar, or above it, in the band at the top of its
+        // zone (the one it is placed below, or will be); not at all for the moment its title bar
+        // is being read.
+        let (tag, tag_at, drop_area) = if tag {
             match self.tag_spot(h, g.frame, &zone.name, zone.dpi) {
-                TitleSpot::In(r) => (true, Some(r), Some((r, BarPlace::TitleBar))),
-                TitleSpot::Above => (
-                    true,
-                    None,
-                    self.style_of(h)
-                        .tag_area(zone.rect, zone.dpi)
-                        .map(|band| (band, BarPlace::Band)),
-                ),
-                TitleSpot::NotYet | TitleSpot::NoAnswer => (false, None, None),
+                TitleSpot::In(r) => (true, TagPlace::TitleBar(r), Some((r, BarPlace::TitleBar))),
+                TitleSpot::Above => {
+                    let band = self.style_of(h).tag_area(zone.rect, zone.dpi).or_else(|| {
+                        self.settings
+                            .frames
+                            .banded_style()
+                            .for_tabs()
+                            .tag_area(zone.rect, zone.dpi)
+                    });
+                    (
+                        true,
+                        band.map_or(TagPlace::Above, TagPlace::Band),
+                        band.map(|b| (b, BarPlace::Band)),
+                    )
+                }
+                TitleSpot::NotYet | TitleSpot::NoAnswer => (false, TagPlace::Above, None),
             }
         } else {
-            (false, None, None)
+            (false, TagPlace::Above, None)
         };
         if !(ring || tag) {
             return None;
@@ -507,7 +515,7 @@ impl Engine {
             rounded: self.watch.rounded,
             ring,
             tag,
-            tag_in,
+            tag_at,
         };
         Some(FrameInfo {
             rect: g.frame,

@@ -8,7 +8,7 @@
 //! whole zone. A window with no stretch wide enough wears its tag above it, in a band, as it does
 //! when tags are set to go above windows.
 
-use crate::geometry::{Point, Rect, scale_for_dpi};
+use crate::geometry::{Point, Rect, Size, scale_for_dpi};
 use crate::zone::CHIP_HEIGHT;
 
 /// What a window answers for a point of its title bar.
@@ -207,6 +207,18 @@ impl TitleRoom {
     }
 }
 
+/// Whether a window must wear its tag, or its group's strip, above it, below a band in its
+/// zone: its title bar, read while its frame was `read` in size and now `frame`, has no stretch
+/// with room for `fit`. Read at another size, its stretches are only a guess (each keeps to the
+/// edges that bound it, so all of them grow as the window widens), and a guess must not move a
+/// window: it keeps its band, or no band (`banded`), until it is read at its size.
+pub fn needs_band(room: &TitleRoom, read: Size, frame: Rect, fit: Fit, banded: bool) -> bool {
+    if frame.size() != read {
+        return banded;
+    }
+    room.spot(frame, fit).is_none()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +306,38 @@ mod tests {
         assert_eq!(room.runs_on(now), vec![(136, 757)]);
         // So narrow that nothing is left between them: no room until it is read again.
         assert!(room.runs_on(Rect::new(0, 0, 150, 600)).is_empty());
+    }
+
+    #[test]
+    fn a_guess_from_another_size_moves_no_window_into_or_out_of_a_band() {
+        // Calculator, 856 px wide: its own content, then 32 px of caption by its buttons (job
+        // 0067).
+        let read = Rect::new(1060, 526, 1916, 1028);
+        let room = scan(read, 96, |p: Point| {
+            let x = p.x - read.left;
+            let caption = p.y - read.top < 32 && (664..696).contains(&x);
+            Some(if caption { Hit::Caption } else { Hit::Other })
+        })
+        .unwrap();
+        let strip = Fit::strip(i32::MAX, 96);
+        assert!(needs_band(&room, read.size(), read, strip, false));
+        // Made the visible tab of a group 1048 px wide: its stretch, kept to the edges that
+        // bound it, would be 224 px wide, room for a strip. Only a reading at that size can say
+        // so; until then the window keeps its band (job 0067: it left its band and went back to
+        // it 24 ms later, moved twice).
+        let joined = Rect::new(4, 4, 1052, 1028);
+        assert!(room.spot(joined, strip).is_some());
+        assert!(needs_band(&room, read.size(), joined, strip, true));
+        // Nor does a guess put a window below a band.
+        assert!(!needs_band(&room, read.size(), joined, strip, false));
+        // Read at its new size, it says.
+        let again = scan(joined, 96, |p: Point| {
+            let x = p.x - joined.left;
+            let caption = p.y - joined.top < 32 && (856..888).contains(&x);
+            Some(if caption { Hit::Caption } else { Hit::Other })
+        })
+        .unwrap();
+        assert!(needs_band(&again, joined.size(), joined, strip, false));
     }
 
     #[test]

@@ -17,7 +17,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use mosaik_core::geometry::{Rect, Size};
-use mosaik_core::titlebar::{Fit, TitleRoom};
+use mosaik_core::titlebar::{self, Fit, TitleRoom};
 use mosaik_core::window::WindowHandle;
 use mosaik_core::zone::FrameStyle;
 use mosaik_win::titlebar::Reading;
@@ -346,7 +346,10 @@ impl Engine {
             Fit::tag(self.tag_width(&label, dpi), dpi)
         };
         match self.title_bar(h, g.frame) {
-            Bar::Room(room) => room.spot(g.frame, fit).is_none(),
+            Bar::Room(room) => {
+                let read = self.titles.known.get(&h).map_or(g.frame.size(), |k| k.size);
+                titlebar::needs_band(&room, read, g.frame, fit, banded)
+            }
             // Never answered: a strip must be reachable, so it goes above the window; a tag
             // waits for an answer.
             Bar::Unread => strip || banded,

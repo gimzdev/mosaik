@@ -42,9 +42,20 @@ pub struct FrameLook {
     pub rounded: bool,
     pub ring: bool,
     pub tag: bool,
-    /// Where the tag goes: at the right end of this free stretch of the window's own title bar,
-    /// or above the window when `None`.
-    pub tag_in: Option<Rect>,
+    pub tag_at: TagPlace,
+}
+
+/// Where a window's tag goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TagPlace {
+    /// At the right end of this free stretch of the window's own title bar.
+    TitleBar(Rect),
+    /// At the left end of this band at the top of the window's zone, also when the window keeps
+    /// a height of its own that runs into the band (an app's minimum size): the tag stays in
+    /// its zone.
+    Band(Rect),
+    /// Right above the window.
+    Above,
 }
 
 /// The width a zone's tag needs to show all of `label` on a monitor at `dpi`.
@@ -93,14 +104,21 @@ impl Frame {
                 ink: Rgba::of(look.color.label(), 1.0),
                 scale: s,
             };
-            match look.tag_in {
-                Some(room) => {
+            // 25 px up from the window's top edge, or the band's bottom: 3 px below the band's
+            // top, 4 px above the window.
+            let above = px(25.0 * s);
+            match look.tag_at {
+                TagPlace::TitleBar(room) => {
                     let width = self.tag.width(canvas, &tag, room.width());
                     let at = Point::new(room.right - width, room.top + (room.height() - tag.height()) / 2);
                     self.tag.show(canvas, at, &tag, room.width(), stack)?;
                 }
-                None => {
-                    let at = Point::new(frame.left, frame.top - px(25.0 * s));
+                TagPlace::Band(band) => {
+                    let at = Point::new(band.left, band.bottom - above);
+                    self.tag.show(canvas, at, &tag, band.width(), stack)?;
+                }
+                TagPlace::Above => {
+                    let at = Point::new(frame.left, frame.top - above);
                     self.tag.show(canvas, at, &tag, frame.width(), stack)?;
                 }
             }

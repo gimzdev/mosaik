@@ -156,19 +156,20 @@ impl Styles {
     }
 }
 
-/// Whether `w` wears its tag, or its group's strip, above its frame (tags set to go above
-/// windows, or no room in its title bar).
+/// Whether `w` wears its tag, or its group's strip, above its frame, in a band (tags set to go
+/// above windows, or no room in its title bar): it starts above the window's top edge. (A window
+/// whose app keeps a height that runs into the band is overlapped by it.)
 pub(crate) fn wears_above(st: &StateSnapshot, w: HWND) -> bool {
     let Some(me) = st.windows.iter().find(|x| x.handle == handle(w)) else {
         return false;
     };
     let top = me.frame_rect.top;
-    me.tag.is_some_and(|t| t.bottom <= top + 1)
+    me.tag.is_some_and(|t| t.top < top)
         || st
             .tab_strips
             .iter()
             .filter(|s| s.tabs.iter().any(|t| t.window == me.handle && t.visible))
-            .any(|s| s.rect.bottom <= top + 1)
+            .any(|s| s.rect.top < top)
 }
 
 /// Where the engine draws `w`'s tag and where dropping a window on it makes them tabs, once its
