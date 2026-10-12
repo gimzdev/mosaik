@@ -383,8 +383,8 @@ its own size kept      Character Map (a dialog of a fixed size, 477 x 430: in th
 by its band            Calculator, into the editor's zone: 0 px
 ```
 
-Job 0061, before tags moved into title bars: 144 entries, 34 let through, the same programs but
-Character Map, all passing.
+Job 0061, before tags moved into title bars: 144 entries, 34 let through, all passing; Dev Home
+was in the Start menu then, and Character Map was not managed.
 
 ### Apps that drag their own window (job 0059)
 
