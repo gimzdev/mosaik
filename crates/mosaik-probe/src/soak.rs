@@ -81,7 +81,10 @@ pub fn run(
     cycles: usize,
 ) -> Result<Value, String> {
     let [(code, _), (terminal, _), (review, _)] = windows;
-    // A: the terminal joins the code window as a tab.
+    // A: tiled (saved first, so the windows wear tags), then the terminal joins the code window
+    // as a tab, and A is saved again with its tab group.
+    save(engine, "Soak A")?;
+    pump_until(700, || false);
     let t = frame_rect(terminal).ok_or("the terminal window vanished")?;
     drag_path(&[Point::new(t.left + t.width() / 3, t.top + 12), tag], terminal)?;
     let st = state(engine)?;

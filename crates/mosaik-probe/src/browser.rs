@@ -18,7 +18,7 @@ use mosaik_win::window::{Scanner, frame_rect, handle, title, top_level};
 use serde_json::{Value, json};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+    HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
 };
 
 use crate::workspace::{drag_path, state};
@@ -107,24 +107,28 @@ fn tabs(hwnd: HWND, at_least: usize) -> Vec<Rect> {
     }
 }
 
-/// Puts the probe's browser window above every other window that is not top-most (the probe's
-/// own windows are not, for this test: a browser takes back its normal stacking at once when it
-/// is made top-most, job 0052).
+/// Puts the probe's browser window in front of every window that is not top-most (the probe's
+/// own windows are not, for this test). Made top-most and then not, as a program that is not in
+/// the foreground may bring a window forward; a browser that has just started takes back its
+/// normal stacking anyway (job 0052).
 fn on_top(window: HWND) -> Result<(), String> {
-    // SAFETY: changes the stacking of a window this probe opened.
-    let set = unsafe {
-        SetWindowPos(
-            window,
-            Some(HWND_TOP),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-        )
-    };
+    for order in [HWND_TOPMOST, HWND_NOTOPMOST] {
+        // SAFETY: changes the stacking of a window this probe opened.
+        unsafe {
+            SetWindowPos(
+                window,
+                Some(order),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        }
+        .map_err(|e| e.to_string())?;
+    }
     pump_until(300, || false);
-    set.map_err(|e| e.to_string())
+    Ok(())
 }
 
 /// How the probe's browser window stands: what Windows says of it, and its place in the stacking
