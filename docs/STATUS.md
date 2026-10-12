@@ -10,7 +10,7 @@ re-run before each release.
 
 | Step | State | Evidence |
 | --- | --- | --- |
-| 1. Verify assumptions | in progress: two monitors (virtual displays) and Windows 10 left | [Step 1](#step-1-verify-assumptions) |
+| 1. Verify assumptions | in progress: two monitors verified at one scale (job 0072); mixed scales and Windows 10 left | [Step 1](#step-1-verify-assumptions) |
 | 2. Core, topologies, persistence, IPC, mosaikctl | done | [Step 2](#step-2-core-persistence-ipc) |
 | 3. Zones | done: capture, frames and tags in title bars, drag to snap, zone editor | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces), [Step 6](#step-6-product-ui) |
 | 4. Workspaces | done: save, switch, start missing apps, switcher, tray, workspace shortcuts | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
@@ -176,8 +176,9 @@ build; releases are signed by the Microsoft Store.
 ### Still to do in step 1
 
 - Two monitors with different scale factors and hotplug, with virtual displays: the driver is
-  installed (Virtual Display Driver 25.7.26 from winget, owner's go-ahead), two virtual
-  monitors configured; the owner sets their scales.
+  installed (Virtual Display Driver 25.7.26 from winget, owner's go-ahead) and one virtual
+  display is on (800x600 at 100%); two monitors at the same scale pass (job 0072, step 7). The
+  owner sets a different scale on it (Windows' display settings) for the mixed-scale run.
 - Windows 10 22H2: needs a second machine or a VM (this PC has 18.6 GB free, too little for a VM).
 
 ## Step 2: core, persistence, IPC
@@ -410,6 +411,24 @@ the strip above it, and pulled out again it wears its tag in its title bar. Calc
 keeps its minimum height (856 x 502 where 856 x 480 was given), 0 px from where that size fits
 best. The window that moves itself with no caption to grab (`--self-move --no-title-room`) wears
 its tag above it too, 0 px from its place.
+
+### Two monitors (`mosaik-probe workspace --monitors`, job 0072)
+
+The main monitor (1920x1080 at 0,0) and a virtual display (800x600 at 1920,0), both at 100%. The
+probe's editor on the left half of the main monitor, its terminal and review windows side by
+side on the virtual display, with the real mouse:
+
+```
+saved across both monitors:   3 windows, 3 zones, 2 monitors in the layout; each window 0 px, tag in its title bar
+piled on the main monitor, then the workspace opened again (29 ms): each back on its own monitor, 0 px
+review dragged by its title bar into the editor's zone on the main monitor: 0 px; and back: 0 px
+its ring and tag on the virtual display, read from the screen: the zone's colour on all four sides and the tag
+terminal dropped on the editor's tag, across monitors: a group of two on the main monitor, 0 px
+its tab pulled out onto its own zone on the virtual display: 0 px, the editor shown again
+```
+
+Two monitors at different scales are still to be measured: the virtual display's scale is a
+Windows setting (the release checks).
 
 ### Windows' own snapping (`mosaik-probe workspace --drag`, jobs 0048 and 0051)
 
