@@ -215,7 +215,14 @@ pub fn run(args: &[String]) -> Result<Value, String> {
                 .position(|a| a == "--only")
                 .and_then(|i| args.get(i + 1))
                 .map(String::as_str);
-            apps_scenario(&engine, &probes, dpi, work, &scope, only)
+            let installed = args.iter().any(|a| a == "--installed").then(|| {
+                if args.iter().any(|a| a == "--list") {
+                    Installed::List
+                } else {
+                    Installed::Test
+                }
+            });
+            apps_scenario(&engine, &probes, dpi, work, &scope, only, installed)
         }
         None => scenario(&engine, &probes, drag, dpi, &dir),
     };
@@ -490,6 +497,13 @@ fn soak_scenario(
 
 /// Real apps put into the workspace of the three probe windows: into the review zone, onto the
 /// code window's tag. The workspace is deleted afterwards.
+/// `--installed`: every app of the user's Start menu; `--installed --list`: only the list.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Installed {
+    Test,
+    List,
+}
+
 fn apps_scenario(
     engine: &Engine,
     probes: &[Probe],
@@ -497,6 +511,7 @@ fn apps_scenario(
     work: Rect,
     scope: &Scope,
     only: Option<&str>,
+    installed: Option<Installed>,
 ) -> Result<Value, String> {
     let style = FrameStyle::default();
     let saved = done(
@@ -522,7 +537,34 @@ fn apps_scenario(
         work,
     };
     let original = input::cursor();
-    let result = crate::app_drag::scenario(engine, scope, &targets, only);
+    if let Some(mode) = installed {
+        let r = crate::app_drag::installed(engine, scope, &targets, mode == Installed::List);
+        input::move_to(original);
+        let _ = ask(
+            engine,
+            Command::DeleteWorkspace {
+                workspace: "Probe apps".into(),
+            },
+        );
+        let r = r?;
+        println!(
+            "installed: {} Start menu apps, {} tested or to test, {} skipped",
+            r["start_menu_apps"],
+            r["tested"].as_object().map_or(0, serde_json::Map::len),
+            r["skipped"].as_object().map_or(0, serde_json::Map::len)
+        );
+        if mode == Installed::List {
+            println!("installed list: {r}");
+        }
+        return Ok(json!({ "saved": saved, "installed": r }));
+    }
+    let mut result = crate::app_drag::scenario(engine, scope, &targets, only);
+    // A window its app drags itself, without Windows' move loop.
+    if only.is_none_or(|o| o.split(',').any(|w| w.trim() == "self")) {
+        let r = crate::app_drag::self_moved(engine, &targets).unwrap_or_else(|e| json!({ "failed": e }));
+        println!("app moves itself: {r}");
+        result["moves itself"] = r;
+    }
     input::move_to(original);
     let _ = ask(
         engine,

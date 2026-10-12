@@ -325,3 +325,113 @@ fn hit(p: Point, root: HWND) -> Option<u32> {
         return u32::try_from(code).ok();
     }
 }
+
+/// A window whose app drags it itself (no move loop of Windows': the probe's own window with
+/// `--self-move`), dragged by a press in it into the zone, then onto the tag, then pulled out of
+/// its group by its tab.
+pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
+    let place = Rect::from_origin_size(
+        t.work.left + t.work.width() / 3,
+        t.work.top + t.work.height() / 4,
+        t.work.width() / 3,
+        t.work.height() / 2,
+    );
+    let (process, w) = crate::dummy::spawn_with("Probe moves itself", place, " --topmost --self-move")?;
+    pump_until(500, || false);
+    let result = (|| {
+        let mut out = json!({});
+        // 1. By a press in the window, into the zone.
+        let at = frame_rect(w).ok_or("the window vanished")?.center();
+        let drag = watched(w, || drag_path(&[at, t.zone_point], w))?;
+        let st = state(engine)?;
+        out["into_zone"] = json!({
+            "drag": drag,
+            "error_px": error_to(w, t.zone_area),
+            "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
+        });
+        // 2. Onto the other window's tag.
+        let at = frame_rect(w).ok_or("the window vanished")?.center();
+        let drag = watched(w, || drag_path(&[at, t.tag_point], w))?;
+        let st = state(engine)?;
+        let strip = strip_with(&st, w);
+        out["onto_tag"] = json!({
+            "drag": drag,
+            "tabs": strip.as_ref().map_or(0, |s| s.tabs.len()),
+            "with_the_tag_owner": strip.as_ref().is_some_and(|s| s.tabs.iter().any(|x| x.window == handle(t.code))),
+            "error_px": error_to(w, t.group_area),
+        });
+        // 3. Its tab pulled out into the zone.
+        if let Some(chip) = strip.as_ref().and_then(|s| chip_of(s, w)) {
+            drag_path(&[chip, t.zone_point], w)?;
+            let st = state(engine)?;
+            out["pulled_out"] = json!({
+                "in_a_strip": strip_with(&st, w).is_some(),
+                "error_px": error_to(w, t.zone_area),
+            });
+        }
+        Ok(out)
+    })();
+    close(w);
+    if !process.wait(3000) {
+        let _ = process.kill();
+    }
+    result
+}
+
+/// Every app of the user's Start menu that `apps::skip_reason` lets through, opened, put
+/// through the same steps as the catalog's apps, and closed. With `dry_run`, only the list: what
+/// would be opened, and what is skipped and why. An app the test started that keeps running
+/// once its window is closed (in the tray) is stopped; nothing that ran before is.
+pub fn installed(engine: &Engine, scope: &Scope, t: &Targets, dry_run: bool) -> Result<Value, String> {
+    let apps = crate::apps::start_apps()?;
+    let mut skipped = serde_json::Map::new();
+    let mut tested = serde_json::Map::new();
+    let before = mosaik_win::process::running_pids().map_err(|e| e.to_string())?;
+    let mut scanner = Scanner::new();
+    for app in &apps {
+        if let Some(why) = crate::apps::skip_reason(app) {
+            skipped.insert(app.name.clone(), json!(why));
+            continue;
+        }
+        if dry_run {
+            tested.insert(app.name.clone(), json!("would be opened"));
+            continue;
+        }
+        let opened = match crate::apps::open_start_app(app, &mut scanner) {
+            Ok(o) => o,
+            Err(e) => {
+                tested.insert(app.name.clone(), json!({ "skipped": e }));
+                continue;
+            }
+        };
+        let w = opened.hwnd;
+        let pid = mosaik_win::window::pid(w);
+        if let Ok(mut windows) = scope.windows.lock() {
+            windows.insert(handle(w));
+        }
+        let mut result = steps(engine, w, t).unwrap_or_else(|e| json!({ "failed": e }));
+        result["exe"] = json!(opened.exe);
+        result["class"] = json!(opened.class);
+        close(w);
+        pump_until(4000, || !exists(w));
+        if exists(w) {
+            // SAFETY: minimises a window this probe opened.
+            let _ = unsafe { ShowWindow(w, SW_MINIMIZE) };
+            result["closed"] = json!(false);
+        }
+        if let Ok(mut windows) = scope.windows.lock() {
+            windows.remove(&handle(w));
+        }
+        // Started by the test and still running without its window: stopped.
+        pump_until(1500, || false);
+        if !before.contains(&pid)
+            && let Ok(p) = mosaik_win::process::Process::open(pid)
+            && p.exit_code().is_none()
+        {
+            result["stopped_after"] = json!(p.kill().is_ok());
+        }
+        println!("installed {}: {result}", app.name);
+        tested.insert(app.name.clone(), result);
+    }
+    Ok(json!({ "start_menu_apps": apps.len(), "tested": tested, "skipped": skipped }))
+}

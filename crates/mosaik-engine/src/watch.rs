@@ -3,8 +3,14 @@
 //! window on another's tag to make them tabs.
 //!
 //! Most events come from global hooks. Moves (`EVENT_OBJECT_LOCATIONCHANGE`) are hooked per
-//! process, only for the apps whose windows wear a frame or are being dragged: a global hook
-//! would also report every movement of the mouse pointer.
+//! process, only for the apps whose windows wear a frame or are being dragged, or whose window
+//! has just taken the mouse: a global hook would also report every movement of the pointer.
+//!
+//! A drag is followed through Windows' move loop (`EVENT_SYSTEM_MOVESIZESTART`), which nearly
+//! every app uses. An app that drags its window itself (it takes the mouse and moves the window
+//! as the pointer moves) is followed too: while one of its windows holds the mouse, a move of
+//! that window at the same size, with the button down, is a drag, which ends when the app lets
+//! the mouse go.
 
 use std::collections::{HashMap, HashSet};
 
@@ -22,9 +28,9 @@ use mosaik_win::{input, window};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CHILDID_SELF, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_LOCATIONCHANGE,
-    EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND,
-    EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZEEND,
-    EVENT_SYSTEM_MOVESIZESTART, OBJID_WINDOW,
+    EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_CAPTUREEND,
+    EVENT_SYSTEM_CAPTURESTART, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART,
+    EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART, OBJID_WINDOW,
 };
 
 use crate::mover::{self, To};
@@ -34,7 +40,8 @@ use crate::thread::{Engine, WM_EVENTS, timer};
 /// Events hooked for every window.
 const GLOBAL: [(u32, u32); 6] = [
     (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND),
-    (EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND),
+    // Taking and letting go of the mouse (a press), then Windows' move loop: one range.
+    (EVENT_SYSTEM_CAPTURESTART, EVENT_SYSTEM_MOVESIZEEND),
     (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
     (EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE),
     (EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE),
@@ -57,7 +64,25 @@ pub(crate) struct Drag {
     /// The window whose tag or tab strip is under the pointer, and the tab the dropped window
     /// would go before (the end when `None`).
     pub tab_target: Option<(WindowHandle, Option<WindowHandle>)>,
+    /// The app moves the window itself (no move loop of Windows'): the drag ends when the app
+    /// lets the mouse go, or a moment after the button is up.
+    pub self_moved: bool,
+    /// When the button was first seen up during a drag the app makes itself.
+    pub released: Option<std::time::Instant>,
 }
+
+/// A window that took the mouse: if it moves at the same size while the button is down, without
+/// Windows' move loop, its app is dragging it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Pressed {
+    window: WindowHandle,
+    pid: u32,
+    start: Rect,
+}
+
+/// How long a drag the app makes itself waits, once the button is up, for the app to let the
+/// mouse go before Mosaïk ends it anyway.
+const SELF_MOVE_RELEASE_MS: u128 = 400;
 
 struct Framed {
     pid: u32,
@@ -91,6 +116,8 @@ pub(crate) struct Watch {
     /// The strip shown over a single window's tag while another window is dragged onto it.
     drop_bar: Option<TabBar>,
     pub(crate) drag: Option<Drag>,
+    /// The window holding the mouse, watched for a drag its app makes itself.
+    pressed: Option<Pressed>,
     /// A window Mosaïk must not move, being dragged while zones are on: why is told when the
     /// drag ends, not in the middle of it.
     refused: Option<(WindowHandle, Refuse)>,
@@ -148,6 +175,7 @@ impl Engine {
     pub(crate) fn stop_watching(&mut self) {
         self.kill_timer(timer::DRAG);
         self.watch.drag = None;
+        self.watch.pressed = None;
         self.watch.bar_drag = None;
         self.watch.moving = None;
         self.watch.preview.hide();
@@ -206,6 +234,8 @@ impl Engine {
                         moved.push(h);
                     }
                 }
+                EVENT_SYSTEM_CAPTURESTART => self.capture_start(h),
+                EVENT_SYSTEM_CAPTUREEND => self.capture_end(h),
                 EVENT_SYSTEM_MOVESIZESTART => self.drag_start(h),
                 EVENT_SYSTEM_MOVESIZEEND => self.drag_end(h),
                 EVENT_SYSTEM_FOREGROUND => sync |= self.came_forward(h),
@@ -241,6 +271,8 @@ impl Engine {
         for h in moved {
             if self.watch.drag.as_ref().is_some_and(|d| d.window == h) {
                 self.drag_update();
+            } else if self.watch.pressed.is_some_and(|p| p.window == h) && self.self_move_begins(h) {
+                // Followed as a drag from here on.
             } else if self.watch.frames.contains_key(&h) || self.group_of_window(h).is_some() {
                 self.refresh_frame(h);
             }
@@ -308,6 +340,9 @@ impl Engine {
         }
         if self.watch.refused.is_some_and(|(w, _)| w == h) {
             self.watch.refused = None;
+        }
+        if self.watch.pressed.is_some_and(|p| p.window == h) {
+            self.watch.pressed = None;
         }
         tab
     }
@@ -428,6 +463,9 @@ impl Engine {
         if let Some(d) = &self.watch.drag {
             wanted.insert(d.pid);
         }
+        if let Some(p) = &self.watch.pressed {
+            wanted.insert(p.pid);
+        }
         self.watch.location.retain(|pid, _| wanted.contains(pid));
         for pid in wanted {
             if pid == 0 || self.watch.location.contains_key(&pid) {
@@ -443,6 +481,8 @@ impl Engine {
     }
 
     fn drag_start(&mut self, h: WindowHandle) {
+        // Windows' own move loop: no need to watch for one the app makes itself.
+        self.watch.pressed = None;
         self.watch.moving = Some(h);
         if let Some(f) = self.watch.frames.get_mut(&h) {
             f.frame.hide();
@@ -497,13 +537,98 @@ impl Engine {
             zones,
             target: None,
             tab_target: None,
+            self_moved: false,
+            released: None,
         });
         self.sync_location_hooks();
         self.set_timer(timer::DRAG, DRAG_TICK_MS);
     }
 
+    /// A window took the mouse (a press in it). Watched while zones are on, in case its app drags
+    /// it itself rather than through Windows' move loop.
+    fn capture_start(&mut self, h: WindowHandle) {
+        if self.watch.drag.is_some()
+            || self.watch.moving.is_some()
+            || self.config.safe_mode
+            || !self.settings.snap.enabled
+            || !self.active.as_ref().is_some_and(|a| !a.zones.is_empty())
+        {
+            return;
+        }
+        let root = window::root(window::hwnd(h));
+        let Some(facts) = self.scanner.facts(root) else {
+            return;
+        };
+        if !self.manageable(&facts) {
+            return;
+        }
+        self.watch.pressed = Some(Pressed {
+            window: facts.handle,
+            pid: facts.pid,
+            start: facts.frame_rect,
+        });
+        self.sync_location_hooks();
+    }
+
+    /// A window let the mouse go: a drag its app made itself ends here (unless the button is
+    /// still down: the app may take the mouse again).
+    fn capture_end(&mut self, h: WindowHandle) {
+        let root = window::handle(window::root(window::hwnd(h)));
+        let ends = self
+            .watch
+            .drag
+            .as_ref()
+            .is_some_and(|d| d.self_moved && d.window == root);
+        if ends && !input::primary_button_down() {
+            self.drag_end(root);
+        }
+        if self.watch.pressed.is_some_and(|p| p.window == root) {
+            self.watch.pressed = None;
+            self.sync_location_hooks();
+        }
+    }
+
+    /// The window holding the mouse moved: at the same size, with the button down and no move
+    /// loop of Windows', its app is dragging it, and Mosaïk follows it as any drag. Returns
+    /// whether it did.
+    fn self_move_begins(&mut self, h: WindowHandle) -> bool {
+        let Some(p) = self.watch.pressed else { return false };
+        let Some(g) = window::geometry(window::hwnd(h)) else {
+            return false;
+        };
+        if g.frame == p.start || g.frame.size() != p.start.size() || !input::primary_button_down() {
+            return false;
+        }
+        self.drag_start(h);
+        let Some(d) = self.watch.drag.as_mut().filter(|d| d.window == h) else {
+            return false;
+        };
+        d.start = p.start;
+        d.kind = DragKind::Moving;
+        d.self_moved = true;
+        tracing::debug!(frame = ?g.frame, "the app drags its window itself");
+        self.show_zone_preview(Stack::Below(h.0.cast_signed_isize()));
+        self.drag_update();
+        true
+    }
+
     pub(crate) fn drag_tick(&mut self) {
         self.bar_tick();
+        // A drag the app makes itself ends when the app lets the mouse go; if it keeps it a
+        // moment after the button is up, Mosaïk ends the drag anyway.
+        let up = input::primary_button_down();
+        if let Some(d) = self.watch.drag.as_mut().filter(|d| d.self_moved) {
+            if up {
+                d.released = None;
+            } else {
+                let since = *d.released.get_or_insert_with(std::time::Instant::now);
+                if since.elapsed().as_millis() >= SELF_MOVE_RELEASE_MS {
+                    let w = d.window;
+                    self.drag_end(w);
+                    return;
+                }
+            }
+        }
         if self.watch.drag.is_some() {
             self.drag_update();
         } else if self.watch.bar_drag.is_none() {

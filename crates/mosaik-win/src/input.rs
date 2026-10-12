@@ -95,6 +95,19 @@ pub fn cursor() -> Point {
     Point::new(p.x, p.y)
 }
 
+/// The primary mouse button is held down now: the left one, or the right one when the user
+/// swapped them (the state is read from the physical buttons).
+pub fn primary_button_down() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_SWAPBUTTON};
+    // SAFETY: reads a system setting.
+    let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
+    let vk = if swapped { VK_RBUTTON } else { VK_LBUTTON };
+    // SAFETY: reads the state of one button; the top bit is set while it is down.
+    let state = unsafe { GetAsyncKeyState(i32::from(vk.0)) };
+    state < 0
+}
+
 /// The pointer's shape, as far as it tells a move from a resize: Windows shows one of its
 /// resize arrows for the whole of a resize, whichever app the window belongs to.
 pub fn pointer() -> mosaik_core::snap::Pointer {

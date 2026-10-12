@@ -8,10 +8,19 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOPMOST, WS_OVERLAPPEDWINDOW,
 };
 
-/// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost]`: shows the window and runs until it
-/// is closed or the process is killed. `--topmost` keeps it above the user's windows, so a probe
-/// that presses the mouse on its title bar never lands on something else.
+thread_local! {
+    /// `--self-move`: a press in the window drags it, by the app's own code (no move loop of
+    /// Windows'), as some apps with their own title bars do.
+    static SELF_MOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// While such a drag is on: where the pointer is in the window.
+    static GRAB: std::cell::Cell<Option<(i32, i32)>> = const { std::cell::Cell::new(None) };
+}
+
+/// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost] [--self-move]`: shows the window
+/// and runs until it is closed or the process is killed. `--topmost` keeps it above the user's
+/// windows, so a probe that presses the mouse on its title bar never lands on something else.
 pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
+    SELF_MOVE.with(|m| m.set(args.iter().any(|a| a == "--self-move")));
     let title = args
         .iter()
         .position(|a| a == "--title")
@@ -54,10 +63,60 @@ unsafe extern "system" fn dummy_proc(
     wparam: windows::Win32::Foundation::WPARAM,
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
-    if msg == windows::Win32::UI::WindowsAndMessaging::WM_DESTROY {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetWindowRect, HWND_TOP, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+        WM_DESTROY, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    };
+    if msg == WM_DESTROY {
         // SAFETY: ends this process's message loop.
         unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0) };
         return windows::Win32::Foundation::LRESULT(0);
+    }
+    if SELF_MOVE.with(std::cell::Cell::get) {
+        let cursor = || {
+            let mut p = windows::Win32::Foundation::POINT::default();
+            // SAFETY: valid out pointer.
+            let _ = unsafe { GetCursorPos(&raw mut p) };
+            (p.x, p.y)
+        };
+        match msg {
+            WM_LBUTTONDOWN => {
+                let mut r = windows::Win32::Foundation::RECT::default();
+                // SAFETY: our own window; valid out pointer.
+                let _ = unsafe { GetWindowRect(hwnd, &raw mut r) };
+                let (x, y) = cursor();
+                GRAB.with(|g| g.set(Some((x - r.left, y - r.top))));
+                // SAFETY: our own window takes the mouse until the button is let go.
+                unsafe { windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd) };
+                return windows::Win32::Foundation::LRESULT(0);
+            }
+            WM_MOUSEMOVE => {
+                if let Some((dx, dy)) = GRAB.with(std::cell::Cell::get) {
+                    let (x, y) = cursor();
+                    // SAFETY: moves our own window, as the app's own drag code would.
+                    let _ = unsafe {
+                        SetWindowPos(
+                            hwnd,
+                            Some(HWND_TOP),
+                            x - dx,
+                            y - dy,
+                            0,
+                            0,
+                            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                        )
+                    };
+                }
+                return windows::Win32::Foundation::LRESULT(0);
+            }
+            WM_LBUTTONUP => {
+                if GRAB.with(|g| g.take()).is_some() {
+                    // SAFETY: lets go of the mouse our own window took.
+                    let _ = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture() };
+                }
+                return windows::Win32::Foundation::LRESULT(0);
+            }
+            _ => {}
+        }
     }
     // SAFETY: default handling for everything else.
     unsafe { plain_wndproc(hwnd, msg, wparam, lparam) }
@@ -69,14 +128,21 @@ pub fn spawn(
     rect: Rect,
     topmost: bool,
 ) -> Result<(mosaik_win::process::Process, windows::Win32::Foundation::HWND), String> {
+    spawn_with(title, rect, if topmost { " --topmost" } else { "" })
+}
+
+/// [`spawn`] with more of the dummy's options (`" --topmost --self-move"`).
+pub fn spawn_with(
+    title: &str,
+    rect: Rect,
+    options: &str,
+) -> Result<(mosaik_win::process::Process, windows::Win32::Foundation::HWND), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut args = format!(
         "dummy --title \"{title}\" --rect {},{},{},{}",
         rect.left, rect.top, rect.right, rect.bottom
     );
-    if topmost {
-        args.push_str(" --topmost");
-    }
+    args.push_str(options);
     let process = mosaik_win::process::spawn(&exe.to_string_lossy(), &args).map_err(|e| e.to_string())?;
     let pid = process.pid;
     let mut found = None;

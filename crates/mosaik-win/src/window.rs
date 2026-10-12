@@ -180,6 +180,14 @@ pub fn is_arranged(hwnd: HWND) -> Option<bool> {
     f.map(|f| unsafe { f(hwnd) }.as_bool())
 }
 
+/// The top-level window `hwnd` belongs to (itself when it is one).
+pub fn root(hwnd: HWND) -> HWND {
+    use windows::Win32::UI::WindowsAndMessaging::GA_ROOT;
+    // SAFETY: read-only; any handle value is accepted.
+    let r = unsafe { GetAncestor(hwnd, GA_ROOT) };
+    if r.is_invalid() { hwnd } else { r }
+}
+
 pub fn cloak(hwnd: HWND) -> Cloak {
     let mut v = 0u32;
     // SAFETY: the attribute is a DWORD and the buffer is one u32.

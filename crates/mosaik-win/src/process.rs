@@ -179,6 +179,31 @@ pub fn running_programs() -> Result<std::collections::BTreeSet<String>> {
     Ok(names)
 }
 
+/// The ids of the processes running now: one snapshot of the process list.
+pub fn running_pids() -> Result<std::collections::BTreeSet<u32>> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+    };
+    // SAFETY: a snapshot of the process list; the handle is closed below.
+    let snapshot =
+        unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }.ctx("CreateToolhelp32Snapshot")?;
+    let mut entry = PROCESSENTRY32W {
+        dwSize: u32::try_from(std::mem::size_of::<PROCESSENTRY32W>()).unwrap_or(0),
+        ..Default::default()
+    };
+    let mut pids = std::collections::BTreeSet::new();
+    // SAFETY: `entry` is sized as the API requires and outlives each call.
+    let mut more = unsafe { Process32FirstW(snapshot, &raw mut entry) }.is_ok();
+    while more {
+        pids.insert(entry.th32ProcessID);
+        // SAFETY: as above.
+        more = unsafe { Process32NextW(snapshot, &raw mut entry) }.is_ok();
+    }
+    // SAFETY: the snapshot handle was opened above.
+    let _ = unsafe { CloseHandle(snapshot) };
+    Ok(pids)
+}
+
 /// Opens a file, program or URI the way Explorer would (packaged apps, `ms-settings:`...).
 pub fn shell_open(target: &str, args: &str) -> Result<()> {
     let (t, a, verb) = (wide(target), wide(args), wide("open"));
