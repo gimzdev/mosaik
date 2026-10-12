@@ -1,5 +1,5 @@
 //! Mosaïk's native overlays: the zone preview shown while dragging, the coloured frames and
-//! tags around managed windows, and tab strips. They are layered windows drawn by Mosaïk (not
+//! tags around managed windows, tab strips, and the quick menu at the screen's edge. They are layered windows drawn by Mosaïk (not
 //! DWM border colours, which only exist on Windows 11), so Windows 10 and 11 look the same, and
 //! they never take focus or clicks they do not need.
 //!
@@ -12,6 +12,8 @@ pub mod paint;
 
 #[cfg(windows)]
 pub mod canvas;
+#[cfg(windows)]
+pub mod edge;
 #[cfg(windows)]
 pub mod frame;
 #[cfg(windows)]

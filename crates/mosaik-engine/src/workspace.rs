@@ -112,7 +112,7 @@ impl Engine {
 }
 
 /// The zones of `ws` on the monitors connected now.
-fn live_zones(ws: &Workspace, topology: &Topology, style: FrameStyle) -> Vec<LiveZone> {
+pub(crate) fn live_zones(ws: &Workspace, topology: &Topology, style: FrameStyle) -> Vec<LiveZone> {
     let resolver = Resolver::new(&ws.layout, topology, style);
     ws.layout
         .zones
@@ -307,7 +307,7 @@ impl Engine {
     }
 
     /// Makes `id` the open workspace with these windows in its slots, and shows its frames.
-    fn activate(
+    pub(crate) fn activate(
         &mut self,
         id: WorkspaceId,
         windows: HashMap<SlotId, WindowHandle>,
@@ -759,6 +759,7 @@ impl Engine {
         }
         tracing::info!(monitors = topology.monitors().len(), "displays changed");
         self.refit_open_workspace(&topology);
+        self.place_quick();
     }
 
     /// Puts the open workspace's windows that are on screen where its layout says on

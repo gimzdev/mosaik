@@ -71,3 +71,27 @@ pub fn apps_use_light_theme() -> bool {
     };
     status.is_err() || value != 0
 }
+
+/// A high-contrast theme is on (Settings, Accessibility, Contrast themes): Mosaïk's own drawing
+/// uses Windows' colours then.
+pub fn high_contrast() -> bool {
+    use windows::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    let mut hc = HIGHCONTRASTW {
+        cbSize: u32::try_from(std::mem::size_of::<HIGHCONTRASTW>()).unwrap_or(0),
+        ..Default::default()
+    };
+    // SAFETY: SPI_GETHIGHCONTRAST fills a sized HIGHCONTRASTW.
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST,
+            hc.cbSize,
+            Some((&raw mut hc).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    }
+    .is_ok();
+    ok && hc.dwFlags.contains(HCF_HIGHCONTRASTON)
+}

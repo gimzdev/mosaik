@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Raised when commands or replies change; a client may be older than Mosaïk, never newer.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -48,6 +48,13 @@ pub enum Command {
     },
     /// Bring back every hidden window now.
     Rescue,
+    /// Put every window on screen in the zone that suits it: the open workspace's zones, or new
+    /// ones on a monitor without zones (a new workspace when none is open). Windows left over
+    /// become tabs.
+    Arrange,
+    /// Put back what the last `arrange` changed (for ten minutes, until a workspace is opened,
+    /// saved or edited).
+    UndoArrange,
     ShowSwitcher,
     /// Open the settings window (what a second launch of Mosaïk asks the running one).
     ShowSettings,
@@ -407,6 +414,8 @@ mod tests {
             },
             Command::Save { workspace: None },
             Command::Rescue,
+            Command::Arrange,
+            Command::UndoArrange,
             Command::Settings,
             Command::SetSettings {
                 settings: Box::default(),
@@ -646,6 +655,8 @@ mod wire {
             },
             Command::Save { workspace: None },
             Command::Rescue,
+            Command::Arrange,
+            Command::UndoArrange,
             Command::ShowSwitcher,
             Command::ShowSettings,
             Command::Quit,

@@ -49,6 +49,8 @@ struct AppState {
     pipe: Mutex<Option<(std::thread::JoinHandle<()>, Stopper)>>,
     /// Notices not yet shown, oldest first.
     notices: Mutex<Vec<Notice>>,
+    /// The workspace whose zones the quick menu asked to edit, until the window takes it.
+    edit_zones: Mutex<Option<String>>,
     data_dir: PathBuf,
 }
 
@@ -179,6 +181,7 @@ pub fn run(args: Vec<String>) -> i32 {
         .invoke_handler(tauri::generate_handler![
             engine_request,
             take_notices,
+            take_zones_to_edit,
             open_link,
             open_logs,
             open_licences,
@@ -250,6 +253,7 @@ fn setup(
         engine,
         pipe: Mutex::new(pipe),
         notices: Mutex::new(Vec::new()),
+        edit_zones: Mutex::new(None),
         data_dir,
     });
     let first_run = app
@@ -355,6 +359,15 @@ fn on_ui_event(handle: &AppHandle, event: UiEvent) {
     let h = handle.clone();
     let ran = handle.run_on_main_thread(move || match event {
         UiEvent::ShowSettings => show_settings(&h),
+        UiEvent::EditZones { workspace } => {
+            if let Some(state) = h.try_state::<AppState>()
+                && let Ok(mut e) = state.edit_zones.lock()
+            {
+                *e = Some(workspace);
+            }
+            show_settings(&h);
+            let _ = h.emit("zones:edit", ());
+        }
         UiEvent::Notice { title, body } => show_notice(&h, Notice { title, body }),
         UiEvent::WorkspacesChanged => {
             let _ = h.emit("workspaces:changed", ());
@@ -437,6 +450,7 @@ fn tray_menu(
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
     menu.append_items(&[
+        &MenuItem::with_id(app, "arrange", "Arrange windows", true, None::<&str>)?,
         &MenuItem::with_id(app, "switcher", "Open the switcher", true, None::<&str>)?,
         &MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
@@ -481,6 +495,7 @@ fn build_tray(app: &AppHandle, engine: &Engine) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
+            "arrange" => ask_engine(app, Command::Arrange),
             "switcher" => ask_engine(app, Command::ShowSwitcher),
             "settings" => show_settings(app),
             "rescue" => ask_engine(app, Command::Rescue),
@@ -595,6 +610,12 @@ async fn engine_request(state: tauri::State<'_, AppState>, command: Command) -> 
     tauri::async_runtime::spawn_blocking(move || engine.request(command, ENGINE_TIMEOUT))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// The workspace whose zones to open in the editor, asked for from the quick menu, if any.
+#[tauri::command]
+fn take_zones_to_edit(state: tauri::State<'_, AppState>) -> Option<String> {
+    state.edit_zones.lock().ok().and_then(|mut e| e.take())
 }
 
 #[tauri::command]

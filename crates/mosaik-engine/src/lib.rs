@@ -9,11 +9,13 @@
 //! Windows only; an empty library elsewhere so the workspace builds everywhere.
 #![cfg(windows)]
 
+mod arranging;
 mod editing;
 mod hider;
 mod hotkeys;
 mod mover;
 mod others;
+mod quick;
 mod resize;
 pub mod server;
 mod state;
@@ -90,6 +92,10 @@ impl Scope {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiEvent {
     ShowSettings,
+    /// Open the zone editor for this workspace (from the quick menu).
+    EditZones {
+        workspace: String,
+    },
     /// Tell the user something once, plainly (a shortcut that could not be registered...).
     Notice {
         title: String,

@@ -52,6 +52,8 @@ mod windows_main {
   workspaces [--json]            the saved workspaces
   switch <workspace>             open a workspace
   save [<workspace>]             save the windows on screen
+  arrange                        put every window on screen in the zone that suits it
+  undo-arrange                   put back what the last arrange changed
   rename <workspace> <name>      rename a workspace
   delete <workspace>             delete a workspace (its windows stay)
   hotkey <workspace> <shortcut>  give a workspace its own shortcut (`none` removes it)
@@ -105,6 +107,8 @@ A <workspace> is its name or its id.";
             ("zones", [w]) => Command::Zones {
                 workspace: (*w).to_owned(),
             },
+            ("arrange", []) => Command::Arrange,
+            ("undo-arrange", []) => Command::UndoArrange,
             ("rescue", []) => Command::Rescue,
             ("switcher", []) => Command::ShowSwitcher,
             ("settings", []) => Command::ShowSettings,

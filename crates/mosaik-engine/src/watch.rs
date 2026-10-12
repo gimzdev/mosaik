@@ -202,6 +202,7 @@ impl Engine {
     pub(crate) fn start_watching(&mut self) {
         events::wake_on_event(self.window, WM_EVENTS);
         tabbar::wake_on_input(self.window, WM_EVENTS);
+        mosaik_overlay::edge::wake_on_input(self.window, WM_EVENTS);
         match events::hook(&GLOBAL, 0) {
             Ok(h) => self.watch.hooks = Some(h),
             Err(e) => {
@@ -282,7 +283,10 @@ impl Engine {
                 EVENT_SYSTEM_CAPTUREEND => self.capture_end(h),
                 EVENT_SYSTEM_MOVESIZESTART => self.drag_start(h),
                 EVENT_SYSTEM_MOVESIZEEND => self.drag_end(h),
-                EVENT_SYSTEM_FOREGROUND => sync |= self.came_forward(h),
+                EVENT_SYSTEM_FOREGROUND => {
+                    self.quick_follow_foreground(h);
+                    sync |= self.came_forward(h);
+                }
                 EVENT_SYSTEM_MINIMIZESTART | EVENT_OBJECT_HIDE | EVENT_OBJECT_CLOAKED => {
                     if let Some(f) = self.watch.frames.get_mut(&h) {
                         f.frame.hide();
@@ -327,6 +331,10 @@ impl Engine {
         let inputs = tabbar::take_inputs();
         if !inputs.is_empty() {
             self.on_bar_inputs(inputs);
+        }
+        let quick = mosaik_overlay::edge::take_inputs();
+        if !quick.is_empty() {
+            self.on_quick_inputs(quick);
         }
         if sync {
             self.sync_tabs();

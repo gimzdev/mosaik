@@ -59,6 +59,8 @@ pub(crate) mod timer {
     pub const LAUNCH: usize = 5;
     /// Mosaïk's shortcuts come back after being held for a recorder that never let go.
     pub const HOTKEYS: usize = 6;
+    /// The quick menu closes a moment after the pointer left it.
+    pub const QUICK: usize = 7;
 }
 
 /// Shift a timer id into the `Pending::timers` bit set.
@@ -169,6 +171,10 @@ pub(crate) struct Engine {
     pub(crate) titles: Titles,
     /// Notices given once per session, by key.
     pub(crate) told: HashSet<&'static str>,
+    /// What the last Arrange changed, to undo it.
+    pub(crate) undo: Option<crate::arranging::Undo>,
+    /// The quick menu at the screen's edge.
+    pub(crate) quick: crate::quick::Quick,
 }
 
 pub(crate) fn run(
@@ -258,6 +264,8 @@ pub(crate) fn run(
         ),
         titles: Titles::new(),
         told: HashSet::new(),
+        undo: None,
+        quick: crate::quick::Quick::default(),
     };
     for n in notices {
         engine.notice("Mosaïk's settings", n);
@@ -280,6 +288,7 @@ pub(crate) fn run(
         }
         engine.start_watching();
         engine.check_others();
+        engine.place_quick();
     }
     let hotkey = engine.hotkey_state();
     tracing::info!(
@@ -456,6 +465,9 @@ impl Engine {
         if todo.timers & timer_bit(timer::HOTKEYS) != 0 {
             self.release_hotkeys();
         }
+        if todo.timers & timer_bit(timer::QUICK) != 0 {
+            self.quick_tick();
+        }
         if todo.displays {
             // Windows sends several of these for one change; act once it is done.
             self.set_timer(timer::TOPOLOGY, 400);
@@ -569,7 +581,7 @@ impl Engine {
         )
     }
 
-    fn show_switcher(&mut self, asked: Instant) {
+    pub(crate) fn show_switcher(&mut self, asked: Instant) {
         let entries = self.file.workspaces.iter().map(Entry::from_workspace).collect();
         let active = self.active.as_ref().map(|a| a.id.clone());
         switcher::open(entries, active, self.hotkey_state().shortcut, asked);
@@ -592,7 +604,7 @@ impl Engine {
 
     /// Answers a command; when it changed the workspaces (or which one is open), the
     /// interface is told so its lists stay current.
-    fn handle(&mut self, command: Command) -> Reply {
+    pub(crate) fn handle(&mut self, command: Command) -> Reply {
         let changes_workspaces = matches!(
             command,
             Command::Save { .. }
@@ -601,9 +613,19 @@ impl Engine {
                 | Command::RenameWorkspace { .. }
                 | Command::DeleteWorkspace { .. }
                 | Command::SetWorkspaceHotkey { .. }
+                | Command::Arrange
+                | Command::UndoArrange
+        );
+        // Once a workspace is opened, saved or edited, what Arrange did is part of it.
+        let keeps_arrange = matches!(
+            command,
+            Command::Arrange | Command::UndoArrange | Command::SetWorkspaceHotkey { .. }
         );
         let reply = self.dispatch(command);
         if changes_workspaces && !matches!(reply, Reply::Error { .. }) {
+            if !keeps_arrange {
+                self.forget_arrange();
+            }
             (self.ui)(UiEvent::WorkspacesChanged);
         }
         reply
@@ -622,6 +644,8 @@ impl Engine {
             Command::Workspaces => self.workspaces(),
             Command::Switch { workspace } => self.switch(&workspace),
             Command::Save { workspace } => self.save(workspace),
+            Command::Arrange => self.arrange(),
+            Command::UndoArrange => self.undo_arrange(),
             Command::Rescue => self.rescue(),
             Command::ShowSwitcher => {
                 self.show_switcher(Instant::now());

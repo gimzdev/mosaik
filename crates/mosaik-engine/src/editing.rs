@@ -188,6 +188,9 @@ impl Engine {
         if old.theme != self.settings.theme {
             switcher::set_theme(self.settings.theme);
         }
+        if old.edge != self.settings.edge || old.theme != self.settings.theme {
+            self.place_quick();
+        }
         if old.frames.effective_style() != self.settings.frames.effective_style()
             || old.frames.banded_style() != self.settings.frames.banded_style()
         {
