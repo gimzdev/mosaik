@@ -331,6 +331,14 @@ Found and fixed on the way:
 - **A browser window closed at the end of its drag** (a tab dragged back into its window) no
   longer brings a "did not move into its zone" notice.
 
+### Apps that drag their own window (job 0059)
+
+A window whose app moves it itself as the pointer moves, with no move loop of Windows' (the
+probe's own window with `--self-move`, as some custom title bars do): dragged by a press in it
+into the zone, 0 px from the zone, in the workspace; onto the code window's tag, a strip of two
+tabs, 0 px; its tab pulled out into the zone, 0 px. Windows reported mouse capture and no move
+loop for each drag (the engine's log: "the app drags its window itself").
+
 ### Windows' own snapping (`mosaik-probe workspace --drag`, jobs 0048 and 0051)
 
 Windows 11 25H2, "Snap windows" on:
