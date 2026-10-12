@@ -19,8 +19,8 @@ use mosaik_core::store::StoreError;
 use mosaik_core::topology::Topology;
 use mosaik_core::window::{Cloak, WindowFacts, WindowHandle};
 use mosaik_core::workspace::{
-    Move, Present, Seen, capture, edge_distance, holds, plan_refit, plan_switch, remember, same_name,
-    workspace_id,
+    Move, Present, Seen, capture, edge_distance, holds, plan_refit, plan_switch, regroup, remember,
+    same_name, workspace_id,
 };
 use mosaik_core::zone::{FrameStyle, ZoneColor, ZoneId};
 use mosaik_ipc::protocol::{ErrorCode, Reply};
@@ -167,6 +167,18 @@ impl Engine {
             )
     }
 
+    /// Every top-level window, with the ones Mosaïk hid (background tabs) marked as such, so
+    /// they count as the workspace's windows rather than as windows on another desktop.
+    pub(crate) fn scan_marked(&mut self) -> Vec<WindowFacts> {
+        let mut all = self.scanner.scan();
+        for f in &mut all {
+            if self.hiding.hidden.contains_key(&f.handle) {
+                f.cloak = Cloak::ByMosaik;
+            }
+        }
+        all
+    }
+
     /// Reads the monitors again; keeps the last known arrangement if Windows cannot say.
     pub(crate) fn refresh_topology(&mut self) -> Option<Topology> {
         match mosaik_win::monitors::topology() {
@@ -309,8 +321,7 @@ impl Engine {
         let name: String = name.chars().take(mosaik_core::switcher::MAX_NAME).collect();
 
         let windows: Vec<WindowFacts> = self
-            .scanner
-            .scan()
+            .scan_marked()
             .into_iter()
             .filter(|f| self.manageable(f))
             .collect();
@@ -342,7 +353,7 @@ impl Engine {
         );
         let name = previous.as_ref().map_or(name, |p| p.name.clone());
         let style = self.style();
-        let ws = capture(
+        let mut ws = capture(
             id.clone(),
             name.clone(),
             &seen,
@@ -350,6 +361,18 @@ impl Engine {
             style,
             previous.as_ref(),
         );
+        // Tab groups on screen stay tab groups.
+        let groups: Vec<(Vec<usize>, usize)> = self
+            .groups_now()
+            .into_iter()
+            .filter_map(|g| {
+                let at = |h: WindowHandle| windows.iter().position(|w| w.handle == h);
+                let tabs: Vec<usize> = g.tabs.iter().filter_map(|(_, w)| at(*w)).collect();
+                let visible = g.visible.and_then(|(_, w)| at(w))?;
+                (tabs.len() > 1).then_some((tabs, visible))
+            })
+            .collect();
+        regroup(&mut ws, &groups);
         let assigned: HashMap<SlotId, WindowHandle> = ws
             .layout
             .slots
@@ -446,7 +469,7 @@ impl Engine {
             .map(|a| a.windows.values().copied().collect())
             .unwrap_or_default();
         let ws = self.file.workspaces[index].clone();
-        let all = self.scanner.scan();
+        let all = self.scan_marked();
         let candidates: Vec<&WindowFacts> = all.iter().filter(|f| self.movable(f)).collect();
         let plan = plan_switch(
             &ws,
@@ -481,6 +504,9 @@ impl Engine {
         for h in &plan.minimize {
             arrange::minimize(window::hwnd(*h));
         }
+        // Tab groups: the visible tab shows, the others hide.
+        self.activate(ws.id.clone(), assigned, placed);
+        self.apply_groups();
         for h in &plan.raise {
             let _ = arrange::raise(window::hwnd(*h));
         }
@@ -508,10 +534,10 @@ impl Engine {
             });
         }
         let starting = launching.len();
-        self.activate(ws.id.clone(), assigned, placed);
         if let Some(a) = &mut self.active {
             a.launching = launching;
         }
+        self.refresh_frames();
         if starting > 0 {
             self.set_timer(timer::LAUNCH, 1000);
         }
@@ -617,7 +643,7 @@ impl Engine {
         };
         let assigned: HashMap<WindowHandle, SlotId> =
             active.windows.iter().map(|(s, w)| (*w, s.clone())).collect();
-        let all = self.scanner.scan();
+        let all = self.scan_marked();
         let on_screen: Vec<(SlotId, &WindowFacts)> = all
             .iter()
             .filter(|f| self.manageable(f))

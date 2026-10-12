@@ -13,10 +13,11 @@ use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1_RENDER_TARGET_USAGE_NONE,
-    D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1DCRenderTarget,
-    ID2D1Factory, ID2D1SolidColorBrush,
+    D2D1_DASH_STYLE_DASH, D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    D2D1_FEATURE_LEVEL_DEFAULT, D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+    D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT, D2D1_STROKE_STYLE_PROPERTIES,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory,
+    ID2D1SolidColorBrush,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
@@ -111,7 +112,7 @@ pub enum Align {
 }
 
 pub struct Canvas {
-    _factory: ID2D1Factory,
+    factory: ID2D1Factory,
     target: ID2D1DCRenderTarget,
     brush: ID2D1SolidColorBrush,
     dwrite: IDWriteFactory,
@@ -169,7 +170,7 @@ impl Canvas {
                 DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ctx("DWriteCreateFactory")?;
             let font = ui_font(&dwrite);
             Ok(Self {
-                _factory: factory,
+                factory,
                 target,
                 brush,
                 dwrite,
@@ -278,6 +279,31 @@ impl Pen<'_> {
         // SAFETY: changes the colour of the canvas's own brush.
         unsafe { self.canvas.brush.SetColor(&c.d2d()) };
         &self.canvas.brush
+    }
+
+    /// Strokes a rounded rectangle with a dashed line `width` wide, drawn inside `a`.
+    pub fn dash_round(&self, a: Area, radius: f32, width: f32, c: Rgba) {
+        let props = D2D1_STROKE_STYLE_PROPERTIES {
+            dashStyle: D2D1_DASH_STYLE_DASH,
+            ..Default::default()
+        };
+        // SAFETY: a stroke style from the canvas's own factory, used at once.
+        let Ok(style) = (unsafe { self.canvas.factory.CreateStrokeStyle(&props, None) }) else {
+            self.stroke_round(a, radius, width, c);
+            return;
+        };
+        let half = width / 2.0;
+        let rr = D2D1_ROUNDED_RECT {
+            rect: a.inset(half).d2d(),
+            radiusX: (radius - half).max(0.0),
+            radiusY: (radius - half).max(0.0),
+        };
+        // SAFETY: inside BeginDraw/EndDraw on the bound target.
+        unsafe {
+            self.canvas
+                .target
+                .DrawRoundedRectangle(&rr, self.brush(c), width, Some(&style));
+        }
     }
 
     pub fn fill_round(&self, a: Area, radius: f32, c: Rgba) {

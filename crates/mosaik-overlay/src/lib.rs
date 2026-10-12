@@ -21,4 +21,6 @@ pub mod shapes;
 #[cfg(windows)]
 pub mod surface;
 #[cfg(windows)]
+pub mod tabbar;
+#[cfg(windows)]
 pub mod tint;

@@ -77,5 +77,6 @@ pub(crate) fn snapshot(i: Inputs<'_>) -> StateSnapshot {
         active_workspace: i.active_workspace,
         hotkey: i.hotkey.clone(),
         hidden: i.journal.hidden.clone(),
+        tab_strips: Vec::new(),
     }
 }

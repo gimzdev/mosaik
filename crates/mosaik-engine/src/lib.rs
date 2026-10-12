@@ -14,6 +14,7 @@ mod mover;
 pub mod server;
 mod state;
 mod switcher;
+mod tabs;
 mod thread;
 mod watch;
 pub mod watchdog;

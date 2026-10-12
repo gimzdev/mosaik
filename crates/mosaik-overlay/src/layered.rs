@@ -70,7 +70,18 @@ impl LayeredWindow {
 
     /// Like [`LayeredWindow::new`]; `topmost` false for overlays stacked with other windows.
     pub fn create(class_name: &str, click_through: bool, topmost: bool) -> Result<Self> {
-        let class = WindowClass::register(class_name, Some(overlay_proc))?;
+        Self::with_proc(class_name, click_through, topmost, overlay_proc)
+    }
+
+    /// Like [`LayeredWindow::create`] with a window procedure of the caller's (the tab strip
+    /// reads the mouse).
+    pub(crate) fn with_proc(
+        class_name: &str,
+        click_through: bool,
+        topmost: bool,
+        proc: unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT,
+    ) -> Result<Self> {
+        let class = WindowClass::register(class_name, Some(proc))?;
         let mut ex = WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
         if topmost {
             ex |= WS_EX_TOPMOST;

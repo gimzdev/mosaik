@@ -31,3 +31,23 @@ pub fn build() -> Option<u32> {
 pub fn is_windows_11() -> bool {
     build().is_some_and(|b| b >= 22_000)
 }
+
+/// Windows' "Choose your app mode" setting: light (the default when it cannot be read) or dark.
+pub fn apps_use_light_theme() -> bool {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let mut value = 1u32;
+    let mut size = 4u32;
+    // SAFETY: reads one DWORD into a local; the size is passed.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("AppsUseLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&raw mut value).cast()),
+            Some(&mut size),
+        )
+    };
+    status.is_err() || value != 0
+}

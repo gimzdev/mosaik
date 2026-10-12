@@ -25,7 +25,6 @@ use windows::Win32::Graphics::Gdi::{
     InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, PAINTSTRUCT, SYS_COLOR_INDEX,
     UpdateWindow,
 };
-use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
 use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_SELECTED};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
@@ -206,28 +205,9 @@ fn theme_for(setting: ThemeSetting) -> Theme {
     let light = match setting {
         ThemeSetting::Light => true,
         ThemeSetting::Dark => false,
-        ThemeSetting::System => apps_use_light_theme(),
+        ThemeSetting::System => mosaik_win::os::apps_use_light_theme(),
     };
     if light { Theme::LIGHT } else { Theme::DARK }
-}
-
-/// Windows' "Choose your app mode" setting.
-fn apps_use_light_theme() -> bool {
-    let mut value = 1u32;
-    let mut size = 4u32;
-    // SAFETY: reads one DWORD into a local; the size is passed.
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
-            w!("AppsUseLightTheme"),
-            RRF_RT_REG_DWORD,
-            None,
-            Some((&raw mut value).cast()),
-            Some(&mut size),
-        )
-    };
-    status.is_err() || value != 0
 }
 
 /// Opens the switcher on the monitor with the pointer, in the current theme (read on every open,

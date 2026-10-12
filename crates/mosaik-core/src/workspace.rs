@@ -375,13 +375,7 @@ pub fn remember(
         if w.minimized || !w.visible {
             continue;
         }
-        let Some(slot) = out.layout.slots.iter_mut().find(|s| s.id == p.slot) else {
-            continue;
-        };
-        if matches!(slot.place, Place::Tab { .. }) {
-            continue;
-        }
-        slot.place = if w.maximized {
+        let place = if w.maximized {
             Place::Maximized {
                 monitor: monitor_index(&mut refs, topology.monitor_for_rect(w.frame_rect)),
             }
@@ -390,6 +384,18 @@ pub fn remember(
         } else {
             free_place(&mut refs, topology, w.frame_rect)
         };
+        let Some(slot) = out.layout.slots.iter_mut().find(|s| s.id == p.slot) else {
+            continue;
+        };
+        // A tab moves its whole group: the others follow when they are shown.
+        if let Place::Tab { group } = &slot.place {
+            let group = group.clone();
+            if matches!(w.cloak, crate::window::Cloak::None) {
+                out.layout.move_group(&group, place);
+            }
+            continue;
+        }
+        slot.place = place;
         // The latest title, unless the user wrote a title rule of their own.
         if matches!(slot.app.title, None | Some(TitleMatch::Like(_))) && !w.title.trim().is_empty() {
             slot.app.title = Some(TitleMatch::Like(w.title.clone()));
@@ -422,9 +428,26 @@ pub struct SwitchPlan {
     /// Slots with no open window and no way to start one.
     pub missing: Vec<SlotId>,
     pub minimize: Vec<WindowHandle>,
-    /// Back to front.
+    /// Back to front. Background tabs are not raised.
     pub raise: Vec<WindowHandle>,
     pub focus: Option<WindowHandle>,
+    /// Tab groups: which window shows, which hide.
+    pub tabs: Vec<TabShow>,
+}
+
+/// A tab group as a switch leaves it: its windows (in tab order) and the one that shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabShow {
+    pub group: crate::layout::TabGroupId,
+    pub windows: Vec<WindowHandle>,
+    pub active: WindowHandle,
+}
+
+impl TabShow {
+    /// The tabs to keep hidden.
+    pub fn background(&self) -> impl Iterator<Item = WindowHandle> + '_ {
+        self.windows.iter().copied().filter(|w| *w != self.active)
+    }
 }
 
 /// Decides how `to` opens. `windows` are the windows Mosaïk may move, front to back (minimised
@@ -469,10 +492,52 @@ pub fn plan_switch(
             .filter(|h| previous.contains(h) && !used.contains(h))
             .collect();
     }
+    // Tab groups: the visible tab shows (or the first open one, when it is not open).
+    for g in &to.layout.tab_groups {
+        let windows: Vec<WindowHandle> = g.tabs.iter().filter_map(|s| assigned.get(s).copied()).collect();
+        let Some(first) = windows.first().copied() else {
+            continue;
+        };
+        let active = assigned.get(&g.active).copied().unwrap_or(first);
+        plan.tabs.push(TabShow {
+            group: g.id.clone(),
+            windows,
+            active,
+        });
+    }
+    let background: HashSet<WindowHandle> = plan.tabs.iter().flat_map(TabShow::background).collect();
     // Slots are front to back: raise from the back so the first slot ends on top.
-    plan.raise = plan.moves.iter().rev().map(|m| m.window).collect();
-    plan.focus = plan.moves.first().map(|m| m.window);
+    plan.raise = plan
+        .moves
+        .iter()
+        .rev()
+        .map(|m| m.window)
+        .filter(|w| !background.contains(w))
+        .collect();
+    plan.focus = plan
+        .moves
+        .iter()
+        .map(|m| m.window)
+        .find(|w| !background.contains(w));
     plan
+}
+
+/// After [`capture`]: windows that were tabs of one group become a tab group again. Each entry
+/// lists positions in the captured windows (in tab order) and the position of the visible one.
+pub fn regroup(ws: &mut Workspace, groups: &[(Vec<usize>, usize)]) {
+    for (tabs, active) in groups {
+        let slots: Vec<SlotId> = tabs
+            .iter()
+            .filter_map(|i| ws.layout.slots.get(*i).map(|s| s.id.clone()))
+            .collect();
+        let Some(first) = slots.first() else { continue };
+        for t in slots.iter().skip(1) {
+            ws.layout.join_tab(first, t, None);
+        }
+        if let Some(a) = ws.layout.slots.get(*active).map(|s| s.id.clone()) {
+            ws.layout.show_tab(&a);
+        }
+    }
 }
 
 /// Where the windows already filling a workspace's slots go on the monitors connected now:
@@ -969,6 +1034,65 @@ mod tests {
                 assert!(t.is_reachable(f, 32), "{f:?} on {}", t.fingerprint());
             }
         }
+    }
+
+    #[test]
+    fn tab_groups_show_one_window_and_regroup_after_saving() {
+        let t = fixtures::single_1080p_100();
+        // Two editors stacked in the left half (one of them a hidden tab), a browser on the right.
+        let ws = [
+            win(
+                1,
+                "code.exe",
+                "a - x - Visual Studio Code",
+                Rect::new(0, 0, 960, 1032),
+            ),
+            win(
+                2,
+                "code.exe",
+                "b - y - Visual Studio Code",
+                Rect::new(0, 0, 960, 1032),
+            ),
+            win(
+                3,
+                "chrome.exe",
+                "Docs - Google Chrome",
+                Rect::new(960, 0, 1920, 1032),
+            ),
+        ];
+        let seen: Vec<Seen> = ws.iter().map(|w| seen(w, "App")).collect();
+        let mut w = capture(WorkspaceId("w".into()), "W".into(), &seen, &t, style(), None);
+        regroup(&mut w, &[(vec![0, 1], 0)]);
+        assert_eq!(w.layout.problems(), vec![]);
+        assert_eq!(w.layout.tab_groups.len(), 1);
+        let g = &w.layout.tab_groups[0];
+        assert_eq!(g.tabs.len(), 2);
+        assert_eq!(g.active, w.layout.slots[0].id);
+        assert!(matches!(g.place, Place::Zone { .. }));
+
+        let plan = plan_switch(
+            &w,
+            &[&ws[0], &ws[1], &ws[2]],
+            &[],
+            &t,
+            style(),
+            SwitchSettings::default(),
+        );
+        assert_eq!(plan.tabs.len(), 1);
+        assert_eq!(plan.tabs[0].active, WindowHandle(1));
+        assert_eq!(
+            plan.tabs[0].background().collect::<Vec<_>>(),
+            vec![WindowHandle(2)]
+        );
+        assert_eq!(plan.moves.len(), 3, "hidden tabs move with their group");
+        assert!(
+            !plan.raise.contains(&WindowHandle(2)),
+            "a background tab is not raised"
+        );
+        assert_eq!(plan.focus, Some(WindowHandle(1)));
+        // The visible tab's window is closed: the other one shows.
+        let plan = plan_switch(&w, &[&ws[1], &ws[2]], &[], &t, style(), SwitchSettings::default());
+        assert_eq!(plan.tabs[0].active, WindowHandle(2));
     }
 
     #[test]

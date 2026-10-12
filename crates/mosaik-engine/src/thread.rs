@@ -34,6 +34,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::hotkeys::{self, Registered};
 use crate::state;
+use crate::tabs::Hiding;
 use crate::watch::Watch;
 use crate::workspace::Active;
 use crate::{Config, Message, UiEvent, UiSink, WM_WAKE, switcher};
@@ -138,6 +139,10 @@ pub(crate) struct Engine {
     pub(crate) active: Option<Active>,
     /// Window events, frames and the drag preview.
     pub(crate) watch: Watch,
+    /// Background tabs Mosaïk has hidden, and the journal the watchdog reads.
+    pub(crate) hiding: Hiding,
+    /// Why tabs could not hide a window was told once.
+    pub(crate) told_tabs: bool,
 }
 
 pub(crate) fn run(
@@ -185,6 +190,15 @@ pub(crate) fn run(
         }
         Err(e) => (WorkspacesFile::default(), Some(e)),
     };
+    // Windows a previous run hid and could not bring back (it was killed and its watchdog with
+    // it) come back before anything else.
+    let leftovers = mosaik_win::rescue::restore_hidden(&store);
+    if !outcome_is_empty(&leftovers) {
+        log_report(
+            "windows left hidden by an earlier run restored",
+            &leftovers.report,
+        );
+    }
     let mut scanner = Scanner::new();
     scanner.own_pids.clone_from(&config.own_pids);
     let mut engine = Engine {
@@ -204,6 +218,8 @@ pub(crate) fn run(
         save_failed_told: false,
         active: None,
         watch: Watch::new(),
+        hiding: Hiding::new(mosaik_win::process::own_pid()),
+        told_tabs: false,
     };
     for n in notices {
         engine.notice("Mosaïk's settings", n);
@@ -576,15 +592,41 @@ impl Engine {
             journal: &journal,
             active_workspace: self.active.as_ref().map(|a| a.id.clone()),
         });
-        // Which slot and zone each window of the open workspace fills.
+        // Which slot, zone and tab group each window of the open workspace fills.
         let style = self.style();
+        let groups = self.groups_now();
         if let Some(active) = &self.active {
             for w in &mut snapshot.windows {
                 if let Some(slot) = active.slot_of(w.handle) {
                     w.slot = Some(slot.clone());
                     w.zone = active.zone_for(w.frame_rect, style).map(|z| z.id.clone());
+                    w.tab_group = groups
+                        .iter()
+                        .find(|g| g.tabs.iter().any(|(_, h)| *h == w.handle))
+                        .map(|g| g.id.clone());
                 }
             }
+        }
+        for g in &groups {
+            let Some(bar) = self.watch.bars.get(&g.id) else {
+                continue;
+            };
+            let Some(rect) = bar.rect() else { continue };
+            let chips = bar.chips();
+            snapshot.tab_strips.push(mosaik_ipc::protocol::TabStripState {
+                group: g.id.clone(),
+                rect,
+                tabs: g
+                    .tabs
+                    .iter()
+                    .zip(chips)
+                    .map(|((_, h), chip)| mosaik_ipc::protocol::TabState {
+                        window: *h,
+                        chip,
+                        visible: g.visible.as_ref().is_some_and(|(_, v)| v == h),
+                    })
+                    .collect(),
+            });
         }
         Reply::State(Box::new(snapshot))
     }
@@ -608,7 +650,10 @@ impl Engine {
     }
 
     fn rescue(&mut self) -> Reply {
+        self.show_all_hidden();
         let outcome = mosaik_win::rescue::restore_hidden(&self.store);
+        self.hiding = Hiding::new(mosaik_win::process::own_pid());
+        self.refresh_frames();
         log_report("rescue", &outcome.report);
         let mut message = outcome.report.summary();
         if let Some(problem) = &outcome.problem {
@@ -633,6 +678,7 @@ impl Engine {
     /// finds nothing left to do.
     fn shut_down(&mut self) {
         self.stop_watching();
+        self.show_all_hidden();
         let outcome = mosaik_win::rescue::restore_hidden(&self.store);
         log_report("windows restored before exit", &outcome.report);
         if let Some(problem) = outcome.problem {
@@ -641,6 +687,10 @@ impl Engine {
         }
         self.hotkey = None;
     }
+}
+
+fn outcome_is_empty(o: &mosaik_win::rescue::Outcome) -> bool {
+    o.report.restored.is_empty() && o.report.failed.is_empty() && o.problem.is_none()
 }
 
 /// Counts only: window titles stay out of the log.

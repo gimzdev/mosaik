@@ -1,5 +1,6 @@
-//! Watching windows: the frames and tags windows wear in their zones, the zones shown while a
-//! window is dragged, and the pull into a zone when it is dropped.
+//! Watching windows: the frames, tags and tab strips windows wear in their zones, the zones
+//! shown while a window is dragged, the pull into a zone when it is dropped, and dropping a
+//! window on another's tag to make them tabs.
 //!
 //! Most events come from global hooks. Moves (`EVENT_OBJECT_LOCATIONCHANGE`) are hooked per
 //! process, only for the apps whose windows wear a frame or are being dragged: a global hook
@@ -7,16 +8,16 @@
 
 use std::collections::{HashMap, HashSet};
 
-use mosaik_core::geometry::Rect;
-use mosaik_core::layout::{Place, Slot, SlotId};
+use mosaik_core::geometry::{Insets, Point, Rect, scale_for_dpi};
+use mosaik_core::layout::{Place, TabGroupId};
 use mosaik_core::snap::{self, LiveZone as SnapZone};
 use mosaik_core::window::WindowHandle;
-use mosaik_core::workspace::app_match;
 use mosaik_overlay::canvas::Canvas;
 use mosaik_overlay::frame::{Frame, FrameLook, Preview, ZoneView};
 use mosaik_overlay::layered::Stack;
+use mosaik_overlay::tabbar::{self, BarLook, TabBar, TabView};
 use mosaik_win::events::{self, Hooks, WinEvent};
-use mosaik_win::{apps, input, window};
+use mosaik_win::{input, window};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CHILDID_SELF, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_LOCATIONCHANGE,
@@ -25,6 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EVENT_SYSTEM_MOVESIZESTART, OBJID_WINDOW,
 };
 
+use crate::tabs::{AsIsize, BarDrag, GroupNow};
 use crate::thread::{Engine, WM_EVENTS, timer};
 
 /// Events hooked for every window.
@@ -58,11 +60,24 @@ pub(crate) struct Drag {
     /// The zones shown, in the preview's order.
     pub zones: Vec<SnapZone>,
     pub target: Option<usize>,
+    /// The window whose tag or tab strip is under the pointer, and where the dropped window
+    /// would go among its tabs.
+    pub tab_target: Option<(WindowHandle, usize)>,
 }
 
 struct Framed {
     pid: u32,
     frame: Frame,
+}
+
+/// What a framed window wears.
+struct FrameInfo {
+    rect: Rect,
+    look: FrameLook,
+    pid: u32,
+    zone: ZoneView,
+    /// The window is the visible tab of this group: its strip replaces the tag.
+    group: Option<GroupNow>,
 }
 
 #[derive(Default)]
@@ -74,7 +89,13 @@ pub(crate) struct Watch {
     /// Drawing is not possible (Direct2D unavailable): frames are off, said once.
     canvas_failed: bool,
     frames: HashMap<WindowHandle, Framed>,
-    preview: Preview,
+    pub(crate) preview: Preview,
+    /// Each tab group's strip.
+    pub(crate) bars: HashMap<TabGroupId, TabBar>,
+    /// A press on a tab chip.
+    pub(crate) bar_drag: Option<BarDrag>,
+    /// The strip shown over a single window's tag while another window is dragged onto it.
+    drop_bar: Option<TabBar>,
     pub(crate) drag: Option<Drag>,
     /// The window the user is moving or resizing right now (any window, zones or not), so
     /// nothing moves it from under the pointer.
@@ -87,6 +108,16 @@ pub(crate) struct Watch {
 impl Watch {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// The canvas, lent out while something else of the watch is borrowed; put it back with
+    /// [`Watch::put_canvas`].
+    pub(crate) fn take_canvas(&mut self) -> Option<Canvas> {
+        self.canvas.take()
+    }
+
+    pub(crate) fn put_canvas(&mut self, canvas: Canvas) {
+        self.canvas = Some(canvas);
     }
 }
 
@@ -103,6 +134,7 @@ fn shift_down() -> bool {
 impl Engine {
     pub(crate) fn start_watching(&mut self) {
         events::wake_on_event(self.window, WM_EVENTS);
+        tabbar::wake_on_input(self.window, WM_EVENTS);
         match events::hook(&GLOBAL, 0) {
             Ok(h) => self.watch.hooks = Some(h),
             Err(e) => {
@@ -119,14 +151,18 @@ impl Engine {
     pub(crate) fn stop_watching(&mut self) {
         self.kill_timer(timer::DRAG);
         self.watch.drag = None;
+        self.watch.bar_drag = None;
         self.watch.moving = None;
         self.watch.preview.hide();
         self.watch.frames.clear();
+        self.watch.bars.clear();
+        self.watch.drop_bar = None;
         self.watch.location.clear();
         self.watch.hooks = None;
     }
 
-    fn canvas(&mut self) -> Option<&mut Canvas> {
+    /// Makes sure the canvas exists (said once if it cannot be made).
+    pub(crate) fn canvas_ready(&mut self) -> Option<()> {
         if self.watch.canvas.is_none() && !self.watch.canvas_failed {
             match Canvas::new() {
                 Ok(c) => self.watch.canvas = Some(c),
@@ -140,11 +176,20 @@ impl Engine {
                 }
             }
         }
-        self.watch.canvas.as_mut()
+        self.watch.canvas.as_ref().map(|_| ())
     }
 
-    /// Handles every window event recorded since the last call. Moves are merged per window:
-    /// only where a window ended up matters.
+    /// Dark chips on tab strips: the user's choice, or Windows' app mode.
+    pub(crate) fn dark_theme(&self) -> bool {
+        match self.settings.theme {
+            mosaik_core::settings::Theme::Dark => true,
+            mosaik_core::settings::Theme::Light => false,
+            mosaik_core::settings::Theme::System => !mosaik_win::os::apps_use_light_theme(),
+        }
+    }
+
+    /// Handles every window event recorded since the last call, and the mouse on tab strips.
+    /// Moves are merged per window: only where a window ended up matters.
     pub(crate) fn on_events(&mut self) {
         let batch = events::drain();
         let mut moved: Vec<WindowHandle> = Vec::new();
@@ -161,14 +206,17 @@ impl Engine {
                 }
                 EVENT_SYSTEM_MOVESIZESTART => self.drag_start(h),
                 EVENT_SYSTEM_MOVESIZEEND => self.drag_end(h),
-                EVENT_SYSTEM_FOREGROUND => {
-                    if let Some(f) = self.watch.frames.get(&h) {
-                        f.frame.restack(h.0.cast_signed_isize());
-                    }
-                }
+                EVENT_SYSTEM_FOREGROUND => self.came_forward(h),
                 EVENT_SYSTEM_MINIMIZESTART | EVENT_OBJECT_HIDE | EVENT_OBJECT_CLOAKED => {
+                    // Mosaïk hiding a tab reports itself here too: its strip moves to the next tab.
                     if let Some(f) = self.watch.frames.get_mut(&h) {
                         f.frame.hide();
+                    }
+                    if let Some(g) = self.group_of_window(h)
+                        && g.visible.as_ref().is_some_and(|(_, w)| *w == h)
+                        && !self.hiding.hidden.contains_key(&h)
+                    {
+                        self.hide_bar(&g.id);
                     }
                 }
                 EVENT_SYSTEM_MINIMIZEEND | EVENT_OBJECT_UNCLOAKED => self.refresh_frame(h),
@@ -178,8 +226,16 @@ impl Engine {
                         self.refresh_frame(h);
                     }
                 }
-                // Some apps show their window first and name it a moment later.
-                EVENT_OBJECT_NAMECHANGE => self.adopt(h),
+                // Some apps show their window first and name it a moment later; a tab's chip
+                // shows its window's title.
+                EVENT_OBJECT_NAMECHANGE => {
+                    self.adopt(h);
+                    if let Some(g) = self.group_of_window(h)
+                        && let Some((_, visible)) = g.visible
+                    {
+                        self.refresh_frame(visible);
+                    }
+                }
                 EVENT_OBJECT_DESTROY => self.forget(h),
                 _ => {}
             }
@@ -191,13 +247,42 @@ impl Engine {
                 self.refresh_frame(h);
             }
         }
+        let inputs = tabbar::take_inputs();
+        if !inputs.is_empty() {
+            self.on_bar_inputs(inputs);
+        }
     }
 
-    /// A window closed: its frame goes; its slot stays (the workspace starts it again next time).
+    /// A window came to the front: its frame and strip follow it in the stacking order, and a
+    /// hidden tab an app brought forward (a notification, a link) shows in its group.
+    fn came_forward(&mut self, h: WindowHandle) {
+        if self.hiding.hidden.contains_key(&h)
+            && let Some(g) = self.group_of_window(h)
+            && let Some((slot, _)) = g.tabs.iter().find(|(_, w)| *w == h).cloned()
+        {
+            self.show_tab(&g.id, &slot);
+            return;
+        }
+        if let Some(f) = self.watch.frames.get(&h) {
+            f.frame.restack(h.0.cast_signed_isize());
+        }
+        if let Some(g) = self.group_of_window(h)
+            && g.visible.as_ref().is_some_and(|(_, w)| *w == h)
+            && let Some(bar) = self.watch.bars.get(&g.id)
+            && bar.is_shown()
+        {
+            mosaik_overlay::layered::restack_windows(&[bar.hwnd()], Stack::Above(h.0.cast_signed_isize()));
+        }
+    }
+
+    /// A window closed: its frame goes; its slot stays (the workspace starts it again next
+    /// time). When it was the visible tab of a group, the next tab shows.
     fn forget(&mut self, h: WindowHandle) {
+        let group = self.group_of_window(h);
         if self.watch.frames.remove(&h).is_some() {
             self.sync_location_hooks();
         }
+        self.forget_hidden(h);
         if let Some(a) = &mut self.active {
             a.windows.retain(|_, w| *w != h);
         }
@@ -209,7 +294,21 @@ impl Engine {
             self.watch.drag = None;
             self.watch.preview.hide();
             self.watch.preview_visible = false;
+            self.hide_drop_bar();
             self.sync_location_hooks();
+        }
+        if let Some(g) = group
+            && g.visible.as_ref().is_some_and(|(_, w)| *w == h)
+        {
+            // The tab to its right (or else its left) takes over.
+            let i = g.tabs.iter().position(|(_, w)| *w == h).unwrap_or(0);
+            let rest: Vec<(mosaik_core::layout::SlotId, WindowHandle)> =
+                g.tabs.iter().filter(|(_, w)| *w != h).cloned().collect();
+            if let Some((slot, _)) = rest.get(i.min(rest.len().saturating_sub(1))).cloned() {
+                self.show_tab(&g.id, &slot);
+            } else {
+                self.hide_bar(&g.id);
+            }
         }
     }
 
@@ -217,9 +316,12 @@ impl Engine {
         for f in self.watch.frames.values_mut() {
             f.frame.hide();
         }
+        for b in self.watch.bars.values_mut() {
+            b.hide();
+        }
     }
 
-    /// Shows, moves or hides the frames of every window of the open workspace.
+    /// Shows, moves or hides the frames and strips of every window of the open workspace.
     pub(crate) fn refresh_frames(&mut self) {
         let windows: Vec<WindowHandle> = self
             .active
@@ -228,6 +330,11 @@ impl Engine {
             .unwrap_or_default();
         let keep: HashSet<WindowHandle> = windows.iter().copied().collect();
         self.watch.frames.retain(|h, _| keep.contains(h));
+        let groups: HashSet<TabGroupId> = self.groups_now().into_iter().map(|g| g.id).collect();
+        self.watch.bars.retain(|g, _| groups.contains(g));
+        for b in self.watch.bars.values_mut() {
+            b.hide();
+        }
         for h in windows {
             self.refresh_frame(h);
         }
@@ -235,19 +342,23 @@ impl Engine {
     }
 
     /// The frame of one window: shown around it when it sits in a zone of the open workspace,
-    /// hidden otherwise.
+    /// hidden otherwise. The visible tab of a group wears the group's strip instead of a tag.
     pub(crate) fn refresh_frame(&mut self, h: WindowHandle) {
-        let wanted = self.frame_for(h);
-        let Some((frame_rect, look, pid)) = wanted else {
+        let Some(info) = self.frame_for(h) else {
             if let Some(f) = self.watch.frames.get_mut(&h) {
                 f.frame.hide();
+            }
+            if let Some(g) = self.group_of_window(h)
+                && g.visible.as_ref().is_some_and(|(_, w)| *w == h)
+            {
+                self.hide_bar(&g.id);
             }
             return;
         };
         if let std::collections::hash_map::Entry::Vacant(slot) = self.watch.frames.entry(h) {
             match Frame::new() {
                 Ok(frame) => {
-                    slot.insert(Framed { pid, frame });
+                    slot.insert(Framed { pid: info.pid, frame });
                     self.sync_location_hooks();
                 }
                 Err(e) => {
@@ -256,7 +367,7 @@ impl Engine {
                 }
             }
         }
-        if self.canvas().is_none() {
+        if self.canvas_ready().is_none() {
             return;
         }
         let (Some(canvas), Some(framed)) = (self.watch.canvas.as_mut(), self.watch.frames.get_mut(&h)) else {
@@ -264,19 +375,31 @@ impl Engine {
         };
         if let Err(e) = framed
             .frame
-            .show(canvas, frame_rect, &look, h.0.cast_signed_isize())
+            .show(canvas, info.rect, &info.look, h.0.cast_signed_isize())
         {
             tracing::debug!(error = %e, "frame not drawn");
         }
+        if let Some(g) = &info.group {
+            let drop_at = self
+                .watch
+                .drag
+                .as_ref()
+                .and_then(|d| d.tab_target)
+                .filter(|(w, _)| *w == h)
+                .map(|(_, i)| i);
+            self.show_bar(g, info.rect, &info.zone, h, drop_at);
+        }
     }
 
-    fn frame_for(&mut self, h: WindowHandle) -> Option<(Rect, FrameLook, u32)> {
+    fn frame_for(&mut self, h: WindowHandle) -> Option<FrameInfo> {
         let frames = self.settings.frames;
         if !(frames.show_frames || frames.show_tags)
             || self.watch.drag.as_ref().is_some_and(|d| d.window == h)
+            || self.hiding.hidden.contains_key(&h)
         {
             return None;
         }
+        let style = self.style();
         let active = self.active.as_ref()?;
         active.slot_of(h)?;
         let hwnd = window::hwnd(h);
@@ -284,16 +407,30 @@ impl Engine {
         if !g.framable() {
             return None;
         }
-        let zone = active.zone_for(g.frame, self.style())?;
+        let zone = active.zone_for(g.frame, style)?.clone();
+        let group = self
+            .group_of_window(h)
+            .filter(|gr| gr.visible.as_ref().is_some_and(|(_, w)| *w == h) && gr.tabs.len() > 1);
         let look = FrameLook {
             color: zone.color,
             label: zone.name.clone(),
             dpi: zone.dpi,
             rounded: self.watch.rounded,
             ring: frames.show_frames,
-            tag: frames.show_tags,
+            tag: frames.show_tags && group.is_none(),
         };
-        Some((g.frame, look, window::pid(hwnd)))
+        Some(FrameInfo {
+            rect: g.frame,
+            look,
+            pid: window::pid(hwnd),
+            zone: ZoneView {
+                rect: zone.rect,
+                color: zone.color,
+                name: zone.name,
+                dpi: zone.dpi,
+            },
+            group,
+        })
     }
 
     /// Move hooks for exactly the processes whose windows wear a frame or are being dragged.
@@ -320,6 +457,9 @@ impl Engine {
         self.watch.moving = Some(h);
         if let Some(f) = self.watch.frames.get_mut(&h) {
             f.frame.hide();
+        }
+        if let Some(g) = self.group_of_window(h) {
+            self.hide_bar(&g.id);
         }
         if self.config.safe_mode || !self.settings.snap.enabled {
             return;
@@ -348,10 +488,8 @@ impl Engine {
         // frame), it is a resize; anywhere else (a title bar, a tab strip, a keyboard move), a
         // move. A snapped or maximised window changes size as it is dragged, so the size alone
         // cannot tell.
-        let margin = mosaik_core::geometry::scale_for_dpi(4, facts.dpi.max(96));
-        let inner = facts
-            .frame_rect
-            .inset(mosaik_core::geometry::Insets::uniform(margin));
+        let margin = scale_for_dpi(4, facts.dpi.max(96));
+        let inner = facts.frame_rect.inset(Insets::uniform(margin));
         let kind = if inner.contains(input::cursor()) {
             DragKind::Undecided
         } else {
@@ -364,6 +502,7 @@ impl Engine {
             kind,
             zones,
             target: None,
+            tab_target: None,
         });
         self.sync_location_hooks();
         self.set_timer(timer::DRAG, DRAG_TICK_MS);
@@ -378,7 +517,7 @@ impl Engine {
     }
 
     /// Follows the dragged window: decides whether it is a move or a resize, shows the zones
-    /// on a move, and lights the one it would drop into.
+    /// on a move, and lights the zone it would drop into, or the tab strip it would join.
     fn drag_update(&mut self) {
         let Some(d) = &self.watch.drag else { return };
         let (h, start, kind) = (d.window, d.start, d.kind);
@@ -399,7 +538,7 @@ impl Engine {
             if let Some(d) = &mut self.watch.drag {
                 d.kind = DragKind::Moving;
             }
-            self.show_preview(h);
+            self.show_zone_preview(Stack::Below(h.0.cast_signed_isize()));
         }
         if self
             .watch
@@ -411,28 +550,41 @@ impl Engine {
         }
         let snapping = self.settings.snap.active(shift_down());
         let cursor = input::cursor();
-        let target = self.watch.drag.as_ref().and_then(|d| {
-            if !snapping {
-                return None;
+        // Over a window's tag or tab strip: the dragged window would become one of its tabs.
+        let tab_target = if snapping {
+            self.tab_target_at(cursor, h)
+        } else {
+            None
+        };
+        let previous_tab_target = self.watch.drag.as_ref().and_then(|d| d.tab_target);
+        if let Some(d) = &mut self.watch.drag {
+            d.tab_target = tab_target;
+        }
+        if previous_tab_target != tab_target {
+            self.hide_drop_bar();
+            if let Some((w, _)) = previous_tab_target {
+                self.refresh_frame(w);
             }
-            let id = snap::target(cursor, &d.zones, self.settings.snap)?;
-            d.zones.iter().position(|z| &z.id == id)
-        });
+            if let Some((w, i)) = tab_target {
+                self.show_drop_strip(w, i);
+            }
+        }
+        let target = if tab_target.is_some() || !snapping {
+            None
+        } else {
+            self.watch.drag.as_ref().and_then(|d| {
+                let id = snap::target(cursor, &d.zones, self.settings.snap)?;
+                d.zones.iter().position(|z| &z.id == id)
+            })
+        };
         if let Some(d) = &mut self.watch.drag {
             d.target = target;
         }
         if snapping {
             if !self.watch.preview_visible {
-                self.show_preview(h);
+                self.show_zone_preview(Stack::Below(h.0.cast_signed_isize()));
             }
-            if self.canvas().is_none() {
-                return;
-            }
-            if let Some(canvas) = self.watch.canvas.as_mut()
-                && let Err(e) = self.watch.preview.set_hot(canvas, target)
-            {
-                tracing::debug!(error = %e, "drop target not drawn");
-            }
+            self.set_preview_target(target);
         } else {
             // Shift held: the window moves freely and the zones step aside.
             self.watch.preview.hide();
@@ -440,7 +592,105 @@ impl Engine {
         }
     }
 
-    fn show_preview(&mut self, h: WindowHandle) {
+    /// The window whose tag (or tab strip) is under `p`, other than `dragged` and its own group,
+    /// with where the dragged window would go among its tabs.
+    fn tab_target_at(&self, p: Point, dragged: WindowHandle) -> Option<(WindowHandle, usize)> {
+        let own_group = self.group_of_window(dragged).map(|g| g.id);
+        let band_h = self.style().tag_band;
+        if band_h <= 0 {
+            return None;
+        }
+        for (&w, framed) in &self.watch.frames {
+            if w == dragged || !framed.frame.is_shown() {
+                continue;
+            }
+            let group = self.group_of_window(w);
+            if group.as_ref().is_some_and(|g| Some(&g.id) == own_group.as_ref()) {
+                continue;
+            }
+            let Some(geo) = window::geometry(window::hwnd(w)) else {
+                continue;
+            };
+            let band = Rect::new(
+                geo.frame.left,
+                geo.frame.top - scale_for_dpi(band_h, geo.dpi.max(96)),
+                geo.frame.right,
+                geo.frame.top,
+            );
+            if !band.outset(Insets::new(0, 4, 0, 2)).contains(p) {
+                continue;
+            }
+            let index = match &group {
+                Some(g) => self.watch.bars.get(&g.id).map_or(g.tabs.len(), |b| b.slot_for(p)),
+                None => usize::from(p.x >= band.center().x),
+            };
+            return Some((w, index));
+        }
+        None
+    }
+
+    /// The "Drop to add" slot on the strip of `onto` (or on a strip shown over its tag, when
+    /// it is a single window).
+    fn show_drop_strip(&mut self, onto: WindowHandle, at: usize) {
+        if let Some(g) = self.group_of_window(onto).filter(|g| g.tabs.len() > 1) {
+            if let Some((_, visible)) = g.visible {
+                self.refresh_frame(visible);
+            }
+            return;
+        }
+        let Some(info) = self.frame_for(onto) else { return };
+        let Some(geo) = window::geometry(window::hwnd(onto)) else {
+            return;
+        };
+        let band_h = scale_for_dpi(self.style().tag_band.max(24), info.zone.dpi);
+        let band = Rect::new(
+            geo.frame.left,
+            geo.frame.top - band_h,
+            geo.frame.right,
+            geo.frame.top,
+        );
+        let tabs = [TabView {
+            title: window::title(window::hwnd(onto)).trim().to_owned(),
+            active: true,
+        }];
+        let look = BarLook {
+            color: info.zone.color,
+            label: info.zone.name.clone(),
+            dpi: info.zone.dpi,
+            dark: self.dark_theme(),
+        };
+        if self.canvas_ready().is_none() {
+            return;
+        }
+        if self.watch.drop_bar.is_none() {
+            self.watch.drop_bar = TabBar::new().ok();
+        }
+        let Some(mut canvas) = self.watch.take_canvas() else {
+            return;
+        };
+        if let Some(bar) = &mut self.watch.drop_bar
+            && let Err(e) = bar.show(
+                &mut canvas,
+                band,
+                &look,
+                &tabs,
+                Some(at.min(1)),
+                Stack::Above(onto.0.cast_signed_isize()),
+            )
+        {
+            tracing::debug!(error = %e, "drop strip not drawn");
+        }
+        self.watch.put_canvas(canvas);
+    }
+
+    fn hide_drop_bar(&mut self) {
+        if let Some(b) = &mut self.watch.drop_bar {
+            b.hide();
+        }
+    }
+
+    /// Shows the open workspace's zones, stacked per `stack`.
+    pub(crate) fn show_zone_preview(&mut self, stack: Stack) {
         let Some(active) = &self.active else { return };
         let views: Vec<ZoneView> = active
             .zones
@@ -452,18 +702,26 @@ impl Engine {
                 dpi: z.dpi,
             })
             .collect();
-        if self.canvas().is_none() {
+        if self.canvas_ready().is_none() {
             return;
         }
         if let Some(canvas) = self.watch.canvas.as_mut() {
-            match self
-                .watch
-                .preview
-                .show(canvas, &views, Stack::Below(h.0.cast_signed_isize()))
-            {
+            match self.watch.preview.show(canvas, &views, stack) {
                 Ok(()) => self.watch.preview_visible = true,
                 Err(e) => tracing::debug!(error = %e, "zones not shown"),
             }
+        }
+    }
+
+    /// Lights the zone at `target` in the preview (or none).
+    pub(crate) fn set_preview_target(&mut self, target: Option<usize>) {
+        if self.canvas_ready().is_none() {
+            return;
+        }
+        if let Some(canvas) = self.watch.canvas.as_mut()
+            && let Err(e) = self.watch.preview.set_hot(canvas, target)
+        {
+            tracing::debug!(error = %e, "drop target not drawn");
         }
     }
 
@@ -480,11 +738,18 @@ impl Engine {
         self.kill_timer(timer::DRAG);
         self.watch.preview.hide();
         self.watch.preview_visible = false;
-        if d.kind == DragKind::Moving
-            && let Some(i) = d.target
-            && let Some(zone) = d.zones.get(i)
-        {
-            self.snap_into(h, zone.id.clone());
+        self.hide_drop_bar();
+        if d.kind == DragKind::Moving {
+            if let Some((onto, at)) = d.tab_target {
+                self.join_group(onto, h, Some(at));
+                self.sync_location_hooks();
+                return;
+            }
+            if let Some(i) = d.target
+                && let Some(zone) = d.zones.get(i)
+            {
+                self.snap_into(h, zone.id.clone());
+            }
         }
         self.sync_location_hooks();
         self.after_user_move(h);
@@ -497,13 +762,15 @@ impl Engine {
     }
 
     /// Pulls a dropped window into a zone of the open workspace; a window that was not part of
-    /// the workspace joins it.
+    /// the workspace joins it. The visible tab of a group brings its group along.
     fn snap_into(&mut self, h: WindowHandle, zone: mosaik_core::zone::ZoneId) {
-        let Some(active) = &self.active else { return };
-        let Some(live) = active.zones.iter().find(|z| z.id == zone).cloned() else {
+        let Some(live) = self
+            .active
+            .as_ref()
+            .and_then(|a| a.zones.iter().find(|z| z.id == zone).cloned())
+        else {
             return;
         };
-        let hwnd = window::hwnd(h);
         let target = self.style().window_area(live.rect, live.dpi);
         let moved = crate::mover::move_all(
             &[(h, crate::mover::To::Frame(target))],
@@ -513,59 +780,25 @@ impl Engine {
             tracing::warn!(error = %e, "window not pulled into its zone");
             return;
         }
-        let Some(index) = self.file.workspaces.iter().position(|w| w.id == active.id) else {
-            return;
-        };
-        let slot_id = active.slot_of(h).cloned();
-        let ws = &mut self.file.workspaces[index];
-        match slot_id.and_then(|id| ws.layout.slots.iter_mut().find(|s| s.id == id)) {
-            Some(slot) => {
-                if !matches!(slot.place, Place::Tab { .. }) {
-                    slot.place = Place::Zone { zone };
-                }
+        let place = Place::Zone { zone };
+        match self.group_of_window(h) {
+            Some(g) => {
+                let id = g.id.clone();
+                let p = place.clone();
+                self.edit_layout(|layout| layout.move_group(&id, p));
             }
             None => {
-                let Some(facts) = self.scanner.facts(hwnd) else {
+                let Some(slot) = self.slot_for_window(h, place.clone()) else {
                     return;
                 };
-                let path = self.scanner.process_path(facts.pid);
-                let taken: HashSet<String> = ws.layout.slots.iter().map(|s| s.id.0.clone()).collect();
-                let id = SlotId(
-                    (1..)
-                        .map(|n| format!("s{n}"))
-                        .find(|s| !taken.contains(s))
-                        .unwrap_or_else(|| "s0".into()),
-                );
-                ws.layout.slots.insert(
-                    0,
-                    Slot {
-                        id: id.clone(),
-                        app: app_match(&facts),
-                        launch: apps::launch_for(&facts, path.as_deref()),
-                        place: Place::Zone { zone },
-                    },
-                );
-                if let Some(a) = &mut self.active {
-                    a.windows.insert(id, h);
-                }
+                self.edit_layout(|layout| {
+                    if let Some(s) = layout.slots.iter_mut().find(|s| s.id == slot) {
+                        s.place = place;
+                    }
+                });
             }
         }
-        self.persist();
         self.refresh_frame(h);
         self.sync_location_hooks();
-    }
-}
-
-/// Window handles as the overlay crate takes them (a pointer-sized integer).
-trait AsIsize {
-    fn cast_signed_isize(self) -> isize;
-}
-
-impl AsIsize for u64 {
-    fn cast_signed_isize(self) -> isize {
-        // Handles are 32-bit values sign-extended to pointer size (see `mosaik_win::window`).
-        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-        let v = self as isize;
-        v
     }
 }

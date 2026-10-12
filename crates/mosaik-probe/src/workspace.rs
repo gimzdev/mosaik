@@ -261,9 +261,9 @@ fn scenario(
         .ok()
         .and_then(|p| p.memory());
 
-    // 4. With --drag: the review window is dragged into the code zone with the mouse.
+    // 4. With --drag: tabs and drag to snap, with the mouse.
     let dragged = if drag {
-        Some(drag_into_code(probes, dpi)?)
+        Some(tabs_and_snap(engine, probes, dpi)?)
     } else {
         None
     };
@@ -292,12 +292,7 @@ fn scenario(
     let restarted = match again {
         Some(hwnd) => {
             let frame = frame_rect(hwnd).ok_or("the restarted window vanished")?;
-            let zone = if dragged.is_some() {
-                probes[0].tiled
-            } else {
-                probes[2].tiled
-            };
-            let error = edge_error(frame, style.window_area(zone, dpi));
+            let error = edge_error(frame, style.window_area(probes[2].tiled, dpi));
             crate::apps::close(hwnd);
             json!({ "reply": restarted_reply, "started": true, "error_px": error })
         }
@@ -352,43 +347,130 @@ impl Probe {
     }
 }
 
-/// Drags the review window by its title bar to the middle of the code zone and releases it.
-fn drag_into_code(probes: &[Probe], dpi: u32) -> Result<Value, String> {
-    let review = &probes[2];
-    let code = &probes[0];
-    let frame = frame_rect(review.hwnd).ok_or("the review window vanished")?;
-    let grab = Point::new(frame.left + frame.width() / 3, frame.top + 12);
-    // Never press the button on anything but the probe's own window.
+/// Presses the left button at `from` (only on a window of this probe: a probe window, or the
+/// tab strip the engine in this process draws), moves to `to` in small steps, releases.
+fn drag(from: Point, to: Point, expected: HWND) -> Result<(), String> {
     // SAFETY: read-only hit test.
-    let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: grab.x, y: grab.y }), GA_ROOT) };
-    if under != review.hwnd {
-        return Err(
-            "another window covers the review window's title bar; not pressing the mouse there".into(),
-        );
+    let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: from.x, y: from.y }), GA_ROOT) };
+    let ours = under == expected || mosaik_win::window::pid(under) == mosaik_win::process::own_pid();
+    if !ours {
+        return Err("another window is where the probe would press the mouse; not pressing it there".into());
     }
-    let original = input::cursor();
-    input::move_to(grab);
+    input::move_to(from);
     pump_until(150, || false);
-    let to = code.tiled.center();
     {
         let _button = LeftButton::press();
         pump_until(200, || false);
         let steps = 40;
         for i in 1..=steps {
             input::move_to(Point::new(
-                grab.x + (to.x - grab.x) * i / steps,
-                grab.y + (to.y - grab.y) * i / steps,
+                from.x + (to.x - from.x) * i / steps,
+                from.y + (to.y - from.y) * i / steps,
             ));
             pump_until(16, || false);
         }
         pump_until(250, || false);
     }
-    pump_until(800, || false);
+    pump_until(900, || false);
+    Ok(())
+}
+
+fn state(engine: &Engine) -> Result<Box<mosaik_ipc::protocol::StateSnapshot>, String> {
+    match engine.request(Command::State, TIMEOUT) {
+        Reply::State(s) => Ok(s),
+        other => Err(format!("state: {other:?}")),
+    }
+}
+
+fn hidden(s: &mosaik_ipc::protocol::StateSnapshot, h: HWND) -> bool {
+    s.hidden.iter().any(|w| w.handle == handle(h))
+}
+
+/// Tabs with the mouse: the terminal is dropped on the code window's tag (they become tabs), the
+/// code tab is clicked, then the terminal's tab is pulled out into the review zone. Then a
+/// window is dragged back into its own zone.
+fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String> {
+    let style = FrameStyle::default();
+    let (code, terminal, review) = (&probes[0], &probes[1], &probes[2]);
+    let original = input::cursor();
+    let s = f64::from(dpi) / 96.0;
+    #[allow(clippy::cast_possible_truncation)]
+    let px = |v: f64| (v * s).round() as i32;
+
+    // 1. Drop the terminal on the code window's tag.
+    let t = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
+    let c = frame_rect(code.hwnd).ok_or("the code window vanished")?;
+    drag(
+        Point::new(t.left + t.width() / 3, t.top + 12),
+        Point::new(c.left + c.width() / 2, c.top - px(14.0)),
+        terminal.hwnd,
+    )?;
+    let after_join = state(engine)?;
+    let strip = after_join.tab_strips.first().cloned();
+    let joined = json!({
+        "strips": after_join.tab_strips.len(),
+        "tabs": strip.as_ref().map_or(0, |st| st.tabs.len()),
+        "terminal_error_px": frame_rect(terminal.hwnd).map(|f| edge_error(f, style.window_area(code.tiled, dpi))),
+        "code_hidden": hidden(&after_join, code.hwnd),
+        "terminal_hidden": hidden(&after_join, terminal.hwnd),
+    });
+
+    // 2. Click the code tab.
+    let clicked = match strip
+        .as_ref()
+        .and_then(|st| st.tabs.iter().find(|tb| tb.window == handle(code.hwnd)).cloned())
+    {
+        Some(tab) => {
+            let at = tab.chip.center();
+            drag(at, at, code.hwnd)?;
+            let st = state(engine)?;
+            json!({
+                "code_hidden": hidden(&st, code.hwnd),
+                "terminal_hidden": hidden(&st, terminal.hwnd),
+                "code_error_px": frame_rect(code.hwnd).map(|f| edge_error(f, style.window_area(code.tiled, dpi))),
+            })
+        }
+        None => json!({ "skipped": "no strip with the code tab" }),
+    };
+
+    // 3. Pull the terminal's tab out into the review zone.
+    let st = state(engine)?;
+    let pulled = match st.tab_strips.first().and_then(|strip| {
+        strip
+            .tabs
+            .iter()
+            .find(|tb| tb.window == handle(terminal.hwnd))
+            .cloned()
+    }) {
+        Some(tab) => {
+            drag(tab.chip.center(), review.tiled.center(), terminal.hwnd)?;
+            let st = state(engine)?;
+            json!({
+                "strips": st.tab_strips.len(),
+                "terminal_hidden": hidden(&st, terminal.hwnd),
+                "terminal_error_px": frame_rect(terminal.hwnd).map(|f| edge_error(f, style.window_area(review.tiled, dpi))),
+                "code_hidden": hidden(&st, code.hwnd),
+            })
+        }
+        None => json!({ "skipped": "no terminal tab" }),
+    };
+
+    // 4. Drag the terminal by its title bar back into its own zone.
+    let t = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
+    drag(
+        Point::new(t.left + t.width() / 3, t.top + 12),
+        terminal.tiled.center(),
+        terminal.hwnd,
+    )?;
+    let back = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
     input::move_to(original);
-    let after = frame_rect(review.hwnd).ok_or("the review window vanished")?;
-    let wanted = FrameStyle::default().window_area(code.tiled, dpi);
     Ok(json!({
-        "error_px": edge_error(after, wanted),
-        "frame": frame_colours(after, ZoneColor::Lapis, dpi),
+        "joined": joined,
+        "clicked_code_tab": clicked,
+        "pulled_out": pulled,
+        "snapped_back": {
+            "error_px": edge_error(back, style.window_area(terminal.tiled, dpi)),
+            "frame": frame_colours(back, ZoneColor::Verdigris, dpi),
+        },
     }))
 }

@@ -106,6 +106,25 @@ pub struct StateSnapshot {
     pub active_workspace: Option<WorkspaceId>,
     pub hotkey: HotkeyState,
     pub hidden: Vec<HiddenWindow>,
+    /// The tab strips on screen, so tests can click a tab by its numbers.
+    #[serde(default)]
+    pub tab_strips: Vec<TabStripState>,
+}
+
+/// A tab group's strip as drawn: where it is, each tab's chip and window, the one that shows.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabStripState {
+    pub group: TabGroupId,
+    pub rect: Rect,
+    /// In tab order.
+    pub tabs: Vec<TabState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabState {
+    pub window: WindowHandle,
+    pub chip: Rect,
+    pub visible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -453,6 +472,15 @@ mod tests {
                 problem: None,
             },
             hidden: vec![],
+            tab_strips: vec![TabStripState {
+                group: TabGroupId("g1".into()),
+                rect: Rect::new(4, 4, 956, 32),
+                tabs: vec![TabState {
+                    window: WindowHandle(0x1234),
+                    chip: Rect::new(90, 7, 200, 28),
+                    visible: true,
+                }],
+            }],
         };
         let r = Response::new(9, Reply::State(Box::new(state)));
         let bytes = encode(&r).unwrap();
