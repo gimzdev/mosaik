@@ -9,6 +9,9 @@
   move to it once, with a note; tags can still go in title bars (Settings, Tags and tabs).
 - A window that cannot be resized keeps its size centred across its zone and at its top, on the
   same line as its neighbours, no longer in the middle.
+- Zones sit closer together: windows are as far apart as their coloured rings are wide, so no
+  desktop shows between them (it was 8 px, now 4 px at 100%). Settings from 1.0 move to it
+  once; a space you chose yourself stays.
 
 ### Zones that follow a resize
 
@@ -43,7 +46,7 @@
 ### Under the hood
 
 - `mosaikctl state` lists the quick menu, where it is and its rows. The protocol is version 3;
-  settings are format 2.
+  settings are format 3.
 
 ## 1.0.0
 

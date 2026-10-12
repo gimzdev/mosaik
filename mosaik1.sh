@@ -2310,7 +2310,9 @@ const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
 const TASKBAR = 40; // the Windows taskbar, along the bottom
-const [TOP, BOTTOM, SIDE, PAD] = [22, TASKBAR + 14, 26, 12];
+// Zones fill the desktop above the taskbar; as in the app, windows are as far apart as their two rings are
+// wide (the rings touch), and half that from the desktop's edges.
+const [TOP, BOTTOM, SIDE, PAD] = [0, TASKBAR, 0, 4];
 
 /** The shortcut that opens Mosaïk's switcher (the app's default). */
 export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];

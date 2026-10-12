@@ -92,7 +92,8 @@ pub struct Zone {
 /// How a window sits inside its zone, in device-independent pixels (scaled by the monitor's DPI).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameStyle {
-    /// Space between neighbouring zones.
+    /// Space between neighbouring zones: by default the width of the two zones' rings, so the
+    /// rings touch and no desktop shows between windows (half of it at the screen's edges).
     pub gap: i32,
     /// Height of the band above the window that carries the tag. 0 shows no tags.
     pub tag_band: i32,
@@ -108,7 +109,7 @@ pub struct FrameStyle {
 impl Default for FrameStyle {
     fn default() -> Self {
         Self {
-            gap: 8,
+            gap: 4,
             tag_band: 28,
             border: 2,
             title_bars: false,
@@ -193,12 +194,12 @@ mod tests {
     fn window_area_leaves_room_for_the_tag() {
         let zone = Rect::new(0, 0, 960, 1032);
         let style = FrameStyle::default();
-        assert_eq!(style.window_area(zone, 96), Rect::new(4, 32, 956, 1028));
-        assert_eq!(style.tag_area(zone, 96), Some(Rect::new(4, 4, 956, 32)));
+        assert_eq!(style.window_area(zone, 96), Rect::new(2, 30, 958, 1030));
+        assert_eq!(style.tag_area(zone, 96), Some(Rect::new(2, 2, 958, 30)));
         // At 200% everything doubles.
         assert_eq!(
             style.window_area(Rect::new(0, 0, 1920, 2064), 192),
-            Rect::new(8, 64, 1912, 2056)
+            Rect::new(4, 60, 1916, 2060)
         );
         assert_eq!(style.without_tags().tag_area(zone, 96), None);
         // A tab group keeps its strip's band when tags are hidden.
@@ -210,7 +211,7 @@ mod tests {
             ..style.without_tags()
         };
         assert_eq!(title_bars.for_tabs(), title_bars);
-        assert_eq!(title_bars.window_area(zone, 96), Rect::new(4, 4, 956, 1028));
+        assert_eq!(title_bars.window_area(zone, 96), Rect::new(2, 2, 958, 1030));
         assert_eq!(title_bars.tag_area(zone, 96), None);
     }
 
@@ -230,11 +231,19 @@ mod tests {
     }
 
     #[test]
-    fn neighbours_get_a_full_gap() {
+    fn neighbours_are_apart_by_their_rings_only() {
+        // The owner: "space lost between zones". Two windows side by side are as far apart as
+        // their two rings are wide, so the rings touch and no desktop shows between them; a
+        // window at the screen's edge keeps room for its ring there.
         let style = FrameStyle::default();
         let a = style.window_area(Rect::new(0, 0, 960, 1032), 96);
         let b = style.window_area(Rect::new(960, 0, 1920, 1032), 96);
-        assert_eq!(b.left - a.right, 8);
+        assert_eq!(b.left - a.right, 2 * style.border);
+        assert_eq!(a.left, style.border);
+        // At 200% too.
+        let a = style.window_area(Rect::new(0, 0, 1920, 2064), 192);
+        let b = style.window_area(Rect::new(1920, 0, 3840, 2064), 192);
+        assert_eq!(b.left - a.right, 2 * scale_for_dpi(style.border, 192));
     }
 
     #[test]

@@ -274,7 +274,7 @@ pub struct Row {
 /// Sizes at 96 DPI.
 mod size {
     /// The line, and the strip around it that takes the pointer: narrow where the pointer
-    /// stops at the screen's edge anyway (a window in a zone there is only 4 px from it),
+    /// stops at the screen's edge anyway (a window in a zone there is only 2 px from it),
     /// wider where it goes on past the edge.
     pub const LINE: f32 = 4.0;
     pub const LINE_WIDE: f32 = 6.0;
@@ -406,6 +406,10 @@ impl Edge {
         if self.shown.as_ref() == Some(&want) && self.window.shown_at().is_some() {
             return Ok(());
         }
+        // Only a handle that appears or moves goes back on top: one drawn again where it is
+        // (wider under the pointer) stays as it is.
+        let appears = !matches!(&self.shown, Some(Shown::Handle { place: p, .. }) if *p == place)
+            || self.window.shown_at().is_none();
         let s = scale(place.dpi);
         let r = handle_rect(place);
         let (w, h) = (f(r.width()), f(r.height()));
@@ -430,8 +434,10 @@ impl Edge {
             Ok(())
         })?;
         self.window.present(r.origin(), 255)?;
-        // Above windows kept on top that came after it (a video player, Task Manager).
-        crate::layered::restack(&[&self.window], crate::layered::Stack::Topmost);
+        if appears {
+            // Above windows kept on top that came after it (a video player, Task Manager).
+            crate::layered::restack(&[&self.window], crate::layered::Stack::Topmost);
+        }
         self.shown = Some(want);
         self.rows.clear();
         Ok(())

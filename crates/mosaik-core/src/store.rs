@@ -48,8 +48,9 @@ pub trait Saved: Serialize + DeserializeOwned + Default {
         Err(format!("no migration from version {from}"))
     }
 
-    /// What the user should know about the step from version `from`, if anything: a change
-    /// they will see. (A step that changes nothing they see says nothing.)
+    /// What the user should know about the move from version `from` to the current one, if
+    /// anything: the changes they will see, in one note. (A move that changes nothing they see
+    /// says nothing.)
     fn migration_note(from: u32) -> Option<String> {
         let _ = from;
         None
@@ -81,14 +82,30 @@ impl Saved for Settings {
                 }
                 Ok(value)
             }
+            // 2 to 3: zones sit as far apart as their two rings are wide (4 px), so no desktop
+            // shows between windows, unless the user chose another space than the old default.
+            2 => {
+                if let Some(style) = value
+                    .pointer_mut("/frames/style")
+                    .and_then(serde_json::Value::as_object_mut)
+                    && style.get("gap").and_then(serde_json::Value::as_i64) == Some(8)
+                {
+                    style.insert("gap".to_owned(), serde_json::Value::from(4));
+                }
+                Ok(value)
+            }
             other => Err(format!("no migration from version {other}")),
         }
     }
 
     fn migration_note(from: u32) -> Option<String> {
-        (from == 1).then(|| {
-            "Zone tags now sit in a bar above every window, so the windows in your zones all start at the same line. To put tags back in title bars: Settings, Tags and tabs.".to_owned()
-        })
+        match from {
+            1 => Some(
+                "Zone tags now sit in a bar above every window, so the windows in your zones all start at the same line, and zones sit closer together. To put tags back in title bars: Settings, Tags and tabs.".to_owned(),
+            ),
+            2 => Some("Zones sit closer together: no desktop shows between windows now.".to_owned()),
+            _ => None,
+        }
     }
 }
 
@@ -299,7 +316,9 @@ fn decode<T: Saved>(bytes: &[u8], path: &Path) -> Result<(T, Vec<String>), Store
     let mut notes = Vec::new();
     for from in found..T::VERSION {
         value = T::migrate_step(value, from).map_err(damaged)?;
-        notes.extend(T::migration_note(from));
+    }
+    if found < T::VERSION {
+        notes.extend(T::migration_note(found));
     }
     if let Some(v) = value.get_mut("version") {
         *v = serde_json::Value::from(T::VERSION);
@@ -453,6 +472,41 @@ mod tests {
         Store::new(&d.0).save(&titles).unwrap();
         let loaded = Store::new(&d.0).load::<Settings>().unwrap();
         assert!(loaded.value.frames.tags_in_title_bar);
+        assert!(loaded.notes.is_empty());
+    }
+
+    #[test]
+    fn settings_from_before_bring_zones_closer() {
+        // The owner: "space lost between zones". Zones used to be 8 px apart; now they are as
+        // far apart as their two rings are wide (4 px). Settings saved with the old default
+        // get the new one, with one note for the whole move; a space the user chose stays.
+        let d = TempDir::new("settings-gap");
+        let gap = |json: &[u8]| {
+            fs::write(d.0.join("settings.json"), json).unwrap();
+            let loaded = Store::new(&d.0).load::<Settings>().unwrap();
+            (loaded.value.frames.style.gap, loaded.notes)
+        };
+        let (g, notes) = gap(
+            br#"{"version":1,"frames":{"tags_in_title_bar":true,"style":{"gap":8,"tag_band":28,"border":2}}}"#,
+        );
+        assert_eq!(g, 4);
+        assert_eq!(notes.len(), 1, "one note for the whole move: {notes:?}");
+        assert!(
+            notes[0].contains("same line") && notes[0].contains("closer"),
+            "{notes:?}"
+        );
+        // Saved by a build of 1.1 before this change.
+        let (g, _) = gap(br#"{"version":2,"frames":{"style":{"gap":8,"tag_band":28,"border":2}}}"#);
+        assert_eq!(g, 4);
+        // A space the user chose stays.
+        let (g, _) = gap(br#"{"version":1,"frames":{"style":{"gap":16,"tag_band":28,"border":2}}}"#);
+        assert_eq!(g, 16);
+        // In the current format, 8 is the user's choice.
+        let mut wide = Settings::default();
+        wide.frames.style.gap = 8;
+        Store::new(&d.0).save(&wide).unwrap();
+        let loaded = Store::new(&d.0).load::<Settings>().unwrap();
+        assert_eq!(loaded.value.frames.style.gap, 8);
         assert!(loaded.notes.is_empty());
     }
 

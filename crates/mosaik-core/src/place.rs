@@ -273,7 +273,7 @@ mod tests {
             r.target(&Place::Zone {
                 zone: ZoneId::new("a")
             }),
-            Some(Target::Frame(Rect::new(4, 32, 1148, 1028)))
+            Some(Target::Frame(Rect::new(2, 30, 1150, 1030)))
         );
         // The zone it fills, for a window that goes below a band of its own in it.
         assert_eq!(
@@ -291,7 +291,7 @@ mod tests {
         }) else {
             panic!()
         };
-        assert_eq!(f.left, 48 + 4);
+        assert_eq!(f.left, 48 + 2);
     }
 
     proptest! {

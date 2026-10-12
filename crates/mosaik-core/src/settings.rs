@@ -11,7 +11,7 @@ use crate::zone::FrameStyle;
 /// 2: tags and tab strips go in a bar above each window by default, so every window in a zone
 /// starts at the same line (format 1 put them in title bars, and a window whose title bar had no
 /// room sat lower than its neighbours).
-pub const SETTINGS_VERSION: u32 = 2;
+pub const SETTINGS_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
