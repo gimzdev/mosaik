@@ -33,7 +33,13 @@
   </Resources>
 
   <Applications>
-    <Application Id="Mosaik" Executable="mosaik.exe" EntryPoint="Windows.FullTrustApplication">
+    <!-- SupportsMultipleInstances: Windows requires it for the console alias below. Mosaïk keeps
+         to one instance itself: a second start hands its request to the running one (app.rs). -->
+    <Application
+      Id="Mosaik"
+      Executable="mosaik.exe"
+      EntryPoint="Windows.FullTrustApplication"
+      desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements
         DisplayName="{{displayName}}"
         Description="Give every project its own workspace."
