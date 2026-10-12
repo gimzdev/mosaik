@@ -15,7 +15,7 @@ const FEATURES = [
   {
     id: 'tabs',
     title: 'Tabs for any app, not only the browser',
-    body: 'Stack your editor, terminal and design tool into one frame and flip between them like browser tabs. One window to find instead of twelve.',
+    body: 'Stack your editor, terminal and design tool into one frame and flip between them like browser tabs. Tabs dragged out of Chrome or Edge join in too. One window to find instead of twelve.',
     points: ['Group any windows into one tab strip', 'Tab order is remembered per workspace', 'Pull a tab out and it becomes a window again'],
     Art: TabsArt,
   },
