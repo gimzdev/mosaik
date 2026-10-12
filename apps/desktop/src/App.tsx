@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { About } from './About';
 import { guardClose, onNotices, request, styleTitleBar, takeNotices } from './engine';
+import { keepTabInside } from './focusLoop';
 import { Notices, type ShownNotice } from './Notices';
 import { errorMessage, type HotkeyState, type Settings } from './protocol';
 import { SettingsPane } from './SettingsPane';
@@ -109,6 +110,14 @@ export function App() {
     else root.dataset.theme = theme;
   }, [theme]);
   useTitleBar(theme);
+
+  // The Tab key goes round the window's controls and never leaves it (focusLoop.ts).
+  useEffect(() => {
+    document.addEventListener('keydown', keepTabInside);
+    return () => {
+      document.removeEventListener('keydown', keepTabInside);
+    };
+  }, []);
 
   // Closing the window with unsaved zone edits asks first.
   useEffect(() => {

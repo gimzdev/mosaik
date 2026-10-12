@@ -154,7 +154,8 @@ export function Choice<T extends string>({
                 onChange={() => {
                   onChange(o.value);
                 }}
-                className="accent-[var(--accent)]"
+                // The label shows the focus ring; the radio's own would draw a second one inside it.
+                className="accent-[var(--accent)] focus-visible:outline-none"
               />
               {o.label}
             </label>

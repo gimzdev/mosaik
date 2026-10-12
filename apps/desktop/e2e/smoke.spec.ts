@@ -35,6 +35,17 @@ test('the keyboard reaches every page, starting from the page title', async ({ p
   await accessible(page);
 });
 
+test('the Tab key goes round the window and never leaves it', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'About' }).click();
+  const last = page.getByRole('button', { name: 'Show the welcome again' });
+  await last.focus();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Workspaces' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(last).toBeFocused();
+});
+
 test('a dark theme can be chosen, and stays accessible', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings' }).click();

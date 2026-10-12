@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use mosaik_core::geometry::{RatioRect, Rect};
+use mosaik_core::geometry::{Point, RatioRect, Rect};
 use mosaik_core::layout::{Layout, Workspace, WorkspaceId};
 use mosaik_core::store::{Store, WORKSPACES_VERSION, WorkspacesFile};
 use mosaik_core::zone::{Zone, ZoneColor, ZoneId};
@@ -108,7 +108,6 @@ struct Control {
     role: &'static str,
     name: String,
     rect: Rect,
-    pid: u32,
 }
 
 impl Control {
@@ -173,7 +172,6 @@ impl Uia {
                 role: role_of(e.CurrentControlType().ok()?),
                 name: e.CurrentName().map(|b| b.to_string()).unwrap_or_default(),
                 rect: Rect::new(r.left, r.top, r.right, r.bottom),
-                pid: u32::try_from(e.CurrentProcessId().unwrap_or_default()).unwrap_or_default(),
             })
         }
     }
@@ -300,17 +298,22 @@ impl Tour {
     }
 
     /// Tab from where the focus is now until it comes back to a control already reached: each
-    /// control's role and name, and whether the focus stayed in Mosaïk's window.
+    /// control's role and name, the stops a screen reader has no name for (the focus left the
+    /// page), and those outside Mosaïk's window.
     fn tab_walk(&self, shot_at: Option<(usize, &str)>) -> Result<Value, String> {
         let window = frame_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;
         let mut path: Vec<Control> = Vec::new();
-        let mut left_window = Vec::new();
+        let mut unnamed = 0;
+        let mut outside = Vec::new();
         let mut shots = Vec::new();
         for i in 1..=TABS {
             Self::press(VK_TAB.0);
             let Some(c) = self.uia.focused() else { continue };
-            if c.pid != self.pid || window.overlap_area(c.rect) == 0 {
-                left_window.push(c.label());
+            if c.name.trim().is_empty() {
+                unnamed += 1;
+            }
+            if window.overlap_area(c.rect) == 0 {
+                outside.push(c.label());
             }
             if let Some((at, name)) = shot_at
                 && at == i
@@ -325,7 +328,8 @@ impl Tour {
         Ok(json!({
             "order": path.iter().map(Control::label).collect::<Vec<_>>(),
             "cycled": path.len() < TABS,
-            "focus_left_the_window": left_window,
+            "unnamed_stops": unnamed,
+            "outside_the_window": outside,
             "shots": shots,
         }))
     }
@@ -413,9 +417,19 @@ impl Tour {
         Ok(())
     }
 
+    /// Makes the window as small as it goes, as a person does: its bottom-right corner dragged
+    /// up and left, Windows stopping at the window's smallest size.
+    fn shrink(&self) -> Result<(), String> {
+        let r = window::window_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;
+        // On the resize border, just inside the window's rectangle.
+        let corner = Point::new(r.right - 3, r.bottom - 3);
+        crate::workspace::drag_path(&[corner, Point::new(r.left + 120, r.top + 120)], self.hwnd)?;
+        pump_until(600, || false);
+        Ok(())
+    }
+
     fn resize(&self, width: i32, height: i32) {
-        // SAFETY: resizes the window of the Mosaïk under test; Windows keeps it at least as large
-        // as the minimum it asks for.
+        // SAFETY: resizes the window of the Mosaïk under test back to the size it had.
         let _ = unsafe {
             SetWindowPos(
                 self.hwnd,
@@ -466,7 +480,7 @@ impl Tour {
 
         // The smallest the window goes.
         let before = window::window_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;
-        self.resize(200, 200);
+        self.shrink()?;
         self.nav("Workspaces")?;
         self.page("workspaces-smallest", false)?;
         self.zones()?;
