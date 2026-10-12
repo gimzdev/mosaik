@@ -94,7 +94,7 @@ export function SettingsPane({
       <Section title="Zones">
         <Toggle
           label="Snap windows into zones"
-          description="While you drag a window by its title bar, the zones show; let go over one and the window fills it."
+          description="While you drag a window by its title bar, the zones show; let go over one and the window goes into it."
           checked={settings.snap.enabled}
           onChange={(on) => {
             save({ ...settings, snap: { ...settings.snap, enabled: on } });
