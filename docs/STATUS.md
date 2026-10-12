@@ -362,6 +362,30 @@ Found and fixed on the way:
 - **A browser window closed at the end of its drag** (a tab dragged back into its window) no
   longer brings a "did not move into its zone" notice.
 
+### Every app in the Start menu (`--installed`, jobs 0061 and 0083)
+
+Every app of the owner's Start menu that the probe's rules let through, each program once per
+run, with the real mouse through the same steps as above (into a zone, onto a tag, both tabs
+clicked, pulled out; dragged by its band when it wears one), then closed. Left out: installers
+and updaters, documents and links, system and administrator tools, accessibility, camera and
+phone apps, apps that sign in to an account (mail, chat, music, game launchers), hardware
+tools, and entries that start a program already tested (`apps::skip_reason`). Job 0083, this
+build: 142 entries, 33 let through, 22 programs, every step of every one passing:
+
+```
+0 px at every step     Access, Acrobat, Windows Terminal, Excel, File Explorer, Git Bash, Git GUI,
+                       IDLE, Edge, Notepad++, PowerPoint, Publisher, VS Code, Windows Fax and Scan,
+                       Windows Media Player Legacy, PowerShell ISE, Word
+its own size kept      Character Map (a dialog of a fixed size, 477 x 430: in the middle of its
+                       zone and of the group's place, tag in its title bar; not managed before)
+                       Calculator (its minimum height), Chrome (856 x 652, its first window),
+                       Photos (1 px taller): each 0 px from where that size fits best
+by its band            Calculator, into the editor's zone: 0 px
+```
+
+Job 0061, before tags moved into title bars: 144 entries, 34 let through, the same programs but
+Character Map, all passing.
+
 ### Apps that drag their own window (job 0059)
 
 A window whose app moves it itself as the pointer moves, with no move loop of Windows' (the
