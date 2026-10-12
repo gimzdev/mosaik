@@ -674,6 +674,12 @@ switch time (mean)           32.5 ms      33.1 ms
 - 2026-10-11: everything travels in two files that run on another machine: `mosaik.ps1` (the app,
   source inside) and `mosaik1.sh` (the site).
 - 2026-10-11: `mosaik1.sh` reviewed end to end, optimised and cleaned as the final version.
+- 2026-10-12: Store submission 1 sent for certification with the owner's go-ahead: version
+  1.0.0.0, free in all markets, Productivity, rated Everyone / 3+ (IARC), English listing with
+  three screenshots of the app, privacy policy `https://xn--mosak-fta.com/conditions`. The first
+  upload was refused as a "headless app" (`mosaikctl` was a second app with no Start menu
+  entry); it is now an execution alias of Mosaïk's app (ADR 0008). Until the listing is live the
+  site's Download buttons lead to Microsoft's "ProductNotFound" page.
 - 2026-10-12: Mosaïk must work with practically every app, browser tabs included; tags and tab
   strips go in each window's own title bar, as browsers' tabs do (ADR 0011); tests run each
   app once per run.
