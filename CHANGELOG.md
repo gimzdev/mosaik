@@ -40,6 +40,13 @@ and ready in one click. Free, open source (CC0), no account, no telemetry, no ne
 - Zones are kept as proportions of a monitor and fit again when monitors, their scale or the
   taskbar change; each window lands on a monitor that is there.
 
+### Mosaïk's window
+
+- A welcome on the first run, then workspaces, the zone editor, settings and about, in light,
+  dark or as Windows has it, contrast themes included.
+- Every control can be reached with the keyboard, which goes round the window and stays in an
+  open question, and every one has a name for screen readers.
+
 ### Safe with your windows
 
 - A separate watchdog brings back every hidden window if Mosaïk stops unexpectedly, and
@@ -63,6 +70,7 @@ and ready in one click. Free, open source (CC0), no account, no telemetry, no ne
 - Mosaïk reads where a title bar is free from what the app says about it. An app that changes
   its title bar without a new title while it stays in front (a browser opening a tab in the
   background) gets its tag moved when it next comes to the front or changes size.
-- Measured on Windows 11 with one 1920x1080 monitor at 100% scale. Two monitors with different
-  scales, sleep and resume, monitors plugged in and out, Remote Desktop and Windows 10 are
-  covered by tests of the logic, not yet by runs on such machines.
+- Measured on Windows 11 with a 1920x1080 monitor at 100% scale, alone and beside a second
+  display at the same scale. Two monitors with different scales, sleep and resume, monitors
+  plugged in and out, Remote Desktop and Windows 10 are covered by tests of the logic, not yet
+  by runs on such machines.
