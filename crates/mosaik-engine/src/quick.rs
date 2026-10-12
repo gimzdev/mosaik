@@ -118,6 +118,7 @@ impl Engine {
     /// monitor). Called at start and whenever the monitors or the settings change.
     pub(crate) fn place_quick(&mut self) {
         self.kill_timer(timer::QUICK);
+        self.kill_timer(timer::QUICK_HOVER);
         self.quick.menu.clear();
         self.quick.hot = None;
         self.quick.press = None;
@@ -281,6 +282,7 @@ impl Engine {
     /// Back to the handle.
     fn close_menu(&mut self) {
         self.kill_timer(timer::QUICK);
+        self.kill_timer(timer::QUICK_HOVER);
         self.quick.menu.clear();
         self.quick.hot = None;
         self.quick.over = false;
@@ -293,9 +295,18 @@ impl Engine {
     pub(crate) fn on_quick_inputs(&mut self, inputs: Vec<EdgeInput>) {
         let Some(place) = self.quick.place else { return };
         for input in inputs {
+            if !matches!(input, EdgeInput::Move(_)) {
+                tracing::debug!(?input, menu = self.menu_open(), "quick menu");
+            }
             match input {
                 EdgeInput::Move(p) => {
                     self.kill_timer(timer::QUICK);
+                    // The menu opens once the pointer rests on the handle: 300 ms after its
+                    // last move there. (Windows' own hover message opens it too; this does not
+                    // depend on it.)
+                    if !self.menu_open() && self.quick.press.is_none() {
+                        self.set_timer(timer::QUICK_HOVER, edge::HOVER_MS);
+                    }
                     if let Some(mut press) = self.quick.press {
                         let threshold = scale_for_dpi(4, place.dpi);
                         if !self.menu_open() && (press.dragging || (p.y - press.at.y).abs() > threshold) {
@@ -323,6 +334,7 @@ impl Engine {
                     }
                 }
                 EdgeInput::Leave => {
+                    self.kill_timer(timer::QUICK_HOVER);
                     self.quick.over = false;
                     if self.menu_open() {
                         self.set_timer(timer::QUICK, CLOSE_MS);
@@ -331,6 +343,7 @@ impl Engine {
                     }
                 }
                 EdgeInput::Down(at) => {
+                    self.kill_timer(timer::QUICK_HOVER);
                     let row = self.quick.edge.as_ref().and_then(|e| e.row_at(at));
                     self.quick.press = Some(Press {
                         at,
@@ -365,6 +378,24 @@ impl Engine {
                     }
                 }
             }
+        }
+    }
+
+    /// The pointer rested on the handle: the menu opens, if the pointer is still on it.
+    pub(crate) fn quick_hover_tick(&mut self) {
+        self.kill_timer(timer::QUICK_HOVER);
+        if self.menu_open() || self.quick.press.is_some() {
+            return;
+        }
+        let on_it = self
+            .quick
+            .edge
+            .as_ref()
+            .and_then(Edge::shown_at)
+            .is_some_and(|r: Rect| r.contains(input::cursor()));
+        if on_it {
+            tracing::debug!("quick menu opens: the pointer rested on the handle");
+            self.open_menu();
         }
     }
 

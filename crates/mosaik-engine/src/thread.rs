@@ -61,6 +61,8 @@ pub(crate) mod timer {
     pub const HOTKEYS: usize = 6;
     /// The quick menu closes a moment after the pointer left it.
     pub const QUICK: usize = 7;
+    /// The pointer has rested on the quick menu's handle: the menu opens.
+    pub const QUICK_HOVER: usize = 8;
 }
 
 /// Shift a timer id into the `Pending::timers` bit set.
@@ -467,6 +469,9 @@ impl Engine {
         }
         if todo.timers & timer_bit(timer::QUICK) != 0 {
             self.quick_tick();
+        }
+        if todo.timers & timer_bit(timer::QUICK_HOVER) != 0 {
+            self.quick_hover_tick();
         }
         if todo.displays {
             // Windows sends several of these for one change; act once it is done.

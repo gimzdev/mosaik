@@ -71,7 +71,14 @@ fn close_all(opened: &mut Vec<Opened>) {
     }
 }
 
-pub fn run(_args: &[String]) -> Result<Value, String> {
+pub fn run(args: &[String]) -> Result<Value, String> {
+    // `--only follow`, `--only arrange` or `--only quick` (which arranges its windows first).
+    let only = args
+        .iter()
+        .position(|a| a == "--only")
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str);
+    let part = |name: &str| only.is_none_or(|o| o == name || (o == "quick" && name == "arrange"));
     let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
     let work = topology.primary().work_area;
     let dpi = topology.primary().dpi;
@@ -116,31 +123,38 @@ pub fn run(_args: &[String]) -> Result<Value, String> {
     let result = (|| -> Result<Value, String> {
         let styles = Styles::of(&engine, dpi)?;
         let mut out = serde_json::Map::new();
-        let follow = follow(&engine, styles, work, &mut opened).unwrap_or_else(|e| json!({ "failed": e }));
-        println!("line and follow: {follow}");
-        out.insert("line_and_follow".into(), follow);
-        // The workspace goes, so Arrange starts with none open.
-        let _ = engine.request(
-            Command::DeleteWorkspace {
-                workspace: WORKSPACE.into(),
-            },
-            TIMEOUT,
-        );
-        close_all(&mut opened);
-        pump_until(500, || false);
+        if part("follow") {
+            let follow =
+                follow(&engine, styles, work, &mut opened).unwrap_or_else(|e| json!({ "failed": e }));
+            println!("line and follow: {follow}");
+            out.insert("line_and_follow".into(), follow);
+            // The workspace goes, so Arrange starts with none open.
+            let _ = engine.request(
+                Command::DeleteWorkspace {
+                    workspace: WORKSPACE.into(),
+                },
+                TIMEOUT,
+            );
+            close_all(&mut opened);
+            pump_until(500, || false);
+        }
         let mut arranged = Vec::new();
-        let arrange = arrange(&engine, styles, work, &mut opened, &mut arranged)
-            .unwrap_or_else(|e| json!({ "failed": e }));
-        println!("arrange: {arrange}");
-        out.insert("arrange".into(), arrange);
-        let quick = if arranged.len() == 4 {
-            quick_menu(&engine, styles, work, dpi, &arranged, &mut opened)
-                .unwrap_or_else(|e| json!({ "failed": e }))
-        } else {
-            json!({ "failed": "Arrange left no windows to try the quick menu with" })
-        };
-        println!("quick menu: {quick}");
-        out.insert("quick_menu".into(), quick);
+        if part("arrange") {
+            let arrange = arrange(&engine, styles, work, &mut opened, &mut arranged)
+                .unwrap_or_else(|e| json!({ "failed": e }));
+            println!("arrange: {arrange}");
+            out.insert("arrange".into(), arrange);
+        }
+        if part("quick") {
+            let quick = if arranged.len() == 4 {
+                quick_menu(&engine, styles, work, dpi, &arranged, &mut opened)
+                    .unwrap_or_else(|e| json!({ "failed": e }))
+            } else {
+                json!({ "failed": "Arrange left no windows to try the quick menu with" })
+            };
+            println!("quick menu: {quick}");
+            out.insert("quick_menu".into(), quick);
+        }
         Ok(Value::Object(out))
     })();
     engine.stop();
@@ -815,20 +829,44 @@ fn quick_menu(
     pump_until(100, || false);
     glide(away, q.rect.center());
     let (menu, open_ms) = wait_menu(engine, 2000, is_open)?;
-    let menu = menu
-        .filter(|m| m.open)
-        .ok_or("the menu did not open when the pointer rested on the handle")?;
+    let rested = menu.as_ref().is_some_and(|m| m.open);
+    let menu = match menu.filter(|m| m.open) {
+        Some(m) => m,
+        None => {
+            // What is under the pointer, and the handle as the engine sees it; then a click,
+            // which opens the menu too, so the rest can still be tried.
+            let at = input::cursor();
+            // SAFETY: read-only hit test.
+            let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: at.x, y: at.y }), GA_ROOT) };
+            let handle_now = state(engine)?.quick_menu;
+            out.insert(
+                "did_not_open_resting".into(),
+                json!({
+                    "pointer": [at.x, at.y],
+                    "under": mosaik_win::window::class_name(under),
+                    "under_is_mosaik": mosaik_win::window::pid(under) == mosaik_win::process::own_pid(),
+                    "handle": handle_now.map(|q| [q.rect.left, q.rect.top, q.rect.right, q.rect.bottom]),
+                }),
+            );
+            drop(LeftButton::press());
+            let (clicked, _) = wait_menu(engine, 1500, is_open)?;
+            clicked
+                .filter(|m| m.open)
+                .ok_or("the menu opened neither when the pointer rested on the handle nor on a click")?
+        }
+    };
     let labels: Vec<&str> = menu.rows.iter().map(|r| r.label.as_str()).collect();
     let kept_keyboard = mosaik_win::arrange::foreground() == Some(front);
     out.insert(
         "opens".into(),
         json!({
+            "on_resting": rested,
             "after_ms": open_ms,
             "rows": labels,
             "rect": [menu.rect.left, menu.rect.top, menu.rect.right, menu.rect.bottom],
             "front_window_focused_first": focused,
             "front_window_kept_keyboard": kept_keyboard,
-            "ok": labels.first() == Some(&"Arrange windows") && labels.contains(&"Switch workspace")
+            "ok": rested && labels.first() == Some(&"Arrange windows") && labels.contains(&"Switch workspace")
                 && (!focused || kept_keyboard),
         }),
     );

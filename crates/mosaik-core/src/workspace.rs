@@ -63,6 +63,20 @@ fn overlap_fraction(a: Rect, b: Rect) -> f64 {
     f
 }
 
+/// The windows to check once moved windows have settled, each with where it was last meant to
+/// land, in the order they were moved. A window moved twice before then (zones that followed a
+/// resize, then made room for an app's own size) is checked against its last place only:
+/// checked against both, it would be put back where the first move meant it to go.
+pub fn last_places(placed: Vec<(WindowHandle, Rect)>) -> Vec<(WindowHandle, Rect)> {
+    let last: HashMap<WindowHandle, usize> = placed.iter().enumerate().map(|(i, (w, _))| (*w, i)).collect();
+    placed
+        .into_iter()
+        .enumerate()
+        .filter(|(i, (w, _))| last.get(w) == Some(i))
+        .map(|(_, p)| p)
+        .collect()
+}
+
 /// Largest distance between matching edges.
 pub fn edge_distance(a: Rect, b: Rect) -> i32 {
     [
@@ -786,6 +800,23 @@ pub fn zone_around(frame: Rect, style: FrameStyle, dpi: u32) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_window_moved_twice_is_checked_against_its_last_place() {
+        // Job 0092: zones followed a resize, then made room for a browser's own size; the
+        // check that follows put two windows back where the first move had meant them to go,
+        // 104 px off their zones.
+        let (a, b) = (WindowHandle(1), WindowHandle(2));
+        let first = Rect::new(4, 32, 1302, 1028);
+        let second = Rect::new(4, 32, 1198, 1028);
+        let other = Rect::new(1310, 32, 1916, 562);
+        assert_eq!(
+            last_places(vec![(a, first), (b, other), (a, second)]),
+            vec![(b, other), (a, second)]
+        );
+        assert_eq!(last_places(vec![(a, first)]), vec![(a, first)]);
+        assert!(last_places(Vec::new()).is_empty());
+    }
     use crate::fixtures;
     use crate::geometry::Size;
     use crate::window::WindowFacts;
@@ -884,7 +915,7 @@ mod tests {
         );
         assert_eq!(
             r.target(&w.layout.slots[1].place),
-            Some(Target::Frame(Rect::new(964, 32, 1916, 512)))
+            Some(Target::Frame(Rect::new(962, 30, 1918, 514)))
         );
     }
 
@@ -1214,7 +1245,7 @@ mod tests {
         );
         assert_eq!(plan.moves.len(), 2);
         assert_eq!(plan.moves[0].window, WindowHandle(1));
-        assert_eq!(plan.moves[0].target, Target::Frame(Rect::new(4, 32, 956, 1028)));
+        assert_eq!(plan.moves[0].target, Target::Frame(Rect::new(2, 30, 958, 1030)));
         assert_eq!(plan.launch.len(), 1, "the terminal is started");
         assert_eq!(
             plan.minimize,

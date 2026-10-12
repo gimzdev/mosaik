@@ -11,7 +11,7 @@
 //! mosaik-probe idle       CPU and memory of an engine-like loop over 60 s
 //! mosaik-probe smart      what 1.1 adds, with the real engine: windows on one line, zones
 //!                         that follow a resized window, Arrange and Undo, the quick menu
-//!                         (moves the mouse)
+//!                         (moves the mouse; --only follow, arrange or quick for one part)
 //! mosaik-probe workspace  save, switch and reopen with the real engine (--drag: drag to snap;
 //!                         --browser edge|chrome: browser tabs dragged out into a workspace;
 //!                         --apps: real apps into zones and tabs; --soak N: N switches,

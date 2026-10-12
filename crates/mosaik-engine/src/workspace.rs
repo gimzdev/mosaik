@@ -723,7 +723,7 @@ impl Engine {
     /// position after being moved) are put back once. A window the user is moving is left alone.
     pub(crate) fn settle(&mut self) {
         let Some(active) = &mut self.active else { return };
-        let placed = std::mem::take(&mut active.placed);
+        let placed = mosaik_core::workspace::last_places(std::mem::take(&mut active.placed));
         let moving = self.watch.moving;
         let again: Vec<(WindowHandle, To)> = placed
             .into_iter()
