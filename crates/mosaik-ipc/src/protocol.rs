@@ -599,6 +599,32 @@ mod wire {
             Command::ShowSwitcher,
             Command::ShowSettings,
             Command::Quit,
+            Command::Settings,
+            Command::SetSettings {
+                settings: Box::default(),
+            },
+            Command::CheckHotkey {
+                hotkey: "Win+Alt+1".into(),
+                workspace: Some("ship".into()),
+            },
+            Command::Zones {
+                workspace: "ship".into(),
+            },
+            Command::SetZones {
+                workspace: "ship".into(),
+                zones: vec![zone()],
+            },
+            Command::RenameWorkspace {
+                workspace: "ship".into(),
+                name: "Ship 1.0".into(),
+            },
+            Command::DeleteWorkspace {
+                workspace: "ship".into(),
+            },
+            Command::SetWorkspaceHotkey {
+                workspace: "ship".into(),
+                hotkey: Some("Win+Alt+1".into()),
+            },
         ];
         let replies = vec![
             Reply::Hello {
@@ -623,8 +649,41 @@ mod wire {
                 message: "No workspace called \"x\".".into(),
                 hint: Some("mosaikctl workspaces lists them.".into()),
             },
+            Reply::Settings {
+                settings: Box::default(),
+            },
+            Reply::Hotkey {
+                hotkey: "Ctrl+Alt+K".into(),
+                problem: Some("Ctrl+Alt is AltGr on many keyboards.".into()),
+                warnings: vec!["Many apps use Ctrl with a letter.".into()],
+            },
+            Reply::Zones {
+                workspace: WorkspaceId("ship".into()),
+                name: "Ship the release".into(),
+                monitors: vec![MonitorState {
+                    id: "m1".into(),
+                    name: "DELL U2720Q".into(),
+                    primary: true,
+                    bounds: Rect::new(0, 0, 3840, 2160),
+                    work_area: Rect::new(0, 0, 3840, 2112),
+                    dpi: 192,
+                    scale_percent: 200,
+                }],
+                zones: vec![zone()],
+            },
         ];
         serde_json::json!({ "commands": commands, "replies": replies })
+    }
+
+    fn zone() -> ZoneEdit {
+        ZoneEdit {
+            id: Some(mosaik_core::zone::ZoneId::new("z1")),
+            name: "Code".into(),
+            color: mosaik_core::zone::ZoneColor::Lapis,
+            monitor: mosaik_core::topology::MonitorId::new("m1"),
+            area: mosaik_core::geometry::RatioRect::new(0.0, 0.0, 0.6, 1.0)
+                .unwrap_or(mosaik_core::geometry::RatioRect::FULL),
+        }
     }
 
     #[test]

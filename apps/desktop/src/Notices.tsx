@@ -1,4 +1,4 @@
-import type { Notice } from '../protocol';
+import type { Notice } from './protocol';
 
 export interface NoticesProps {
   notices: Notice[];

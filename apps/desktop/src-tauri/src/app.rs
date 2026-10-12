@@ -20,9 +20,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-/// The address the tray menu's "Support on Patreon" opens in the browser (the app itself never
-/// contacts it).
+/// Pages Mosaïk opens in the default browser (About, the tray menu). Mosaïk itself never contacts
+/// them.
 const PATREON: &str = "https://www.patreon.com/gimzdev";
+const SITE: &str = "https://xn--mosak-fta.com";
+const PRIVACY: &str = "https://xn--mosak-fta.com/conditions";
+const SOURCE: &str = "https://github.com/gimzdev/mosaik";
 /// How long the interface waits for the engine before showing "busy".
 const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Exit code after Mosaïk has told the user why it could not start (the watchdog stays quiet).
@@ -160,7 +163,7 @@ pub fn run(args: Vec<String>) -> i32 {
         manage_only: None,
     };
     let built = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_request, take_notices])
+        .invoke_handler(tauri::generate_handler![engine_request, take_notices, open_link, open_logs])
         .setup(move |app| {
             // Tauri turns an error returned here into a panic; report it instead.
             if let Err(e) = setup(app.handle(), config, server, startup_notices, data_dir) {
@@ -228,8 +231,16 @@ fn setup(
         data_dir,
     });
     build_tray(app).map_err(|e| format!("the tray icon could not be created: {e}"))?;
+    let first_run = app
+        .try_state::<AppState>()
+        .map(|s| s.engine.request(Command::Settings, ENGINE_TIMEOUT))
+        .is_some_and(|r| matches!(r, Reply::Settings { settings } if !settings.onboarding_done));
     for n in startup_notices {
         show_notice(app, n);
+    }
+    // The welcome, once: it explains the one shortcut to know.
+    if first_run {
+        show_settings(app);
     }
     Ok(())
 }
@@ -353,8 +364,8 @@ fn show_settings(app: &AppHandle) {
     // Built on demand and destroyed when closed: its web view costs memory only while open.
     let built = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
         .title("Mosaïk")
-        .inner_size(920.0, 640.0)
-        .min_inner_size(640.0, 480.0)
+        .inner_size(980.0, 720.0)
+        .min_inner_size(760.0, 560.0)
         .center()
         .build();
     if let Err(e) = built {
@@ -505,4 +516,26 @@ fn take_notices(state: tauri::State<'_, AppState>) -> Vec<Notice> {
         .lock()
         .map(|mut n| std::mem::take(&mut *n))
         .unwrap_or_default()
+}
+
+/// Opens one of Mosaïk's pages in the default browser. Only these can be opened.
+#[tauri::command]
+fn open_link(link: String) -> Result<(), String> {
+    let url = match link.as_str() {
+        "patreon" => PATREON,
+        "site" => SITE,
+        "privacy" => PRIVACY,
+        "source" => SOURCE,
+        _ => return Err(format!("unknown link: {link}")),
+    };
+    mosaik_win::process::shell_open(url, "").map_err(|e| format!("The browser did not open: {e}"))
+}
+
+/// Opens the folder with Mosaïk's logs in File Explorer.
+#[tauri::command]
+fn open_logs() -> Result<(), String> {
+    let folder = crate::logging::folder().ok_or("The logs folder is unknown (LOCALAPPDATA is not set).")?;
+    std::fs::create_dir_all(&folder).map_err(|e| format!("The logs folder could not be made: {e}"))?;
+    mosaik_win::process::shell_open(&folder.to_string_lossy(), "")
+        .map_err(|e| format!("File Explorer did not open: {e}"))
 }

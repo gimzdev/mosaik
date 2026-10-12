@@ -26,10 +26,21 @@
   --bg: var(--color-plaster);
   --surface: var(--color-paper);
   --line: var(--color-grout);
+  --hover: #e3e7df;
   --text: var(--color-ink);
   --muted: var(--color-slate);
   --accent: var(--color-lapis);
+  --on-accent: #ffffff;
+  --danger: var(--color-madder);
+  --ok: var(--color-verdigris);
   --focus: var(--color-lapis);
+  /* Zone colours: fill, and the label drawn on it (both AA, as on the overlays). */
+  --zone-lapis: #2b44d9;
+  --zone-verdigris: #12786a;
+  --zone-saffron: #f4b13a;
+  --zone-madder: #c93450;
+  --zone-slate: #556070;
+  --zone-label-saffron: #161b25;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
@@ -37,9 +48,13 @@
     --bg: #0f1218;
     --surface: #161b25;
     --line: #2a3140;
+    --hover: #1e2532;
     --text: #edefea;
     --muted: #a3acba;
     --accent: #7c8fff;
+    --on-accent: #0f1218;
+    --danger: #f07892;
+    --ok: #4fd1bd;
     --focus: #f4b13a;
   }
 }
@@ -48,19 +63,28 @@
   --bg: #0f1218;
   --surface: #161b25;
   --line: #2a3140;
+  --hover: #1e2532;
   --text: #edefea;
   --muted: #a3acba;
   --accent: #7c8fff;
+  --on-accent: #0f1218;
+  --danger: #f07892;
+  --ok: #4fd1bd;
   --focus: #f4b13a;
 }
+/* High contrast: the system's own colours, and borders where colour alone would carry meaning. */
 @media (forced-colors: active) {
   :root {
     --bg: Canvas;
     --surface: Canvas;
     --line: CanvasText;
+    --hover: Canvas;
     --text: CanvasText;
     --muted: CanvasText;
     --accent: Highlight;
+    --on-accent: HighlightText;
+    --danger: CanvasText;
+    --ok: CanvasText;
     --focus: Highlight;
   }
 }

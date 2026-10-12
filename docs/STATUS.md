@@ -12,10 +12,10 @@ re-run before each release.
 | --- | --- | --- |
 | 1. Verify assumptions | in progress: two monitors (virtual displays) and Windows 10 left | [Step 1](#step-1-verify-assumptions) |
 | 2. Core, topologies, persistence, IPC, mosaikctl | done | [Step 2](#step-2-core-persistence-ipc) |
-| 3. Zones | in progress: capture, frames and tags, drag to snap done; zone editor left | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
-| 4. Workspaces | in progress: save, switch, start missing apps, switcher, tray done; per-workspace hotkeys left | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
-| 5. Tabs | not started | |
-| 6. Product UI | not started | |
+| 3. Zones | done: capture, frames and tags, drag to snap, zone editor | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces), [Step 6](#step-6-product-ui) |
+| 4. Workspaces | done: save, switch, start missing apps, switcher, tray, workspace shortcuts | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
+| 5. Tabs | done; multi-monitor and app matrix runs left for step 7 | [Step 5](#step-5-tabs) |
+| 6. Product UI | in progress: welcome, workspaces, zone editor, settings, about, themes done; tested in a browser; first run on Windows pending | [Step 6](#step-6-product-ui) |
 | 7. Hardening | not started | |
 | 8. Release | decided: Microsoft Store, direct download from mosaïk.com (ADR 0008) | |
 
@@ -224,7 +224,49 @@ build; releases are signed by the Microsoft Store.
   and other-desktop windows, refitting hidden windows, exact class matching, WM_CLOSE
   destroying the engine window, inconsistent zone membership, name comparisons, the drop
   target's bitmap (now a solid tint), and drag details. Frames now sit right above their window.
-  Re-run pending.
+- Re-run with the fixes (job 0031, release build): save 64 ms and switch back after scrambling
+  48 ms for three windows, every window 0 px from its place after both, ring and tag colours
+  exact; a closed window started again by the next switch, 0 px from its place.
+- Workspaces' own shortcuts: registered from `WM_HOTKEY` id 100 on; every shortcut is checked
+  against the AltGr characters of the installed keyboard layouts (`mosaik_win::keyboard`), the
+  rules of `mosaik_core::hotkey::check`, Mosaïk's own shortcuts, and a live registration probe
+  for other apps.
+
+## Step 5: tabs
+
+- Design and the rule for what shows: architecture.md "How tabs behave", ADR 0009.
+- An adversarial review of the first version (three reviewers: engine, overlay, core) found 35
+  issues, the worst being windows that could stay hidden for good. All fixed in d508938: one
+  reconcile from `mosaik_core::tabs::plan_tabs` (unit tests), hiding on its own thread with a
+  deadline, journal written once per batch with the marker set before hiding, strips in the
+  zone's band (always reserved for groups), chip layout with a "+N" chip (`mosaik_core::strip`,
+  property test: everything drawn is inside the strip and clickable), tabs identified by window
+  rather than position, damaged groups mended on load (a self-referencing group overflowed the
+  stack before), a property test over random tab operations (512 runs of 1 to 40 operations).
+- With the real mouse on Windows (job 0031, `mosaik-probe workspace --drag`, release build):
+
+  ```
+  drop the terminal on the code window's tag: 1 strip, 2 tabs, terminal 0 px from the group's
+    place, code hidden
+  click the code tab: code shows, 0 px; terminal hidden
+  pull the terminal's tab out into the review zone: no strip left, terminal 0 px from the zone,
+    code shows
+  drag the terminal back by its title bar: 0 px, ring in the zone's colour
+  probe process private memory with frames and strips: 6.9 MB
+  ```
+
+## Step 6: product UI
+
+- One window (built when opened, destroyed when closed): welcome on the first run, workspaces
+  (open, zones, shortcut, rename, delete with confirmation), the zone editor (drag or arrow-key
+  the lines between zones, split, rename, recolour, remove, presets; nothing changes until
+  saved), settings (shortcut recorder that refuses AltGr, start with Windows, theme, snapping,
+  frames, tags, switching, tabs), about (privacy, Patreon, website, source, rescue, logs).
+- Interface checks (Linux): typecheck, ESLint (strict, type-checked), 27 component tests, and 5
+  browser smoke tests on the development server's stand-in engine, each with axe-core's WCAG 2.1
+  A and AA rules: no serious or critical violation in the light or dark theme; the keyboard
+  reaches every page; a zone line moves with the arrow keys. The first axe run found shortcut
+  keys labelled in a way screen readers ignore, fixed.
 
 ## Owner decisions
 

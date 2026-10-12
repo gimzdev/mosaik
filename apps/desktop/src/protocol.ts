@@ -9,6 +9,46 @@ export interface Rect {
   bottom: number;
 }
 
+export type ZoneColor = 'lapis' | 'verdigris' | 'saffron' | 'madder' | 'slate';
+
+/** A rectangle as fractions (0 to 1) of a monitor's work area. */
+export interface RatioRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** A zone as the zone editor shows and returns it. */
+export interface ZoneEdit {
+  /** null for a zone made in the editor. */
+  id: string | null;
+  name: string;
+  color: ZoneColor;
+  /** One of the monitors connected now. */
+  monitor: string;
+  area: RatioRect;
+}
+
+export type Theme = 'system' | 'light' | 'dark';
+export type HideMethod = 'shell_cloak' | 'minimize' | 'park';
+
+/** The user's settings (crates/mosaik-core/src/settings.rs). Fields the interface does not
+ * show are sent back as they came. */
+export interface Settings {
+  version: number;
+  switcher_hotkey: string;
+  snap: { enabled: boolean; invert_shift: boolean; near: number };
+  frames: { show_frames: boolean; show_tags: boolean; style: { gap: number; tag_band: number; border: number } };
+  tab_hiding: HideMethod | null;
+  switching: { minimize_others: boolean; launch_missing: boolean };
+  theme: Theme;
+  start_with_windows: boolean;
+  onboarding_done: boolean;
+  rules: unknown;
+  notices_shown: string[];
+}
+
 export type Command =
   | { cmd: 'hello'; client: string }
   | { cmd: 'state' }
@@ -18,7 +58,15 @@ export type Command =
   | { cmd: 'rescue' }
   | { cmd: 'show_switcher' }
   | { cmd: 'show_settings' }
-  | { cmd: 'quit' };
+  | { cmd: 'quit' }
+  | { cmd: 'settings' }
+  | { cmd: 'set_settings'; settings: Settings }
+  | { cmd: 'check_hotkey'; hotkey: string; workspace: string | null }
+  | { cmd: 'zones'; workspace: string }
+  | { cmd: 'set_zones'; workspace: string; zones: ZoneEdit[] }
+  | { cmd: 'rename_workspace'; workspace: string; name: string }
+  | { cmd: 'delete_workspace'; workspace: string }
+  | { cmd: 'set_workspace_hotkey'; workspace: string; hotkey: string | null };
 
 export type ErrorCode = 'unsupported_version' | 'bad_request' | 'not_found' | 'busy' | 'failed' | 'unknown';
 
@@ -59,7 +107,10 @@ export type Reply =
       watchdog: boolean;
       monitors: MonitorState[];
       hotkey: HotkeyState;
-    };
+    }
+  | { reply: 'settings'; settings: Settings }
+  | { reply: 'hotkey'; hotkey: string; problem: string | null; warnings: string[] }
+  | { reply: 'zones'; workspace: string; name: string; monitors: MonitorState[]; zones: ZoneEdit[] };
 
 /** Something the user should be told once. */
 export interface Notice {
@@ -79,7 +130,65 @@ function isObject(x: unknown): x is Record<string, unknown> {
 
 const isString = (x: unknown): x is string => typeof x === 'string';
 const isNumber = (x: unknown): x is number => typeof x === 'number';
+const isBoolean = (x: unknown): x is boolean => typeof x === 'boolean';
 const isNullableString = (x: unknown): x is string | null => x === null || isString(x);
+
+const COLORS = new Set<string>(['lapis', 'verdigris', 'saffron', 'madder', 'slate']);
+const THEMES = new Set<string>(['system', 'light', 'dark']);
+const HIDE_METHODS = new Set<string>(['shell_cloak', 'minimize', 'park']);
+
+function isRect(x: unknown): x is Rect {
+  return isObject(x) && isNumber(x.left) && isNumber(x.top) && isNumber(x.right) && isNumber(x.bottom);
+}
+
+function isMonitor(x: unknown): x is MonitorState {
+  return (
+    isObject(x) &&
+    isString(x.id) &&
+    isString(x.name) &&
+    isBoolean(x.primary) &&
+    isRect(x.bounds) &&
+    isRect(x.work_area) &&
+    isNumber(x.dpi) &&
+    isNumber(x.scale_percent)
+  );
+}
+
+function isZone(x: unknown): x is ZoneEdit {
+  return (
+    isObject(x) &&
+    isNullableString(x.id) &&
+    isString(x.name) &&
+    isString(x.color) &&
+    COLORS.has(x.color) &&
+    isString(x.monitor) &&
+    isRect(x.area)
+  );
+}
+
+export function isSettings(x: unknown): x is Settings {
+  if (!isObject(x)) return false;
+  const { snap, frames, switching } = x;
+  return (
+    isNumber(x.version) &&
+    isString(x.switcher_hotkey) &&
+    isObject(snap) &&
+    isBoolean(snap.enabled) &&
+    isBoolean(snap.invert_shift) &&
+    isObject(frames) &&
+    isBoolean(frames.show_frames) &&
+    isBoolean(frames.show_tags) &&
+    (x.tab_hiding === null || (isString(x.tab_hiding) && HIDE_METHODS.has(x.tab_hiding))) &&
+    isObject(switching) &&
+    isBoolean(switching.minimize_others) &&
+    isBoolean(switching.launch_missing) &&
+    isString(x.theme) &&
+    THEMES.has(x.theme) &&
+    isBoolean(x.start_with_windows) &&
+    isBoolean(x.onboarding_done) &&
+    Array.isArray(x.notices_shown)
+  );
+}
 
 function isWorkspace(x: unknown): x is WorkspaceSummary {
   return (
@@ -106,6 +215,21 @@ export function isReply(x: unknown): x is Reply {
       return isString(x.code) && isString(x.message) && isNullableString(x.hint);
     case 'state':
       return isString(x.app_version) && typeof x.safe_mode === 'boolean' && Array.isArray(x.monitors);
+    case 'settings':
+      return isSettings(x.settings);
+    case 'hotkey':
+      return (
+        isString(x.hotkey) && isNullableString(x.problem) && Array.isArray(x.warnings) && x.warnings.every(isString)
+      );
+    case 'zones':
+      return (
+        isString(x.workspace) &&
+        isString(x.name) &&
+        Array.isArray(x.monitors) &&
+        x.monitors.every(isMonitor) &&
+        Array.isArray(x.zones) &&
+        x.zones.every(isZone)
+      );
     default:
       return false;
   }
@@ -121,6 +245,14 @@ const COMMANDS = new Set<Command['cmd']>([
   'show_switcher',
   'show_settings',
   'quit',
+  'settings',
+  'set_settings',
+  'check_hotkey',
+  'zones',
+  'set_zones',
+  'rename_workspace',
+  'delete_workspace',
+  'set_workspace_hotkey',
 ]);
 
 export function isCommand(x: unknown): x is Command {

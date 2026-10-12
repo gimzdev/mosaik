@@ -29,6 +29,84 @@
     },
     {
       "cmd": "quit"
+    },
+    {
+      "cmd": "settings"
+    },
+    {
+      "cmd": "set_settings",
+      "settings": {
+        "frames": {
+          "show_frames": true,
+          "show_tags": true,
+          "style": {
+            "border": 2,
+            "gap": 8,
+            "tag_band": 28
+          }
+        },
+        "notices_shown": [],
+        "onboarding_done": false,
+        "rules": {
+          "learned": [],
+          "user": []
+        },
+        "snap": {
+          "enabled": true,
+          "invert_shift": false,
+          "near": 48
+        },
+        "start_with_windows": false,
+        "switcher_hotkey": "Win+Alt+Space",
+        "switching": {
+          "launch_missing": true,
+          "minimize_others": true
+        },
+        "tab_hiding": null,
+        "theme": "system",
+        "version": 1
+      }
+    },
+    {
+      "cmd": "check_hotkey",
+      "hotkey": "Win+Alt+1",
+      "workspace": "ship"
+    },
+    {
+      "cmd": "zones",
+      "workspace": "ship"
+    },
+    {
+      "cmd": "set_zones",
+      "workspace": "ship",
+      "zones": [
+        {
+          "area": {
+            "bottom": 1.0,
+            "left": 0.0,
+            "right": 0.6,
+            "top": 0.0
+          },
+          "color": "lapis",
+          "id": "z1",
+          "monitor": "m1",
+          "name": "Code"
+        }
+      ]
+    },
+    {
+      "cmd": "rename_workspace",
+      "name": "Ship 1.0",
+      "workspace": "ship"
+    },
+    {
+      "cmd": "delete_workspace",
+      "workspace": "ship"
+    },
+    {
+      "cmd": "set_workspace_hotkey",
+      "hotkey": "Win+Alt+1",
+      "workspace": "ship"
     }
   ],
   "replies": [
@@ -59,6 +137,88 @@
       "hint": "mosaikctl workspaces lists them.",
       "message": "No workspace called \"x\".",
       "reply": "error"
+    },
+    {
+      "reply": "settings",
+      "settings": {
+        "frames": {
+          "show_frames": true,
+          "show_tags": true,
+          "style": {
+            "border": 2,
+            "gap": 8,
+            "tag_band": 28
+          }
+        },
+        "notices_shown": [],
+        "onboarding_done": false,
+        "rules": {
+          "learned": [],
+          "user": []
+        },
+        "snap": {
+          "enabled": true,
+          "invert_shift": false,
+          "near": 48
+        },
+        "start_with_windows": false,
+        "switcher_hotkey": "Win+Alt+Space",
+        "switching": {
+          "launch_missing": true,
+          "minimize_others": true
+        },
+        "tab_hiding": null,
+        "theme": "system",
+        "version": 1
+      }
+    },
+    {
+      "hotkey": "Ctrl+Alt+K",
+      "problem": "Ctrl+Alt is AltGr on many keyboards.",
+      "reply": "hotkey",
+      "warnings": [
+        "Many apps use Ctrl with a letter."
+      ]
+    },
+    {
+      "monitors": [
+        {
+          "bounds": {
+            "bottom": 2160,
+            "left": 0,
+            "right": 3840,
+            "top": 0
+          },
+          "dpi": 192,
+          "id": "m1",
+          "name": "DELL U2720Q",
+          "primary": true,
+          "scale_percent": 200,
+          "work_area": {
+            "bottom": 2112,
+            "left": 0,
+            "right": 3840,
+            "top": 0
+          }
+        }
+      ],
+      "name": "Ship the release",
+      "reply": "zones",
+      "workspace": "ship",
+      "zones": [
+        {
+          "area": {
+            "bottom": 1.0,
+            "left": 0.0,
+            "right": 0.6,
+            "top": 0.0
+          },
+          "color": "lapis",
+          "id": "z1",
+          "monitor": "m1",
+          "name": "Code"
+        }
+      ]
     }
   ]
 }
