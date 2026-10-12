@@ -1,0 +1,11 @@
+{
+  "about": "Mosaïk's identity in the Microsoft Store, reserved in Partner Center on 2026-10-11. These values are public (every package and the Store page carry them); the package manifest is built from them.",
+  "displayName": "Mosaïk",
+  "name": "Gimzdev.Mosak",
+  "publisher": "CN=AF4B965E-B792-4073-9A56-2ADAEDB3D991",
+  "publisherDisplayName": "Gimzdev",
+  "packageFamilyName": "Gimzdev.Mosak_yjd3d5zpwkx98",
+  "storeId": "9PHR0L7S1QVD",
+  "storePage": "https://apps.microsoft.com/detail/9PHR0L7S1QVD",
+  "submitBy": "2027-01-11"
+}

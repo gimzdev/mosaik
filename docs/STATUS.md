@@ -233,3 +233,6 @@ build; releases are signed by the Microsoft Store.
   Store's direct web installer (ADR 0008). The owner registers the Store developer account and
   verifies their identity; publishing each release stays their action.
 - 2026-10-11: Virtual Display Driver installed for the multi-monitor and mixed-DPI tests.
+- 2026-10-11: Store developer account "Gimzdev" registered; the name "Mosaïk" is reserved
+  (Store ID 9PHR0L7S1QVD, identity in `installer/msix/identity.json`). The first submission is
+  due by 2027-01-11 or the name is released.

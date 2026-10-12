@@ -28,7 +28,10 @@ Options:
 
 ## Decision
 
-- Mosaïk ships as an MSIX package on the Microsoft Store, published by "gimzdev".
+- Mosaïk ships as an MSIX package on the Microsoft Store, published by "Gimzdev". The name
+  "Mosaïk" was reserved on 2026-10-11 (Store ID `9PHR0L7S1QVD`, package name `Gimzdev.Mosak`;
+  all identity values in `installer/msix/identity.json`). A reserved name is kept only if the
+  app is submitted within three months: by 2027-01-11.
 - The Download button on mosaïk.com links to the Store's direct web installer (our button, no
   Store page, no script from Microsoft on the site).
 - Updates come from the Store. Mosaïk has no updater of its own, no update key and no update
