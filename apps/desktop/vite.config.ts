@@ -2,7 +2,8 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
-// Tauri serves the built files from disk in release builds and this dev server in `tauri dev`.
+// `npm run build` makes the files mosaik.exe embeds. `npm run dev` serves the interface in a
+// browser with a stand-in engine (src/mock.ts) for working on it without Windows.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   clearScreen: false,

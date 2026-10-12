@@ -27,7 +27,8 @@ mosaik-core.workspace = true
 mosaik-engine.workspace = true
 mosaik-ipc.workspace = true
 mosaik-win.workspace = true
-tauri = { version = "2.12.3", features = ["tray-icon"] }
+# custom-protocol: the interface is embedded in mosaik.exe (app.rs refuses to build without it).
+tauri = { version = "2.12.3", features = ["custom-protocol", "tray-icon"] }
 
 [target.'cfg(windows)'.dependencies.windows]
 workspace = true

@@ -31,6 +31,14 @@ const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Exit code after Mosaïk has told the user why it could not start (the watchdog stays quiet).
 const STARTUP_FAILURE_REPORTED: i32 = 2;
 
+// The interface is built into mosaik.exe. Without Tauri's `custom-protocol` feature a plain
+// `cargo build` makes a development build whose windows load a local dev server, which shows a
+// "can't reach this page" error on every other computer, so such a build must not compile.
+const _: () = assert!(
+    !tauri::is_dev(),
+    "mosaik.exe must embed its interface: enable Tauri's custom-protocol feature"
+);
+
 struct AppState {
     engine: Arc<Engine>,
     pipe: Mutex<Option<(std::thread::JoinHandle<()>, Stopper)>>,
