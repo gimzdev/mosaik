@@ -18,7 +18,7 @@ re-run before each release.
 | 6. Product UI | done: every page reviewed, tested in a browser and toured on Windows (names, Tab key, light and dark, smallest size); a Windows contrast theme and Narrator by ear are in the release checks | [Step 6](#step-6-product-ui) |
 | 7. Hardening | in progress: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
-| 1.1 | built; zones that follow a resize, Arrange and its undo, zones 4 px apart verified on Windows; the quick menu's hover by hand; tags back in title bars with no band above a window alone, checked by tests (on Windows: next run with the mouse) | [1.1](#11) |
+| 1.1 | built, tested and packaged on Windows (jobs 0094 and 0095: every test, the Store package); zones that follow a resize, Arrange and its undo, zones 4 px apart measured with the mouse; the quick menu's hover by hand; tags back in title bars measured by tests only so far (the next run with the mouse) | [1.1](#11) |
 
 ## Step 1: verify assumptions
 
@@ -704,12 +704,27 @@ process, its own windows, a scratch folder).
   once (format 4). Checked by tests: core 184 (`tag_cut`, the initial's room in a title bar, both
   migrations, failing before the change), the interface's 50 and 13 smoke tests in a browser;
   clippy clean for Windows. The site's desktops show it (screenshots at desktop and phone width).
-- **Left for the next run with the mouse** (the owner's PC was in use): `smart` (the line grabbed
-  by the edge facing it, now that zones are 4 px apart; the quick menu from the probe),
-  `workspace --drag`, `kinds` and `workspace --apps` with tags in title bars (a window with no
-  room stays at the top of its zone; Calculator wears its zone's initial), the engine's own tests
-  (debug builds fail to load the `tracing-attributes` macro on that PC: E0463, under
-  investigation), then the release build, the Store package and Mosaïk restarted on 1.1.
+- **On Windows without the mouse** (jobs 0094 and 0095, commits fbcc568 and 5f6bcce; the owner
+  was using the PC): every test passing, core 184, IPC 20, Win32 13 (real windows), overlays 5,
+  engine 2 (debug, once the library Smart App Control had refused was made again, and release);
+  clippy and rustfmt clean; the interface's type check, lint, format and 50 tests. The release
+  build (161 s) and the Store package (`Mosaik_1.1.0.0_x64.msix`, 2.72 MB). `mosaik.ps1 test`,
+  the owner's own path, passed in 69 s ("Every test passed."), and it found in the real Code
+  Integrity log the two files of this build Windows refused that day. `pack`: the one-file
+  `mosaik.ps1`, 236 files, checked file by file against the repository; it and `mosaik1.sh`
+  are beside the repository. Mosaïk 1.1 started on the new build (16:45; the owner had quit the
+  one before at 16:40, a clean exit in its log, no error reported to Windows), with the switcher
+  shortcut registered, the watchdog running and the note about tags back in title bars shown.
+- **A note said at every start** (found in job 0094): settings moved forward on load were not
+  written back, so the move, and its note, came again at each start until the user changed a
+  setting. A file moved forward or mended is now written back at once (a test failed before:
+  core 185).
+- **Left for the next run with the mouse**: `smart` (the line grabbed by the edge facing it, now
+  that zones are 4 px apart; the quick menu from the probe), `workspace --drag`, `kinds` and
+  `workspace --apps` with tags in title bars (a window with no room stays at the top of its
+  zone; Calculator wears its zone's initial; a tab group with no room for its strip sits below a
+  band), screenshots of a cramped title bar's initial; then the release build and package again
+  at the last commit.
 
 ## Owner decisions
 
