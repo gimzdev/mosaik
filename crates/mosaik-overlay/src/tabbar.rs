@@ -530,6 +530,12 @@ impl TabBar {
         self.window.hide();
     }
 
+    /// Hides the strip but keeps a press on it: its group's visible tab is being dragged by the
+    /// strip's band, and the strip still takes the mouse until the button goes up.
+    pub fn hide_keeping_press(&mut self) {
+        self.window.hide();
+    }
+
     fn release_press(&self) {
         let bar = self.window.hwnd().0 as isize;
         if CAPTURED.with(Cell::get) == Some(bar) {

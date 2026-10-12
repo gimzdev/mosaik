@@ -18,7 +18,7 @@ use mosaik_core::classify::{Refuse, Verdict, classify};
 use mosaik_core::geometry::{Insets, Point, Rect, scale_for_dpi};
 use mosaik_core::layout::{Place, TabGroupId};
 use mosaik_core::snap::{self, DragKind, LiveZone as SnapZone};
-use mosaik_core::window::WindowHandle;
+use mosaik_core::window::{WindowHandle, covers_monitor};
 use mosaik_core::zone::band_above;
 use mosaik_overlay::canvas::Canvas;
 use mosaik_overlay::frame::{Frame, FrameLook, Preview, TagPlace, ZoneView};
@@ -134,8 +134,12 @@ pub(crate) struct Watch {
     pub(crate) strip_broken: HashSet<TabGroupId>,
     /// A press on a tab chip.
     pub(crate) bar_drag: Option<BarDrag>,
-    /// A press on a window's band.
+    /// A press on a window's band, and the thread moving its window with the pointer.
     pub(crate) band_press: Option<BandPress>,
+    pub(crate) follower: Option<mover::Follower>,
+    /// Esc, held by Mosaïk while a press on a strip or a band lasts, so it cancels the drag and
+    /// does not reach the app in front, as with Windows' own move.
+    pub(crate) drag_esc: Option<mosaik_win::hotkey::Registration>,
     /// The strip shown over a single window's tag while another window is dragged onto it.
     drop_bar: Option<TabBar>,
     pub(crate) drag: Option<Drag>,
@@ -505,6 +509,16 @@ impl Engine {
         let (tag, tag_at, drop_area) = if tag {
             match self.tag_spot(h, g.frame, &zone.name, zone.dpi) {
                 TitleSpot::In(r) => (true, TagPlace::TitleBar(r), Some((r, BarPlace::TitleBar))),
+                // A window over its whole monitor is never moved below a band (`wants_band`): a
+                // tag above it would lie on its own title bar, so it wears its ring alone.
+                TitleSpot::Above
+                    if self
+                        .topology
+                        .as_ref()
+                        .is_some_and(|t| covers_monitor(g.frame, t.monitor_for_rect(g.frame).bounds)) =>
+                {
+                    (false, TagPlace::Above, None)
+                }
                 TitleSpot::Above => {
                     // With tags in title bars, a window just found to have no room is not below
                     // its band yet: the band it is about to sit below.
@@ -752,6 +766,24 @@ impl Engine {
         } else if self.watch.bar_drag.is_none() && self.watch.band_press.is_none() {
             self.kill_timer(timer::DRAG);
         }
+        self.hold_esc();
+    }
+
+    /// Holds Esc while a press on a strip or a band lasts, and lets it go after.
+    pub(crate) fn hold_esc(&mut self) {
+        let pressed = self.watch.bar_drag.is_some() || self.watch.band_press.is_some();
+        if !pressed {
+            self.watch.drag_esc = None;
+            return;
+        }
+        if self.watch.drag_esc.is_none() {
+            let esc = mosaik_core::hotkey::Key::from_vk(0x1B)
+                .map(|k| mosaik_core::hotkey::Hotkey::new(mosaik_core::hotkey::Modifiers::NONE, k));
+            // Taken by another app: Esc is still read from the keyboard (`bar_tick`).
+            self.watch.drag_esc = esc.and_then(|h| {
+                mosaik_win::hotkey::register(Some(self.window), crate::hotkeys::DRAG_ESC, h).ok()
+            });
+        }
     }
 
     /// The window whose band is the overlay window `bar`, if it is a band.
@@ -781,20 +813,36 @@ impl Engine {
         self.set_timer(timer::DRAG, DRAG_TICK_MS);
     }
 
+    /// Where the window's rectangle goes with the pointer at `at`: moved as the pointer moved,
+    /// but never off every screen. It is held above itself, so the pointer alone could take all
+    /// of it below the bottom of a screen, where nothing would be left to grab.
+    fn band_place(&self, p: &BandPress, at: Point) -> Point {
+        let frame = p.frame.offset(at.x - p.start.x, at.y - p.start.y);
+        let kept = self
+            .topology
+            .as_ref()
+            .map_or(frame, |t| mosaik_core::place::reachable(frame, t));
+        Point::new(
+            p.origin.x + kept.left - p.frame.left,
+            p.origin.y + kept.top - p.frame.top,
+        )
+    }
+
     /// The pointer moved with the button down on a band: past a few pixels, the window is
-    /// dragged as by its title bar (zones show, tags and strips take it as for any drag).
+    /// dragged as by its title bar (zones show, tags and strips take it as for any drag), moved
+    /// by a thread of its own so a slow app never holds up Mosaïk.
     pub(crate) fn band_move(&mut self, at: Point) {
         let Some(mut p) = self.watch.band_press else {
             return;
         };
-        let (dx, dy) = (at.x - p.start.x, at.y - p.start.y);
         if !p.moving {
             let dpi = self.topology.as_ref().map_or(96, |t| t.nearest_monitor(at).dpi);
-            if dx.abs().max(dy.abs()) <= scale_for_dpi(4, dpi) {
+            if (at.x - p.start.x).abs().max((at.y - p.start.y).abs()) <= scale_for_dpi(4, dpi) {
                 return;
             }
             p.moving = true;
             self.watch.band_press = Some(p);
+            self.watch.follower = mover::Follower::start(p.window);
             self.drag_start(p.window);
             let followed = self
                 .watch
@@ -811,22 +859,25 @@ impl Engine {
                 self.show_zone_preview(Stack::Below(p.window.0.cast_signed_isize()));
             }
         }
-        arrange::move_to(window::hwnd(p.window), p.origin.x + dx, p.origin.y + dy);
+        let to = self.band_place(&p, at);
+        if let Some(f) = &self.watch.follower {
+            f.to(to);
+        }
         self.drag_update();
     }
 
     /// The button went up on a band: a dragged window drops where it is, into a zone or onto a
-    /// tag as from any drag.
+    /// tag as from any drag, once its app has taken the last place.
     pub(crate) fn band_up(&mut self, at: Point) {
         let Some(p) = self.watch.band_press.take() else {
             return;
         };
         if p.moving {
-            arrange::move_to(
-                window::hwnd(p.window),
-                p.origin.x + at.x - p.start.x,
-                p.origin.y + at.y - p.start.y,
-            );
+            let to = self.band_place(&p, at);
+            if let Some(f) = self.watch.follower.take() {
+                f.to(to);
+                f.finish(mover::WAIT_ONE);
+            }
             self.drag_end(p.window);
         }
         if self.watch.drag.is_none() && self.watch.bar_drag.is_none() {
@@ -843,11 +894,18 @@ impl Engine {
         if !p.moving {
             return;
         }
-        arrange::move_to(window::hwnd(p.window), p.origin.x, p.origin.y);
-        self.watch.drag = None;
+        if let Some(f) = self.watch.follower.take() {
+            f.to(p.origin);
+            f.finish(mover::WAIT_ONE);
+        }
+        // The strip it was over loses its "Drop to add" slot.
+        let over = self.watch.drag.take().and_then(|d| d.tab_target);
         self.watch.preview.hide();
         self.watch.preview_visible = false;
         self.hide_drop_bar();
+        if let Some((onto, _)) = over {
+            self.refresh_frame(onto);
+        }
         if self.watch.moving == Some(p.window) {
             self.watch.moving = None;
         }
@@ -1077,6 +1135,7 @@ impl Engine {
         // A drag from a band ended another way (its button seen up by the drag timer).
         if self.watch.band_press.is_some_and(|p| p.window == h) {
             self.watch.band_press = None;
+            self.watch.follower = None;
         }
         if let Some((_, why)) = self.watch.refused.take_if(|(w, _)| *w == h) {
             self.tell_once("refused-drag", "Mosaïk cannot move this window", why.explain());

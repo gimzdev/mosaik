@@ -8,6 +8,8 @@ use windows::Win32::Foundation::HWND;
 
 /// The id of the switcher's hotkey in `WM_HOTKEY`.
 pub(crate) const SWITCHER: i32 = 1;
+/// Esc, held only while a press on a tab strip or a window's band lasts.
+pub(crate) const DRAG_ESC: i32 = 2;
 /// Workspaces' own hotkeys are numbered from here.
 pub(crate) const WORKSPACE_KEYS: i32 = 100;
 

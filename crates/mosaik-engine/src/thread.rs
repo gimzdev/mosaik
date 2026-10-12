@@ -85,6 +85,8 @@ struct Pending {
     ending: bool,
     /// Asked to close (an installer, `taskkill`): quit like "Quit Mosaïk".
     close: bool,
+    /// Esc during a press on a tab strip or a window's band.
+    drag_esc: bool,
 }
 
 impl Pending {
@@ -97,6 +99,7 @@ impl Pending {
             || self.displays
             || self.ending
             || self.close
+            || self.drag_esc
     }
 
     fn merge(&mut self, o: Pending) {
@@ -110,6 +113,7 @@ impl Pending {
         self.displays |= o.displays;
         self.ending |= o.ending;
         self.close |= o.close;
+        self.drag_esc |= o.drag_esc;
     }
 }
 
@@ -124,6 +128,7 @@ thread_local! {
         displays: false,
         ending: false,
         close: false,
+        drag_esc: false,
     }) };
 }
 
@@ -351,6 +356,10 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             switcher: true,
             ..Pending::default()
         },
+        WM_HOTKEY if i32::try_from(wparam.0) == Ok(hotkeys::DRAG_ESC) => Pending {
+            drag_esc: true,
+            ..Pending::default()
+        },
         WM_HOTKEY if i32::try_from(wparam.0).is_ok_and(|id| id >= hotkeys::WORKSPACE_KEYS) => Pending {
             workspace_key: i32::try_from(wparam.0).unwrap_or(0),
             ..Pending::default()
@@ -454,6 +463,9 @@ impl Engine {
         if todo.timers & timer_bit(timer::TOPOLOGY) != 0 {
             self.kill_timer(timer::TOPOLOGY);
             self.displays_changed();
+        }
+        if todo.drag_esc {
+            self.cancel_presses();
         }
         if todo.switcher {
             self.show_switcher(Instant::now());

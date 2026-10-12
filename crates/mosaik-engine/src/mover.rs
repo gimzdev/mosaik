@@ -9,9 +9,9 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use mosaik_core::geometry::Rect;
+use mosaik_core::geometry::{Point, Rect};
 use mosaik_core::window::WindowHandle;
-use mosaik_win::{place, window};
+use mosaik_win::{arrange, place, window};
 use windows::Win32::Foundation::WAIT_TIMEOUT;
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, PostQuitMessage, QS_ALLINPUT,
@@ -96,6 +96,65 @@ pub(crate) fn move_all(moves: &[(WindowHandle, To)], wait: Duration) -> Vec<Outc
         }
     }
     done
+}
+
+/// One window following the pointer (dragged by the band Mosaïk draws above it), moved on a
+/// thread of its own: the engine never waits for the app, and an app slow to move gets only the
+/// latest place. The moves are synchronous on that thread, so they land in order, and before a
+/// move asked later from another thread (the drop into a zone).
+pub(crate) struct Follower {
+    places: Option<mpsc::Sender<Point>>,
+    done: mpsc::Receiver<()>,
+}
+
+impl Follower {
+    /// `None` when no thread could be started: the window then stays where it is until the drop.
+    pub(crate) fn start(window: WindowHandle) -> Option<Self> {
+        let (places, wanted) = mpsc::channel::<Point>();
+        let (finished, done) = mpsc::channel::<()>();
+        std::thread::Builder::new()
+            .name("mosaik-follow".into())
+            .spawn(move || {
+                let hwnd = window::hwnd(window);
+                while let Ok(mut at) = wanted.recv() {
+                    // Only the latest place matters.
+                    while let Ok(later) = wanted.try_recv() {
+                        at = later;
+                    }
+                    arrange::move_to(hwnd, at.x, at.y);
+                }
+                let _ = finished.send(());
+            })
+            .ok()?;
+        Some(Self {
+            places: Some(places),
+            done,
+        })
+    }
+
+    /// The window's rectangle (invisible borders included) goes to start at `at`.
+    pub(crate) fn to(&self, at: Point) {
+        if let Some(places) = &self.places {
+            let _ = places.send(at);
+        }
+    }
+
+    /// No more places: waits at most `wait`, handling this thread's messages, for the app to
+    /// take the last one. Returns whether it did.
+    pub(crate) fn finish(mut self, wait: Duration) -> bool {
+        self.places = None;
+        let deadline = Instant::now() + wait;
+        loop {
+            match self.done.try_recv() {
+                Ok(()) | Err(mpsc::TryRecvError::Disconnected) => return true,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            pump_for(5);
+        }
+    }
 }
 
 /// Handles this thread's messages for up to `ms` milliseconds. Messages for the engine's own

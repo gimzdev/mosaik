@@ -102,6 +102,14 @@ fn chip_of(strip: &TabStripState, w: HWND) -> Option<Point> {
         .map(|t| t.chip.center())
 }
 
+/// A point of a strip drawn in a band, right of its last chip: the band itself.
+fn off_chips(strip: &TabStripState) -> Option<Point> {
+    let last = strip.tabs.iter().map(|t| t.chip.right).max()?;
+    let y = strip.tabs.first()?.chip.center().y;
+    let x = (last + 24).min(strip.rect.right - 8);
+    (x > last).then_some(Point::new(x, y))
+}
+
 fn click(at: Point, expected: HWND) -> Result<(), String> {
     drag_path(&[at, at], expected)
 }
@@ -575,7 +583,33 @@ fn self_moved_as(
             "error_px": error_in(&st, w, t.group_zone, t),
             "kept_size": kept_size(&st, w, t.group_zone, t),
         });
+        // 2b. The group, by its strip's band off the chips (the band works as the visible
+        // tab's title bar): into the zone, then back to its own.
+        if strip.is_some() {
+            let back = Point::new(
+                t.group_zone.center().x,
+                t.group_zone.top + t.group_zone.height() * 2 / 3,
+            );
+            let mut moves = Vec::new();
+            for (to, zone) in [(t.zone_point, t.zone), (back, t.group_zone)] {
+                let st = settled(engine)?;
+                let Some(off_chips) = strip_with(&st, w).and_then(|s| off_chips(&s)) else {
+                    moves.push(json!({ "failed": "no band beside the chips" }));
+                    break;
+                };
+                drag_path(&[off_chips, to], w)?;
+                let st = settled(engine)?;
+                moves.push(json!({
+                    "tabs": strip_with(&st, w).map_or(0, |s| s.tabs.len()),
+                    "error_px": error_in(&st, w, zone, t),
+                    "kept_size": kept_size(&st, w, zone, t),
+                }));
+            }
+            out["group_by_band"] = json!(moves);
+        }
         // 3. Its tab pulled out into the zone.
+        let st = settled(engine)?;
+        let strip = strip_with(&st, w);
         if let Some(chip) = strip.as_ref().and_then(|s| chip_of(s, w)) {
             drag_path(&[chip, t.zone_point], w)?;
             let st = settled(engine)?;

@@ -560,8 +560,18 @@ impl Engine {
     }
 
     pub(crate) fn hide_bar(&mut self, group: &TabGroupId) {
+        // Its visible tab dragged by the strip's band: the strip keeps the press it started
+        // with, hidden or not, until the button goes up.
+        let dragged_by_it = self
+            .watch
+            .band_press
+            .is_some_and(|p| p.moving && self.group_of_window(p.window).is_some_and(|g| &g.id == group));
         if let Some(b) = self.watch.bars.get_mut(group) {
-            b.hide();
+            if dragged_by_it {
+                b.hide_keeping_press();
+            } else {
+                b.hide();
+            }
         }
     }
 
@@ -1124,15 +1134,24 @@ impl Engine {
                 }
             }
         }
+        self.hold_esc();
     }
 
     /// On the drag timer: Esc ends a press on a strip, or on a band (its window goes back).
+    /// Esc is held by Mosaïk meanwhile (`hold_esc`); this reads it when another app holds it.
     pub(crate) fn bar_tick(&mut self) {
         if (self.watch.bar_drag.is_some() || self.watch.band_press.is_some()) && esc_down() {
-            tabbar::cancel_press();
-            self.end_bar_drag();
-            self.band_cancel();
+            self.cancel_presses();
         }
+    }
+
+    /// Esc during a press on a strip or a band: the press ends, and a window dragged by its band
+    /// goes back.
+    pub(crate) fn cancel_presses(&mut self) {
+        tabbar::cancel_press();
+        self.end_bar_drag();
+        self.band_cancel();
+        self.hold_esc();
     }
 
     /// Ends a press on a strip without doing anything more (a reorder made so far is kept).

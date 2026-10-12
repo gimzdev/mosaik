@@ -52,11 +52,14 @@ Vampire Survivors, idle clickers". Three kinds of windows were left out or misha
   (`zone::band_above`).
 - **A band works as its window's title bar.** Solid, it looks like part of the window, so a
   press on it is a press on the window's title bar: the window comes to the front, and dragged,
-  it follows the pointer, moved by Mosaïk, with the zones showing and tags and strips taking it
-  as for any drag (Esc puts it back). The same goes for a strip's band between its chips, and
-  for the zone's tag at a strip's start. Windows' own move loop cannot be started from another
-  app's window: it reads the button from its own thread's input, which never saw the press
-  (job 0080: posted `SC_MOVE`, nothing moved).
+  it follows the pointer, with the zones showing and tags and strips taking it as for any drag.
+  Mosaïk moves it, from a thread of its own (`mover::Follower`), so an app slow to move never
+  holds Mosaïk up; it never takes the window off every screen (it is held above itself, so the
+  pointer alone could); Esc puts it back, and Mosaïk holds Esc while the button is down so it
+  does not reach the app, as Windows' own move does. The same goes for a strip's band beside
+  its chips, which moves the whole group, and for the zone's tag at a strip's start. Windows'
+  own move loop cannot be started from another app's window: it reads the button from its own
+  thread's input, which never saw the press (job 0080: posted `SC_MOVE`, nothing moved).
 - **When zones overlap**, a window belongs to the one whose middle is nearest its own, then the
   smallest (`workspace::holding`).
 

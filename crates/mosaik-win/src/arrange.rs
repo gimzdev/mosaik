@@ -62,8 +62,9 @@ pub fn focus(hwnd: HWND) -> bool {
 
 /// Moves a window so its window rectangle starts at (`x`, `y`), keeping its size, without
 /// activating it: the window following the pointer while the user drags it by the band Mosaïk
-/// draws above it. Synchronous, so moves land in order and before the drop that follows; an app
-/// that is not responding is not waited for (it does not move, as from its own title bar).
+/// draws above it. Synchronous, so moves land in order and before the drop that follows: call
+/// it from a thread of its own, never Mosaïk's engine thread (`mover::Follower`). An app Windows
+/// reports as not responding is not asked.
 pub fn move_to(hwnd: HWND, x: i32, y: i32) {
     if is_hung(hwnd) {
         return;
