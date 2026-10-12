@@ -173,6 +173,14 @@ signing level requirements") and let the new `mosaik.exe`, the watchdog and a de
 `mosaikctl.exe` run: unsigned files are judged one by one. Test jobs fall back to the debug
 build; releases are signed by the Microsoft Store.
 
+Each build is judged again, and a verdict mostly sticks to the file: in jobs 0079 to 0081 it
+blocked six test programs, then the `mosaik-core` and `mosaikctl` test programs of one commit
+four times out of four, a minute apart ("An Application Control policy has blocked this file",
+the tests never ran), while `mosaik-win`'s ran on a second try. Jobs now run each package's
+tests on their own and try a blocked program again; a test program blocked for good is
+reported as such, never as passing, and its tests are counted from the last run that executed
+them (on Windows, or on Linux for `mosaik-core`).
+
 ### Still to do in step 1
 
 - Two monitors with different scale factors and hotplug, with virtual displays: the driver is
@@ -381,7 +389,14 @@ game in full screen                    left alone ("pending: full screen"); the 
 ```
 
 "0 px" for a window that kept its size is its distance from the middle of its place
-(`fit_size`); 306, 302 and 318 px from the group's edges are what the middle is for those sizes.
+(`fit_size`); 306, 302 and 318 px from the group's edges are what the middle is for those sizes
+(job 0080 measured it directly: kept, 0 px from the middle of the group's place).
+
+Dragged by its band (job 0082, after the review below): the borderless fixed-size game that
+moves itself, pressed on its band and dragged into the editor's zone, landed there at its own
+size, in the middle, 0 px, below a band again; Calculator, by its band, into the editor's zone,
+0 px. The window follows the pointer, moved by Mosaïk; a posted `SC_MOVE` (job 0080) had moved
+nothing.
 
 - Steam's library window (job 0078): class `SDL_app` of `steamwebhelper.exe`, a popup with a
   caption, a resize frame and a minimise button, in Alt+Tab: Mosaïk manages it now (it took it
