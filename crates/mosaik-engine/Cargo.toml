@@ -16,6 +16,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+mosaik-overlay.workspace = true
 mosaik-win.workspace = true
 
 [target.'cfg(windows)'.dependencies.windows]

@@ -157,6 +157,7 @@ pub fn run(args: Vec<String>) -> i32 {
         app_version: env!("CARGO_PKG_VERSION").into(),
         own_pids,
         watchdog,
+        manage_only: None,
     };
     let built = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![engine_request, take_notices])

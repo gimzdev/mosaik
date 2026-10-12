@@ -9,6 +9,8 @@
 //! mosaik-probe watchdog   window recovery after the main process is killed
 //! mosaik-probe hotkey     the switcher shortcut on the installed keyboard layouts (presses keys)
 //! mosaik-probe idle       CPU and memory of an engine-like loop over 60 s
+//! mosaik-probe workspace  save, switch and reopen with the real engine (--drag: drag to snap,
+//!                         moves the mouse)
 //! ```
 //!
 //! The probes only touch windows they open themselves, and close them afterwards.
@@ -46,6 +48,8 @@ mod report;
 mod state;
 #[cfg(windows)]
 mod watchdog;
+#[cfg(windows)]
+mod workspace;
 
 #[cfg(windows)]
 fn main() {
@@ -77,6 +81,7 @@ fn main() {
         "hotkey" => hotkey::run(),
         "idle" => idle::run(&args),
         "dummy" => dummy::run(&args),
+        "workspace" => workspace::run(&args),
         _ => Err(format!("unknown command {command}")),
     };
     match result {

@@ -3,11 +3,20 @@
 //! DWM border colours, which only exist on Windows 11), so Windows 10 and 11 look the same, and
 //! they never take focus or clicks they do not need.
 //!
-//! Drawing is plain CPU rasterisation into a premultiplied-alpha bitmap: overlays are simple
-//! shapes, rendered once per size and cached, so moving a preview costs one
-//! `UpdateLayeredWindow` call.
+//! Overlays are drawn with Direct2D and DirectWrite (software rendering: they are small) into
+//! premultiplied bitmaps, once per size, so moving one costs a single window move. Rings are
+//! four thin windows rather than one large transparent one, so a frame around a big window
+//! costs kilobytes, not megabytes.
 
 pub mod paint;
 
 #[cfg(windows)]
+pub mod canvas;
+#[cfg(windows)]
+pub mod frame;
+#[cfg(windows)]
 pub mod layered;
+#[cfg(windows)]
+pub mod shapes;
+#[cfg(windows)]
+pub mod surface;

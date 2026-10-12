@@ -9,7 +9,7 @@ use windows::Win32::Graphics::Direct2D::Common::{
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1_RENDER_TARGET_USAGE_NONE,
     D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1DCRenderTarget,
     ID2D1Factory, ID2D1SolidColorBrush,
 };
@@ -220,7 +220,7 @@ impl Painter {
         unsafe {
             let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let props = D2D1_RENDER_TARGET_PROPERTIES {
-                r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
                 pixelFormat: D2D1_PIXEL_FORMAT {
                     format: DXGI_FORMAT_B8G8R8A8_UNORM,
                     alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
@@ -356,23 +356,33 @@ impl Painter {
             let footer = size::FOOTER * s;
             // Header: what is typed, or what to do.
             let filter = model.filter();
-            let (label, color) = if filter.is_empty() {
+            let naming = model.naming().is_some();
+            let (label, color) = if naming {
+                ("Save this layout as", theme.muted)
+            } else if filter.is_empty() {
                 ("Switch workspace", theme.muted)
             } else {
                 (filter, theme.text)
             };
             self.text(label, &self.header, rect(16.0 * s, 0.0, w - 140.0 * s, header), color);
-            if !filter.is_empty() {
+            if !filter.is_empty() && !naming {
                 // A caret after the typed text, so it reads as a field.
                 let caret_x = 16.0 * s + self.measure(filter, &self.header) + 2.0 * s;
                 self.fill(rect(caret_x, header / 2.0 - 9.0 * s, caret_x + 1.5 * s, header / 2.0 + 9.0 * s), theme.accent);
             }
-            self.keys(shortcut.split('+'), w - 16.0 * s, header / 2.0, theme, false);
+            if !naming {
+                self.keys(shortcut.split('+'), w - 16.0 * s, header / 2.0, theme, false);
+            }
             self.fill(rect(0.0, header - s, w, header), theme.line);
             // Footer.
             self.fill(rect(0.0, h - footer, w, h - footer + s), theme.line);
             let mut x = 16.0 * s;
-            for (key, what) in [("Enter", "open"), ("S", "save current layout"), ("Esc", "close")] {
+            let hints: &[(&str, &str)] = if naming {
+                &[("Enter", "save"), ("Esc", "back")]
+            } else {
+                &[("Enter", "open"), ("S", "save current layout"), ("Esc", "close")]
+            };
+            for &(key, what) in hints {
                 let kw = self.measure(key, &self.title) * 0.8 + 2.0 * s;
                 self.text(key, &self.small, rect(x, h - footer, x + kw, h), theme.text);
                 x += kw + 4.0 * s;
@@ -380,7 +390,7 @@ impl Painter {
                 self.text(what, &self.small, rect(x, h - footer, x + ww, h), theme.muted);
                 x += ww + 18.0 * s;
             }
-            if model.is_empty() || model.shown().is_empty() {
+            if !naming && (model.is_empty() || model.shown().is_empty()) {
                 let (title, body) = if model.is_empty() {
                     (
                         "No workspaces yet",
@@ -534,11 +544,76 @@ impl Painter {
         })
     }
 
+    /// The name field shown while saving: the name (highlighted while it is the untouched
+    /// suggestion), a caret, and what saving will do.
+    pub fn naming_row(
+        &self,
+        hdc: HDC,
+        area: RECT,
+        theme: &Theme,
+        name: &str,
+        selected: bool,
+        replaces: Option<&str>,
+    ) -> windows::core::Result<()> {
+        let s = self.scale();
+        let w = (area.right - area.left) as f32;
+        let h = (area.bottom - area.top) as f32;
+        self.on(hdc, area, || {
+            // SAFETY: inside BeginDraw on the bound target.
+            unsafe { self.target.Clear(Some(&theme.panel.d2d())) };
+            let field = rect(4.0 * s, 2.0 * s, w - 4.0 * s, h - 2.0 * s);
+            self.fill_round(field, 10.0 * s, theme.selection);
+            self.stroke_round(field, 10.0 * s, theme.accent, 1.5 * s);
+            let x = 16.0 * s;
+            let top = rect(x, h / 2.0 - 20.0 * s, w - 16.0 * s, h / 2.0 + 2.0 * s);
+            let text_w = self.measure(name, &self.title);
+            if selected && !name.is_empty() {
+                let mut highlight = theme.accent;
+                highlight.3 = if theme.high_contrast { 1.0 } else { 0.28 };
+                self.fill_round(
+                    rect(
+                        x - 2.0 * s,
+                        top.top + 1.0 * s,
+                        x + text_w + 2.0 * s,
+                        top.bottom - 1.0 * s,
+                    ),
+                    3.0 * s,
+                    highlight,
+                );
+            }
+            let ink = if selected && theme.high_contrast {
+                theme.selection_text
+            } else {
+                theme.text
+            };
+            self.text(name, &self.title, top, ink);
+            if !selected {
+                let caret = x + text_w + 1.0 * s;
+                self.fill(
+                    rect(caret, top.top + 2.0 * s, caret + 1.5 * s, top.bottom - 2.0 * s),
+                    theme.accent,
+                );
+            }
+            let note = match replaces {
+                Some(existing) => {
+                    format!("Updates \u{201c}{existing}\u{201d} with the windows on screen now")
+                }
+                None => "A new workspace with the windows on screen now".to_owned(),
+            };
+            self.text(
+                &note,
+                &self.subtitle,
+                rect(x, h / 2.0 + 2.0 * s, w - 16.0 * s, h / 2.0 + 20.0 * s),
+                theme.muted,
+            );
+        })
+    }
+
     /// Recreates the render target and brush after Direct2D reports a lost device (a driver
     /// update or a GPU reset), so the next paint works again.
     pub fn recreate(&mut self) -> windows::core::Result<()> {
         let props = D2D1_RENDER_TARGET_PROPERTIES {
-            r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
             pixelFormat: D2D1_PIXEL_FORMAT {
                 format: DXGI_FORMAT_B8G8R8A8_UNORM,
                 alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,

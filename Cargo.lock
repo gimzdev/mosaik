@@ -1854,6 +1854,7 @@ version = "0.1.0"
 dependencies = [
  "mosaik-core",
  "mosaik-ipc",
+ "mosaik-overlay",
  "mosaik-win",
  "serde_json",
  "thiserror 2.0.21",
@@ -1887,6 +1888,8 @@ name = "mosaik-probe"
 version = "0.1.0"
 dependencies = [
  "mosaik-core",
+ "mosaik-engine",
+ "mosaik-ipc",
  "mosaik-overlay",
  "mosaik-win",
  "serde_json",

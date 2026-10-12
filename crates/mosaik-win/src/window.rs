@@ -6,7 +6,7 @@ use std::ffi::c_void;
 
 use mosaik_core::geometry::Rect;
 use mosaik_core::window::{Cloak, Elevation, WindowFacts, WindowHandle};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT, WAIT_OBJECT_0};
 use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
@@ -17,7 +17,7 @@ use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW, WaitForSingleObject,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
@@ -89,6 +89,48 @@ pub fn frame_rect(hwnd: HWND) -> Option<Rect> {
     }
 }
 
+/// Where a window is and whether it is on screen: the few facts frames need on every move,
+/// read without the heavier lookups of [`Scanner::facts`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Geometry {
+    pub frame: Rect,
+    pub visible: bool,
+    pub minimized: bool,
+    pub maximized: bool,
+    pub cloaked: bool,
+    pub dpi: u32,
+}
+
+impl Geometry {
+    /// Visible, not minimised, maximised or cloaked: a window that can wear a frame.
+    pub fn framable(&self) -> bool {
+        self.visible && !self.minimized && !self.maximized && !self.cloaked
+    }
+}
+
+pub fn geometry(hwnd: HWND) -> Option<Geometry> {
+    if !exists(hwnd) {
+        return None;
+    }
+    // SAFETY: read-only queries on a window that existed a moment ago.
+    let (visible, minimized, maximized, dpi) = unsafe {
+        (
+            IsWindowVisible(hwnd).as_bool(),
+            IsIconic(hwnd).as_bool(),
+            IsZoomed(hwnd).as_bool(),
+            GetDpiForWindow(hwnd),
+        )
+    };
+    Some(Geometry {
+        frame: frame_rect(hwnd)?,
+        visible,
+        minimized,
+        maximized,
+        cloaked: cloak(hwnd) != Cloak::None,
+        dpi,
+    })
+}
+
 pub fn cloak(hwnd: HWND) -> Cloak {
     let mut v = 0u32;
     // SAFETY: the attribute is a DWORD and the buffer is one u32.
@@ -148,11 +190,39 @@ fn style_bits(v: isize) -> u32 {
     v as u32
 }
 
-/// Process details that do not change for the life of a process, cached per scan.
+/// Process details that do not change for the life of a process.
 #[derive(Clone)]
 struct ProcessInfo {
     exe: Option<String>,
+    /// The full path of the program file.
+    path: Option<String>,
     elevation: Elevation,
+}
+
+/// A cached process. The handle is kept open so Windows cannot give its id to a new process
+/// while the entry is in use; once the process has exited, the entry is dropped.
+struct Cached {
+    handle: Option<HANDLE>,
+    info: ProcessInfo,
+}
+
+impl Cached {
+    fn exited(&self) -> bool {
+        self.handle.is_none_or(|h| {
+            // SAFETY: a process handle owned by this entry, opened with SYNCHRONIZE.
+            let state = unsafe { WaitForSingleObject(h, 0) };
+            state == WAIT_OBJECT_0
+        })
+    }
+}
+
+impl Drop for Cached {
+    fn drop(&mut self) {
+        if let Some(h) = self.handle.take() {
+            // SAFETY: owned by this entry and closed once.
+            let _ = unsafe { CloseHandle(h) };
+        }
+    }
 }
 
 /// The integrity level (as the RID of the mandatory label SID: 0x2000 medium, 0x3000 high).
@@ -188,18 +258,32 @@ fn integrity(process: HANDLE) -> Option<u32> {
     }
 }
 
-fn process_info(pid: u32, own_integrity: Option<u32>) -> ProcessInfo {
-    // SAFETY: OpenProcess with query-limited rights; the handle is closed below.
-    let Ok(h) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else {
-        return ProcessInfo {
-            exe: None,
-            elevation: Elevation::Unknown,
+fn process_info(pid: u32, own_integrity: Option<u32>) -> Cached {
+    // SAFETY: OpenProcess with query-limited rights (and SYNCHRONIZE, to notice its exit); the
+    // handle is owned by the returned entry.
+    let opened = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            false,
+            pid,
+        )
+    }
+    // SAFETY: as above, without SYNCHRONIZE for processes that refuse it.
+    .or_else(|_| unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) });
+    let Ok(h) = opened else {
+        return Cached {
+            handle: None,
+            info: ProcessInfo {
+                exe: None,
+                path: None,
+                elevation: Elevation::Unknown,
+            },
         };
     };
     let mut buf = [0u16; 1024];
     let mut len = 1024u32;
     // SAFETY: the buffer holds `len` UTF-16 units; `len` receives the length written.
-    let exe = unsafe {
+    let path = unsafe {
         QueryFullProcessImageNameW(
             h,
             PROCESS_NAME_WIN32,
@@ -208,18 +292,19 @@ fn process_info(pid: u32, own_integrity: Option<u32>) -> ProcessInfo {
         )
     }
     .ok()
-    .map(|()| {
-        let path = from_wide(&buf[..len as usize]);
-        path.rsplit('\\').next().unwrap_or(&path).to_lowercase()
-    });
+    .map(|()| from_wide(&buf[..len as usize]));
+    let exe = path
+        .as_deref()
+        .map(|p| p.rsplit('\\').next().unwrap_or(p).to_lowercase());
     let elevation = match (integrity(h), own_integrity) {
         (Some(theirs), Some(ours)) if theirs > ours => Elevation::Higher,
         (Some(_), Some(_)) => Elevation::Same,
         _ => Elevation::Unknown,
     };
-    // SAFETY: `h` was opened above and is closed once.
-    let _ = unsafe { CloseHandle(h) };
-    ProcessInfo { exe, elevation }
+    Cached {
+        handle: Some(h),
+        info: ProcessInfo { exe, path, elevation },
+    }
 }
 
 /// The Application User Model ID a window declares (packaged apps, and apps that set one).
@@ -237,11 +322,11 @@ pub fn aumid(hwnd: HWND) -> Option<String> {
     }
 }
 
-/// Gathers facts about windows; caches per-process details for the life of the scanner.
+/// Gathers facts about windows; caches per-process details while each process runs.
 pub struct Scanner {
     own_pid: u32,
     own_integrity: Option<u32>,
-    processes: HashMap<u32, ProcessInfo>,
+    processes: HashMap<u32, Cached>,
     /// Extra process ids that count as Mosaïk's own (the watchdog, the UI's WebView2).
     pub own_pids: Vec<u32>,
 }
@@ -272,12 +357,7 @@ impl Scanner {
             return None;
         }
         let pid = pid(hwnd);
-        let own_integrity = self.own_integrity;
-        let info = self
-            .processes
-            .entry(pid)
-            .or_insert_with(|| process_info(pid, own_integrity))
-            .clone();
+        let info = self.process(pid);
         // SAFETY: style reads on a window that existed a moment ago; a vanished window reads 0.
         let (style, ex) = unsafe {
             (
@@ -324,8 +404,27 @@ impl Scanner {
         })
     }
 
-    /// Facts about every top-level window, front to back.
+    fn process(&mut self, pid: u32) -> ProcessInfo {
+        if self.processes.get(&pid).is_some_and(Cached::exited) {
+            self.processes.remove(&pid);
+        }
+        let own_integrity = self.own_integrity;
+        self.processes
+            .entry(pid)
+            .or_insert_with(|| process_info(pid, own_integrity))
+            .info
+            .clone()
+    }
+
+    /// The full path of a process's program file.
+    pub fn process_path(&mut self, pid: u32) -> Option<String> {
+        self.process(pid).path
+    }
+
+    /// Facts about every top-level window, front to back. Processes that have exited are
+    /// forgotten.
     pub fn scan(&mut self) -> Vec<WindowFacts> {
+        self.processes.retain(|_, c| !c.exited());
         top_level().into_iter().filter_map(|h| self.facts(h)).collect()
     }
 }

@@ -14,7 +14,9 @@ pub mod server;
 mod state;
 mod switcher;
 mod thread;
+mod watch;
 pub mod watchdog;
+mod workspace;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -38,6 +40,9 @@ pub struct Config {
     pub own_pids: Vec<u32>,
     /// The watchdog is running. Without it Mosaïk hides nothing (ADR 0006).
     pub watchdog: bool,
+    /// For probes and tests: manage only the windows of these processes, so a test run never
+    /// touches the user's own windows. `None` in the app.
+    pub manage_only: Option<Vec<u32>>,
 }
 
 /// Something the interface has to do.

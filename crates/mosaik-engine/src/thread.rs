@@ -1,9 +1,13 @@
 //! The engine thread: its window, its messages and the commands it answers.
 //!
-//! Wake-ups, the hotkey and timers are handled in the window procedure, not only in the loop
-//! below, so they are not lost when a modal loop (a COM call into Explorer, a message box) pumps
-//! messages in the middle of other work. The procedure can be re-entered from such a loop; a
-//! re-entered call only records what arrived, and the outer call handles it when it is done.
+//! Wake-ups, window events, the hotkey and timers are handled in the window procedure, not only
+//! in the loop below, so they are not lost when a modal loop (a COM call into Explorer, a message
+//! box) pumps messages in the middle of other work. The procedure can be re-entered from such a
+//! loop; a re-entered call only records what arrived, and the outer call handles it when it is
+//! done.
+//!
+//! The engine's window is a hidden top-level window (not a message-only one) so it also gets the
+//! messages Windows broadcasts: display changes, work-area changes, resume from sleep, sign-out.
 
 use std::cell::{Cell, RefCell};
 use std::sync::mpsc::{Receiver, Sender};
@@ -14,48 +18,116 @@ use mosaik_core::journal::Journal;
 use mosaik_core::settings::Settings;
 use mosaik_core::store::{Store, WorkspacesFile};
 use mosaik_core::switcher::Entry;
+use mosaik_core::topology::Topology;
 use mosaik_ipc::protocol::{Command, ErrorCode, HotkeyState, Reply, WorkspaceSummary};
+use mosaik_win::apps::Apps;
 use mosaik_win::own::{WindowClass, destroy};
 use mosaik_win::rescue::Report;
 use mosaik_win::window::Scanner;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, DispatchMessageW, GetMessageW, HWND_MESSAGE, KillTimer, MSG, PostQuitMessage, SetTimer,
-    TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_HOTKEY, WM_TIMER,
+    DefWindowProcW, DispatchMessageW, GetMessageW, KillTimer, MSG, PostQuitMessage, SetTimer,
+    TranslateMessage, WM_DISPLAYCHANGE, WM_ENDSESSION, WM_HOTKEY, WM_POWERBROADCAST, WM_QUERYENDSESSION,
+    WM_SETTINGCHANGE, WM_TIMER, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
 use crate::hotkeys::{self, Registered};
 use crate::state;
+use crate::watch::Watch;
+use crate::workspace::Active;
 use crate::{Config, Message, UiEvent, UiSink, WM_WAKE, switcher};
 
-/// Timer: tell the app to exit, a moment after answering `quit` so the answer gets out first.
-const EXIT_TIMER: usize = 1;
+/// Posted by the window-event hooks when events are waiting.
+pub(crate) const WM_EVENTS: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
+
+/// Timers on the engine's window.
+pub(crate) mod timer {
+    /// Tell the app to exit, a moment after answering `quit` so the answer gets out first.
+    pub const EXIT: usize = 1;
+    /// Check the windows a switch moved once their apps have settled.
+    pub const SETTLE: usize = 2;
+    /// While a window is dragged: follow the pointer and the Shift key.
+    pub const DRAG: usize = 3;
+    /// A display or work-area change, once Windows has finished making it.
+    pub const TOPOLOGY: usize = 4;
+    /// Apps started for a workspace: give up on the ones that never showed a window.
+    pub const LAUNCH: usize = 5;
+}
+
+/// Shift a timer id into the `Pending::timers` bit set.
+fn timer_bit(id: usize) -> u32 {
+    u32::try_from(id)
+        .ok()
+        .and_then(|i| 1u32.checked_shl(i))
+        .unwrap_or(0)
+}
 
 /// What arrived while the engine was busy, for the outermost handler to deal with.
 #[derive(Clone, Copy, Default)]
 struct Pending {
     wake: bool,
+    events: bool,
     switcher: bool,
-    exit: bool,
+    /// Bit n: timer n fired.
+    timers: u32,
+    /// Monitors or work areas changed (debounced by `timer::TOPOLOGY`).
+    displays: bool,
+    /// Windows is signing out or shutting down.
+    ending: bool,
+}
+
+impl Pending {
+    fn any(self) -> bool {
+        self.wake || self.events || self.switcher || self.timers != 0 || self.displays || self.ending
+    }
+
+    fn merge(&mut self, o: Pending) {
+        self.wake |= o.wake;
+        self.events |= o.events;
+        self.switcher |= o.switcher;
+        self.timers |= o.timers;
+        self.displays |= o.displays;
+        self.ending |= o.ending;
+    }
 }
 
 thread_local! {
     static ENGINE: RefCell<Option<Engine>> = const { RefCell::new(None) };
-    static PENDING: Cell<Pending> = const { Cell::new(Pending { wake: false, switcher: false, exit: false }) };
+    static PENDING: Cell<Pending> = const { Cell::new(Pending {
+        wake: false,
+        events: false,
+        switcher: false,
+        timers: 0,
+        displays: false,
+        ending: false,
+    }) };
 }
 
-struct Engine {
-    config: Config,
-    store: Store,
-    settings: Settings,
-    ui: UiSink,
-    window: HWND,
+pub(crate) struct Engine {
+    pub(crate) config: Config,
+    pub(crate) store: Store,
+    pub(crate) settings: Settings,
+    pub(crate) ui: UiSink,
+    pub(crate) window: HWND,
     messages: Receiver<Message>,
     hotkey: Option<Registered>,
-    scanner: Scanner,
-    /// `Stop` arrived: windows are back, the loop is ending, requests get "stopped".
+    pub(crate) scanner: Scanner,
+    pub(crate) apps: Apps,
+    /// `Stop` arrived (or Windows is ending): windows are back, requests get "stopped".
     stopped: bool,
+    /// The monitors as of the last display change.
+    pub(crate) topology: Option<Topology>,
+    /// `workspaces.json` as loaded at start and changed since; saved on every change.
+    pub(crate) file: WorkspacesFile,
+    /// Why `workspaces.json` must not be written this session (it could not be read).
+    pub(crate) file_problem: Option<String>,
+    /// A failed save was reported; later failures only go to the log.
+    pub(crate) save_failed_told: bool,
+    /// The workspace in use and the windows filling its slots.
+    pub(crate) active: Option<Active>,
+    /// Window events, frames and the drag preview.
+    pub(crate) watch: Watch,
 }
 
 pub(crate) fn run(
@@ -66,20 +138,21 @@ pub(crate) fn run(
     done: Sender<()>,
 ) {
     mosaik_win::dpi::make_process_per_monitor_v2();
-    // SAFETY: COM for this thread (the shell cloak needs it), for the thread's whole life.
+    // SAFETY: COM for this thread (the shell cloak and app activation need it), for the thread's
+    // whole life.
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
     let window = match WindowClass::register("MosaikEngine", Some(engine_proc)).and_then(|class| {
         class.create(
             "Mosaïk engine",
-            WINDOW_STYLE(0),
-            WINDOW_EX_STYLE(0),
+            WS_POPUP,
+            WS_EX_TOOLWINDOW,
             mosaik_core::geometry::Rect::default(),
-            Some(HWND_MESSAGE),
+            None,
         )
     }) {
         Ok(w) => w,
         Err(e) => {
-            let _ = ready.send(Err(format!("its message window could not be created: {e}")));
+            let _ = ready.send(Err(format!("its window could not be created: {e}")));
             return;
         }
     };
@@ -95,6 +168,13 @@ pub(crate) fn run(
             Settings::default()
         }
     };
+    let (file, file_error) = match store.load::<WorkspacesFile>() {
+        Ok(loaded) => {
+            notices.extend(loaded.notes);
+            (loaded.value, None)
+        }
+        Err(e) => (WorkspacesFile::default(), Some(e)),
+    };
     let mut scanner = Scanner::new();
     scanner.own_pids.clone_from(&config.own_pids);
     let mut engine = Engine {
@@ -106,23 +186,31 @@ pub(crate) fn run(
         messages,
         hotkey: None,
         scanner,
+        apps: Apps::new(),
         stopped: false,
+        topology: mosaik_win::monitors::topology().ok(),
+        file,
+        file_problem: None,
+        save_failed_told: false,
+        active: None,
+        watch: Watch::new(),
     };
     for n in notices {
-        (engine.ui)(UiEvent::Notice {
-            title: "Mosaïk's settings".into(),
-            body: n,
-        });
+        engine.notice("Mosaïk's settings", n);
+    }
+    if let Some(problem) = &file_error {
+        engine.file_locked(problem);
     }
     if let Err(e) = switcher::create(window, engine.settings.theme) {
         tracing::error!(error = %e, "switcher not created");
-        (engine.ui)(UiEvent::Notice {
-            title: "The switcher cannot open".into(),
-            body: format!("{e}. Your workspaces stay available from the tray menu and `mosaikctl switch`."),
-        });
+        engine.notice(
+            "The switcher cannot open",
+            format!("{e}. Your workspaces stay available from the tray menu and `mosaikctl switch`."),
+        );
     }
     if !engine.config.safe_mode {
         engine.register_hotkey();
+        engine.start_watching();
     }
     let hotkey = engine.hotkey_state();
     tracing::info!(
@@ -130,6 +218,7 @@ pub(crate) fn run(
         watchdog = engine.config.watchdog,
         hotkey = %hotkey.shortcut,
         registered = hotkey.registered,
+        workspaces = engine.file.workspaces.len(),
         "engine ready"
     );
     ENGINE.with(|e| *e.borrow_mut() = Some(engine));
@@ -179,18 +268,45 @@ pub(crate) fn run(
     let _ = done.send(());
 }
 
+/// SPI_SETWORKAREA: the taskbar moved, resized or started hiding itself.
+const SPI_SETWORKAREA: usize = 0x002F;
+/// PBT_APMRESUMEAUTOMATIC: back from sleep or hibernation.
+const PBT_APMRESUMEAUTOMATIC: usize = 0x0012;
+
 unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let arrived = match msg {
         WM_WAKE => Pending {
             wake: true,
             ..Pending::default()
         },
+        WM_EVENTS => Pending {
+            events: true,
+            ..Pending::default()
+        },
         WM_HOTKEY if i32::try_from(wparam.0) == Ok(hotkeys::SWITCHER) => Pending {
             switcher: true,
             ..Pending::default()
         },
-        WM_TIMER if wparam.0 == EXIT_TIMER => Pending {
-            exit: true,
+        WM_TIMER => Pending {
+            timers: timer_bit(wparam.0),
+            ..Pending::default()
+        },
+        WM_DISPLAYCHANGE => Pending {
+            displays: true,
+            ..Pending::default()
+        },
+        WM_SETTINGCHANGE if wparam.0 == SPI_SETWORKAREA => Pending {
+            displays: true,
+            ..Pending::default()
+        },
+        WM_POWERBROADCAST if wparam.0 == PBT_APMRESUMEAUTOMATIC => Pending {
+            displays: true,
+            ..Pending::default()
+        },
+        // Windows may end the session: say yes, and get ready when it does.
+        WM_QUERYENDSESSION => return LRESULT(1),
+        WM_ENDSESSION if wparam.0 != 0 => Pending {
+            ending: true,
             ..Pending::default()
         },
         // SAFETY: default handling for everything else.
@@ -198,9 +314,7 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
     };
     PENDING.with(|p| {
         let mut now = p.get();
-        now.wake |= arrived.wake;
-        now.switcher |= arrived.switcher;
-        now.exit |= arrived.exit;
+        now.merge(arrived);
         p.set(now);
     });
     // Only the outermost call works; a call re-entered from a modal loop leaves its flags.
@@ -211,7 +325,7 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             };
             let Some(engine) = slot.as_mut() else { return };
             let todo = PENDING.with(Cell::take);
-            if !(todo.wake || todo.switcher || todo.exit) {
+            if !todo.any() {
                 return;
             }
             engine.process(todo);
@@ -222,12 +336,42 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
 
 impl Engine {
     fn process(&mut self, todo: Pending) {
-        if todo.exit {
-            // SAFETY: stops the one-shot timer set on our own window.
-            let _ = unsafe { KillTimer(Some(self.window), EXIT_TIMER) };
+        if todo.ending && !self.stopped {
+            tracing::info!("Windows is ending the session");
+            self.shut_down();
+            self.stopped = true;
+            return;
+        }
+        if todo.timers & timer_bit(timer::EXIT) != 0 {
+            self.kill_timer(timer::EXIT);
             (self.ui)(UiEvent::Exit);
         }
-        if todo.switcher && !self.stopped {
+        if self.stopped {
+            self.answer_stopped();
+            return;
+        }
+        if todo.events {
+            self.on_events();
+        }
+        if todo.timers & timer_bit(timer::DRAG) != 0 {
+            self.drag_tick();
+        }
+        if todo.timers & timer_bit(timer::SETTLE) != 0 {
+            self.kill_timer(timer::SETTLE);
+            self.settle();
+        }
+        if todo.timers & timer_bit(timer::LAUNCH) != 0 {
+            self.launch_tick();
+        }
+        if todo.displays {
+            // Windows sends several of these for one change; act once it is done.
+            self.set_timer(timer::TOPOLOGY, 400);
+        }
+        if todo.timers & timer_bit(timer::TOPOLOGY) != 0 {
+            self.kill_timer(timer::TOPOLOGY);
+            self.displays_changed();
+        }
+        if todo.switcher {
             self.show_switcher(Instant::now());
         }
         if todo.wake {
@@ -257,6 +401,37 @@ impl Engine {
         }
     }
 
+    /// After stopping: requests get "stopped", `Stop` ends the loop.
+    fn answer_stopped(&mut self) {
+        while let Ok(m) = self.messages.try_recv() {
+            match m {
+                Message::Request { reply, .. } => {
+                    let _ = reply.send(crate::stopped());
+                }
+                // SAFETY: ends this thread's message loop.
+                Message::Stop => unsafe { PostQuitMessage(0) },
+            }
+        }
+    }
+
+    pub(crate) fn set_timer(&self, id: usize, ms: u32) {
+        // SAFETY: a timer on our own window; setting it again restarts it.
+        let _ = unsafe { SetTimer(Some(self.window), id, ms, None) };
+    }
+
+    pub(crate) fn kill_timer(&self, id: usize) {
+        // SAFETY: stops a timer on our own window (harmless if it is not running).
+        let _ = unsafe { KillTimer(Some(self.window), id) };
+    }
+
+    /// Tells the user something once, plainly.
+    pub(crate) fn notice(&self, title: impl Into<String>, body: impl Into<String>) {
+        (self.ui)(UiEvent::Notice {
+            title: title.into(),
+            body: body.into(),
+        });
+    }
+
     fn register_hotkey(&mut self) {
         let wanted = self.settings.switcher_hotkey;
         // Settings files can be edited by hand: a shortcut Mosaïk would refuse in the recorder
@@ -275,10 +450,7 @@ impl Engine {
         };
         if let Some((title, body)) = &registered.notice {
             tracing::warn!(%title, %body, "switcher shortcut");
-            (self.ui)(UiEvent::Notice {
-                title: title.clone(),
-                body: body.clone(),
-            });
+            self.notice(title.clone(), body.clone());
         }
         self.hotkey = Some(registered);
     }
@@ -299,37 +471,23 @@ impl Engine {
     }
 
     fn show_switcher(&mut self, asked: Instant) {
-        let (entries, active) = match self.store.load::<WorkspacesFile>() {
-            Ok(loaded) => (
-                loaded
-                    .value
-                    .workspaces
-                    .iter()
-                    .map(Entry::from_workspace)
-                    .collect(),
-                loaded.value.active,
-            ),
-            Err(e) => {
-                (self.ui)(UiEvent::Notice {
-                    title: "Your workspaces could not be read".into(),
-                    body: e.to_string(),
-                });
-                (Vec::new(), None)
-            }
-        };
+        let entries = self.file.workspaces.iter().map(Entry::from_workspace).collect();
+        let active = self.active.as_ref().map(|a| a.id.clone());
         switcher::open(entries, active, self.hotkey_state().shortcut, asked);
     }
 
     fn on_choice(&mut self, choice: switcher::Choice) {
         let reply = match choice {
             switcher::Choice::Open(id) => self.handle(Command::Switch { workspace: id.0 }),
-            switcher::Choice::Save => self.handle(Command::Save { workspace: None }),
+            switcher::Choice::Save(name) => self.handle(Command::Save {
+                workspace: Some(name),
+            }),
         };
         if let Reply::Error { message, hint, .. } = reply {
-            (self.ui)(UiEvent::Notice {
-                title: "Mosaïk".into(),
-                body: hint.map_or(message.clone(), |h| format!("{message} {h}")),
-            });
+            self.notice(
+                "Mosaïk",
+                hint.map_or(message.clone(), |h| format!("{message} {h}")),
+            );
         }
     }
 
@@ -344,8 +502,8 @@ impl Engine {
             }
             Command::State => self.state(),
             Command::Workspaces => self.workspaces(),
-            Command::Switch { workspace } => not_yet(&format!("Switching to \"{workspace}\"")),
-            Command::Save { .. } => not_yet("Saving a workspace"),
+            Command::Switch { workspace } => self.switch(&workspace),
+            Command::Save { workspace } => self.save(workspace),
             Command::Rescue => self.rescue(),
             Command::ShowSwitcher => {
                 self.show_switcher(Instant::now());
@@ -361,7 +519,7 @@ impl Engine {
             }
             Command::Quit => {
                 // SAFETY: a one-shot timer on our own window; the exit happens when it fires.
-                let timer = unsafe { SetTimer(Some(self.window), EXIT_TIMER, 250, None) };
+                let timer = unsafe { SetTimer(Some(self.window), timer::EXIT, 250, None) };
                 if timer == 0 {
                     // No timer: exit now; the answer may not get out, the exit still happens.
                     (self.ui)(UiEvent::Exit);
@@ -386,12 +544,7 @@ impl Engine {
         };
         let journal = self.store.load::<Journal>().map(|l| l.value).unwrap_or_default();
         let hotkey = self.hotkey_state();
-        let active = self
-            .store
-            .load::<WorkspacesFile>()
-            .ok()
-            .and_then(|l| l.value.active);
-        let snapshot = state::snapshot(state::Inputs {
+        let mut snapshot = state::snapshot(state::Inputs {
             app_version: &self.config.app_version,
             safe_mode: self.config.safe_mode,
             watchdog: self.config.watchdog,
@@ -400,33 +553,36 @@ impl Engine {
             rules: &self.settings.rules,
             hotkey: &hotkey,
             journal: &journal,
-            active_workspace: active,
+            active_workspace: self.active.as_ref().map(|a| a.id.clone()),
         });
+        // Which slot and zone each window of the open workspace fills.
+        let style = self.style();
+        if let Some(active) = &self.active {
+            for w in &mut snapshot.windows {
+                if let Some(slot) = active.slot_of(w.handle) {
+                    w.slot = Some(slot.clone());
+                    w.zone = active.zone_for(w.frame_rect, style).map(|z| z.id.clone());
+                }
+            }
+        }
         Reply::State(Box::new(snapshot))
     }
 
     fn workspaces(&self) -> Reply {
-        match self.store.load::<WorkspacesFile>() {
-            Ok(loaded) => Reply::Workspaces {
-                workspaces: loaded
-                    .value
-                    .workspaces
-                    .iter()
-                    .map(|w| WorkspaceSummary {
-                        id: w.id.clone(),
-                        name: w.name.clone(),
-                        windows: w.layout.slots.len(),
-                        zones: w.layout.zones.len(),
-                        hotkey: w.hotkey.map(|h| h.to_string()),
-                    })
-                    .collect(),
-                active: loaded.value.active,
-            },
-            Err(e) => Reply::Error {
-                code: ErrorCode::Failed,
-                message: e.to_string(),
-                hint: None,
-            },
+        Reply::Workspaces {
+            workspaces: self
+                .file
+                .workspaces
+                .iter()
+                .map(|w| WorkspaceSummary {
+                    id: w.id.clone(),
+                    name: w.name.clone(),
+                    windows: w.layout.slots.len(),
+                    zones: w.layout.zones.len(),
+                    hotkey: w.hotkey.map(|h| h.to_string()),
+                })
+                .collect(),
+            active: self.active.as_ref().map(|a| a.id.clone()),
         }
     }
 
@@ -452,9 +608,11 @@ impl Engine {
         }
     }
 
-    /// Before the engine stops: every hidden window comes back, so the watchdog finds nothing
-    /// left to do.
+    /// Before the engine stops: overlays go, the open workspace remembers where its windows are,
+    /// and every hidden window comes back, so the watchdog finds nothing left to do.
     fn shut_down(&mut self) {
+        self.stop_watching();
+        self.remember_active();
         let outcome = mosaik_win::rescue::restore_hidden(&self.store);
         log_report("windows restored before exit", &outcome.report);
         if let Some(problem) = outcome.problem {
@@ -473,12 +631,4 @@ fn log_report(what: &str, r: &Report) {
         failed = r.failed.len(),
         "{what}"
     );
-}
-
-fn not_yet(what: &str) -> Reply {
-    Reply::Error {
-        code: ErrorCode::Failed,
-        message: format!("{what} is not available in this build yet."),
-        hint: None,
-    }
 }

@@ -16,6 +16,7 @@ pub mod switcher;
 pub mod tabs;
 pub mod topology;
 pub mod window;
+pub mod workspace;
 pub mod zone;
 
 #[cfg(any(test, feature = "fixtures"))]

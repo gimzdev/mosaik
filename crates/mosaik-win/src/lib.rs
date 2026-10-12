@@ -4,6 +4,8 @@
 //! Windows only; an empty library elsewhere so the workspace builds everywhere.
 #![cfg(windows)]
 
+pub mod apps;
+pub mod arrange;
 pub mod dpi;
 pub mod error;
 pub mod events;
@@ -11,6 +13,7 @@ pub mod hide;
 pub mod hotkey;
 pub mod input;
 pub mod monitors;
+pub mod os;
 pub mod own;
 pub mod place;
 pub mod process;

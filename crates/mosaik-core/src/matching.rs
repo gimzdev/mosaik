@@ -31,16 +31,57 @@ pub enum TitleMatch {
     Contains(String),
     StartsWith(String),
     EndsWith(String),
+    /// The title the window had when its workspace was saved. Titles change as documents
+    /// change, so this only prefers windows whose title shares parts with it: "lib.rs - mosaik -
+    /// Visual Studio Code" prefers "main.rs - mosaik - Visual Studio Code" over "pay.ts - shop -
+    /// Visual Studio Code", and still accepts either.
+    Like(String),
+}
+
+/// Separators apps put between the parts of a title ("file - folder - app").
+const TITLE_SEPARATORS: [&str; 5] = [" - ", " \u{2014} ", " \u{2013} ", " | ", " \u{b7} "];
+
+/// The parts of a title, lower case, without empty ones.
+fn title_parts(title: &str) -> Vec<String> {
+    let mut parts = vec![title.to_lowercase()];
+    for sep in TITLE_SEPARATORS {
+        parts = parts
+            .iter()
+            .flat_map(|p| p.split(sep).map(str::to_owned).collect::<Vec<_>>())
+            .collect();
+    }
+    parts
+        .into_iter()
+        .map(|p| p.trim().to_owned())
+        .filter(|p| !p.is_empty())
+        .collect()
 }
 
 impl TitleMatch {
     pub fn matches(&self, title: &str) -> bool {
+        self.bonus(title) > 0
+    }
+
+    /// How much a window's title adds to its score; 0 when it does not match.
+    pub fn bonus(&self, title: &str) -> u32 {
         let t = title.to_lowercase();
+        let hit = |ok: bool, points: u32| if ok { points } else { 0 };
         match self {
-            TitleMatch::Exact(s) => t == s.to_lowercase(),
-            TitleMatch::Contains(s) => t.contains(&s.to_lowercase()),
-            TitleMatch::StartsWith(s) => t.starts_with(&s.to_lowercase()),
-            TitleMatch::EndsWith(s) => t.ends_with(&s.to_lowercase()),
+            TitleMatch::Exact(s) => hit(t == s.to_lowercase(), 50),
+            TitleMatch::Contains(s) => hit(t.contains(&s.to_lowercase()), 20),
+            TitleMatch::StartsWith(s) => hit(t.starts_with(&s.to_lowercase()), 30),
+            TitleMatch::EndsWith(s) => hit(t.ends_with(&s.to_lowercase()), 30),
+            TitleMatch::Like(s) => {
+                if t == s.to_lowercase() {
+                    return 50;
+                }
+                let theirs = title_parts(title);
+                let shared = title_parts(s).iter().filter(|p| theirs.contains(p)).count();
+                u32::try_from(shared)
+                    .unwrap_or(u32::MAX)
+                    .saturating_mul(10)
+                    .min(40)
+            }
         }
     }
 }
@@ -88,14 +129,8 @@ impl AppMatch {
             }
             score += 20;
         }
-        if let Some(title) = &self.title
-            && title.matches(&w.title)
-        {
-            score += match title {
-                TitleMatch::Exact(_) => 50,
-                TitleMatch::StartsWith(_) | TitleMatch::EndsWith(_) => 30,
-                TitleMatch::Contains(_) => 20,
-            };
+        if let Some(title) = &self.title {
+            score += title.bonus(&w.title);
         }
         Some(score)
     }
@@ -193,5 +228,39 @@ mod tests {
             ],
             "the terminal is not open, so its slot stays empty"
         );
+    }
+
+    #[test]
+    fn a_saved_title_prefers_windows_that_share_its_parts() {
+        let like = TitleMatch::Like("lib.rs - mosaik - Visual Studio Code".into());
+        assert_eq!(like.bonus("lib.rs - mosaik - Visual Studio Code"), 50);
+        assert_eq!(like.bonus("main.rs - mosaik - Visual Studio Code"), 20);
+        assert_eq!(like.bonus("pay.ts - shop - Visual Studio Code"), 10);
+        assert_eq!(like.bonus("Inbox"), 0);
+        // Em dashes and pipes separate parts too.
+        let page = TitleMatch::Like("Pull request #12 | GitHub \u{2014} Mozilla Firefox".into());
+        assert_eq!(page.bonus("Issues | GitHub \u{2014} Mozilla Firefox"), 20);
+
+        // Two editor windows saved in two workspaces each find their own window again.
+        let mosaik = AppMatch {
+            title: Some(like),
+            ..AppMatch::exe("code.exe")
+        };
+        let shop = AppMatch {
+            title: Some(TitleMatch::Like("pay.ts - shop - Visual Studio Code".into())),
+            ..AppMatch::exe("code.exe")
+        };
+        let w1 = win(1, "code.exe", "C", "checkout.ts - shop - Visual Studio Code");
+        let w2 = win(2, "code.exe", "C", "main.rs - mosaik - Visual Studio Code");
+        let slots = [(SlotId("m".into()), &mosaik), (SlotId("s".into()), &shop)];
+        assert_eq!(
+            assign(&slots, &[&w1, &w2]),
+            vec![
+                (SlotId("m".into()), WindowHandle(2)),
+                (SlotId("s".into()), WindowHandle(1))
+            ]
+        );
+        let json = serde_json::to_string(&TitleMatch::Like("a - b".into())).unwrap();
+        assert_eq!(json, r#"{"kind":"like","text":"a - b"}"#);
     }
 }

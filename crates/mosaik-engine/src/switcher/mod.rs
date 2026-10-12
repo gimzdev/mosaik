@@ -57,7 +57,8 @@ thread_local! {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Choice {
     Open(WorkspaceId),
-    Save,
+    /// Save the windows on screen under this name.
+    Save(String),
 }
 
 struct Switcher {
@@ -317,7 +318,11 @@ fn place(window: HWND) {
         }
         s.dpi = dpi;
         let k = dpi as f32 / 96.0;
-        let rows = s.model.shown().len();
+        let rows = if s.model.naming().is_some() {
+            1
+        } else {
+            s.model.shown().len()
+        };
         let list_h = if rows == 0 {
             size::EMPTY * k
         } else {
@@ -361,6 +366,21 @@ fn refill() {
     let data = SWITCHER.with(|cell| {
         let slot = cell.try_borrow().ok()?;
         let s = slot.as_ref()?;
+        if let Some(n) = s.model.naming() {
+            let what = match s.model.replaces(&n.name) {
+                Some(e) => format!("updates {}", e.name),
+                None => "new workspace".to_owned(),
+            };
+            let spoken = vec![format!(
+                "Save this layout as: {}. {what}. Type a name, Enter to save, Escape to go back.",
+                if n.name.is_empty() {
+                    "no name yet"
+                } else {
+                    n.name.as_str()
+                }
+            )];
+            return Some((s.list, s.window, spoken, "Save this layout".to_owned(), Some(0)));
+        }
         let spoken: Vec<String> = (0..s.model.shown().len())
             .filter_map(|i| s.model.spoken(i))
             .collect();
@@ -480,7 +500,7 @@ fn act(key: Key) {
         }
         Some(Action::Close) => close(),
         Some(Action::Open(id)) => choose(Choice::Open(id)),
-        Some(Action::Save) => choose(Choice::Save),
+        Some(Action::Save(name)) => choose(Choice::Save(name)),
         Some(Action::None) | None => {}
     }
 }
@@ -526,6 +546,31 @@ unsafe extern "system" fn switcher_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
             SWITCHER.with(|cell| {
                 if let Ok(mut slot) = cell.try_borrow_mut()
                     && let Some(s) = slot.as_mut()
+                    && let Some(n) = s.model.naming().cloned()
+                {
+                    let replaces = s.model.replaces(&n.name).map(|e| e.name.clone());
+                    let r = s.painter.naming_row(
+                        item.hDC,
+                        item.rcItem,
+                        &s.theme,
+                        &n.name,
+                        n.selected,
+                        replaces.as_deref(),
+                    );
+                    if r.is_err() && s.painter.recreate().is_ok() {
+                        let _ = s.painter.naming_row(
+                            item.hDC,
+                            item.rcItem,
+                            &s.theme,
+                            &n.name,
+                            n.selected,
+                            replaces.as_deref(),
+                        );
+                    }
+                    return;
+                }
+                if let Ok(mut slot) = cell.try_borrow_mut()
+                    && let Some(s) = slot.as_mut()
                     && let Some(entry) = s.model.shown().get(item.itemID as usize).map(|e| (*e).clone())
                 {
                     let index = item.itemID as usize;
@@ -560,6 +605,9 @@ unsafe extern "system" fn switcher_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
                 let chosen = SWITCHER.with(|cell| {
                     let slot = cell.try_borrow().ok()?;
                     let s = slot.as_ref()?;
+                    if s.model.naming().is_some() {
+                        return None;
+                    }
                     // SAFETY: asks our own list box for its selection.
                     let index = unsafe {
                         SendMessageW(

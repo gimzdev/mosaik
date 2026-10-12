@@ -3,6 +3,10 @@
 //! The switcher has the keyboard while it is open, so bare keys are safe: 1 to 9 then F1 and up
 //! pick a workspace, the arrows move, Enter opens, Esc closes, S saves the current layout, and
 //! any other character filters by name. While a filter is typed, digits and S are text.
+//!
+//! S asks for a name first, in the switcher itself: the open workspace's name (saving it again
+//! updates it) or "Workspace N" for a new one, selected so typing replaces it. Enter saves, Esc
+//! goes back to the list.
 
 use crate::geometry::RatioRect;
 use crate::layout::{Workspace, WorkspaceId};
@@ -78,9 +82,18 @@ pub enum Action {
     /// The filter or selection changed: draw again.
     Changed,
     Open(WorkspaceId),
-    /// Save the current arrangement (ask for a name first).
-    Save,
+    /// Save the current arrangement under this name (a new workspace, or the one with that
+    /// name, which is updated).
+    Save(String),
     Close,
+}
+
+/// Naming the layout about to be saved.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Naming {
+    pub name: String,
+    /// The suggestion is still untouched and selected: the first character typed replaces it.
+    pub selected: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -90,7 +103,11 @@ pub struct Model {
     filter: String,
     /// Index into `shown()`.
     selected: usize,
+    naming: Option<Naming>,
 }
+
+/// Longest name accepted, in characters.
+pub const MAX_NAME: usize = 60;
 
 /// The position a key picks: 1 to 9, then F1 (10th) and up.
 pub fn index_for_key(key: Key) -> Option<usize> {
@@ -117,6 +134,76 @@ impl Model {
             active,
             filter: String::new(),
             selected: 0,
+            naming: None,
+        }
+    }
+
+    /// The name being typed for a save, while naming.
+    pub fn naming(&self) -> Option<&Naming> {
+        self.naming.as_ref()
+    }
+
+    /// The name offered when saving: the open workspace's (to update it) or the first free
+    /// "Workspace N".
+    pub fn suggested_name(&self) -> String {
+        if let Some(e) = self
+            .active
+            .as_ref()
+            .and_then(|a| self.entries.iter().find(|e| &e.id == a))
+        {
+            return e.name.clone();
+        }
+        let taken: Vec<String> = self.entries.iter().map(|e| e.name.to_lowercase()).collect();
+        (1..)
+            .map(|n| format!("Workspace {n}"))
+            .find(|n| !taken.contains(&n.to_lowercase()))
+            .unwrap_or_else(|| "Workspace".to_owned())
+    }
+
+    /// The workspace a save under `name` would update, if one has that name.
+    pub fn replaces(&self, name: &str) -> Option<&Entry> {
+        let n = name.trim().to_lowercase();
+        self.entries.iter().find(|e| e.name.trim().to_lowercase() == n)
+    }
+
+    fn name_key(&mut self, key: Key) -> Action {
+        let Some(naming) = self.naming.as_mut() else {
+            return Action::None;
+        };
+        match key {
+            Key::Escape => {
+                self.naming = None;
+                Action::Changed
+            }
+            Key::Enter => {
+                let name = naming.name.trim().to_owned();
+                if name.is_empty() {
+                    return Action::None;
+                }
+                self.naming = None;
+                Action::Save(name)
+            }
+            Key::Backspace => {
+                if naming.selected {
+                    naming.name.clear();
+                } else {
+                    naming.name.pop();
+                }
+                naming.selected = false;
+                Action::Changed
+            }
+            Key::Char(c) if !c.is_control() => {
+                if naming.selected {
+                    naming.name.clear();
+                    naming.selected = false;
+                }
+                if naming.name.chars().count() >= MAX_NAME {
+                    return Action::None;
+                }
+                naming.name.push(c);
+                Action::Changed
+            }
+            _ => Action::None,
         }
     }
 
@@ -186,6 +273,9 @@ impl Model {
     }
 
     pub fn key(&mut self, key: Key) -> Action {
+        if self.naming.is_some() {
+            return self.name_key(key);
+        }
         let n = self.shown().len();
         match key {
             Key::Escape if !self.filter.is_empty() => {
@@ -217,7 +307,13 @@ impl Model {
             k if self.filter.is_empty() && index_for_key(k).is_some() => index_for_key(k)
                 .and_then(|i| self.shown().get(i).map(|e| Action::Open(e.id.clone())))
                 .unwrap_or(Action::None),
-            Key::Char('s' | 'S') if self.filter.is_empty() => Action::Save,
+            Key::Char('s' | 'S') if self.filter.is_empty() => {
+                self.naming = Some(Naming {
+                    name: self.suggested_name(),
+                    selected: true,
+                });
+                Action::Changed
+            }
             Key::Char(c) if !c.is_control() && !(self.filter.is_empty() && c == ' ') => {
                 self.filter.push(c);
                 self.selected = 0;
@@ -311,13 +407,52 @@ mod tests {
     }
 
     #[test]
-    fn s_saves_and_escape_clears_the_filter_before_closing() {
+    fn s_asks_for_a_name_and_escape_steps_back() {
         let mut m = model();
-        assert_eq!(m.key(Key::Char('S')), Action::Save);
+        assert_eq!(m.key(Key::Char('S')), Action::Changed);
+        // The open workspace's name is offered: saving updates it.
+        assert_eq!(
+            m.naming(),
+            Some(&Naming {
+                name: "Brand refresh".into(),
+                selected: true
+            })
+        );
+        assert_eq!(
+            m.replaces("brand refresh ").map(|e| e.id.0.as_str()),
+            Some("brand")
+        );
+        assert_eq!(m.key(Key::Escape), Action::Changed, "back to the list");
+        assert!(m.naming().is_none());
         m.key(Key::Char('z'));
         assert_eq!(m.key(Key::Escape), Action::Changed);
         assert_eq!(m.filter(), "");
         assert_eq!(m.key(Key::Escape), Action::Close);
+    }
+
+    #[test]
+    fn typing_replaces_the_suggestion_and_enter_saves() {
+        let mut m = Model::new(vec![entry("one", "Workspace 1")], None);
+        m.key(Key::Char('s'));
+        assert_eq!(m.naming().map(|n| n.name.as_str()), Some("Workspace 2"));
+        // Digits and S are text while naming.
+        for c in "S3 go".chars() {
+            assert_eq!(m.key(Key::Char(c)), Action::Changed);
+        }
+        assert_eq!(m.naming().map(|n| n.name.as_str()), Some("S3 go"));
+        m.key(Key::Backspace);
+        assert_eq!(m.key(Key::Enter), Action::Save("S3 g".into()));
+        assert!(m.naming().is_none());
+        // Backspace on the untouched suggestion clears it; an empty name is not saved.
+        m.key(Key::Char('s'));
+        m.key(Key::Backspace);
+        assert_eq!(m.naming().map(|n| n.name.as_str()), Some(""));
+        assert_eq!(m.key(Key::Enter), Action::None);
+        // Names are capped.
+        for _ in 0..(MAX_NAME + 5) {
+            m.key(Key::Char('x'));
+        }
+        assert_eq!(m.naming().map(|n| n.name.chars().count()), Some(MAX_NAME));
     }
 
     #[test]
@@ -342,7 +477,9 @@ mod tests {
         assert!(m.is_empty());
         assert_eq!(m.key(Key::Down), Action::None);
         assert_eq!(m.key(Key::Char('1')), Action::None);
-        assert_eq!(m.key(Key::Char('s')), Action::Save);
+        assert_eq!(m.key(Key::Char('s')), Action::Changed);
+        assert_eq!(m.naming().map(|n| n.name.as_str()), Some("Workspace 1"));
+        assert_eq!(m.key(Key::Enter), Action::Save("Workspace 1".into()));
         assert_eq!(m.key(Key::Escape), Action::Close);
     }
 }

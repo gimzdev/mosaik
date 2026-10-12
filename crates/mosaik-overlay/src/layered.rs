@@ -1,112 +1,60 @@
-//! A layered window that shows a premultiplied bitmap at a screen rectangle.
+//! A layered window that shows a premultiplied bitmap at a screen position, never takes focus
+//! and (optionally) lets clicks through.
 
-use std::ffi::c_void;
-
-use mosaik_core::geometry::Rect;
+use mosaik_core::geometry::{Point, Rect};
 use mosaik_win::error::{Context, Error, Result};
 use mosaik_win::own::{WindowClass, destroy, plain_wndproc};
 use windows::Win32::Foundation::{COLORREF, HWND, POINT, SIZE};
-use windows::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, CreateCompatibleDC,
-    CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, HBITMAP, HDC, HGDIOBJ, ReleaseDC,
-    SelectObject,
-};
+use windows::Win32::Graphics::Gdi::{AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, GetDC, ReleaseDC};
 use windows::Win32::UI::WindowsAndMessaging::{
-    SW_HIDE, SW_SHOWNOACTIVATE, ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowPos,
+    ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 use crate::paint::Pixels;
+use crate::surface::Surface;
 
-/// A 32-bit top-down DIB selected into a memory DC, holding what the window shows.
-struct Surface {
-    dc: HDC,
-    bitmap: HBITMAP,
-    previous: HGDIOBJ,
-    bits: *mut u32,
-    width: usize,
-    height: usize,
+/// Where an overlay sits in the stack of windows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stack {
+    /// Above every normal window (the drag preview when nothing else applies).
+    Topmost,
+    /// Right below another window, so whatever covers that window covers the overlay too (frames
+    /// and tags), and the window itself stays on top of it (the dragged window over its zones).
+    Below(isize),
 }
 
-impl Surface {
-    fn new(width: usize, height: usize) -> Result<Self> {
-        let w = i32::try_from(width.max(1)).map_err(|_| Error::Other("overlay too wide".into()))?;
-        let h = i32::try_from(height.max(1)).map_err(|_| Error::Other("overlay too tall".into()))?;
-        let info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: u32::try_from(std::mem::size_of::<BITMAPINFOHEADER>()).unwrap_or(0),
-                biWidth: w,
-                // Negative height: rows top to bottom, like `Pixels`.
-                biHeight: -h,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits: *mut c_void = std::ptr::null_mut();
-        // SAFETY: a memory DC compatible with the screen and a DIB section described by `info`;
-        // both are released in Drop.
-        unsafe {
-            let dc = CreateCompatibleDC(None);
-            if dc.is_invalid() {
-                return Err(Error::Other("CreateCompatibleDC failed".into()));
-            }
-            let bitmap = match CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0) {
-                Ok(b) if !bits.is_null() => b,
-                _ => {
-                    let _ = DeleteDC(dc);
-                    return Err(Error::Other("CreateDIBSection failed".into()));
-                }
-            };
-            let previous = SelectObject(dc, HGDIOBJ(bitmap.0));
-            Ok(Self {
-                dc,
-                bitmap,
-                previous,
-                bits: bits.cast::<u32>(),
-                width: width.max(1),
-                height: height.max(1),
-            })
-        }
-    }
-
-    fn copy_from(&mut self, p: &Pixels) {
-        let n = self.width * self.height;
-        if p.width != self.width || p.height != self.height || p.data.len() != n {
-            return;
-        }
-        // SAFETY: the DIB section holds exactly width * height 32-bit pixels, and `p.data` has the
-        // same length; the regions do not overlap.
-        unsafe { std::ptr::copy_nonoverlapping(p.data.as_ptr(), self.bits, n) };
-    }
-}
-
-impl Drop for Surface {
-    fn drop(&mut self) {
-        // SAFETY: restores the DC's original bitmap, then frees the objects created in `new`.
-        unsafe {
-            SelectObject(self.dc, self.previous);
-            let _ = DeleteObject(HGDIOBJ(self.bitmap.0));
-            let _ = DeleteDC(self.dc);
-        }
-    }
-}
-
-/// A top-most, click-through (optional), never-activated layered window.
+/// A layered window owned by Mosaïk.
 pub struct LayeredWindow {
     hwnd: HWND,
     surface: Option<Surface>,
     shown: Option<Rect>,
 }
 
+fn blend(alpha: u8) -> BLENDFUNCTION {
+    BLENDFUNCTION {
+        BlendOp: u8::try_from(AC_SRC_OVER).unwrap_or(0),
+        BlendFlags: 0,
+        SourceConstantAlpha: alpha,
+        AlphaFormat: u8::try_from(AC_SRC_ALPHA).unwrap_or(1),
+    }
+}
+
 impl LayeredWindow {
-    /// Creates the window hidden. Overlays that only show (the drag preview, frames) pass
-    /// `click_through`; the tab strip does not.
+    /// A top-most overlay, created hidden. Overlays that only show pass `click_through`.
     pub fn new(class_name: &str, click_through: bool) -> Result<Self> {
+        Self::create(class_name, click_through, true)
+    }
+
+    /// Like [`LayeredWindow::new`]; `topmost` false for overlays stacked with other windows.
+    pub fn create(class_name: &str, click_through: bool, topmost: bool) -> Result<Self> {
         let class = WindowClass::register(class_name, Some(plain_wndproc))?;
-        let mut ex = WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST;
+        let mut ex = WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+        if topmost {
+            ex |= WS_EX_TOPMOST;
+        }
         if click_through {
             ex |= WS_EX_TRANSPARENT;
         }
@@ -122,36 +70,36 @@ impl LayeredWindow {
         self.hwnd
     }
 
-    /// Shows `pixels` at `at` (which must have the bitmap's size) in one call that moves,
-    /// resizes and repaints the window.
-    pub fn show(&mut self, at: Rect, pixels: &Pixels) -> Result<()> {
-        let needs_new = self
+    /// The bitmap to draw into, `width` by `height` pixels (made anew when the size changes,
+    /// otherwise reused with its old content).
+    pub fn surface(&mut self, width: usize, height: usize) -> Result<&mut Surface> {
+        let fits = self
             .surface
             .as_ref()
-            .is_none_or(|s| s.width != pixels.width || s.height != pixels.height);
-        if needs_new {
-            self.surface = Some(Surface::new(pixels.width, pixels.height)?);
+            .is_some_and(|s| s.width() == width.max(1) && s.height() == height.max(1));
+        if !fits {
+            self.surface = None;
+            self.surface = Some(Surface::new(width, height)?);
         }
+        self.surface
+            .as_mut()
+            .ok_or_else(|| Error::Other("no surface".into()))
+    }
+
+    /// Shows the surface at `at` (its top-left corner), with `alpha` applied on top of the
+    /// bitmap's own transparency, in one call that moves, resizes and repaints the window.
+    pub fn present(&mut self, at: Point, alpha: u8) -> Result<()> {
         let surface = self
             .surface
-            .as_mut()
-            .ok_or_else(|| Error::Other("no surface".into()))?;
-        surface.copy_from(pixels);
-        let pos = POINT {
-            x: at.left,
-            y: at.top,
-        };
+            .as_ref()
+            .ok_or_else(|| Error::Other("nothing drawn yet".into()))?;
+        let pos = POINT { x: at.x, y: at.y };
         let size = SIZE {
-            cx: i32::try_from(pixels.width).unwrap_or(1),
-            cy: i32::try_from(pixels.height).unwrap_or(1),
+            cx: i32::try_from(surface.width()).unwrap_or(1),
+            cy: i32::try_from(surface.height()).unwrap_or(1),
         };
         let origin = POINT { x: 0, y: 0 };
-        let blend = BLENDFUNCTION {
-            BlendOp: u8::try_from(AC_SRC_OVER).unwrap_or(0),
-            BlendFlags: 0,
-            SourceConstantAlpha: 255,
-            AlphaFormat: u8::try_from(AC_SRC_ALPHA).unwrap_or(1),
-        };
+        let b = blend(alpha);
         // SAFETY: the screen DC is released below; the memory DC holds a 32-bit premultiplied
         // DIB of exactly `size`.
         unsafe {
@@ -161,10 +109,10 @@ impl LayeredWindow {
                 Some(screen),
                 Some(&pos),
                 Some(&size),
-                Some(surface.dc),
+                Some(surface.dc()),
                 Some(&origin),
                 COLORREF(0),
-                Some(&blend),
+                Some(&b),
                 ULW_ALPHA,
             );
             ReleaseDC(None, screen);
@@ -173,8 +121,58 @@ impl LayeredWindow {
                 let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
             }
         }
-        self.shown = Some(at);
+        self.shown = Some(Rect::from_origin_size(at.x, at.y, size.cx, size.cy));
         Ok(())
+    }
+
+    /// Changes only the overall opacity, keeping the bitmap Windows already has.
+    pub fn set_alpha(&mut self, alpha: u8) -> Result<()> {
+        if self.shown.is_none() {
+            return Ok(());
+        }
+        let b = blend(alpha);
+        // SAFETY: no source DC: Windows keeps the current bitmap and applies the new blend.
+        unsafe {
+            UpdateLayeredWindow(
+                self.hwnd,
+                None,
+                None,
+                None,
+                None,
+                None,
+                COLORREF(0),
+                Some(&b),
+                ULW_ALPHA,
+            )
+        }
+        .ctx("UpdateLayeredWindow")
+    }
+
+    /// Shows `pixels` at `at` (which must have the bitmap's size).
+    pub fn show(&mut self, at: Rect, pixels: &Pixels) -> Result<()> {
+        self.surface(pixels.width, pixels.height)?.copy_from(pixels);
+        self.present(at.origin(), 255)
+    }
+
+    /// Moves the overlay without redrawing it.
+    pub fn move_to(&mut self, at: Point) {
+        let Some(shown) = self.shown else { return };
+        if shown.origin() == at {
+            return;
+        }
+        // SAFETY: our own window; position only.
+        let _ = unsafe {
+            SetWindowPos(
+                self.hwnd,
+                None,
+                at.x,
+                at.y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+            )
+        };
+        self.shown = Some(Rect::from_origin_size(at.x, at.y, shown.width(), shown.height()));
     }
 
     pub fn hide(&mut self) {
@@ -187,11 +185,60 @@ impl LayeredWindow {
     pub fn shown_at(&self) -> Option<Rect> {
         self.shown
     }
+
+    /// Frees the bitmap of a hidden overlay (large previews are only kept while dragging).
+    pub fn release_surface(&mut self) {
+        self.surface = None;
+    }
 }
 
 impl Drop for LayeredWindow {
     fn drop(&mut self) {
         self.surface = None;
         destroy(self.hwnd);
+    }
+}
+
+/// Puts `overlays` (front to back) right below `stack`'s window, or at the top of the top-most
+/// band, in one step so they never flash in the wrong order. Hidden overlays are skipped.
+pub fn restack(overlays: &[&LayeredWindow], stack: Stack) {
+    let shown: Vec<HWND> = overlays
+        .iter()
+        .filter(|o| o.shown.is_some())
+        .map(|o| o.hwnd)
+        .collect();
+    if shown.is_empty() {
+        return;
+    }
+    let first_after = match stack {
+        Stack::Topmost => HWND_TOPMOST,
+        Stack::Below(h) => HWND(h as *mut core::ffi::c_void),
+    };
+    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW;
+    // SAFETY: a deferred batch of z-order changes on our own windows; if the batch cannot be
+    // made (a window just closed), each is placed on its own below.
+    unsafe {
+        if let Ok(mut batch) = BeginDeferWindowPos(i32::try_from(shown.len()).unwrap_or(1)) {
+            let mut after = first_after;
+            let mut ok = true;
+            for h in &shown {
+                match DeferWindowPos(batch, *h, Some(after), 0, 0, 0, 0, flags) {
+                    Ok(next) => batch = next,
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                }
+                after = *h;
+            }
+            if ok && EndDeferWindowPos(batch).is_ok() {
+                return;
+            }
+        }
+        let mut after = first_after;
+        for h in &shown {
+            let _ = SetWindowPos(*h, Some(after), 0, 0, 0, 0, flags);
+            after = *h;
+        }
     }
 }

@@ -4,15 +4,16 @@
 //! which must pump messages. The callback only records the event; the thread's loop drains the
 //! queue afterwards, because the callback can be re-entered and must not do real work.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::ffi::c_void;
 
 use mosaik_core::window::WindowHandle;
-use windows::Win32::Foundation::{HWND, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{HWND, LPARAM, WAIT_TIMEOUT, WPARAM};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT, TranslateMessage,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_QUIT,
+    DispatchMessageW, MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, PostMessageW, QS_ALLINPUT,
+    TranslateMessage, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_QUIT,
 };
 
 use crate::error::{Error, Result};
@@ -33,6 +34,16 @@ pub struct WinEvent {
 
 thread_local! {
     static QUEUE: RefCell<VecDeque<WinEvent>> = const { RefCell::new(VecDeque::new()) };
+    /// Where to post a wake-up when the queue stops being empty, and whether one is on its way.
+    static WAKE: Cell<Option<(isize, u32)>> = const { Cell::new(None) };
+    static WAKE_POSTED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Makes events wake a message loop that blocks in `GetMessage`: hook callbacks run inside
+/// `GetMessage` without returning from it, so the first event after a drain posts `message` to
+/// `window` (one post per drain, however many events arrive).
+pub fn wake_on_event(window: HWND, message: u32) {
+    WAKE.with(|w| w.set(Some((window.0 as isize, message))));
 }
 
 unsafe extern "system" fn on_event(
@@ -57,6 +68,14 @@ unsafe extern "system" fn on_event(
             q.push_back(e);
         }
     });
+    if !WAKE_POSTED.with(Cell::get)
+        && let Some((window, message)) = WAKE.with(Cell::get)
+    {
+        WAKE_POSTED.with(|p| p.set(true));
+        // SAFETY: posts to a window of this thread; a failed post only delays the events until
+        // the next message.
+        let _ = unsafe { PostMessageW(Some(HWND(window as *mut c_void)), message, WPARAM(0), LPARAM(0)) };
+    }
 }
 
 /// Installed hooks; removed when dropped. Lives on the thread that installed them.
@@ -100,6 +119,7 @@ pub fn hook(ranges: &[(u32, u32)], process: u32) -> Result<Hooks> {
 
 /// Takes every event recorded so far on this thread.
 pub fn drain() -> Vec<WinEvent> {
+    WAKE_POSTED.with(|p| p.set(false));
     QUEUE.with(|q| {
         q.try_borrow_mut()
             .map(|mut q| q.drain(..).collect())
