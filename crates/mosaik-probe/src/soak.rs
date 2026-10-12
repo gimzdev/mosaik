@@ -152,3 +152,79 @@ pub fn run(
     println!("soak: {result}");
     Ok(result)
 }
+
+/// Eight windows switched between two layouts of their own, a 4 by 2 grid and the same grid
+/// mirrored, so every window moves on every switch: the time of each switch, against the budget
+/// of 400 ms for eight windows. `aside`: the probe's other windows, minimised meanwhile (a
+/// minimised window is not saved into a workspace).
+pub fn eight(engine: &Engine, aside: &[HWND], work: Rect) -> Result<Value, String> {
+    use windows::Win32::UI::WindowsAndMessaging::{SW_MINIMIZE, SW_RESTORE, ShowWindow};
+    for &h in aside {
+        // SAFETY: minimises the probe's own windows.
+        let _ = unsafe { ShowWindow(h, SW_MINIMIZE) };
+    }
+    let (w, h) = (work.width() / 4, work.height() / 2);
+    let cell = |i: i32| Rect::from_origin_size(work.left + (i % 4) * w, work.top + (i / 4) * h, w, h);
+    let mut windows = Vec::new();
+    for i in 0..8 {
+        windows.push(crate::dummy::spawn(
+            &format!("Probe eight {}", i + 1),
+            cell(i),
+            true,
+        )?);
+    }
+    let result = (|| {
+        for (i, (_, hwnd)) in (0..).zip(&windows) {
+            move_frame(*hwnd, cell(i)).map_err(|e| e.to_string())?;
+        }
+        pump_until(500, || false);
+        save(engine, "Eight A")?;
+        for (i, (_, hwnd)) in (0..).zip(&windows) {
+            move_frame(*hwnd, cell(7 - i)).map_err(|e| e.to_string())?;
+        }
+        pump_until(500, || false);
+        save(engine, "Eight B")?;
+        let mut times = Vec::new();
+        let mut failed = 0usize;
+        for i in 0..20 {
+            let (ok, ms) = switch(engine, if i % 2 == 0 { "Eight A" } else { "Eight B" });
+            failed += usize::from(!ok);
+            times.push(ms);
+            pump_until(300, || false);
+        }
+        let mut sorted = times.clone();
+        sorted.sort_by(f64::total_cmp);
+        #[allow(clippy::cast_precision_loss)]
+        let mean = times.iter().sum::<f64>() / times.len() as f64;
+        let round = |v: f64| (v * 10.0).round() / 10.0;
+        let result = json!({
+            "windows": 8,
+            "switches": times.len(),
+            "failed": failed,
+            "ms_mean": round(mean),
+            "ms_median": round(sorted[sorted.len() / 2]),
+            "ms_max": round(sorted[sorted.len() - 1]),
+        });
+        println!("eight: {result}");
+        Ok(result)
+    })();
+    for (process, hwnd) in &windows {
+        crate::apps::close(*hwnd);
+        if !process.wait(3000) {
+            let _ = process.kill();
+        }
+    }
+    for name in ["Eight A", "Eight B"] {
+        let _ = engine.request(
+            Command::DeleteWorkspace {
+                workspace: name.into(),
+            },
+            std::time::Duration::from_secs(15),
+        );
+    }
+    for &h in aside {
+        // SAFETY: restores the probe's own windows.
+        let _ = unsafe { ShowWindow(h, SW_RESTORE) };
+    }
+    result
+}

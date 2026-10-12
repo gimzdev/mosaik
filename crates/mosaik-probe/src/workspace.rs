@@ -205,6 +205,10 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     let result = match &browser {
         Some(b) => browser_scenario(&engine, &probes, dpi, b, work),
         None if soak.is_some() => soak_scenario(&engine, &probes, dpi, work, soak.unwrap_or_default()),
+        None if args.iter().any(|a| a == "--eight") => {
+            let aside: Vec<HWND> = probes.iter().map(|p| p.hwnd).collect();
+            crate::soak::eight(&engine, &aside, work)
+        }
         None if apps => {
             let only = args
                 .iter()

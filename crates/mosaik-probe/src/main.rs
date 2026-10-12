@@ -12,7 +12,8 @@
 //! mosaik-probe workspace  save, switch and reopen with the real engine (--drag: drag to snap;
 //!                         --browser edge|chrome: browser tabs dragged out into a workspace;
 //!                         --apps: real apps into zones and tabs; --soak N: N switches,
-//!                         watching for leaks; all but --soak move the mouse much)
+//!                         watching for leaks; --eight: switch time with eight windows;
+//!                         all but the last two move the mouse much)
 //! ```
 //!
 //! The probes only touch windows they open themselves, and close them afterwards.

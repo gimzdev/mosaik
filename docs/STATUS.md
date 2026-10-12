@@ -354,12 +354,43 @@ named once, ever, with what to do (`mosaik_core::others`, unit tests for finding
 keys). None of them is installed on this PC, so the notice itself is checked by the unit tests
 and the probe's notice for Windows' snapping, which goes through the same path.
 
-### Browser tabs dragged out (`mosaik-probe workspace --browser`, jobs 0046 and 0051)
+### Browser tabs dragged out (`mosaik-probe workspace --browser`, jobs 0046 to 0056)
 
-Edge, a private window with three tabs (job 0046): a tab dragged out onto the review zone became a
-window of the workspace, 0 px from the zone; a tab dragged onto the code window's tag became a
-Mosaïk tab of it (a strip of two). Chromium drags a torn-off tab through Windows' move loop, so
-everything that works for a window works for a tab being torn off.
+A browser window with three tabs (the probe's own pages); tab 2 is dragged out onto the review
+zone, then tab 3 onto the code window's tag. The user's browser is never touched: Chrome runs as
+a separate copy with a profile of its own in the temp folder, Edge in a private window, and the
+engine manages only windows showing the probe's pages.
+
+```
+Edge (job 0046):    onto the zone: a new window, 0 px from the zone, part of the workspace
+                    onto the tag:  a new window, a strip of two tabs with the code window
+Chrome (job 0055):  onto the zone: a new window, 0 px from the zone, part of the workspace
+                    onto the tag:  a new window, a strip of two tabs with the code window
+```
+
+Chromium tears a tab off through Windows' move loop, so a tab being torn off is a window being
+dragged: zones and tags take it like any other. On its way up to the tag, the tab passed over
+its old window's tab strip; Chrome put it back there and tore it off again, and the window it
+closed meanwhile was let go quietly (the fix of job 0046). Firefox tears a tab off only when it
+is dropped, so there is no window to follow during the drag: its new window is dragged into a
+zone or onto a tag afterwards, like any window (not installed on this PC).
+
+### Soak (`mosaik-probe workspace --soak 300`, job 0055)
+
+300 switches between two workspaces of the three probe windows (A tiled, with the terminal a
+tab of the code window, so each switch to A hides a tab and draws a strip; B in three columns),
+in 1.4 minutes, measured in the probe's process where the engine and its overlays run (a debug
+build: Smart App Control blocked that release build of the probe, job 0053):
+
+```
+                    after 10 switches   after 300   change
+switches failed                                  0
+GDI objects                     68           68        0
+USER objects                    52           52        0
+handles                        343          341       -2
+private memory              11.5 MB      15.7 MB    +4.2 MB, flat from switch 180 on
+switch time (mean)           32.5 ms      33.1 ms
+```
 
 ## Step 8: release
 
