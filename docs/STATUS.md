@@ -183,6 +183,13 @@ build; releases are signed by the Microsoft Store.
 
 ## Step 2: core, persistence, IPC
 
+- Windows tests with real windows the test makes (`mosaik-win/tests/windows.rs`, run by
+  `mosaik.ps1 test` and CI; job 0074: all pass): a window placed in four places lands on each
+  with its visible frame 0 px off; a maximised window is restored into its place; its title bar
+  is read as real input finds it (room for a tag, clear of the buttons Windows draws; caption
+  where the reading says); the scanner and classifier take it for an app window; it is hidden
+  and shown back in place by each hiding method (shell cloak, minimise, park).
+
 - `mosaik-core`: 66 tests pass on Linux and on Windows (`cargo test -p mosaik-core
   --all-features`), including property tests: ratios round-trip to the same pixels on any
   reference rectangle, shared zone edges stay shared, `fit_inside` always lands inside, zones
@@ -510,6 +517,11 @@ switch time (mean)           32.5 ms      33.1 ms
   ```
 
   Budget: under 1% CPU, and under 15 MB private for the two together with no web window open.
+  Again after tags moved into title bars (job 0074): `mosaik.exe` 0.000% of one core, private
+  4.0 MB, working set 20.8 MB, 241 handles, 6 threads; the watchdog 0.000%, 1.0 MB. The engine's
+  share is now a test, `mosaik-engine/tests/budget.rs`, run by `mosaik.ps1 test` and CI: the
+  engine started as the app starts it, with nothing to manage, measured for 10 s (job 0074:
+  passed).
 - **Switching eight windows** (job 0057, `mosaik-probe workspace --eight`): eight windows
   between a 4 by 2 grid and the same grid mirrored, so every window moves on every switch, 20
   switches: mean 80.7 ms, median 79.2 ms, slowest 107.5 ms, none failed (budget: 400 ms). The
