@@ -24,6 +24,8 @@ pub struct Settings {
     /// How background tabs are hidden. `None` lets Mosaïk pick per window (ADR 0003).
     pub tab_hiding: Option<HideMethod>,
     pub switching: SwitchSettings,
+    /// The handle at the edge of the screen that opens the quick menu.
+    pub edge: EdgeSettings,
     pub theme: Theme,
     pub start_with_windows: bool,
     pub onboarding_done: bool,
@@ -42,6 +44,7 @@ impl Default for Settings {
             frames: FrameSettings::default(),
             tab_hiding: None,
             switching: SwitchSettings::default(),
+            edge: EdgeSettings::default(),
             theme: Theme::System,
             start_with_windows: false,
             onboarding_done: false,
@@ -53,11 +56,12 @@ impl Default for Settings {
 
 /// The ranges of the settings that are numbers, as (what, lowest, highest), in the order of
 /// `Settings::numbers_mut`.
-const RANGES: [(&str, i32, i32); 4] = [
+const RANGES: [(&str, i32, i32); 5] = [
     ("The space between zones", 0, 64),
     ("The tag band", 0, 64),
     ("The frame width", 0, 16),
     ("The distance zones pull windows from", 0, 400),
+    ("The quick menu's place along the edge", 0, 100),
 ];
 
 /// Whether `settings.json` was read when Mosaïk started. When it was not (written by a newer
@@ -80,12 +84,13 @@ impl Settings {
         on_disk == OnDisk::Readable
     }
 
-    fn numbers_mut(&mut self) -> [&mut i32; 4] {
+    fn numbers_mut(&mut self) -> [&mut i32; 5] {
         [
             &mut self.frames.style.gap,
             &mut self.frames.style.tag_band,
             &mut self.frames.style.border,
             &mut self.snap.near,
+            &mut self.edge.position,
         ]
     }
 
@@ -181,6 +186,36 @@ impl Default for SwitchSettings {
     }
 }
 
+/// Which edge of the main monitor holds the quick menu's handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeSide {
+    Left,
+    Right,
+}
+
+/// The quick menu: a thin handle at an edge of the main monitor that opens, when the pointer
+/// rests on it, onto Arrange and the other things done often.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EdgeSettings {
+    pub enabled: bool,
+    pub side: EdgeSide,
+    /// Where the handle's middle is along the edge, in percent of the work area's height from
+    /// its top. Dragging the handle moves it.
+    pub position: i32,
+}
+
+impl Default for EdgeSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            side: EdgeSide::Right,
+            position: 30,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {
@@ -246,6 +281,13 @@ mod tests {
         let s = Settings::default();
         assert!(!s.start_with_windows);
         assert_eq!(s.switcher_hotkey.to_string(), "Win+Alt+Space");
+        // Zones follow a window resized by hand; the quick menu waits at the right edge.
+        assert!(s.snap.resize_zones);
+        assert_eq!(s.edge, EdgeSettings::default());
+        assert!(s.edge.enabled && s.edge.side == EdgeSide::Right);
+        // Settings saved before these existed get them on.
+        let older: Settings = serde_json::from_str(r#"{"version":2,"snap":{"enabled":true,"invert_shift":false,"near":48}}"#).unwrap();
+        assert!(older.snap.resize_zones && older.edge.enabled);
     }
 
     #[test]
@@ -267,6 +309,13 @@ mod tests {
         );
         let c = s.clamped();
         assert_eq!((c.frames.style.gap, c.snap.near), (64, 0));
+        let mut s = Settings::default();
+        s.edge.position = 140;
+        assert_eq!(
+            s.problem().as_deref(),
+            Some("The quick menu's place along the edge must be from 0 to 100; it is 140.")
+        );
+        assert_eq!(s.clamped().edge.position, 100);
         assert_eq!(c.problem(), None);
     }
 

@@ -765,34 +765,67 @@ impl Engine {
     /// `topology` (after a display change, or when its zones were edited), and shows its zones
     /// there. Hidden, minimised and other-desktop windows are left alone.
     pub(crate) fn refit_open_workspace(&mut self, topology: &Topology) {
+        self.hide_frames();
+        self.refit(topology, None);
+    }
+
+    /// [`Engine::refit_open_workspace`] for the windows in some zones only (`only`), or all of
+    /// them. Returns each window moved, with the frame it was meant to have and the one it
+    /// kept: they differ when its app would not take the zone's size.
+    pub(crate) fn refit(
+        &mut self,
+        topology: &Topology,
+        only: Option<&std::collections::HashSet<ZoneId>>,
+    ) -> Vec<(WindowHandle, Rect, Rect)> {
         let Some(active) = &self.active else {
-            return;
+            return Vec::new();
         };
         let Some(ws) = self.file.workspaces.iter().find(|w| w.id == active.id).cloned() else {
-            return;
+            return Vec::new();
         };
-        let assigned: HashMap<WindowHandle, SlotId> =
-            active.windows.iter().map(|(s, w)| (*w, s.clone())).collect();
+        let in_zones = |slot: &SlotId| {
+            only.is_none_or(|zones| {
+                ws.layout
+                    .slot(slot)
+                    .and_then(|s| ws.layout.effective_place(s))
+                    .is_some_and(|p| matches!(p, Place::Zone { zone } if zones.contains(zone)))
+            })
+        };
+        let assigned: HashMap<WindowHandle, SlotId> = active
+            .windows
+            .iter()
+            .filter(|(s, _)| in_zones(s))
+            .map(|(s, w)| (*w, s.clone()))
+            .collect();
         let all = self.scan_marked();
         let on_screen: Vec<(SlotId, &WindowFacts)> = all
             .iter()
             .filter(|f| self.manageable(f))
             .filter_map(|f| assigned.get(&f.handle).map(|s| (s.clone(), f)))
             .collect();
-        let moves = plan_refit(&ws, &on_screen, topology, self.style());
-        self.hide_frames();
-        let placed: Vec<(WindowHandle, Rect)> =
-            mover::move_all(&self.to_moves(&moves, topology), mover::WAIT)
-                .into_iter()
-                .filter_map(|o| o.result.ok().map(|r| (o.window, r)))
-                .collect();
+        let moves = self.to_moves(&plan_refit(&ws, &on_screen, topology, self.style()), topology);
+        let targets: HashMap<WindowHandle, Rect> = moves
+            .iter()
+            .filter_map(|(w, to)| match to {
+                To::Frame(r) => Some((*w, *r)),
+                To::Maximized(_) => None,
+            })
+            .collect();
+        let placed: Vec<(WindowHandle, Rect)> = mover::move_all(&moves, mover::WAIT)
+            .into_iter()
+            .filter_map(|o| o.result.ok().map(|r| (o.window, r)))
+            .collect();
         let zones = live_zones(&ws, topology, self.style());
         if let Some(a) = &mut self.active {
             a.zones = zones;
-            a.placed = placed;
+            a.placed.extend(placed.iter().copied());
         }
         self.set_timer(timer::SETTLE, 500);
         self.refresh_frames();
+        placed
+            .into_iter()
+            .filter_map(|(w, wanted)| targets.get(&w).map(|t| (w, *t, wanted)))
+            .collect()
     }
 
     /// Drops apps that never showed a window.

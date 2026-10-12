@@ -14,6 +14,7 @@ mod hider;
 mod hotkeys;
 mod mover;
 mod others;
+mod resize;
 pub mod server;
 mod state;
 mod switcher;

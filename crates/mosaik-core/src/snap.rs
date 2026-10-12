@@ -16,6 +16,10 @@ pub struct SnapSettings {
     pub invert_shift: bool,
     /// How close (in device-independent pixels) the cursor must be to a zone to be pulled in.
     pub near: i32,
+    /// Resizing a window in a zone by an edge it shares with other zones moves that edge for
+    /// all of them, and their windows follow (`crate::lines::follow_resize`). Shift resizes
+    /// freely, as it moves freely.
+    pub resize_zones: bool,
 }
 
 impl Default for SnapSettings {
@@ -24,6 +28,7 @@ impl Default for SnapSettings {
             enabled: true,
             invert_shift: false,
             near: 48,
+            resize_zones: true,
         }
     }
 }

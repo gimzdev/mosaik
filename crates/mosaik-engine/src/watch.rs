@@ -71,6 +71,8 @@ pub(crate) struct Drag {
     pub self_moved: bool,
     /// When the button was first seen up during a drag the app makes itself.
     pub released: Option<std::time::Instant>,
+    /// The zones a resize of the window would move, when it fills a zone (`resize.rs`).
+    pub zone_resize: Option<crate::resize::ZoneResize>,
 }
 
 /// A window that took the mouse: if it moves at the same size while the button is down, without
@@ -661,6 +663,7 @@ impl Engine {
         let pointer = input::pointer();
         let kind = DragKind::at_start(pointer, inner.contains(input::cursor()));
         tracing::debug!(?pointer, ?kind, frame = ?facts.frame_rect, "drag started");
+        let zone_resize = self.zone_resize_for(h, facts.frame_rect, facts.resizable);
         self.watch.drag = Some(Drag {
             window: h,
             pid: facts.pid,
@@ -671,6 +674,7 @@ impl Engine {
             tab_target: None,
             self_moved: false,
             released: None,
+            zone_resize,
         });
         self.sync_location_hooks();
         self.set_timer(timer::DRAG, DRAG_TICK_MS);
@@ -933,18 +937,23 @@ impl Engine {
             if let Some(d) = &mut self.watch.drag {
                 d.kind = decided;
             }
-            if decided != DragKind::Moving {
+            match decided {
+                DragKind::Moving => self.show_zone_preview(Stack::Below(h.0.cast_signed_isize())),
+                DragKind::Resizing => {
+                    self.resize_update(h);
+                    return;
+                }
+                DragKind::Undecided => return,
+            }
+        }
+        match self.watch.drag.as_ref().map(|d| d.kind) {
+            Some(DragKind::Moving) => {}
+            Some(DragKind::Resizing) => {
+                // A window filling a zone takes its zone's lines along (`resize.rs`).
+                self.resize_update(h);
                 return;
             }
-            self.show_zone_preview(Stack::Below(h.0.cast_signed_isize()));
-        }
-        if self
-            .watch
-            .drag
-            .as_ref()
-            .is_some_and(|d| d.kind != DragKind::Moving)
-        {
-            return;
+            _ => return,
         }
         let snapping = self.settings.snap.active(shift_down());
         let cursor = input::cursor();
@@ -1092,6 +1101,30 @@ impl Engine {
         }
     }
 
+    /// Shows `views` (the zones of a monitor as a resize would leave them), stacked per `stack`,
+    /// with the one at `hot` lit. Returns whether they show.
+    pub(crate) fn show_zone_views(&mut self, views: &[ZoneView], hot: Option<usize>, stack: Stack) -> bool {
+        if self.canvas_ready().is_none() {
+            return false;
+        }
+        let Some(canvas) = self.watch.canvas.as_mut() else {
+            return false;
+        };
+        match self.watch.preview.show(canvas, views, stack) {
+            Ok(()) => {
+                if let Err(e) = self.watch.preview.set_hot(canvas, hot) {
+                    tracing::debug!(error = %e, "zone not lit");
+                }
+                self.watch.preview_visible = true;
+                true
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "zones not shown");
+                false
+            }
+        }
+    }
+
     /// Shows the open workspace's zones, stacked per `stack`.
     pub(crate) fn show_zone_preview(&mut self, stack: Stack) {
         let Some(active) = &self.active else { return };
@@ -1189,6 +1222,19 @@ impl Engine {
             {
                 self.note_windows_snapping(pointer);
             }
+        }
+        if d.kind == DragKind::Resizing
+            && let Some(zr) = d.zone_resize
+            && self.resize_end(h, d.start, zr)
+        {
+            // The window stays in its zone, which followed it; its group's other tabs follow
+            // when shown.
+            self.sync_location_hooks();
+            self.refresh_frame(h);
+            if self.group_of_window(h).is_some() {
+                self.sync_tabs();
+            }
+            return;
         }
         self.sync_location_hooks();
         self.after_user_move(h);
