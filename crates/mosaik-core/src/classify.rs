@@ -54,6 +54,9 @@ pub enum Refuse {
     /// The app runs as administrator (or at a higher integrity level): Windows does not let a
     /// normal app move it, and Mosaïk never asks for more rights.
     Elevated,
+    /// Mosaïk could not read the app's rights (Windows protects some processes from others):
+    /// treated as if it ran as administrator.
+    Protected,
 }
 
 impl Refuse {
@@ -61,6 +64,9 @@ impl Refuse {
         match self {
             Refuse::Elevated => {
                 "This window belongs to an app running as administrator. Windows doesn't let other apps move it, so Mosaïk leaves it alone."
+            }
+            Refuse::Protected => {
+                "Windows keeps this window's app out of other apps' reach, so Mosaïk cannot move it and leaves it alone."
             }
         }
     }
@@ -168,8 +174,10 @@ pub fn classify(w: &WindowFacts, rules: &Rules) -> Verdict {
         }
     }
 
-    if matches!(w.elevation, Elevation::Higher | Elevation::Unknown) {
-        return Verdict::Refuse(Refuse::Elevated);
+    match w.elevation {
+        Elevation::Higher => return Verdict::Refuse(Refuse::Elevated),
+        Elevation::Unknown => return Verdict::Refuse(Refuse::Protected),
+        Elevation::Same => {}
     }
     if w.minimized {
         return Verdict::Pending(Pending::Minimized);
@@ -302,6 +310,19 @@ mod tests {
         let v = classify(&w, &Rules::default());
         assert_eq!(v, Verdict::Refuse(Refuse::Elevated));
         assert!(Refuse::Elevated.explain().contains("administrator"));
+    }
+
+    #[test]
+    fn windows_whose_rights_cannot_be_read_are_refused_without_blaming_administrator() {
+        let w = WindowFacts {
+            elevation: Elevation::Unknown,
+            ..app("protected.exe", "ProtectedWindow", "Protected")
+        };
+        assert_eq!(
+            classify(&w, &Rules::default()),
+            Verdict::Refuse(Refuse::Protected)
+        );
+        assert!(!Refuse::Protected.explain().contains("administrator"));
     }
 
     #[test]

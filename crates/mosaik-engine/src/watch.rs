@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use mosaik_core::classify::{Verdict, classify};
+use mosaik_core::classify::{Refuse, Verdict, classify};
 use mosaik_core::geometry::{Insets, Point, Rect, scale_for_dpi};
 use mosaik_core::layout::{Place, TabGroupId};
 use mosaik_core::snap::{self, DragKind, LiveZone as SnapZone};
@@ -91,6 +91,9 @@ pub(crate) struct Watch {
     /// The strip shown over a single window's tag while another window is dragged onto it.
     drop_bar: Option<TabBar>,
     pub(crate) drag: Option<Drag>,
+    /// A window Mosaïk must not move, being dragged while zones are on: why is told when the
+    /// drag ends, not in the middle of it.
+    refused: Option<(WindowHandle, Refuse)>,
     /// The window the user is moving or resizing right now (any window, zones or not), so
     /// nothing moves it from under the pointer.
     pub(crate) moving: Option<WindowHandle>,
@@ -293,13 +296,18 @@ impl Engine {
         if self.watch.moving == Some(h) {
             self.watch.moving = None;
         }
-        if self.watch.drag.as_ref().is_some_and(|d| d.window == h) {
+        if let Some(d) = self.watch.drag.take_if(|d| d.window == h) {
             self.kill_timer(timer::DRAG);
-            self.watch.drag = None;
             self.watch.preview.hide();
             self.watch.preview_visible = false;
             self.hide_drop_bar();
+            if let Some((onto, _)) = d.tab_target {
+                self.refresh_frame(onto);
+            }
             self.sync_location_hooks();
+        }
+        if self.watch.refused.is_some_and(|(w, _)| w == h) {
+            self.watch.refused = None;
         }
         tab
     }
@@ -455,11 +463,11 @@ impl Engine {
         };
         if !self.manageable(&facts) {
             // Dragged while zones are on, a window Mosaïk must not move would get no zones and
-            // no tag without a word: say why, once.
+            // no tag without a word: why is told when the drag ends.
             if self.allowed(&facts)
                 && let Verdict::Refuse(why) = classify(&facts, &self.settings.rules)
             {
-                self.tell_once("refused", "Mosaïk cannot move this window", why.explain());
+                self.watch.refused = Some((h, why));
             }
             return;
         }
@@ -727,6 +735,9 @@ impl Engine {
         if self.watch.moving == Some(h) {
             self.watch.moving = None;
         }
+        if let Some((_, why)) = self.watch.refused.take_if(|(w, _)| *w == h) {
+            self.tell_once("refused-drag", "Mosaïk cannot move this window", why.explain());
+        }
         if !self.watch.drag.as_ref().is_some_and(|d| d.window == h) {
             // Not a drag Mosaïk follows: the window may have moved in or out of a zone.
             self.after_user_move(h);
@@ -747,25 +758,34 @@ impl Engine {
         // A window that is gone at the end of its drag (a browser tab dragged back into its
         // window: the browser closes the window it had made for it) has nowhere to go.
         if !window::exists(window::hwnd(h)) {
+            // The strip it was over loses its "Drop to add" slot.
+            if let Some((onto, _)) = d.tab_target {
+                self.refresh_frame(onto);
+            }
             self.sync_location_hooks();
             return;
         }
         if d.kind == DragKind::Moving {
-            if d.tab_target.is_some() || d.target.is_some() {
-                self.note_windows_snapping(input::cursor());
-            }
+            let pointer = input::cursor();
             if let Some((onto, before)) = d.tab_target {
                 if let Some(g) = self.group_of_window(onto) {
                     self.hide_bar(&g.id);
                 }
                 self.join_group(onto, h, before);
+                let joined = self
+                    .group_of_window(h)
+                    .is_some_and(|g| g.open.iter().any(|(_, w)| *w == onto));
+                if joined {
+                    self.note_windows_snapping(pointer);
+                }
                 self.sync_location_hooks();
                 return;
             }
             if let Some(i) = d.target
                 && let Some(zone) = d.zones.get(i)
+                && self.snap_into(h, zone.id.clone())
             {
-                self.snap_into(h, zone.id.clone());
+                self.note_windows_snapping(pointer);
             }
         }
         self.sync_location_hooks();
@@ -816,13 +836,14 @@ impl Engine {
 
     /// Pulls a dropped window into a zone of the open workspace; a window that was not part of
     /// the workspace joins it. The visible tab of a group brings its group along.
-    fn snap_into(&mut self, h: WindowHandle, zone: mosaik_core::zone::ZoneId) {
+    /// Returns whether the window went into the zone.
+    fn snap_into(&mut self, h: WindowHandle, zone: mosaik_core::zone::ZoneId) -> bool {
         let Some(live) = self
             .active
             .as_ref()
             .and_then(|a| a.zones.iter().find(|z| z.id == zone).cloned())
         else {
-            return;
+            return false;
         };
         let group = self.group_of_window(h).map(|g| g.id);
         // A tab group sits below a band with room for its strip, tags or not.
@@ -835,7 +856,7 @@ impl Engine {
         if let Some(Err(e)) = moved.into_iter().next().map(|o| o.result) {
             if !window::exists(window::hwnd(h)) {
                 // Closed while it was being moved: nothing to tell.
-                return;
+                return false;
             }
             tracing::warn!(error = %e, "window not pulled into its zone");
             self.tell_once(
@@ -843,7 +864,7 @@ impl Engine {
                 "A window did not move into its zone",
                 format!("{e}. It stays where it was dropped."),
             );
-            return;
+            return false;
         }
         let place = Place::Zone { zone };
         match group {
@@ -853,7 +874,7 @@ impl Engine {
             }
             None => {
                 let Some(slot) = self.slot_for_window(h, place.clone()) else {
-                    return;
+                    return true;
                 };
                 self.edit_layout(|layout| {
                     if let Some(s) = layout.slots.iter_mut().find(|s| s.id == slot) {
@@ -864,5 +885,6 @@ impl Engine {
         }
         self.refresh_frame(h);
         self.sync_location_hooks();
+        true
     }
 }

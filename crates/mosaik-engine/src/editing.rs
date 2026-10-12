@@ -177,6 +177,8 @@ impl Engine {
             self.settings = old;
             return failed(format!("Your settings could not be saved: {e}"));
         }
+        // The user's own save: the file holds their settings from now on.
+        self.settings_on_disk = mosaik_core::settings::OnDisk::Readable;
         // While shortcuts are held for the recorder, the new one is registered on release.
         if hotkey_changed && !self.config.safe_mode && !self.hotkeys_held {
             // The old shortcut goes first, so a swap between the two works.

@@ -22,23 +22,30 @@ zone snappers (PowerToys FancyZones, AquaSnap) and tab groupers (WindowTabs).
 - **Move or resize** is decided by what Windows shows and what the window does, not by where
   the pointer was (`mosaik_core::snap::DragKind`). Windows shows one of its resize arrows for the
   whole of a resize, mouse or keyboard, whichever app the window belongs to: that is a resize.
-  Otherwise the first change of the window decides: same size, a move; new size in the same
-  place, a resize from the keyboard; new size somewhere else, a maximised or snapped window
-  taking back its size as it is dragged, a move. Only with no pointer on screen (touch, pen)
-  does the old position test decide.
+  Otherwise (a pen, an app that draws its own pointer, a cursor tool) the first change of the
+  window decides: same size, a move; a new size that kept one side and the top or the bottom
+  where they were, a resize by an edge or a corner; a new size with every side moved, a
+  maximised or snapped window taking back its size as it is dragged, a move. Only with no
+  pointer on screen (touch) does the position test decide the start.
 - **Windows' snapping is left on and not fought.** Measured on Windows 11 25H2 (job 0048): a
   window dropped on a tag at the screen's top edge or top centre becomes a tab and is not
   maximised; one dropped on a zone at the left edge lands in the zone, 0 px off. Mosaïk acts
   after Windows at the end of the drag, so the place the user dropped on wins. Windows still
-  shows its own preview during such a drag, so the first time a drop on a zone or a tab is at
-  the edge of the screen while Windows' snapping is on, the user is told once, ever, why, and
-  where to turn Windows' snapping off if they prefer. Mosaïk never changes that setting itself.
-- **Other arrangers** are found by their program in one snapshot of the process list, when
-  Mosaïk starts and after each switch (never during a drag), and each is named to the user once,
-  ever, with what to do: pause one of the two, give the other the drags made with Shift, or use
-  one of them for tabs (`mosaik_core::others`). Mosaïk does not stop or configure them.
+  shows its own preview during such a drag, so the first time a drop that went onto a zone or a
+  tab was at an edge where Windows' snapping reacts (left, right, top; the bottom only at its
+  corners) while it is on, the user is told once, ever, why, and where to turn Windows'
+  snapping off if they prefer. Mosaïk never changes that setting itself.
+- **Other arrangers** are found by their program in one snapshot of the process list of the
+  user's own session, when Mosaïk starts and once things settle after a switch or a display
+  change (never during a drag or before a reply), and each is named to the user once, ever, with
+  what to do: pause one of the two, give the other the drags made with Shift, or use one of them
+  for tabs (`mosaik_core::others`). A zone snapper is named only while Mosaïk's own snapping is
+  on. Once every known one has been named, the process list is not read again. Mosaïk does not
+  stop or configure them.
 - Notices told once ever are kept in `settings.notices_shown`; the interface saving settings it
-  read earlier cannot bring one back.
+  read earlier cannot bring one back. While the settings file could not be read (written by a
+  newer Mosaïk, say), they are kept for the session only: Mosaïk never writes its defaults over
+  the user's settings on its own.
 
 ## Consequences
 

@@ -57,7 +57,26 @@ const RANGES: [(&str, i32, i32); 4] = [
     ("The distance zones pull windows from", 0, 400),
 ];
 
+/// Whether `settings.json` was read when Mosaïk started. When it was not (written by a newer
+/// Mosaïk, or unreadable), Mosaïk runs on its defaults and writes nothing on its own, which would
+/// replace the user's settings with those defaults; a save the user makes is theirs to make.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnDisk {
+    Readable,
+    Unreadable,
+}
+
 impl Settings {
+    /// Remembers that the one-time notice `key` was shown. Returns whether to save the settings
+    /// now: when the key is new and the file on disk may be written.
+    pub fn notice_shown(&mut self, key: &str, on_disk: OnDisk) -> bool {
+        if self.notices_shown.iter().any(|k| k == key) {
+            return false;
+        }
+        self.notices_shown.push(key.to_owned());
+        on_disk == OnDisk::Readable
+    }
+
     fn numbers_mut(&mut self) -> [&mut i32; 4] {
         [
             &mut self.frames.style.gap,
@@ -148,6 +167,20 @@ pub enum Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_notice_shown_is_saved_only_over_a_settings_file_mosaik_could_read() {
+        // A file from a newer Mosaïk (or unreadable) is left as it is: the notice is remembered
+        // for this run only, rather than writing the defaults Mosaïk fell back on over it.
+        let mut s = Settings::default();
+        assert!(!s.notice_shown("other:komorebi", OnDisk::Unreadable));
+        assert_eq!(s.notices_shown, ["other:komorebi"]);
+        assert!(!s.notice_shown("other:komorebi", OnDisk::Unreadable));
+        let mut s = Settings::default();
+        assert!(s.notice_shown("windows-snapping", OnDisk::Readable));
+        assert!(!s.notice_shown("windows-snapping", OnDisk::Readable));
+        assert_eq!(s.notices_shown.len(), 1);
+    }
 
     #[test]
     fn defaults_are_safe() {

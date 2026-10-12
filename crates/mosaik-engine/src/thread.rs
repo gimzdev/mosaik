@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use mosaik_core::hotkey::check;
 use mosaik_core::journal::Journal;
-use mosaik_core::settings::Settings;
+use mosaik_core::settings::{OnDisk, Settings};
 use mosaik_core::store::{Store, WorkspacesFile};
 use mosaik_core::switcher::Entry;
 use mosaik_core::topology::Topology;
@@ -130,6 +130,9 @@ pub(crate) struct Engine {
     pub(crate) config: Config,
     pub(crate) store: Store,
     pub(crate) settings: Settings,
+    /// Whether `settings.json` could be read at start; when not, Mosaïk saves nothing to it on
+    /// its own (`OnDisk`).
+    pub(crate) settings_on_disk: OnDisk,
     pub(crate) ui: UiSink,
     pub(crate) window: HWND,
     messages: Receiver<Message>,
@@ -188,14 +191,14 @@ pub(crate) fn run(
     };
     let store = Store::new(&config.data_dir);
     let mut notices = Vec::new();
-    let settings = match store.load::<Settings>() {
+    let (settings, settings_on_disk) = match store.load::<Settings>() {
         Ok(loaded) => {
             notices.extend(loaded.notes);
-            loaded.value
+            (loaded.value, OnDisk::Readable)
         }
         Err(e) => {
             notices.push(format!("{e} Mosaïk is using its default settings for now."));
-            Settings::default()
+            (Settings::default(), OnDisk::Unreadable)
         }
     };
     let (file, file_error) = match store.load::<WorkspacesFile>() {
@@ -224,6 +227,7 @@ pub(crate) fn run(
         config,
         store,
         settings,
+        settings_on_disk,
         ui,
         window,
         messages,
@@ -430,6 +434,8 @@ impl Engine {
         if todo.timers & timer_bit(timer::SETTLE) != 0 {
             self.kill_timer(timer::SETTLE);
             self.settle();
+            // After a switch or a display change, once things are in place: off the reply path.
+            self.check_others();
         }
         if todo.timers & timer_bit(timer::LAUNCH) != 0 {
             self.launch_tick();

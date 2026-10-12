@@ -141,12 +141,22 @@ pub fn spawn(program: &str, args: &str) -> Result<Process> {
     })
 }
 
-/// The program file names of the processes running now (lower case, each once): one snapshot
-/// of the process list, without opening any process.
-pub fn running_programs() -> Result<Vec<String>> {
+/// The program file names of the processes running now in this user's session (lower case, each
+/// once): one snapshot of the process list, without opening any process. Other sessions (another
+/// user signed in on the same PC) are left out: their programs do not touch these windows.
+pub fn running_programs() -> Result<std::collections::BTreeSet<String>> {
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
     };
+    use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+    let session = |pid: u32| {
+        let mut id = 0u32;
+        // SAFETY: reads a process's session id into a local; no handle is opened.
+        unsafe { ProcessIdToSessionId(pid, &raw mut id) }
+            .ok()
+            .map(|()| id)
+    };
+    let own = session(own_pid());
     // SAFETY: a snapshot of the process list; the handle is closed below.
     let snapshot =
         unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }.ctx("CreateToolhelp32Snapshot")?;
@@ -154,13 +164,12 @@ pub fn running_programs() -> Result<Vec<String>> {
         dwSize: u32::try_from(std::mem::size_of::<PROCESSENTRY32W>()).unwrap_or(0),
         ..Default::default()
     };
-    let mut names: Vec<String> = Vec::new();
+    let mut names = std::collections::BTreeSet::new();
     // SAFETY: `entry` is sized as the API requires and outlives each call.
     let mut more = unsafe { Process32FirstW(snapshot, &raw mut entry) }.is_ok();
     while more {
-        let name = crate::text::from_wide(&entry.szExeFile).to_lowercase();
-        if !names.contains(&name) {
-            names.push(name);
+        if own.is_some() && session(entry.th32ProcessID) == own {
+            names.insert(crate::text::from_wide(&entry.szExeFile).to_lowercase());
         }
         // SAFETY: as above.
         more = unsafe { Process32NextW(snapshot, &raw mut entry) }.is_ok();

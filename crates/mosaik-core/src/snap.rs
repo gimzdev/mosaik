@@ -81,9 +81,13 @@ impl DragKind {
         if now.size() == start.size() {
             return Self::Moving;
         }
-        // The size changed. From the keyboard the window does not travel; a maximised or snapped
-        // window dragged by its title bar takes back its own size and travels with the pointer.
-        if now.origin() == start.origin() {
+        // The size changed. A resize by an edge or a corner, with the mouse, a pen or the
+        // keyboard, keeps the opposite side and the opposite top or bottom where they were; a
+        // maximised or snapped window dragged by its title bar takes back its own size and
+        // travels with the pointer, every side moving.
+        let kept_side = now.left == start.left || now.right == start.right;
+        let kept_top_or_bottom = now.top == start.top || now.bottom == start.bottom;
+        if kept_side && kept_top_or_bottom {
             Self::Resizing
         } else {
             Self::Moving
@@ -91,15 +95,15 @@ impl DragKind {
     }
 }
 
-/// `p` is on the outer edge of the desktop, where the pointer stops: the edge pixel of a monitor
-/// with no monitor beyond it. Windows' own snapping reacts to a window dragged there.
+/// `p` is where Windows' own snapping reacts to a dragged window: on the left, right or top edge
+/// of the desktop, where the pointer stops (the edge pixel of a monitor with no monitor beyond
+/// it). The bottom edge counts only at its corners, which are on the left and right edges.
 pub fn at_screen_edge(p: Point, monitors: &[Rect]) -> bool {
     let on_any = |q: Point| monitors.iter().any(|m| m.contains(q));
     monitors.iter().filter(|m| m.contains(p)).any(|m| {
         (p.x == m.left && !on_any(Point::new(p.x - 1, p.y)))
             || (p.x == m.right - 1 && !on_any(Point::new(p.x + 1, p.y)))
             || (p.y == m.top && !on_any(Point::new(p.x, p.y - 1)))
-            || (p.y == m.bottom - 1 && !on_any(Point::new(p.x, p.y + 1)))
     })
 }
 
@@ -146,7 +150,6 @@ mod tests {
         assert!(at_screen_edge(Point::new(576, 0), &one));
         assert!(at_screen_edge(Point::new(0, 516), &one));
         assert!(at_screen_edge(Point::new(1919, 300), &one));
-        assert!(at_screen_edge(Point::new(300, 1079), &one));
         assert!(!at_screen_edge(Point::new(528, 18), &one));
         // Two side by side, the second one above the line of the first: the shared edge is
         // crossed, not an edge; the part of the second's left edge above the first is one.
@@ -156,6 +159,39 @@ mod tests {
         assert!(at_screen_edge(Point::new(1920, -100), &two));
         assert!(at_screen_edge(Point::new(2500, -200), &two));
         assert!(!at_screen_edge(Point::new(5000, 0), &two));
+    }
+
+    #[test]
+    fn any_edge_or_corner_resize_without_arrows_is_a_resize() {
+        // Pen input, apps drawing their own pointer, cursor tools: the pointer tells nothing,
+        // and the frame does: an edge or corner resize keeps one side and one of top or bottom.
+        let start = Rect::new(100, 100, 900, 700);
+        for now in [
+            Rect::new(60, 100, 900, 700),  // left edge
+            Rect::new(100, 60, 900, 700),  // top edge
+            Rect::new(60, 60, 900, 700),   // top-left corner
+            Rect::new(100, 60, 940, 700),  // top-right corner
+            Rect::new(60, 100, 900, 740),  // bottom-left corner
+            Rect::new(100, 100, 940, 740), // bottom-right corner
+        ] {
+            for pointer in [Pointer::Other, Pointer::Hidden] {
+                assert_eq!(
+                    DragKind::once_changed(start, now, pointer),
+                    DragKind::Resizing,
+                    "{now:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn windows_snapping_does_not_watch_the_middle_of_the_bottom_edge() {
+        let one = [Rect::new(0, 0, 1920, 1080)];
+        // Over the taskbar, at the bottom: Windows does not snap there.
+        assert!(!at_screen_edge(Point::new(900, 1079), &one));
+        // Its corners are the left and right edges, which it does watch.
+        assert!(at_screen_edge(Point::new(0, 1079), &one));
+        assert!(at_screen_edge(Point::new(1919, 1079), &one));
     }
 
     #[test]
