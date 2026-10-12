@@ -10,6 +10,7 @@
 #![cfg(windows)]
 
 mod hotkeys;
+mod mover;
 pub mod server;
 mod state;
 mod switcher;
@@ -40,9 +41,10 @@ pub struct Config {
     pub own_pids: Vec<u32>,
     /// The watchdog is running. Without it Mosaïk hides nothing (ADR 0006).
     pub watchdog: bool,
-    /// For probes and tests: manage only the windows of these processes, so a test run never
-    /// touches the user's own windows. `None` in the app.
-    pub manage_only: Option<Vec<u32>>,
+    /// For probes and tests: manage only the windows of these programs (file names such as
+    /// `mosaik-probe.exe`), so a test run never touches the user's own windows, and apps it
+    /// starts are recognised too. `None` in the app.
+    pub manage_only: Option<Vec<String>>,
 }
 
 /// Something the interface has to do.

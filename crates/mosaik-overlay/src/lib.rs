@@ -20,3 +20,5 @@ pub mod layered;
 pub mod shapes;
 #[cfg(windows)]
 pub mod surface;
+#[cfg(windows)]
+pub mod tint;

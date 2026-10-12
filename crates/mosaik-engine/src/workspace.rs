@@ -1,7 +1,13 @@
 //! Workspaces at run time: saving the windows on screen as a workspace, opening one, starting
-//! the apps it needs, and remembering where its windows are as the user moves them.
+//! the apps it needs, and remembering a window the user moves by hand.
+//!
+//! A workspace's layout changes only when the user changes it: by saving, by dropping a window
+//! into a zone, or by moving one of its windows by hand. Windows that apps move on their own, or
+//! that the user maximises for a moment, go back to their places the next time the workspace
+//! opens.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mosaik_core::classify::{Pending, Verdict, classify};
@@ -9,15 +15,20 @@ use mosaik_core::geometry::Rect;
 use mosaik_core::layout::{Place, SlotId, Workspace, WorkspaceId};
 use mosaik_core::matching::AppMatch;
 use mosaik_core::place::{Resolver, Target};
-use mosaik_core::settings::SwitchSettings;
 use mosaik_core::store::StoreError;
 use mosaik_core::topology::Topology;
 use mosaik_core::window::{Cloak, WindowFacts, WindowHandle};
-use mosaik_core::workspace::{Present, Seen, capture, edge_distance, plan_switch, remember, workspace_id};
+use mosaik_core::workspace::{
+    Move, Present, Seen, capture, edge_distance, holds, plan_refit, plan_switch, remember, same_name,
+    workspace_id,
+};
 use mosaik_core::zone::{FrameStyle, ZoneColor, ZoneId};
 use mosaik_ipc::protocol::{ErrorCode, Reply};
-use mosaik_win::{apps, arrange, place, window};
+use mosaik_win::{apps, arrange, window};
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 
+use crate::UiEvent;
+use crate::mover::{self, To};
 use crate::thread::{Engine, timer};
 
 /// How long an app started for a workspace has to show its window.
@@ -57,23 +68,12 @@ impl Active {
         self.windows.iter().find(|(_, w)| **w == h).map(|(s, _)| s)
     }
 
-    /// The zone a window at `frame` sits in: its centre is in the zone, and the window and the
-    /// zone's window area mostly cover each other. That holds for a window Mosaïk put there,
-    /// including an app that kept a size of its own a little larger than the zone, but not for
-    /// a small window floating over the zone or a large one spanning two zones.
+    /// The zone a window whose visible frame is `frame` sits in (the rule is
+    /// `mosaik_core::workspace::holds`); the smallest one when zones overlap.
     pub fn zone_for(&self, frame: Rect, style: FrameStyle) -> Option<&LiveZone> {
         self.zones
             .iter()
-            .filter(|z| z.rect.contains(frame.center()))
-            .filter(|z| {
-                let area = style.window_area(z.rect, z.dpi);
-                let shared = frame.overlap_area(area);
-                let larger = frame.area().max(area.area()).max(1);
-                // Pixel areas are far below 2^52.
-                #[allow(clippy::cast_precision_loss)]
-                let fraction = shared as f64 / larger as f64;
-                fraction >= 0.7
-            })
+            .filter(|z| holds(z.rect, z.dpi, frame, style))
             .min_by_key(|z| z.rect.area())
     }
 }
@@ -96,6 +96,42 @@ fn live_zones(ws: &Workspace, topology: &Topology, style: FrameStyle) -> Vec<Liv
         .collect()
 }
 
+/// A short name for a slot in messages: its zone's name, else its program.
+fn slot_label(ws: &Workspace, slot: &SlotId) -> String {
+    let Some(s) = ws.layout.slot(slot) else {
+        return "a window".to_owned();
+    };
+    if let Some(Place::Zone { zone }) = ws.layout.effective_place(s)
+        && let Some(z) = ws.layout.zone(zone)
+    {
+        return z.name.clone();
+    }
+    s.app
+        .exe
+        .as_deref()
+        .map(|e| e.trim_end_matches(".exe").to_owned())
+        .or_else(|| {
+            s.app
+                .aumid
+                .as_deref()
+                .map(|a| a.split('!').next().unwrap_or(a).to_owned())
+        })
+        .unwrap_or_else(|| "a window".to_owned())
+}
+
+/// The moves of a plan, in the form the mover takes.
+fn to_moves(moves: &[Move], topology: &Topology) -> Vec<(WindowHandle, To)> {
+    moves
+        .iter()
+        .filter_map(|m| match &m.target {
+            Target::Frame(r) => Some((m.window, To::Frame(*r))),
+            Target::Maximized(monitor) => topology
+                .get(monitor)
+                .map(|mon| (m.window, To::Maximized(mon.work_area))),
+        })
+        .collect()
+}
+
 fn error(code: ErrorCode, message: impl Into<String>, hint: Option<&str>) -> Reply {
     Reply::Error {
         code,
@@ -110,10 +146,11 @@ impl Engine {
     }
 
     fn allowed(&self, f: &WindowFacts) -> bool {
-        self.config
-            .manage_only
-            .as_ref()
-            .is_none_or(|pids| pids.contains(&f.pid))
+        self.config.manage_only.as_ref().is_none_or(|exes| {
+            f.exe
+                .as_deref()
+                .is_some_and(|e| exes.iter().any(|x| x.eq_ignore_ascii_case(e)))
+        })
     }
 
     /// A window Mosaïk manages now: on screen, an app window, not elevated.
@@ -176,19 +213,14 @@ impl Engine {
         }
     }
 
+    /// A workspace by id, then by name (the same comparison the switcher uses).
     fn find_workspace(&self, which: &str) -> Option<usize> {
         let w = which.trim();
         self.file
             .workspaces
             .iter()
             .position(|ws| ws.id.0 == w)
-            .or_else(|| {
-                let lower = w.to_lowercase();
-                self.file
-                    .workspaces
-                    .iter()
-                    .position(|ws| ws.name.trim().to_lowercase() == lower)
-            })
+            .or_else(|| self.file.workspaces.iter().position(|ws| same_name(&ws.name, w)))
     }
 
     /// Makes `id` the open workspace with these windows in its slots, and shows its frames.
@@ -213,36 +245,26 @@ impl Engine {
         self.refresh_frames();
     }
 
-    /// The open workspace remembers where its windows are now (when it is left, after the user
-    /// moves one of its windows, and before Mosaïk exits).
-    pub(crate) fn remember_active(&mut self) {
+    /// The user moved or resized one of the open workspace's windows by hand: the workspace
+    /// remembers where it is now.
+    pub(crate) fn remember_window(&mut self, h: WindowHandle) {
         let Some(active) = &self.active else { return };
+        let Some(slot) = active.slot_of(h).cloned() else {
+            return;
+        };
         let Some(topology) = self.topology.clone() else {
             return;
         };
         let Some(index) = self.file.workspaces.iter().position(|w| w.id == active.id) else {
             return;
         };
-        let by_window: HashMap<WindowHandle, SlotId> =
-            active.windows.iter().map(|(s, w)| (*w, s.clone())).collect();
-        // Front to back, as Windows stacks them.
-        let mut facts: Vec<(SlotId, WindowFacts)> = Vec::new();
-        for hwnd in window::top_level() {
-            let h = window::handle(hwnd);
-            if let Some(slot) = by_window.get(&h)
-                && let Some(f) = self.scanner.facts(hwnd)
-                && f.cloak != Cloak::ByShell
-            {
-                facts.push((slot.clone(), f));
-            }
+        let Some(facts) = self.scanner.facts(window::hwnd(h)) else {
+            return;
+        };
+        if facts.cloak == Cloak::ByShell {
+            return;
         }
-        let present: Vec<Present<'_>> = facts
-            .iter()
-            .map(|(slot, f)| Present {
-                slot: slot.clone(),
-                window: f,
-            })
-            .collect();
+        let present = [Present { slot, window: &facts }];
         let updated = remember(&self.file.workspaces[index], &present, &topology, self.style());
         if updated != self.file.workspaces[index] {
             self.file.workspaces[index] = updated;
@@ -286,20 +308,6 @@ impl Engine {
             .unwrap_or_else(|| mosaik_core::workspace::suggested_name(&self.file.workspaces));
         let name: String = name.chars().take(mosaik_core::switcher::MAX_NAME).collect();
 
-        // The workspace being left keeps its own windows' places.
-        let previous_index = self.find_workspace(&name).filter(|i| {
-            // Only an exact name match updates; an id typed by hand does too.
-            let ws = &self.file.workspaces[*i];
-            ws.name.trim().eq_ignore_ascii_case(name.trim()) || ws.id.0 == name.trim()
-        });
-        if self
-            .active
-            .as_ref()
-            .is_some_and(|a| previous_index.is_none_or(|i| self.file.workspaces[i].id != a.id))
-        {
-            self.remember_active();
-        }
-
         let windows: Vec<WindowFacts> = self
             .scanner
             .scan()
@@ -322,6 +330,8 @@ impl Engine {
                 launch: apps::launch_for(w, path.as_deref()),
             });
         }
+        // Saving under an existing name (or id) updates that workspace.
+        let previous_index = self.find_workspace(&name);
         let previous = previous_index.map(|i| self.file.workspaces[i].clone());
         let id = previous.as_ref().map_or_else(
             || {
@@ -330,6 +340,7 @@ impl Engine {
             },
             |p| p.id.clone(),
         );
+        let name = previous.as_ref().map_or(name, |p| p.name.clone());
         let style = self.style();
         let ws = capture(
             id.clone(),
@@ -348,14 +359,14 @@ impl Engine {
             .collect();
         // Windows in zones move inside them, below their tags.
         let resolver = Resolver::new(&ws.layout, &topology, style);
-        let targets: Vec<(WindowHandle, Rect)> = ws
+        let moves: Vec<(WindowHandle, To)> = ws
             .layout
             .slots
             .iter()
             .zip(&windows)
             .filter(|(s, _)| matches!(s.place, Place::Zone { .. }))
             .filter_map(|(s, w)| match resolver.target(&s.place) {
-                Some(Target::Frame(r)) => Some((w.handle, r)),
+                Some(Target::Frame(r)) => Some((w.handle, To::Frame(r))),
                 _ => None,
             })
             .collect();
@@ -365,17 +376,16 @@ impl Engine {
             None => self.file.workspaces.push(ws),
         }
         self.hide_frames();
-        let mut placed = Vec::new();
-        for (h, r) in targets {
-            let hwnd = window::hwnd(h);
-            if arrange::is_hung(hwnd) {
-                continue;
-            }
-            match place::move_frame(hwnd, r) {
-                Ok(moved) => placed.push((h, moved.wanted)),
-                Err(e) => tracing::warn!(error = %e, "window not put in its zone"),
-            }
-        }
+        let placed = mover::move_all(&moves, mover::WAIT)
+            .into_iter()
+            .filter_map(|o| match o.result {
+                Ok(wanted) => Some((o.window, wanted)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "window not put in its zone");
+                    None
+                }
+            })
+            .collect();
         self.activate(id, assigned, placed);
         self.persist();
         self.set_timer(timer::SETTLE, 400);
@@ -430,7 +440,6 @@ impl Engine {
                 None,
             );
         };
-        self.remember_active();
         let previous: Vec<WindowHandle> = self
             .active
             .as_ref()
@@ -449,37 +458,26 @@ impl Engine {
         );
 
         self.hide_frames();
-        let mut assigned: HashMap<SlotId, WindowHandle> = HashMap::new();
+        let outcomes = mover::move_all(&to_moves(&plan.moves, &topology), mover::WAIT);
         let mut placed = Vec::new();
         let mut trouble: Vec<String> = Vec::new();
-        let label = |slot: &SlotId| -> String {
-            ws.layout
-                .slot(slot)
-                .and_then(|s| s.app.exe.clone().or_else(|| s.app.aumid.clone()))
-                .unwrap_or_else(|| "a window".to_owned())
-        };
-        for m in &plan.moves {
-            let hwnd = window::hwnd(m.window);
-            if arrange::is_hung(hwnd) {
-                trouble.push(format!("{} is not responding", label(&m.slot)));
-                continue;
-            }
-            let result = match &m.target {
-                Target::Frame(r) => place::move_frame(hwnd, *r).map(|moved| {
-                    placed.push((m.window, moved.wanted));
-                }),
-                Target::Maximized(monitor) => match topology.get(monitor) {
-                    Some(mon) => place::maximize_on(hwnd, mon.work_area),
-                    None => Ok(()),
-                },
-            };
-            match result {
-                Ok(()) => {
-                    assigned.insert(m.slot.clone(), m.window);
+        for o in outcomes {
+            match o.result {
+                Ok(wanted) => placed.push((o.window, wanted)),
+                Err(e) => {
+                    let slot = plan
+                        .moves
+                        .iter()
+                        .find(|m| m.window == o.window)
+                        .map(|m| m.slot.clone());
+                    let who = slot.map_or_else(|| "a window".to_owned(), |s| slot_label(&ws, &s));
+                    trouble.push(format!("{who}: {e}"));
                 }
-                Err(e) => trouble.push(format!("{}: {e}", label(&m.slot))),
             }
         }
+        // Every window the plan picked belongs to the workspace, moved or not.
+        let assigned: HashMap<SlotId, WindowHandle> =
+            plan.moves.iter().map(|m| (m.slot.clone(), m.window)).collect();
         for h in &plan.minimize {
             arrange::minimize(window::hwnd(*h));
         }
@@ -496,20 +494,18 @@ impl Engine {
             let Some(app) = ws.layout.slot(slot).map(|s| s.app.clone()) else {
                 continue;
             };
-            let elsewhere = all
+            if all
                 .iter()
-                .any(|f| f.cloak == Cloak::ByShell && app.score(f).is_some());
-            if elsewhere {
+                .any(|f| f.cloak == Cloak::ByShell && app.score(f).is_some())
+            {
                 continue;
             }
-            match apps::start(launch) {
-                Ok(_) => launching.push(Launching {
-                    slot: slot.clone(),
-                    app,
-                    until: Instant::now() + LAUNCH_WAIT,
-                }),
-                Err(e) => trouble.push(format!("{} did not start: {e}", label(slot))),
-            }
+            self.start_app(launch.clone(), slot_label(&ws, slot));
+            launching.push(Launching {
+                slot: slot.clone(),
+                app,
+                until: Instant::now() + LAUNCH_WAIT,
+            });
         }
         let starting = launching.len();
         self.activate(ws.id.clone(), assigned, placed);
@@ -521,10 +517,9 @@ impl Engine {
         }
         self.set_timer(timer::SETTLE, 400);
         self.persist();
-        let moved = plan.moves.len() - trouble.len().min(plan.moves.len());
         tracing::info!(
             ms = format!("{:.1}", started.elapsed().as_secs_f64() * 1000.0),
-            moved,
+            moved = plan.moves.len() - trouble.len().min(plan.moves.len()),
             starting,
             problems = trouble.len(),
             minimized = plan.minimize.len(),
@@ -544,37 +539,66 @@ impl Engine {
             error(
                 ErrorCode::Failed,
                 format!(
-                    "{message} Some windows could not be placed: {}.",
+                    "{message} Some windows stayed where they were: {}.",
                     trouble.join("; ")
                 ),
-                Some(
-                    "Windows of apps running as administrator, and apps that are not responding, are left where they are.",
-                ),
+                Some("Apps that are not responding, and apps running as administrator, are left alone."),
             )
         }
     }
 
-    /// A moment after a switch or save: windows that apps moved again (some restore their own
-    /// position after being moved) are put back once.
+    /// Starts an app on a thread of its own: Windows can take seconds to start one (a packaged
+    /// app waits for it to be ready), and the engine must not wait. A failure is told to the
+    /// user in plain words.
+    fn start_app(&self, launch: mosaik_core::layout::Launch, label: String) {
+        let ui = Arc::clone(&self.ui);
+        let spawned = std::thread::Builder::new()
+            .name("mosaik-launch".into())
+            .spawn(move || {
+                // SAFETY: COM for this short-lived thread (packaged apps are started through COM).
+                let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+                if let Err(e) = apps::start(&launch) {
+                    tracing::warn!(error = %e, "app not started");
+                    ui(UiEvent::Notice {
+                        title: "An app did not start".into(),
+                        body: format!("{label} did not start: {e}"),
+                    });
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::error!(error = %e, "launch thread not started");
+        }
+    }
+
+    /// A moment after windows were moved: those an app moved again (some restore their own
+    /// position after being moved) are put back once. A window the user is moving is left alone.
     pub(crate) fn settle(&mut self) {
         let Some(active) = &mut self.active else { return };
         let placed = std::mem::take(&mut active.placed);
-        for (h, wanted) in placed {
-            let hwnd = window::hwnd(h);
-            let Some(g) = window::geometry(hwnd) else { continue };
-            if g.framable()
-                && edge_distance(g.frame, wanted) > 2
-                && !arrange::is_hung(hwnd)
-                && let Err(e) = place::move_frame(hwnd, wanted)
-            {
-                tracing::debug!(error = %e, "window not put back");
+        let moving = self.watch.moving;
+        let again: Vec<(WindowHandle, To)> = placed
+            .into_iter()
+            .filter(|(h, _)| moving != Some(*h))
+            .filter_map(|(h, wanted)| {
+                let hwnd = window::hwnd(h);
+                let g = window::geometry(hwnd)?;
+                (g.framable() && edge_distance(g.frame, wanted) > 2 && !arrange::is_hung(hwnd))
+                    .then_some((h, To::Frame(wanted)))
+            })
+            .collect();
+        if !again.is_empty() {
+            for o in mover::move_all(&again, Duration::from_millis(1000)) {
+                if let Err(e) = o.result {
+                    tracing::debug!(error = %e, "window not put back");
+                }
             }
         }
         self.refresh_frames();
     }
 
     /// Monitors or work areas changed (a monitor plugged in or out, a scale or taskbar change,
-    /// back from sleep): the open workspace's windows are fitted to the new arrangement.
+    /// back from sleep): the open workspace's windows are fitted to the new arrangement. Only
+    /// windows on screen move; hidden, minimised and other-desktop windows are left alone.
     pub(crate) fn displays_changed(&mut self) {
         let before = self.topology.as_ref().map(Topology::fingerprint);
         let Some(topology) = self.refresh_topology() else {
@@ -591,37 +615,20 @@ impl Engine {
         let Some(ws) = self.file.workspaces.iter().find(|w| w.id == active.id).cloned() else {
             return;
         };
-        let assigned: Vec<WindowHandle> = active.windows.values().copied().collect();
+        let assigned: HashMap<WindowHandle, SlotId> =
+            active.windows.iter().map(|(s, w)| (*w, s.clone())).collect();
         let all = self.scanner.scan();
-        let candidates: Vec<&WindowFacts> = all
+        let on_screen: Vec<(SlotId, &WindowFacts)> = all
             .iter()
-            .filter(|f| assigned.contains(&f.handle) && !f.minimized)
+            .filter(|f| self.manageable(f))
+            .filter_map(|f| assigned.get(&f.handle).map(|s| (s.clone(), f)))
             .collect();
-        let quiet = SwitchSettings {
-            minimize_others: false,
-            launch_missing: false,
-        };
-        let plan = plan_switch(&ws, &candidates, &[], &topology, self.style(), quiet);
+        let moves = plan_refit(&ws, &on_screen, &topology, self.style());
         self.hide_frames();
-        let mut placed = Vec::new();
-        for m in &plan.moves {
-            let hwnd = window::hwnd(m.window);
-            if arrange::is_hung(hwnd) {
-                continue;
-            }
-            match &m.target {
-                Target::Frame(r) => {
-                    if let Ok(moved) = place::move_frame(hwnd, *r) {
-                        placed.push((m.window, moved.wanted));
-                    }
-                }
-                Target::Maximized(monitor) => {
-                    if let Some(mon) = topology.get(monitor) {
-                        let _ = place::maximize_on(hwnd, mon.work_area);
-                    }
-                }
-            }
-        }
+        let placed: Vec<(WindowHandle, Rect)> = mover::move_all(&to_moves(&moves, &topology), mover::WAIT)
+            .into_iter()
+            .filter_map(|o| o.result.ok().map(|r| (o.window, r)))
+            .collect();
         let zones = live_zones(&ws, &topology, self.style());
         if let Some(a) = &mut self.active {
             a.zones = zones;
@@ -650,13 +657,13 @@ impl Engine {
         if active.launching.is_empty() || active.slot_of(h).is_some() {
             return;
         }
-        let hwnd = window::hwnd(h);
-        let Some(facts) = self.scanner.facts(hwnd) else {
+        let Some(facts) = self.scanner.facts(window::hwnd(h)) else {
             return;
         };
         if !self.manageable(&facts) {
             return;
         }
+        let Some(active) = &self.active else { return };
         let Some(pos) = active
             .launching
             .iter()
@@ -674,22 +681,14 @@ impl Engine {
         let Some(active) = &mut self.active else { return };
         let launched = active.launching.remove(pos);
         active.windows.insert(launched.slot.clone(), h);
-        let target = ws
-            .layout
-            .slot(&launched.slot)
-            .and_then(|s| ws.layout.effective_place(s))
-            .and_then(|p| Resolver::new(&ws.layout, &topology, style).target(p));
-        match target {
-            Some(Target::Frame(r)) => match place::move_frame(hwnd, r) {
-                Ok(moved) => active.placed.push((h, moved.wanted)),
-                Err(e) => tracing::warn!(error = %e, "started window not placed"),
-            },
-            Some(Target::Maximized(monitor)) => {
-                if let Some(mon) = topology.get(&monitor) {
-                    let _ = place::maximize_on(hwnd, mon.work_area);
-                }
-            }
-            None => {}
+        let moves = plan_refit(&ws, &[(launched.slot, &facts)], &topology, style);
+        let placed: Vec<(WindowHandle, Rect)> =
+            mover::move_all(&to_moves(&moves, &topology), Duration::from_millis(1500))
+                .into_iter()
+                .filter_map(|o| o.result.ok().map(|r| (o.window, r)))
+                .collect();
+        if let Some(a) = &mut self.active {
+            a.placed.extend(placed);
         }
         self.set_timer(timer::SETTLE, 600);
         self.refresh_frame(h);

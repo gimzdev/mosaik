@@ -35,9 +35,9 @@ pub struct Seen<'a> {
 const SAME_PLACE: i32 = 12;
 /// Windows "tile" when the area they share is under this fraction of the smaller one.
 const TILE_OVERLAP: f64 = 0.02;
-/// A window sits in a zone when its frame is within this many pixels (at 100%) of the zone's
-/// window area on every edge.
-const IN_ZONE: i32 = 8;
+/// A window sits in a zone when it and the zone's window area cover at least this much of each
+/// other.
+const IN_ZONE: f64 = 0.7;
 
 fn tolerance(work: Rect, dpi: u32) -> (i32, i32) {
     let px = crate::geometry::scale_for_dpi(SAME_PLACE, dpi);
@@ -77,14 +77,40 @@ pub fn edge_distance(a: Rect, b: Rect) -> i32 {
     .unwrap_or(0)
 }
 
-/// The zone of an existing layout whose window area this frame fills, if any.
-fn zone_holding(frame: Rect, zones: &[(ZoneId, Rect, u32)], style: FrameStyle) -> Option<ZoneId> {
+/// Whether a window whose visible frame is `frame` sits in the zone at `zone` (on a monitor at
+/// `dpi`): its centre is in the zone, and it and the zone's window area cover at least 70% of
+/// each other. That holds for a window Mosaïk put there, including an app that kept a size a
+/// little larger than the zone (a browser in a narrow zone), but not for a small window
+/// floating over the zone or a large one spanning two zones. One rule for everything that asks
+/// "is this window in its zone?": frames, remembering, saving again.
+pub fn holds(zone: Rect, dpi: u32, frame: Rect, style: FrameStyle) -> bool {
+    if !zone.contains(frame.center()) {
+        return false;
+    }
+    let area = style.window_area(zone, dpi);
+    let larger = frame.area().max(area.area());
+    if larger <= 0 {
+        return false;
+    }
+    // Areas of real screens are far below 2^52, so the conversion is exact.
+    #[allow(clippy::cast_precision_loss)]
+    let covered = frame.overlap_area(area) as f64 / larger as f64;
+    covered >= IN_ZONE
+}
+
+/// The zone a window sits in (see [`holds`]); the smallest one when zones overlap.
+pub fn zone_holding(frame: Rect, zones: &[(ZoneId, Rect, u32)], style: FrameStyle) -> Option<ZoneId> {
     zones
         .iter()
-        .map(|(id, rect, dpi)| (id, edge_distance(style.window_area(*rect, *dpi), frame), *dpi))
-        .filter(|(_, d, dpi)| *d <= crate::geometry::scale_for_dpi(IN_ZONE, *dpi))
-        .min_by_key(|(_, d, _)| *d)
+        .filter(|(_, rect, dpi)| holds(*rect, *dpi, frame, style))
+        .min_by_key(|(_, rect, _)| rect.area())
         .map(|(id, _, _)| id.clone())
+}
+
+/// Whether two workspace names are the same for the user: case and surrounding spaces do not
+/// count, in any language.
+pub fn same_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
 }
 
 /// Every zone of a layout as it lands on the monitors connected now.
@@ -331,9 +357,10 @@ pub struct Present<'a> {
     pub window: &'a WindowFacts,
 }
 
-/// Updates `workspace` from where its windows are now: a window in one of its zones stays in
-/// that zone, a maximised one stays maximised on its monitor, any other remembers its own place.
-/// Minimised and closed windows keep the place they had. Slots are reordered front to back.
+/// Updates `workspace` from where the given windows are now (the engine passes the window the
+/// user just moved by hand): a window in one of its zones stays in that zone, a maximised one
+/// stays maximised on its monitor, any other remembers its own place. Minimised windows keep the
+/// place they had. The given windows move to the front of the slot order, front to back.
 pub fn remember(
     workspace: &Workspace,
     present: &[Present<'_>],
@@ -433,18 +460,44 @@ pub fn plan_switch(
     }
     let used: HashSet<WindowHandle> = assigned.values().copied().collect();
     if settings.minimize_others {
-        let minimized: HashSet<WindowHandle> =
-            windows.iter().filter(|w| w.minimized).map(|w| w.handle).collect();
-        plan.minimize = previous
+        // Only windows on screen now: a previous window that is hidden (an app closed to the
+        // tray), on another desktop or gone is left alone, since minimising would show it.
+        plan.minimize = windows
             .iter()
-            .filter(|h| !used.contains(h) && !minimized.contains(h))
-            .copied()
+            .filter(|w| w.visible && !w.minimized && w.cloak == crate::window::Cloak::None)
+            .map(|w| w.handle)
+            .filter(|h| previous.contains(h) && !used.contains(h))
             .collect();
     }
     // Slots are front to back: raise from the back so the first slot ends on top.
     plan.raise = plan.moves.iter().rev().map(|m| m.window).collect();
     plan.focus = plan.moves.first().map(|m| m.window);
     plan
+}
+
+/// Where the windows already filling a workspace's slots go on the monitors connected now:
+/// after a display change, or when a window the workspace started appears. Minimised windows are
+/// left where they are.
+pub fn plan_refit(
+    ws: &Workspace,
+    windows: &[(SlotId, &WindowFacts)],
+    topology: &Topology,
+    style: FrameStyle,
+) -> Vec<Move> {
+    let resolver = Resolver::new(&ws.layout, topology, style);
+    windows
+        .iter()
+        .filter(|(_, w)| !w.minimized)
+        .filter_map(|(slot, w)| {
+            let s = ws.layout.slot(slot)?;
+            let target = ws.layout.effective_place(s).and_then(|p| resolver.target(p))?;
+            Some(Move {
+                slot: slot.clone(),
+                window: w.handle,
+                target,
+            })
+        })
+        .collect()
 }
 
 /// A short, readable id for a new workspace: its name in lower case with dashes ("Ship the
@@ -847,7 +900,81 @@ mod tests {
     }
 
     #[test]
+    fn only_windows_on_screen_are_minimised() {
+        let t = fixtures::single_1080p_100();
+        let ws = snapped();
+        let seen: Vec<Seen> = ws.iter().map(|w| seen(w, "App")).collect();
+        let w = capture(WorkspaceId("w".into()), "W".into(), &seen, &t, style(), None);
+        let mail = win(9, "outlook.exe", "Inbox", Rect::new(0, 0, 1920, 1032));
+        let elsewhere = WindowFacts {
+            cloak: crate::window::Cloak::ByShell,
+            ..win(8, "teams.exe", "Chat", Rect::new(0, 0, 900, 900))
+        };
+        // The previous workspace also had a chat app now closed to the tray (not in the list).
+        let tray = WindowHandle(7);
+        let plan = plan_switch(
+            &w,
+            &[&mail, &elsewhere],
+            &[mail.handle, elsewhere.handle, tray],
+            &t,
+            style(),
+            SwitchSettings::default(),
+        );
+        assert_eq!(plan.minimize, vec![mail.handle]);
+    }
+
+    #[test]
+    fn one_rule_for_being_in_a_zone() {
+        let zone = Rect::new(1500, 0, 1920, 1032);
+        let s = style();
+        let area = s.window_area(zone, 96);
+        assert!(holds(zone, 96, area, s), "exactly in place");
+        // A browser that will not go below 502 px, fitted against the screen edge.
+        let wide = Rect::new(1912 - 502, area.top, 1912, area.bottom);
+        assert!(holds(zone, 96, wide, s), "an app that kept its own size");
+        assert!(
+            !holds(zone, 96, Rect::new(1600, 300, 1800, 500), s),
+            "a small window floating over it"
+        );
+        assert!(
+            !holds(zone, 96, Rect::new(900, 0, 1920, 1032), s),
+            "a window spanning two zones"
+        );
+        // Hiding tags moves the window area by the band: windows placed before still count.
+        assert!(holds(zone, 96, area, s.without_tags()));
+    }
+
+    #[test]
+    fn refit_places_the_same_windows_on_new_monitors() {
+        let one = fixtures::single_1080p_100();
+        let ws = snapped();
+        let seen: Vec<Seen> = ws.iter().map(|w| seen(w, "App")).collect();
+        let w = capture(WorkspaceId("w".into()), "W".into(), &seen, &one, style(), None);
+        let minimized = WindowFacts {
+            minimized: true,
+            ..ws[2].clone()
+        };
+        let windows = [
+            (w.layout.slots[0].id.clone(), &ws[0]),
+            (w.layout.slots[1].id.clone(), &ws[1]),
+            (w.layout.slots[2].id.clone(), &minimized),
+        ];
+        for t in fixtures::all() {
+            let moves = plan_refit(&w, &windows, &t, style());
+            assert_eq!(moves.len(), 2, "the minimised window stays put");
+            for m in moves {
+                let Target::Frame(f) = m.target else {
+                    unreachable!("zoned slots resolve to frames")
+                };
+                assert!(t.is_reachable(f, 32), "{f:?} on {}", t.fingerprint());
+            }
+        }
+    }
+
+    #[test]
     fn ids_and_names() {
+        assert!(same_name("  Été ", "ÉTÉ"));
+        assert!(!same_name("Été", "Ete"));
         let taken = [WorkspaceId("ship-the-release".into())];
         assert_eq!(workspace_id("Ship the release!", &taken).0, "ship-the-release-2");
         assert_eq!(workspace_id("  Été 2026 ", &[]).0, "été-2026");

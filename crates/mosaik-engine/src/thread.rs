@@ -28,8 +28,8 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, DispatchMessageW, GetMessageW, KillTimer, MSG, PostQuitMessage, SetTimer,
-    TranslateMessage, WM_DISPLAYCHANGE, WM_ENDSESSION, WM_HOTKEY, WM_POWERBROADCAST, WM_QUERYENDSESSION,
-    WM_SETTINGCHANGE, WM_TIMER, WS_EX_TOOLWINDOW, WS_POPUP,
+    TranslateMessage, WM_CLOSE, WM_DISPLAYCHANGE, WM_ENDSESSION, WM_HOTKEY, WM_POWERBROADCAST,
+    WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_TIMER, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
 use crate::hotkeys::{self, Registered};
@@ -73,13 +73,21 @@ struct Pending {
     timers: u32,
     /// Monitors or work areas changed (debounced by `timer::TOPOLOGY`).
     displays: bool,
-    /// Windows is signing out or shutting down.
+    /// Windows is signing out or shutting down, or an installer is closing Mosaïk.
     ending: bool,
+    /// Asked to close (an installer, `taskkill`): quit like "Quit Mosaïk".
+    close: bool,
 }
 
 impl Pending {
     fn any(self) -> bool {
-        self.wake || self.events || self.switcher || self.timers != 0 || self.displays || self.ending
+        self.wake
+            || self.events
+            || self.switcher
+            || self.timers != 0
+            || self.displays
+            || self.ending
+            || self.close
     }
 
     fn merge(&mut self, o: Pending) {
@@ -89,6 +97,7 @@ impl Pending {
         self.timers |= o.timers;
         self.displays |= o.displays;
         self.ending |= o.ending;
+        self.close |= o.close;
     }
 }
 
@@ -101,6 +110,7 @@ thread_local! {
         timers: 0,
         displays: false,
         ending: false,
+        close: false,
     }) };
 }
 
@@ -305,6 +315,12 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         },
         // Windows may end the session: say yes, and get ready when it does.
         WM_QUERYENDSESSION => return LRESULT(1),
+        // The engine's window is a top-level window, so an installer or `taskkill` asks it to
+        // close: Mosaïk quits properly instead of losing its window.
+        WM_CLOSE => Pending {
+            close: true,
+            ..Pending::default()
+        },
         WM_ENDSESSION if wparam.0 != 0 => Pending {
             ending: true,
             ..Pending::default()
@@ -337,10 +353,15 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
 impl Engine {
     fn process(&mut self, todo: Pending) {
         if todo.ending && !self.stopped {
-            tracing::info!("Windows is ending the session");
+            tracing::info!("Windows is ending the session or closing Mosaïk");
             self.shut_down();
             self.stopped = true;
+            (self.ui)(UiEvent::Exit);
             return;
+        }
+        if todo.close && !self.stopped {
+            tracing::info!("asked to close");
+            (self.ui)(UiEvent::Exit);
         }
         if todo.timers & timer_bit(timer::EXIT) != 0 {
             self.kill_timer(timer::EXIT);
@@ -608,11 +629,10 @@ impl Engine {
         }
     }
 
-    /// Before the engine stops: overlays go, the open workspace remembers where its windows are,
-    /// and every hidden window comes back, so the watchdog finds nothing left to do.
+    /// Before the engine stops: overlays go and every hidden window comes back, so the watchdog
+    /// finds nothing left to do.
     fn shut_down(&mut self) {
         self.stop_watching();
-        self.remember_active();
         let outcome = mosaik_win::rescue::restore_hidden(&self.store);
         log_report("windows restored before exit", &outcome.report);
         if let Some(problem) = outcome.problem {

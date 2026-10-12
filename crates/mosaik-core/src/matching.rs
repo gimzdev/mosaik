@@ -86,6 +86,19 @@ impl TitleMatch {
     }
 }
 
+/// The part of a window class that stays the same from one run of an app to the next. WPF and
+/// WinForms add a suffix that changes every run (`HwndWrapper[App;;<guid>]`,
+/// `WindowsForms10.Window.8.app.0.<hash>`).
+pub fn stable_class(class: &str) -> &str {
+    if let Some(i) = class.find('[') {
+        return &class[..i];
+    }
+    if class.starts_with("WindowsForms10.") {
+        return "WindowsForms10";
+    }
+    class
+}
+
 impl AppMatch {
     pub fn exe(name: &str) -> Self {
         Self {
@@ -124,10 +137,14 @@ impl AppMatch {
             score += 100;
         }
         if let Some(class) = &self.class {
-            if !w.class.eq_ignore_ascii_case(class) {
+            let same = stable_class(&w.class).eq_ignore_ascii_case(stable_class(class));
+            // With a program or app id to go by, the class only breaks ties: some apps get a
+            // new class name every run. Without one, the class is all there is.
+            if same {
+                score += 20;
+            } else if self.exe.is_none() && self.aumid.is_none() {
                 return None;
             }
-            score += 20;
         }
         if let Some(title) = &self.title {
             score += title.bonus(&w.title);
@@ -179,14 +196,32 @@ mod tests {
     }
 
     #[test]
-    fn program_and_class_must_match() {
+    fn the_program_must_match_and_the_class_breaks_ties() {
         let m = AppMatch::of(&win(1, "Code.exe", "Chrome_WidgetWin_1", "x"));
         assert_eq!(m.exe.as_deref(), Some("code.exe"));
-        assert!(m.score(&win(2, "code.exe", "chrome_widgetwin_1", "y")).is_some());
+        let same_class = m.score(&win(2, "code.exe", "chrome_widgetwin_1", "y"));
+        let other_class = m.score(&win(4, "code.exe", "SomethingElse", "y"));
+        assert!(same_class > other_class && other_class.is_some());
         assert!(
             m.score(&win(3, "chrome.exe", "Chrome_WidgetWin_1", "y"))
                 .is_none()
         );
+        // A WPF window gets a new class name every run; it is still found.
+        let wpf = AppMatch::of(&win(5, "devenv.exe", "HwndWrapper[DefaultDomain;;6a1c]", "x"));
+        assert_eq!(
+            wpf.score(&win(6, "devenv.exe", "HwndWrapper[DefaultDomain;;99f0]", "x")),
+            Some(120)
+        );
+        assert_eq!(
+            stable_class("WindowsForms10.Window.8.app.0.141b42a_r6_ad1"),
+            "WindowsForms10"
+        );
+        // Without a program, the class must match.
+        let class_only = AppMatch {
+            class: Some("Notepad".into()),
+            ..AppMatch::default()
+        };
+        assert!(class_only.score(&win(7, "x.exe", "Other", "t")).is_none());
         assert!(
             AppMatch::default().score(&win(4, "a.exe", "b", "c")).is_none(),
             "an empty match matches nothing"

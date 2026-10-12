@@ -53,9 +53,18 @@ mod workspace;
 
 #[cfg(windows)]
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // Started with no arguments by the engine under test, which starts a workspace's missing
+    // apps by their program file: the workspace probe says which window to show.
+    if args.is_empty()
+        && let Ok(title) = std::env::var(workspace::RELAUNCH_TITLE)
+    {
+        args = vec!["dummy".into(), "--title".into(), title, "--topmost".into()];
+    }
     let Some(command) = args.first().cloned() else {
-        eprintln!("usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle> [--out file.json]");
+        eprintln!(
+            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace> [--out file.json]"
+        );
         std::process::exit(2);
     };
     let out = args

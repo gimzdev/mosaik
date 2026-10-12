@@ -29,6 +29,10 @@ use crate::dummy;
 
 const TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Set while the engine under test may start a closed probe window again: the title the new
+/// probe window takes (see `main`).
+pub const RELAUNCH_TITLE: &str = "MOSAIK_PROBE_RELAUNCH_TITLE";
+
 fn ask(engine: &Engine, command: Command) -> (Reply, f64) {
     let start = Instant::now();
     let reply = engine.request(command, TIMEOUT);
@@ -51,9 +55,20 @@ fn pixel(p: Point) -> Option<Rgb> {
     Some(Rgb(byte(16), byte(8), byte(0)))
 }
 
+/// The zone colour, exactly or darkened evenly (a window's shadow over the ring, antialiasing):
+/// each channel scaled by the same factor, within a few levels.
 fn close_to(a: Rgb, b: Rgb) -> bool {
     let d = |x: u8, y: u8| x.abs_diff(y);
-    d(a.0, b.0) <= 12 && d(a.1, b.1) <= 12 && d(a.2, b.2) <= 12
+    if d(a.0, b.0) <= 12 && d(a.1, b.1) <= 12 && d(a.2, b.2) <= 12 {
+        return true;
+    }
+    let brightest = b.0.max(b.1).max(b.2);
+    if brightest == 0 {
+        return false;
+    }
+    let factor = f64::from(a.0.max(a.1).max(a.2)) / f64::from(brightest);
+    let near = |x: u8, y: u8| (f64::from(x) - f64::from(y) * factor).abs() <= 10.0;
+    (0.6..=1.05).contains(&factor) && near(a.0, b.0) && near(a.1, b.1) && near(a.2, b.2)
 }
 
 /// Checks the ring around a window and its tag: the pixel just outside the middle of each side,
@@ -142,7 +157,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             app_version: "probe".into(),
             own_pids: vec![mosaik_win::process::own_pid()],
             watchdog: false,
-            manage_only: Some(probes.iter().map(|p| p.process.pid).collect()),
+            manage_only: Some(vec!["mosaik-probe.exe".into()]),
         },
         sink,
     )
@@ -253,16 +268,41 @@ fn scenario(
         None
     };
 
-    // 5. A window that is closed is started again on the next switch.
+    // 5. A window that is closed is started again on the next switch, and goes to its place.
     crate::apps::close(probes[2].hwnd);
     pump_until(800, || false);
+    // SAFETY: set once, from this thread, before the engine starts the app (which inherits it);
+    // nothing else in this process reads or writes the environment meanwhile.
+    unsafe { std::env::set_var(RELAUNCH_TITLE, "Probe Review again") };
     let (reply, _) = ask(
         engine,
         Command::Switch {
             workspace: "Probe workspace".into(),
         },
     );
-    let restarted = done(&reply)?;
+    let restarted_reply = done(&reply)?;
+    let mut again = None;
+    pump_until(10_000, || {
+        again = mosaik_win::window::top_level()
+            .into_iter()
+            .find(|h| mosaik_win::window::title(*h) == "Probe Review again");
+        again.is_some()
+    });
+    pump_until(1500, || false);
+    let restarted = match again {
+        Some(hwnd) => {
+            let frame = frame_rect(hwnd).ok_or("the restarted window vanished")?;
+            let zone = if dragged.is_some() {
+                probes[0].tiled
+            } else {
+                probes[2].tiled
+            };
+            let error = edge_error(frame, style.window_area(zone, dpi));
+            crate::apps::close(hwnd);
+            json!({ "reply": restarted_reply, "started": true, "error_px": error })
+        }
+        None => json!({ "reply": restarted_reply, "started": false }),
+    };
 
     println!("saved: {saved} ({save_ms:.0} ms)");
     for v in &after_save {
@@ -279,7 +319,7 @@ fn scenario(
     if let Some(d) = &dragged {
         println!("drag: {d}");
     }
-    println!("closed window: {restarted}");
+    println!("closed window started again: {restarted}");
     if let Some((private, ws)) = memory {
         println!(
             "probe process memory with frames: private {:.1} MB, working set {:.1} MB",
@@ -294,7 +334,7 @@ fn scenario(
         "after_switch": after_switch,
         "windows_in_zones": in_zones,
         "drag": dragged,
-        "restart_reply": restarted,
+        "restarted": restarted,
         "private_mb": memory.map(|m| mb(m.0)),
     }))
 }

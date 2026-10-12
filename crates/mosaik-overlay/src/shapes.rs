@@ -170,6 +170,9 @@ impl TagLook {
 pub struct Tag {
     window: LayeredWindow,
     drawn: Option<(TagLook, i32)>,
+    /// The width the text needs, for the look it was measured for: measuring lays the text out,
+    /// which is not worth doing every time the window moves.
+    natural: Option<(String, u32, i32)>,
 }
 
 impl Tag {
@@ -177,6 +180,7 @@ impl Tag {
         Ok(Self {
             window: LayeredWindow::create(class, true, topmost)?,
             drawn: None,
+            natural: None,
         })
     }
 
@@ -191,7 +195,17 @@ impl Tag {
     ) -> Result<()> {
         let text_size = TagLook::TEXT * look.scale;
         let pad = TagLook::PAD * look.scale;
-        let natural = px(canvas.text_width(&look.text, text_size, Weight::SemiBold) + 2.0 * pad);
+        // Scales are a few hundred percent at most.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let scale_key = (look.scale * 100.0).round() as u32;
+        let natural = match &self.natural {
+            Some((text, key, width)) if *text == look.text && *key == scale_key => *width,
+            _ => {
+                let width = px(canvas.text_width(&look.text, text_size, Weight::SemiBold) + 2.0 * pad);
+                self.natural = Some((look.text.clone(), scale_key, width));
+                width
+            }
+        };
         let width = natural.min(max_width);
         let height = look.height();
         if width < height || look.text.trim().is_empty() {

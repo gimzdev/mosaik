@@ -5,9 +5,11 @@ use mosaik_core::geometry::{Insets, Point, Rect};
 use mosaik_core::zone::ZoneColor;
 use mosaik_win::error::Result;
 
-use crate::canvas::{Area, Canvas, Rgba};
-use crate::layered::{LayeredWindow, Stack, restack};
+use crate::canvas::{Canvas, Rgba};
+use crate::layered::{LayeredWindow, Stack, restack, restack_windows};
 use crate::shapes::{Ring, RingLook, Tag, TagLook};
+use crate::tint::Tint;
+use windows::Win32::Foundation::HWND;
 
 fn scale(dpi: u32) -> f32 {
     // DPI values are small (96 to 480).
@@ -42,8 +44,9 @@ pub struct FrameLook {
     pub tag: bool,
 }
 
-/// The ring around a window in a zone and the tag above it. Both sit right below the window in
-/// the z-order, so they are covered by whatever covers the window.
+/// The ring around a window in a zone and the tag above it. Both sit right above the window in
+/// the z-order (and below anything above it), so they are covered by whatever covers the window
+/// and are not darkened by its shadow.
 pub struct Frame {
     ring: Ring,
     tag: Tag,
@@ -62,7 +65,7 @@ impl Frame {
         let s = scale(look.dpi);
         let width = px(2.0 * s).max(1);
         let corner = if look.rounded { 8.0 * s } else { 0.0 };
-        let stack = Stack::Below(window);
+        let stack = Stack::Above(window);
         if look.ring {
             let ring = RingLook {
                 color: Rgba::of(look.color.fill(), 1.0),
@@ -89,11 +92,11 @@ impl Frame {
         Ok(())
     }
 
-    /// Puts the frame back right below its window (after the window came to the front).
+    /// Puts the frame back right above its window (after the window came to the front).
     pub fn restack(&self, window: isize) {
         let mut all: Vec<&LayeredWindow> = vec![self.tag.window()];
         all.extend(self.ring.windows());
-        restack(&all, Stack::Below(window));
+        restack(&all, Stack::Above(window));
     }
 
     pub fn hide(&mut self) {
@@ -119,18 +122,21 @@ struct Shown {
     view: ZoneView,
     ring: Ring,
     tag: Tag,
-    /// The highlight, drawn the first time the zone is the target.
-    fill: Option<LayeredWindow>,
 }
 
 /// The zones of the open workspace while a window is dragged: an outline and name for each,
-/// and the zone the window would go to filled with its colour.
+/// and the zone the window would go to tinted with its colour and outlined more strongly.
 #[derive(Default)]
 pub struct Preview {
     zones: Vec<Shown>,
+    /// The drop target's tint, made on first use and kept.
+    tint: Option<Tint>,
     hot: Option<usize>,
     stack: Option<Stack>,
 }
+
+/// Opacity of the drop target's tint: 22%, as on mosaïk.com.
+const TINT_ALPHA: u8 = 56;
 
 impl Preview {
     pub fn new() -> Self {
@@ -142,6 +148,15 @@ impl Preview {
         (v.rect.inset(Insets::uniform(px(4.0 * s))), s)
     }
 
+    fn ring_look(v: &ZoneView, hot: bool) -> RingLook {
+        let s = scale(v.dpi);
+        RingLook {
+            color: Rgba::of(v.color.fill(), if hot { 1.0 } else { 0.9 }),
+            width: px(if hot { 3.0 } else { 2.0 } * s).max(1),
+            radius: 8.0 * s,
+        }
+    }
+
     /// Shows every zone, stacked per `stack` (right below the dragged window).
     pub fn show(&mut self, canvas: &mut Canvas, zones: &[ZoneView], stack: Stack) -> Result<()> {
         while self.zones.len() < zones.len() {
@@ -149,29 +164,22 @@ impl Preview {
                 view: zones[self.zones.len()].clone(),
                 ring: Ring::new("MosaikZoneRing", true)?,
                 tag: Tag::new("MosaikZoneTag", true)?,
-                fill: None,
             });
+        }
+        if let Some(t) = &mut self.tint {
+            t.hide();
         }
         for (i, shown) in self.zones.iter_mut().enumerate() {
             let Some(v) = zones.get(i) else {
                 shown.ring.hide();
                 shown.tag.hide();
-                if let Some(fill) = &mut shown.fill {
-                    fill.hide();
-                }
                 continue;
             };
-            if shown.view != *v {
-                shown.fill = None;
-                shown.view = v.clone();
-            }
+            shown.view = v.clone();
             let (outline, s) = Self::outline(v);
-            let look = RingLook {
-                color: Rgba::of(v.color.fill(), 0.9),
-                width: px(2.0 * s).max(1),
-                radius: 8.0 * s,
-            };
-            shown.ring.show(canvas, outline, look, stack)?;
+            shown
+                .ring
+                .show(canvas, outline, Self::ring_look(v, false), stack)?;
             let tag = TagLook {
                 text: v.name.clone(),
                 fill: Rgba::of(v.color.fill(), 1.0),
@@ -189,66 +197,68 @@ impl Preview {
         Ok(())
     }
 
-    /// Fills the zone at `index` (the drop target), or none.
+    /// Marks the zone at `index` as the drop target (or none).
     pub fn set_hot(&mut self, canvas: &mut Canvas, index: Option<usize>) -> Result<()> {
         if index == self.hot {
             return Ok(());
         }
-        if let Some(old) = self.hot.and_then(|i| self.zones.get_mut(i))
-            && let Some(fill) = &mut old.fill
-        {
-            fill.hide();
+        let Some(stack) = self.stack else { return Ok(()) };
+        if let Some(old) = self.hot.and_then(|i| self.zones.get_mut(i)) {
+            let (outline, _) = Self::outline(&old.view);
+            let look = Self::ring_look(&old.view, false);
+            old.ring.show(canvas, outline, look, stack)?;
         }
         self.hot = index;
         let Some(shown) = index.and_then(|i| self.zones.get_mut(i)) else {
+            if let Some(t) = &mut self.tint {
+                t.hide();
+            }
             return Ok(());
         };
         let (outline, s) = Self::outline(&shown.view);
-        if shown.fill.is_none() {
-            let mut fill = LayeredWindow::create("MosaikZoneFill", true, true)?;
-            let surface = fill.surface(
-                usize::try_from(outline.width().max(1)).unwrap_or(1),
-                usize::try_from(outline.height().max(1)).unwrap_or(1),
-            )?;
-            let color = shown.view.color.fill();
-            canvas.render(surface, |pen| {
-                let all = Area::new(0.0, 0.0, f(outline.width()), f(outline.height()));
-                pen.fill_round(all, 8.0 * s, Rgba::of(color, 0.22));
-                pen.stroke_round(all, 8.0 * s, 3.0 * s, Rgba::of(color, 1.0));
-                Ok(())
-            })?;
-            shown.fill = Some(fill);
+        let look = Self::ring_look(&shown.view, true);
+        shown.ring.show(canvas, outline, look, stack)?;
+        if self.tint.is_none() {
+            self.tint = Some(Tint::new()?);
         }
-        if let Some(fill) = shown.fill.as_mut() {
-            fill.present(outline.origin(), 255)?;
+        if let Some(t) = &mut self.tint {
+            t.show(outline, shown.view.color.fill(), TINT_ALPHA, px(8.0 * s), stack)?;
         }
         self.restack();
         Ok(())
     }
 
+    /// Tags on top, then outlines, then the tint, all right below the dragged window.
     fn restack(&self) {
         let Some(stack) = self.stack else { return };
-        let mut all: Vec<&LayeredWindow> = Vec::new();
+        let mut all: Vec<HWND> = Vec::new();
         for z in &self.zones {
-            all.push(z.tag.window());
-        }
-        for z in &self.zones {
-            all.extend(z.ring.windows());
-        }
-        for z in &self.zones {
-            if let Some(fill) = &z.fill {
-                all.push(fill);
+            if let Some(w) = Some(z.tag.window()).filter(|w| w.shown_at().is_some()) {
+                all.push(w.hwnd());
             }
         }
-        restack(&all, stack);
+        for z in &self.zones {
+            all.extend(
+                z.ring
+                    .windows()
+                    .filter(|w| w.shown_at().is_some())
+                    .map(LayeredWindow::hwnd),
+            );
+        }
+        if let Some(t) = self.tint.as_ref().filter(|t| t.is_shown()) {
+            all.push(t.hwnd());
+        }
+        restack_windows(&all, stack);
     }
 
-    /// Hides everything and frees the highlight bitmaps (they can be large).
+    /// Hides everything.
     pub fn hide(&mut self) {
         for z in &mut self.zones {
             z.ring.hide();
             z.tag.hide();
-            z.fill = None;
+        }
+        if let Some(t) = &mut self.tint {
+            t.hide();
         }
         self.hot = None;
         self.stack = None;

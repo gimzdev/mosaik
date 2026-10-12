@@ -16,7 +16,7 @@ use mosaik_overlay::canvas::Canvas;
 use mosaik_overlay::frame::{Frame, FrameLook, Preview, ZoneView};
 use mosaik_overlay::layered::Stack;
 use mosaik_win::events::{self, Hooks, WinEvent};
-use mosaik_win::{apps, input, place, window};
+use mosaik_win::{apps, input, window};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CHILDID_SELF, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_LOCATIONCHANGE,
@@ -43,10 +43,10 @@ const DRAG_TICK_MS: u32 = 30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DragKind {
-    /// Pressed, not moved yet.
+    /// Grabbed away from the edges (a move), not moved yet.
     Undecided,
     Moving,
-    /// The size changed: a resize, which never snaps.
+    /// Grabbed by an edge or a corner, or only resized: never snaps.
     Resizing,
 }
 
@@ -54,8 +54,6 @@ pub(crate) struct Drag {
     pub window: WindowHandle,
     pub pid: u32,
     pub start: Rect,
-    /// Dragging a maximised window restores it first: its size changes, yet it is a move.
-    pub was_maximized: bool,
     pub kind: DragKind,
     /// The zones shown, in the preview's order.
     pub zones: Vec<SnapZone>,
@@ -78,6 +76,9 @@ pub(crate) struct Watch {
     frames: HashMap<WindowHandle, Framed>,
     preview: Preview,
     pub(crate) drag: Option<Drag>,
+    /// The window the user is moving or resizing right now (any window, zones or not), so
+    /// nothing moves it from under the pointer.
+    pub(crate) moving: Option<WindowHandle>,
     /// The drag preview is on screen (it steps aside while Shift is held).
     preview_visible: bool,
     rounded: bool,
@@ -118,6 +119,7 @@ impl Engine {
     pub(crate) fn stop_watching(&mut self) {
         self.kill_timer(timer::DRAG);
         self.watch.drag = None;
+        self.watch.moving = None;
         self.watch.preview.hide();
         self.watch.frames.clear();
         self.watch.location.clear();
@@ -199,10 +201,15 @@ impl Engine {
         if let Some(a) = &mut self.active {
             a.windows.retain(|_, w| *w != h);
         }
+        if self.watch.moving == Some(h) {
+            self.watch.moving = None;
+        }
         if self.watch.drag.as_ref().is_some_and(|d| d.window == h) {
             self.kill_timer(timer::DRAG);
             self.watch.drag = None;
             self.watch.preview.hide();
+            self.watch.preview_visible = false;
+            self.sync_location_hooks();
         }
     }
 
@@ -310,6 +317,7 @@ impl Engine {
     }
 
     fn drag_start(&mut self, h: WindowHandle) {
+        self.watch.moving = Some(h);
         if let Some(f) = self.watch.frames.get_mut(&h) {
             f.frame.hide();
         }
@@ -336,12 +344,24 @@ impl Engine {
                 dpi: z.dpi,
             })
             .collect();
+        // Grabbed by an edge or a corner (Windows' resize borders reach a few pixels into the
+        // frame), it is a resize; anywhere else (a title bar, a tab strip, a keyboard move), a
+        // move. A snapped or maximised window changes size as it is dragged, so the size alone
+        // cannot tell.
+        let margin = mosaik_core::geometry::scale_for_dpi(4, facts.dpi.max(96));
+        let inner = facts
+            .frame_rect
+            .inset(mosaik_core::geometry::Insets::uniform(margin));
+        let kind = if inner.contains(input::cursor()) {
+            DragKind::Undecided
+        } else {
+            DragKind::Resizing
+        };
         self.watch.drag = Some(Drag {
             window: h,
             pid: facts.pid,
             start: facts.frame_rect,
-            was_maximized: facts.maximized,
-            kind: DragKind::Undecided,
+            kind,
             zones,
             target: None,
         });
@@ -361,18 +381,19 @@ impl Engine {
     /// on a move, and lights the one it would drop into.
     fn drag_update(&mut self) {
         let Some(d) = &self.watch.drag else { return };
-        let (h, start, kind, was_maximized) = (d.window, d.start, d.kind, d.was_maximized);
+        let (h, start, kind) = (d.window, d.start, d.kind);
         let Some(g) = window::geometry(window::hwnd(h)) else {
             return;
         };
         if kind == DragKind::Undecided {
-            if g.frame.size() != start.size() && !was_maximized {
+            if g.frame == start {
+                return;
+            }
+            // Sized from the keyboard: the size changes, the window does not travel.
+            if g.frame.origin() == start.origin() {
                 if let Some(d) = &mut self.watch.drag {
                     d.kind = DragKind::Resizing;
                 }
-                return;
-            }
-            if g.frame == start {
                 return;
             }
             if let Some(d) = &mut self.watch.drag {
@@ -447,11 +468,15 @@ impl Engine {
     }
 
     fn drag_end(&mut self, h: WindowHandle) {
-        let Some(d) = self.watch.drag.take().filter(|d| d.window == h) else {
+        if self.watch.moving == Some(h) {
+            self.watch.moving = None;
+        }
+        if !self.watch.drag.as_ref().is_some_and(|d| d.window == h) {
             // Not a drag Mosaïk follows: the window may have moved in or out of a zone.
             self.after_user_move(h);
             return;
-        };
+        }
+        let Some(d) = self.watch.drag.take() else { return };
         self.kill_timer(timer::DRAG);
         self.watch.preview.hide();
         self.watch.preview_visible = false;
@@ -467,9 +492,7 @@ impl Engine {
 
     /// The user moved or resized a window by hand: the open workspace remembers it.
     fn after_user_move(&mut self, h: WindowHandle) {
-        if self.active.as_ref().is_some_and(|a| a.slot_of(h).is_some()) {
-            self.remember_active();
-        }
+        self.remember_window(h);
         self.refresh_frame(h);
     }
 
@@ -482,7 +505,11 @@ impl Engine {
         };
         let hwnd = window::hwnd(h);
         let target = self.style().window_area(live.rect, live.dpi);
-        if let Err(e) = place::move_frame(hwnd, target) {
+        let moved = crate::mover::move_all(
+            &[(h, crate::mover::To::Frame(target))],
+            std::time::Duration::from_millis(1500),
+        );
+        if let Some(Err(e)) = moved.into_iter().next().map(|o| o.result) {
             tracing::warn!(error = %e, "window not pulled into its zone");
             return;
         }
