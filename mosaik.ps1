@@ -324,6 +324,49 @@ function Use-Cargo {
   if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Fail 'Node.js is not installed. Run: .\mosaik.ps1 check' }
 }
 
+# The files of the build in $Source\target that Windows refused to load or start since $Since:
+# Smart App Control judges every new unsigned file, and now and then refuses one a build has just
+# made (Code Integrity events 3033 and 3077 name it). Read from the events' own fields, so the
+# language of Windows and spaces in paths do not matter.
+function Get-RefusedFiles([string]$Source, [datetime]$Since) {
+  $target = [IO.Path]::GetFullPath((Under $Source 'target'))
+  $drive = $target.Substring(0, 2)
+  $under = $target.Substring(2).TrimEnd('\') + '\'
+  try {
+    $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-CodeIntegrity/Operational'; Id = 3033, 3077; StartTime = $Since } -ErrorAction Stop)
+  }
+  catch { return @() }
+  $files = foreach ($e in $events) {
+    foreach ($p in $e.Properties) {
+      # A device path: \Device\HarddiskVolume5\Users\...\target\debug\deps\some.dll
+      if ($p.Value -is [string] -and $p.Value -match '^\\Device\\[^\\]+(\\.+)$') {
+        $path = $Matches[1]
+        if ($path.StartsWith($under, [StringComparison]::OrdinalIgnoreCase)) { $drive + $path }
+      }
+    }
+  }
+  @($files | Sort-Object -Unique)
+}
+
+# Runs cargo. When it fails because Windows refused a file the build had just made (rustc then
+# "can't find crate", or a test program does not start), those files are removed and cargo runs
+# once more: a file made again is judged again, and is let through (ADR 0008; job 0094).
+function Invoke-Cargo([string]$In, [string[]]$Arguments) {
+  $since = (Get-Date).AddSeconds(-5)
+  try { Invoke-Tool $In 'cargo' $Arguments; return }
+  catch {
+    $refused = @(Get-RefusedFiles $In $since)
+    if ($refused.Count -eq 0) { throw }
+    Say ("Windows (Smart App Control) refused {0} file(s) this build made: {1}. Making them again." -f $refused.Count, (($refused | ForEach-Object { Split-Path -Leaf $_ }) -join ', ')) Yellow
+    foreach ($f in $refused) {
+      # The file with every companion the build made beside it (.pdb, .d, .lib, .exp).
+      $stem = [IO.Path]::GetFileNameWithoutExtension($f)
+      Get-ChildItem -LiteralPath (Split-Path -Parent $f) -Filter "$stem.*" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+    Invoke-Tool $In 'cargo' $Arguments
+  }
+}
+
 function Invoke-Build {
   $source = Get-Source
   Use-Cargo
@@ -332,7 +375,7 @@ function Invoke-Build {
   Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund')
   Invoke-Tool $ui 'npm' @('run', 'build')
   Step 'Building Mosaik, its watchdog and mosaikctl (release)'
-  Invoke-Tool $source 'cargo' @('build', '--release', '-p', 'mosaik-desktop', '-p', 'mosaik-watchdog', '-p', 'mosaik-ipc')
+  Invoke-Cargo $source @('build', '--release', '-p', 'mosaik-desktop', '-p', 'mosaik-watchdog', '-p', 'mosaik-ipc')
   # The licences of what Mosaik is built with, where About finds them: beside mosaik.exe.
   Copy-Item (Under $source 'THIRD-PARTY-NOTICES.txt') (Under $source 'target' 'release')
   Say ("Done: {0}" -f (Under $source 'target' 'release' 'mosaik.exe')) Green
@@ -343,9 +386,9 @@ function Invoke-Test {
   Use-Cargo
   $ui = Under $source 'apps' 'desktop'
   Step 'Engine tests'
-  Invoke-Tool $source 'cargo' @('test', '--no-fail-fast', '--all-features', '-p', 'mosaik-core', '-p', 'mosaik-ipc', '-p', 'mosaik-win', '-p', 'mosaik-overlay', '-p', 'mosaik-engine')
+  Invoke-Cargo $source @('test', '--no-fail-fast', '--all-features', '-p', 'mosaik-core', '-p', 'mosaik-ipc', '-p', 'mosaik-win', '-p', 'mosaik-overlay', '-p', 'mosaik-engine')
   Step 'Lints (clippy)'
-  Invoke-Tool $source 'cargo' @('clippy', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings')
+  Invoke-Cargo $source @('clippy', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings')
   Step 'Interface checks and tests'
   Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund')
   foreach ($script in 'typecheck', 'lint', 'format:check', 'test') { Invoke-Tool $ui 'npm' @('run', $script) }

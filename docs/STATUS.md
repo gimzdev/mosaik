@@ -186,6 +186,14 @@ the Windows tests last ran at commit b993011 (job 0082: all passing), and what c
 `mosaik-win` and the engine is the band drag, which the probe drove with the real mouse. CI on
 `windows-latest` has no Smart App Control and runs every test.
 
+It refuses libraries a build makes too: in jobs 0092 and 0093 the engine's tests would not build
+("can't find crate for `tracing_attributes`", three tries each). Job 0094 read why from the Code
+Integrity log: events 3033 and 3077 at 16:04, rustc refused the debug build of that procedural
+macro's DLL ("did not meet the Enterprise signing level requirements"). The DLL made again, the
+same size, was let through, and the engine's tests ran (2 passing). `mosaik.ps1 build` and `test`
+now do the same on their own: when cargo fails and the log names files of the build it refused,
+they are removed, said, and cargo runs once more (`Invoke-Cargo`).
+
 ### Still to do in step 1
 
 - Two monitors with different scale factors and hotplug, with virtual displays: the driver is
