@@ -16,7 +16,7 @@ re-run before each release.
 | 4. Workspaces | done: save, switch, start missing apps, switcher, tray, workspace shortcuts | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
 | 5. Tabs | done, with 12 real apps and browser tabs dragged out of Edge; multi-monitor left for step 7 | [Step 5](#step-5-tabs), [Step 7](#step-7-hardening) |
 | 6. Product UI | done: every page reviewed, tested in a browser and toured on Windows (names, Tab key, light and dark, smallest size); a Windows contrast theme and Narrator by ear are in the release checks | [Step 6](#step-6-product-ui) |
-| 7. Hardening | in progress: real apps, tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
+| 7. Hardening | in progress: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
 
 ## Step 1: verify assumptions
@@ -188,7 +188,9 @@ build; releases are signed by the Microsoft Store.
   with its visible frame 0 px off; a maximised window is restored into its place; its title bar
   is read as real input finds it (room for a tag, clear of the buttons Windows draws; caption
   where the reading says); the scanner and classifier take it for an app window; it is hidden
-  and shown back in place by each hiding method (shell cloak, minimise, park).
+  and shown back in place by each hiding method (shell cloak, minimise, park); a window without
+  a frame to resize it by keeps its size in a larger and a smaller place, and after a restore
+  from minimised (job 0078: failed on the code before the fix, then all 7 pass).
 
 - `mosaik-core`: 66 tests pass on Linux and on Windows (`cargo test -p mosaik-core
   --all-features`), including property tests: ratios round-trip to the same pixels on any
@@ -359,6 +361,38 @@ probe's own window with `--self-move`, as some custom title bars do): dragged by
 into the zone, 0 px from the zone, in the workspace; onto the code window's tag, a strip of two
 tabs, 0 px; its tab pulled out into the zone, 0 px. Windows reported mouse capture and no move
 loop for each drag (the engine's log: "the app drags its window itself").
+
+### Every kind of app (jobs 0077 and 0078) — ADR 0012
+
+The probe's own window stands in for the kinds of apps the catalog has none of (`--only kinds`),
+each dragged with the real mouse into a zone, onto the editor's tag, shown by its tab, and pulled
+out again (1920x1080 at 100%):
+
+```
+                                       into the zone                 made a tab, shown         pulled out
+borderless app, own 32 px title bar    0 px, tag in its title bar    2 tabs, 0 px              0 px
+game in a fixed window                 626x413 kept where 856x508    2 tabs, in the middle     kept, 0 px
+                                       was given, middle, 0 px       of the group, own size
+borderless game of a fixed size        640x420 kept, middle, 0 px    the same                  kept, 0 px
+borderless fixed-size game that        560x360 kept, middle, 0 px,   2 tabs, in the middle     0 px
+  moves itself, nothing to grab        a solid band right above it   below the band
+game in full screen                    left alone ("pending: full screen"); the workspace saved
+                                       around it took the 3 other windows; its frame untouched
+```
+
+"0 px" for a window that kept its size is its distance from the middle of its place
+(`fit_size`); 306, 302 and 318 px from the group's edges are what the middle is for those sizes.
+
+- Steam's library window (job 0078): class `SDL_app` of `steamwebhelper.exe`, a popup with a
+  caption, a resize frame and a minimise button, in Alt+Tab: Mosaïk manages it now (it took it
+  for a splash screen before). It was open on the owner's screen, so the probe, which touches
+  only windows it opens, left it alone; the borderless app above stands in for it.
+- Calculator, which wears its tag above it, has a solid band inside its ring (job 0077), and
+  with tags above every window the bands read #EDEFEA from the screen, the rings in each zone's
+  colour around band and window together (job 0077, `--drag --tags-above --shots`).
+- **Games of a fixed size were stretched** (job 0077: the probe's fixed-size game filled its
+  zone): a window without a frame to resize it by is now only moved, with a Windows test that
+  failed on the old code (job 0078: 626 x 473 became 1060 x 1032) and passes on the new.
 
 ### Tags and tabs in title bars (jobs 0062 to 0070) — ADR 0011
 
@@ -580,3 +614,5 @@ switch time (mean)           32.5 ms      33.1 ms
 - 2026-10-12: Mosaïk must work with practically every app, browser tabs included; tags and tab
   strips go in each window's own title bar, as browsers' tabs do (ADR 0011); tests run each
   app once per run.
+- 2026-10-12: every kind of app, Steam, launchers and games included (ADR 0012); one row of
+  title bar wherever possible, and where a band is needed above a window, a solid one (ADR 0011).

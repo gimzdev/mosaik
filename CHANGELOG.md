@@ -27,6 +27,16 @@ and ready in one click. Free, open source (CC0), no account, no telemetry, no ne
 - Checked end to end with Notepad, Notepad++, Word, Excel, Explorer, Windows Terminal, VS Code,
   Chrome, Edge, Calculator, Paint and Git Bash.
 
+### Every kind of app
+
+- Apps that draw their own title bar in a borderless window, such as Steam and game launchers,
+  and games in a window join zones, tabs and workspaces like any other window.
+- A window that cannot be resized, as most games' windows, keeps its size: Mosaïk only moves it,
+  to the middle of its zone.
+- A game or a video in full screen is left alone until it leaves full screen.
+- Where a window's title bar has no room for its tag or tabs, they sit on a solid band right
+  above it, inside its ring, so the two read as one window.
+
 ### Switching
 
 - One shortcut, Win+Alt+Space, opens the switcher: a preview of each workspace; 1 to 9, then F1

@@ -49,6 +49,11 @@ one records it instead of opening the switcher.
 The decisions are pure functions in `mosaik_core::workspace`, tested on every monitor fixture;
 the engine gathers windows and applies the result.
 
+- **Which windows**: those Alt+Tab lists, without an owner, with a title, that Windows lets
+  Mosaïk move (not an app running as administrator). Borderless windows that draw their own
+  title bar (Steam, launchers, games) count; a popup with no caption, resize frame or minimise
+  button (a splash screen, a menu) does not. A game or video in full screen is left alone until
+  it leaves full screen (ADR 0012).
 - **Saving** (S in the switcher, then a name) turns the windows on screen into a workspace.
   Windows that tile, side by side without overlapping, become zones named after their app;
   windows stacked exactly on top of each other share a zone; maximised windows and windows
@@ -57,7 +62,9 @@ the engine gathers windows and applies the result.
   its windows sit in.
 - **Being in a zone** has one rule everywhere (`holds`): the window's centre is in the zone and
   the window and the zone's window area cover at least 70% of each other. A browser that will
-  not shrink to a narrow zone still counts; a small window floating over a zone does not.
+  not shrink to a narrow zone still counts; a small window floating over a zone does not. A
+  window without a frame to resize it by (most games) is never resized, only moved to the middle
+  of its zone; it is in the zone when its centre is and 70% of it is inside (`holds_fixed`).
 - **A layout changes only by the user's hand**: saving, dropping a window into a zone, or moving
   one of the workspace's windows by mouse. Windows an app moved on its own, or a window
   maximised for a moment, go back to their places the next time the workspace opens.
@@ -74,7 +81,8 @@ the engine gathers windows and applies the result.
   own (`titles`): when it first needs a tag, after a resize (and once more when the app has
   settled), when its title changes or it comes to the front. A window whose title bar has no
   room wears its tag above it, below a band at the top of its zone, once two readings a quarter
-  of a second apart agree; a setting puts every tag above its window.
+  of a second apart agree; the band is solid and inside the window's ring, so the two read as
+  one. A setting puts every tag above its window.
 - **Drag to snap**: while a window is dragged by its title bar, the open workspace's zones show
   under it; the zone under the pointer (or within 48 px) is tinted, and the window is pulled into
   it on release. Shift moves freely; a setting swaps that. A window that was not part of the

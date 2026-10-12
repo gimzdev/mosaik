@@ -209,6 +209,13 @@ pub fn open(app: &App, scanner: &mut Scanner) -> Result<Opened, String> {
         .collect();
     let start = Instant::now();
     shell_open(&app.target, &app.args).map_err(|e| e.to_string())?;
+    let its_window = |f: &mosaik_core::window::WindowFacts| {
+        f.exe
+            .as_deref()
+            .is_some_and(|e| app.exe.split('|').any(|x| x == e))
+            && app.class.is_none_or(|c| f.class.eq_ignore_ascii_case(c))
+            && classify(f, &Rules::default()) == Verdict::Manage
+    };
     while start.elapsed() < Duration::from_secs(25) {
         mosaik_win::events::pump_until(150, || false);
         for h in top_level() {
@@ -216,12 +223,7 @@ pub fn open(app: &App, scanner: &mut Scanner) -> Result<Opened, String> {
                 continue;
             }
             let Some(f) = scanner.facts(h) else { continue };
-            let exe_ok = f
-                .exe
-                .as_deref()
-                .is_some_and(|e| app.exe.split('|').any(|x| x == e));
-            let class_ok = app.class.is_none_or(|c| f.class.eq_ignore_ascii_case(c));
-            if exe_ok && class_ok && classify(&f, &Rules::default()) == Verdict::Manage {
+            if its_window(&f) {
                 // Let the app finish its first layout before measuring anything.
                 mosaik_win::events::pump_until(800, || false);
                 return Ok(Opened {
@@ -232,6 +234,19 @@ pub fn open(app: &App, scanner: &mut Scanner) -> Result<Opened, String> {
                 });
             }
         }
+    }
+    // An app with one window (Steam) shows the one the user has open: that is the user's.
+    let already_open = top_level()
+        .into_iter()
+        .filter(|h| before.contains(&handle(*h).0))
+        .filter_map(|h| scanner.facts(h))
+        .any(|f| its_window(&f));
+    if already_open {
+        return Err(format!(
+            "{}: its window was already open, and the test leaves the user's windows alone \
+             (closed to the tray, it can be tested); Mosaïk manages it",
+            app.name
+        ));
     }
     Err(format!(
         "{}: no new window within 25 s; its windows: {}",

@@ -66,6 +66,13 @@ stretches of its title bar.
   corner rather than leave its zone. Until a window has been read, it shows its ring without a
   tag; a window whose app does not answer keeps no tag until it does, and its group's strip goes
   above it.
+- **The band is solid** (2026-10-12, the owner: "if we need 2 rows ... we shouldn't use
+  transparent", "should try to one row"): where a tag or strip goes above a window, the band
+  is filled with the app's paper colour (#EDEFEA, or #11141B in dark mode) and the zone's ring
+  goes around the band and the window together, so the two read as one window with a taller
+  title bar, and nothing behind shows through between them. One row stays the rule; the band
+  is only for windows whose title bar has no room. A window of a fixed size gets its band right
+  above it, wherever it sits in its zone (ADR 0012).
 - **The setting** "Tags and tabs: in each window's title bar / above each window" keeps the band
   for everyone who prefers it (`FrameSettings::tags_in_title_bar`, on by default; settings saved
   before keep it on).

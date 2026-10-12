@@ -264,6 +264,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         "tabs": strip.as_ref().map_or(0, |s| s.tabs.len()),
         "with_the_tag_owner": strip.as_ref().is_some_and(|s| s.tabs.iter().any(|x| x.window == handle(t.code))),
         "error_px": error_in(&st, w, t.group_zone, t),
+        "kept_size": kept_size(&st, w, t.group_zone, t),
         "tag_owner_hidden": hidden(&st, t.code),
     });
     let Some(strip) = strip else { return Ok(out) };
@@ -288,6 +289,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         "app_hidden": hidden(&st, w),
         "app_cloaked": geometry(w).is_some_and(|g| g.cloaked),
         "error_px": error_in(&st, w, t.group_zone, t),
+        "kept_size": kept_size(&st, w, t.group_zone, t),
         "tag_owner_hidden": hidden(&st, t.code),
     });
 
@@ -544,6 +546,7 @@ fn self_moved_as(
             "tabs": strip.as_ref().map_or(0, |s| s.tabs.len()),
             "with_the_tag_owner": strip.as_ref().is_some_and(|s| s.tabs.iter().any(|x| x.window == handle(t.code))),
             "error_px": error_in(&st, w, t.group_zone, t),
+            "kept_size": kept_size(&st, w, t.group_zone, t),
         });
         // 3. Its tab pulled out into the zone.
         if let Some(chip) = strip.as_ref().and_then(|s| chip_of(s, w)) {
@@ -552,6 +555,7 @@ fn self_moved_as(
             out["pulled_out"] = json!({
                 "in_a_strip": strip_with(&st, w).is_some(),
                 "error_px": error_in(&st, w, t.zone, t),
+                "kept_size": kept_size(&st, w, t.zone, t),
                 "tag_above": wears_above(&st, w),
                 "tag": tag_place(&st, w),
             });
