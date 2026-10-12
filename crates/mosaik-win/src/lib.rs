@@ -16,6 +16,7 @@ pub mod keyboard;
 pub mod monitors;
 pub mod os;
 pub mod own;
+pub mod package;
 pub mod place;
 pub mod process;
 pub mod rescue;

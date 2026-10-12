@@ -6,8 +6,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use windows::ApplicationModel::{StartupTask, StartupTaskState};
-use windows::Win32::Foundation::{APPMODEL_ERROR_NO_PACKAGE, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
-use windows::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
+use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW};
 use windows::core::{HSTRING, PCWSTR};
 
@@ -20,14 +19,6 @@ const TASK_ID: &str = "MosaikStartup";
 const TASK_TIMEOUT: Duration = Duration::from_secs(5);
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const RUN_VALUE: &str = "Mosaik";
-
-/// Whether this process runs from the Store package.
-pub fn is_packaged() -> bool {
-    let mut len = 0u32;
-    // SAFETY: asks for the length only; no buffer is written.
-    let r = unsafe { GetCurrentPackageFullName(&mut len, None) };
-    r != APPMODEL_ERROR_NO_PACKAGE
-}
 
 /// How starting with Windows ended up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +33,7 @@ pub enum Startup {
 
 /// Turns starting with Windows on or off.
 pub fn set(enabled: bool) -> Result<Startup> {
-    if is_packaged() {
+    if crate::package::is_packaged() {
         startup_task(enabled)
     } else {
         run_key(enabled)

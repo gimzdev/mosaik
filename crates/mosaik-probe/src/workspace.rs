@@ -454,6 +454,7 @@ fn editing(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String>
         .and_then(|w| w.zone.clone());
 
     // Rename; the old name then saves a new workspace instead of overwriting the renamed one.
+    // (Names, never ids, go to `save`; the renamed workspace keeps its id, `probe-workspace`.)
     let renamed = done(
         &ask(
             engine,
@@ -468,7 +469,7 @@ fn editing(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String>
         &ask(
             engine,
             Command::Save {
-                workspace: Some("probe-workspace".into()),
+                workspace: Some("Probe workspace".into()),
             },
         )
         .0,
@@ -477,15 +478,27 @@ fn editing(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String>
         Reply::Workspaces { workspaces, .. } => workspaces.len(),
         other => return Err(format!("workspaces: {other:?}")),
     };
-    let _ = done(
+    // The new one goes (no id is "Probe workspace", so the name finds it), and the renamed one
+    // opens again for the steps below.
+    done(
         &ask(
             engine,
             Command::DeleteWorkspace {
-                workspace: "probe-workspace".into(),
+                workspace: "Probe workspace".into(),
             },
         )
         .0,
-    );
+    )?;
+    done(
+        &ask(
+            engine,
+            Command::Switch {
+                workspace: "Probe renamed".into(),
+            },
+        )
+        .0,
+    )?;
+    pump_until(500, || false);
 
     // A shortcut of its own, then none.
     let shortcut = "Win+Ctrl+Alt+F9";

@@ -5,8 +5,8 @@
 
 .DESCRIPTION
   Needs the release build (mosaik.ps1 build, or cargo build --release -p mosaik-desktop
-  -p mosaik-watchdog -p mosaik-ipc) and makeappx.exe from the Windows SDK. The package is not
-  signed: the Store signs it when it is published.
+  -p mosaik-watchdog -p mosaik-ipc) and makepri.exe and makeappx.exe from the Windows SDK. The
+  package is not signed: the Store signs it when it is published.
 
   The manifest is AppxManifest.xml beside this script, filled in from identity.json (the identity
   reserved in Partner Center) and the version in Cargo.toml.
@@ -35,16 +35,22 @@ function Fail([string]$Message) {
   throw $Message
 }
 
-# The newest makeappx.exe of the installed Windows SDKs.
-function Find-MakeAppx {
+# A tool of the newest installed Windows SDK that has it (makepri.exe, makeappx.exe).
+function Find-SdkTool([string]$Name) {
   $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
   if (-not (Test-Path $kits)) { return $null }
   Get-ChildItem $kits -Directory |
     Where-Object { $_.Name -match '^10\.\d+\.\d+\.\d+$' } |
     Sort-Object { [version]$_.Name } -Descending |
-    ForEach-Object { Join-Path $_.FullName 'x64\makeappx.exe' } |
+    ForEach-Object { Join-Path $_.FullName "x64\$Name" } |
     Where-Object { Test-Path $_ } |
     Select-Object -First 1
+}
+
+# Runs an SDK tool; its own lines say what went wrong, if anything.
+function Invoke-SdkTool([string]$Tool, [string]$What, [string[]]$Arguments) {
+  & $Tool @Arguments | Out-Host
+  if ($LASTEXITCODE -ne 0) { Fail "$What failed (exit code $LASTEXITCODE); the lines above say why." }
 }
 
 # The workspace version ("1.0.0") as a package version ("1.0.0.0": the Store wants the fourth
@@ -61,9 +67,10 @@ $missing = @($executables | Where-Object { -not (Test-Path (Join-Path $Release $
 if ($missing.Count -gt 0) {
   Fail ("The release build is missing ({0}). Build first: mosaik.ps1 build" -f ($missing -join ', '))
 }
-$makeAppx = Find-MakeAppx
-if (-not $makeAppx) {
-  Fail 'makeappx.exe was not found. It comes with the Windows SDK: winget install Microsoft.WindowsSDK.10.0.26100'
+$makePri = Find-SdkTool 'makepri.exe'
+$makeAppx = Find-SdkTool 'makeappx.exe'
+if (-not $makePri -or -not $makeAppx) {
+  Fail 'makepri.exe and makeappx.exe were not found. They come with the Windows SDK: winget install Microsoft.WindowsSDK.10.0.26100'
 }
 
 $identity = Get-Content -Raw -Encoding UTF8 (Join-Path $Here 'identity.json') | ConvertFrom-Json
@@ -91,11 +98,23 @@ foreach ($key in $values.Keys) {
   $manifest = $manifest.Replace("{{$key}}", $escaped)
 }
 if ($manifest -match '\{\{\w+\}\}') { Fail "AppxManifest.xml has a value with nothing to fill it: $($Matches[0])" }
-[IO.File]::WriteAllText((Join-Path $Layout 'AppxManifest.xml'), $manifest, (New-Object Text.UTF8Encoding $false))
+$manifestPath = Join-Path $Layout 'AppxManifest.xml'
+[IO.File]::WriteAllText($manifestPath, $manifest, (New-Object Text.UTF8Encoding $false))
+
+# The logos come in several sizes (StoreLogo.scale-200.png...) while the manifest names one
+# (Assets\StoreLogo.png): resources.pri is the index Windows picks the right size from.
+$priConfig = Join-Path $Work 'priconfig.xml'
+Invoke-SdkTool $makePri 'makepri (configuration)' @('createconfig', '/cf', $priConfig, '/dq', 'en-US', '/pv', '10.0.0', '/o')
+# One package, not a bundle: every size stays in resources.pri rather than in resource packs.
+$config = New-Object Xml.XmlDocument
+$config.Load($priConfig)
+$packaging = $config.DocumentElement.SelectSingleNode('packaging')
+if ($packaging) { [void]$config.DocumentElement.RemoveChild($packaging) }
+$config.Save($priConfig)
+Invoke-SdkTool $makePri 'makepri (resource index)' @('new', '/pr', $Layout, '/cf', $priConfig, '/mn', $manifestPath, '/of', (Join-Path $Layout 'resources.pri'), '/o')
 
 $msix = Join-Path $Work ('Mosaik_{0}_x64.msix' -f $version)
-& $makeAppx pack /o /h SHA256 /d $Layout /p $msix | Out-Host
-if ($LASTEXITCODE -ne 0) { Fail "makeappx could not make the package (exit code $LASTEXITCODE); the lines above say why." }
+Invoke-SdkTool $makeAppx 'makeappx' @('pack', '/o', '/h', 'SHA256', '/d', $Layout, '/p', $msix)
 
 $size = (Get-Item $msix).Length / 1MB
 Write-Host ''

@@ -595,6 +595,8 @@ fn open_link(link: String) -> Result<(), String> {
 fn open_logs() -> Result<(), String> {
     let folder = crate::logging::folder().ok_or("The logs folder is unknown (LOCALAPPDATA is not set).")?;
     std::fs::create_dir_all(&folder).map_err(|e| format!("The logs folder could not be made: {e}"))?;
+    // From the Store package, File Explorer sees the folder in the package's own copy of AppData.
+    let folder = mosaik_win::package::visible_path(&folder);
     mosaik_win::process::shell_open(&folder.to_string_lossy(), "")
         .map_err(|e| format!("File Explorer did not open: {e}"))
 }
