@@ -40,14 +40,24 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 pub const RELAUNCH_TITLE: &str = "MOSAIK_PROBE_RELAUNCH_TITLE";
 
 /// With `--shots DIR`: a picture of the title bars of `windows` (probe windows), with what Mosaïk
-/// draws in them, and nothing else of the screen.
+/// draws in them and in the band above them, and nothing else of the screen (above the band, at
+/// most the bottom few pixels of the probe window above).
 fn shot(dir: Option<&std::path::Path>, name: &str, windows: &[HWND], dpi: u32) {
     let Some(dir) = dir else { return };
-    let bar = i32::try_from(48 * dpi / 96).unwrap_or(48);
+    let px = |v: u32| i32::try_from(v * dpi / 96).unwrap_or_default();
+    let (bar, band) = (px(48), px(36));
+    let screen_top = mosaik_win::monitors::topology().map_or(0, |t| t.primary().bounds.top);
     let regions: Vec<Rect> = windows
         .iter()
         .filter_map(|w| frame_rect(*w))
-        .map(|f| Rect::new(f.left, f.top, f.right, (f.top + bar).min(f.bottom)))
+        .map(|f| {
+            Rect::new(
+                f.left - px(4),
+                (f.top - band).max(screen_top),
+                f.right + px(4),
+                (f.top + bar).min(f.bottom),
+            )
+        })
         .collect();
     let path = dir.join(format!("{name}.bmp"));
     match crate::capture::save_bmp(&regions, &path) {
