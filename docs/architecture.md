@@ -72,7 +72,8 @@ the engine gathers windows and applies the result.
   under it; the zone under the pointer (or within 48 px) is tinted, and the window is pulled into
   it on release. Shift moves freely; a setting swaps that. A window that was not part of the
   workspace joins it. A resize never snaps: Windows shows its resize arrows for the whole of one
-  (ADR 0010). A window Mosaïk must not move (an app running as administrator, or one Windows
+  (ADR 0010). Apps that drag their window themselves, without Windows' move loop, are followed
+  too: a window that took the mouse and moves at the same size is being dragged. A window Mosaïk must not move (an app running as administrator, or one Windows
   protects) gets no zones, and the user is told why once, when the drag ends.
 - **Living with other arrangers** (ADR 0010): Windows' own snapping stays on; a drop on a zone or
   a tab at the edge of the screen ends where the user dropped it, and the first one tells the

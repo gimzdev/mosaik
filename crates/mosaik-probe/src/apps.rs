@@ -261,7 +261,7 @@ pub fn start_apps() -> Result<Vec<StartApp>, String> {
 /// hardware, or takes over the screen. Opening those could change something; everything else is
 /// opened, tested and closed.
 pub fn skip_reason(app: &StartApp) -> Option<&'static str> {
-    const RULES: [(&str, &[&str]); 8] = [
+    const RULES: [(&str, &[&str]); 10] = [
         (
             "installs, updates or removes software",
             &[
@@ -467,7 +467,43 @@ pub fn skip_reason(app: &StartApp) -> Option<&'static str> {
             ],
         ),
         ("Mosaïk itself", &["mosaik", "mosa\u{ef}k"]),
+        (
+            "a game, an emulator, an assistant or the app the user is talking to",
+            &[
+                "league of legends",
+                "tftacademy",
+                "curseforge",
+                "bluestacks",
+                "claude",
+                "copilot",
+                "click to do",
+                "family",
+            ],
+        ),
+        (
+            "a duplicate of a console already tested, or a developer test tool",
+            &[
+                "native tools command prompt",
+                "cross tools command prompt",
+                "powershell (x86)",
+                "powershell ise (x86)",
+                "application verifier",
+                "cert kit",
+                "software development kit",
+                "module docs",
+                "alienware",
+                "killer",
+                "preferences",
+                "onenote",
+                "sticky notes",
+                "to do",
+                "canva",
+            ],
+        ),
     ];
+    if app.name.eq_ignore_ascii_case("Run") {
+        return Some("a system or administrator tool");
+    }
     let text = format!("{} {}", app.name, app.id).to_lowercase();
     RULES
         .iter()

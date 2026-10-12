@@ -27,6 +27,13 @@ zone snappers (PowerToys FancyZones, AquaSnap) and tab groupers (WindowTabs).
   where they were, a resize by an edge or a corner; a new size with every side moved, a
   maximised or snapped window taking back its size as it is dragged, a move. Only with no
   pointer on screen (touch) does the position test decide the start.
+- **Apps that drag their own window** (some custom title bars: Java, Qt, launchers, games)
+  move it themselves instead of through Windows' move loop, so no move-size event comes. While
+  zones are on, a window that takes the mouse (`EVENT_SYSTEM_CAPTURESTART`, a press) is
+  watched: if it moves at the same size while the primary button is down and no move loop
+  started, its app is dragging it, and Mosaïk follows it like any drag. It ends when the app
+  lets the mouse go with the button up, or 400 ms after the button is up if the app keeps the
+  mouse. Moves are hooked only for the app holding the mouse, and only while it holds it.
 - **Windows' snapping is left on and not fought.** Measured on Windows 11 25H2 (job 0048): a
   window dropped on a tag at the screen's top edge or top centre becomes a tab and is not
   maximised; one dropped on a zone at the left edge lands in the zone, 0 px off. Mosaïk acts
