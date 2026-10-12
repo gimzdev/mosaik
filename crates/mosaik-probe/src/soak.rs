@@ -71,20 +71,23 @@ fn save(engine: &Engine, name: &str) -> Result<(), String> {
     }
 }
 
-/// `windows`: the code, terminal and review probe windows, each with its tiled place; `tag`: a
-/// point on the code window's tag.
+/// `windows`: the code, terminal and review probe windows, each with its tiled place.
 pub fn run(
     engine: &Engine,
     windows: [(HWND, Rect); 3],
-    tag: Point,
+    dpi: u32,
     work: Rect,
     cycles: usize,
 ) -> Result<Value, String> {
     let [(code, _), (terminal, _), (review, _)] = windows;
     // A: tiled (saved first, so the windows wear tags), then the terminal joins the code window
-    // as a tab, and A is saved again with its tab group.
+    // as a tab, dropped on the middle of its tag, and A is saved again with its tab group.
     save(engine, "Soak A")?;
     pump_until(700, || false);
+    let c = frame_rect(code).ok_or("the code window vanished")?;
+    #[allow(clippy::cast_possible_truncation)]
+    let band_middle = (14.0 * f64::from(dpi) / 96.0).round() as i32;
+    let tag = Point::new(c.left + c.width() / 2, c.top - band_middle);
     let t = frame_rect(terminal).ok_or("the terminal window vanished")?;
     drag_path(&[Point::new(t.left + t.width() / 3, t.top + 12), tag], terminal)?;
     let st = state(engine)?;

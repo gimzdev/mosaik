@@ -465,17 +465,13 @@ fn soak_scenario(
     work: Rect,
     cycles: usize,
 ) -> Result<Value, String> {
-    let c = frame_rect(probes[0].hwnd).ok_or("the code window vanished")?;
-    #[allow(clippy::cast_possible_truncation)]
-    let band_middle = (14.0 * f64::from(dpi) / 96.0).round() as i32;
-    let tag = Point::new(c.left + c.width() / 2, c.top - band_middle);
     let windows = [
         (probes[0].hwnd, probes[0].tiled),
         (probes[1].hwnd, probes[1].tiled),
         (probes[2].hwnd, probes[2].tiled),
     ];
     let original = input::cursor();
-    let result = crate::soak::run(engine, windows, tag, work, cycles);
+    let result = crate::soak::run(engine, windows, dpi, work, cycles);
     input::move_to(original);
     for name in ["Soak A", "Soak B"] {
         let _ = ask(

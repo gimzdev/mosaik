@@ -2,10 +2,10 @@
 //! dragged out onto a zone (it should land in the zone, as a window of the workspace), and one
 //! dragged out onto another window's tag (it should become a Mosaïk tab of that window).
 //!
-//! The user's own browser is never touched: the probe runs a separate copy of the browser with a
-//! profile of its own in the temp folder (so a tab can never land in one of the user's windows,
-//! and nothing reaches their history or session), the engine manages only windows showing the
-//! probe's pages, and the probe closes only those.
+//! The user's own browser is never touched: the probe runs Chrome as a separate copy with a
+//! profile of its own in the temp folder, and Edge in a private window (so a tab can never land in
+//! one of the user's windows, and nothing reaches their history or session); the engine manages
+//! only windows showing the probe's pages, and the probe closes only those.
 
 use std::time::{Duration, Instant};
 
@@ -28,6 +28,17 @@ pub struct Browser {
     pub name: &'static str,
     /// The program, as Mosaïk sees it (lower case).
     pub exe: &'static str,
+    /// How the probe's window is opened, so nothing reaches the user's own windows or profile.
+    mode: Mode,
+}
+
+enum Mode {
+    /// A separate copy of the browser with a profile of its own in the temp folder: a tab can
+    /// never land in one of the user's windows.
+    OwnProfile,
+    /// A private window (no history, no session), where a tab can only land in another private
+    /// window: for Edge, whose first run in a new profile asks questions first (job 0055).
+    Private(&'static str),
 }
 
 /// `edge` or `chrome`.
@@ -36,10 +47,12 @@ pub fn browser(name: &str) -> Option<Browser> {
         "edge" => Some(Browser {
             name: "Edge",
             exe: "msedge.exe",
+            mode: Mode::Private("--inprivate"),
         }),
         "chrome" => Some(Browser {
             name: "Chrome",
             exe: "chrome.exe",
+            mode: Mode::OwnProfile,
         }),
         _ => None,
     }
@@ -169,16 +182,15 @@ pub fn scenario(
     tag_point: Point,
     tag_owner: HWND,
 ) -> Result<Value, String> {
-    let urls = pages()?;
-    shell_open(
-        b.exe,
-        &format!(
-            "--user-data-dir=\"{}\" --no-first-run --no-default-browser-check --new-window {}",
-            profile(b).display(),
-            urls.join(" ")
+    let urls = pages()?.join(" ");
+    let args = match b.mode {
+        Mode::OwnProfile => format!(
+            "--user-data-dir=\"{}\" --no-first-run --no-default-browser-check --new-window {urls}",
+            profile(b).display()
         ),
-    )
-    .map_err(|e| e.to_string())?;
+        Mode::Private(flag) => format!("{flag} --new-window {urls}"),
+    };
+    shell_open(b.exe, &args).map_err(|e| e.to_string())?;
     let window =
         find(b.exe, &page_title(1), 25_000).ok_or_else(|| format!("{}: its window did not open", b.name))?;
     // In front of the probe's own windows, in the middle of the screen.
@@ -265,7 +277,9 @@ pub fn close_pages(b: &Browser) {
             }
         }
     }
-    // The browser lets go of its files a moment after its last window closes.
-    pump_until(2000, || false);
-    let _ = std::fs::remove_dir_all(profile(b));
+    if matches!(b.mode, Mode::OwnProfile) {
+        // The browser lets go of its files a moment after its last window closes.
+        pump_until(2000, || false);
+        let _ = std::fs::remove_dir_all(profile(b));
+    }
 }
