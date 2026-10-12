@@ -1,0 +1,64 @@
+{
+  "commands": [
+    {
+      "client": "settings",
+      "cmd": "hello"
+    },
+    {
+      "cmd": "state"
+    },
+    {
+      "cmd": "workspaces"
+    },
+    {
+      "cmd": "switch",
+      "workspace": "ship"
+    },
+    {
+      "cmd": "save",
+      "workspace": null
+    },
+    {
+      "cmd": "rescue"
+    },
+    {
+      "cmd": "show_switcher"
+    },
+    {
+      "cmd": "show_settings"
+    },
+    {
+      "cmd": "quit"
+    }
+  ],
+  "replies": [
+    {
+      "app_version": "1.0.0",
+      "protocol": 1,
+      "reply": "hello"
+    },
+    {
+      "active": "ship",
+      "reply": "workspaces",
+      "workspaces": [
+        {
+          "hotkey": null,
+          "id": "ship",
+          "name": "Ship the release",
+          "windows": 4,
+          "zones": 3
+        }
+      ]
+    },
+    {
+      "message": "2 window(s) restored",
+      "reply": "done"
+    },
+    {
+      "code": "not_found",
+      "hint": "mosaikctl workspaces lists them.",
+      "message": "No workspace called \"x\".",
+      "reply": "error"
+    }
+  ]
+}

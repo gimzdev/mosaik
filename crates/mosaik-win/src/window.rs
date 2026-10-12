@@ -23,8 +23,8 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetClassNameW,
-    GetLastActivePopup, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, WS_CAPTION, WS_CHILD,
+    GetLastActivePopup, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
+    InternalGetWindowText, IsIconic, IsWindow, IsWindowVisible, IsZoomed, WS_CAPTION, WS_CHILD,
     WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::BOOL;
@@ -108,11 +108,13 @@ pub fn class_name(hwnd: HWND) -> String {
     from_wide(&buf[..usize::try_from(n).unwrap_or(0)])
 }
 
-/// The title, read from the window's stored caption (no message is sent to the app).
+/// The title, read from the window's stored caption. `InternalGetWindowText` never sends a
+/// message, unlike `GetWindowText` on a window of the calling process, which would wait on that
+/// window's thread (a deadlock when that thread is waiting on the caller).
 pub fn title(hwnd: HWND) -> String {
     let mut buf = [0u16; 512];
     // SAFETY: the buffer length is passed by the slice.
-    let n = unsafe { GetWindowTextW(hwnd, &mut buf) };
+    let n = unsafe { InternalGetWindowText(hwnd, &mut buf) };
     from_wide(&buf[..usize::try_from(n).unwrap_or(0)])
 }
 

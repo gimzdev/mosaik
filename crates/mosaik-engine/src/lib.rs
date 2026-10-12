@@ -12,6 +12,7 @@
 mod hotkeys;
 pub mod server;
 mod state;
+mod switcher;
 mod thread;
 pub mod watchdog;
 
@@ -19,7 +20,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use mosaik_ipc::protocol::{Command, ErrorCode, Reply};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
@@ -35,17 +36,13 @@ pub struct Config {
     pub app_version: String,
     /// Process ids that are Mosaïk's own (its WebView2 processes, the watchdog): never managed.
     pub own_pids: Vec<u32>,
+    /// The watchdog is running. Without it Mosaïk hides nothing (ADR 0006).
+    pub watchdog: bool,
 }
 
 /// Something the interface has to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiEvent {
-    /// Show the switcher. `token` identifies this request, so the interface can report when the
-    /// switcher was on screen and the engine can log how long it took.
-    ShowSwitcher {
-        token: u64,
-        shortcut: String,
-    },
     ShowSettings,
     /// Tell the user something once, plainly (a shortcut that could not be registered...).
     Notice {
@@ -71,15 +68,11 @@ enum Message {
         command: Command,
         reply: mpsc::Sender<Reply>,
     },
-    SwitcherShown {
-        token: u64,
-        at: Instant,
-    },
     Stop,
 }
 
 /// Posted to the engine's window when its inbox has messages.
-const WM_WAKE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
+pub(crate) const WM_WAKE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 
 /// A handle to the running engine. Cheap to share (`Arc<Engine>`) between the interface and the
 /// pipe server.
@@ -88,8 +81,14 @@ pub struct Engine {
     /// The engine's message-only window, as an integer: `HWND` is not `Send`, and the window is
     /// only ever posted to from here.
     window: isize,
+    /// Signalled when the engine thread has finished.
+    done: std::sync::Mutex<Option<mpsc::Receiver<()>>>,
     thread: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
+
+/// How long [`Engine::stop`] waits for windows to come back before giving up on the engine
+/// thread (the watchdog restores whatever is left once the process ends).
+const STOP_TIMEOUT: Duration = Duration::from_secs(3);
 
 impl Engine {
     /// Starts the engine thread and waits until it is ready (hotkeys registered, first scan
@@ -97,9 +96,10 @@ impl Engine {
     pub fn start(config: Config, ui: UiSink) -> Result<Self, EngineError> {
         let (inbox, messages) = mpsc::channel();
         let (ready_tx, ready) = mpsc::channel();
+        let (done_tx, done) = mpsc::channel();
         let handle = std::thread::Builder::new()
             .name("mosaik-engine".into())
-            .spawn(move || thread::run(config, messages, ui, ready_tx))
+            .spawn(move || thread::run(config, messages, ui, ready_tx, done_tx))
             .map_err(|e| EngineError::Start(e.to_string()))?;
         let window = match ready.recv_timeout(Duration::from_secs(15)) {
             Ok(Ok(window)) => window,
@@ -109,6 +109,7 @@ impl Engine {
         Ok(Self {
             inbox,
             window,
+            done: std::sync::Mutex::new(Some(done)),
             thread: std::sync::Mutex::new(Some(handle)),
         })
     }
@@ -132,44 +133,43 @@ impl Engine {
             return stopped();
         }
         self.wake();
-        answer.recv_timeout(timeout).unwrap_or_else(|_| Reply::Error {
-            code: ErrorCode::Busy,
-            message: format!("Mosaïk's engine did not answer within {} s.", timeout.as_secs()),
-            hint: Some(
-                "If windows are missing, choose Rescue windows in the tray menu or run `mosaikctl rescue`."
-                    .into(),
-            ),
-        })
-    }
-
-    /// The interface reports that the switcher opened for request `token` is on screen.
-    pub fn switcher_shown(&self, token: u64) {
-        if self
-            .inbox
-            .send(Message::SwitcherShown {
-                token,
-                at: Instant::now(),
-            })
-            .is_ok()
-        {
-            self.wake();
+        match answer.recv_timeout(timeout) {
+            Ok(reply) => reply,
+            Err(mpsc::RecvTimeoutError::Disconnected) => stopped(),
+            Err(mpsc::RecvTimeoutError::Timeout) => Reply::Error {
+                code: ErrorCode::Busy,
+                message: format!("Mosaïk's engine did not answer within {} s.", timeout.as_secs()),
+                hint: Some(
+                    "If windows are missing, run `mosaikctl rescue`: it restores them without the engine."
+                        .into(),
+                ),
+            },
         }
     }
 
-    /// Stops the engine: every hidden window is brought back, hotkeys are released. Waits for
-    /// the engine thread to end.
+    /// Stops the engine: every hidden window is brought back, hotkeys are released. Waits up to
+    /// a few seconds: an app that hangs while its window is restored must not keep Mosaïk from
+    /// exiting (the watchdog finishes the job once the process is gone).
     pub fn stop(&self) {
         if self.inbox.send(Message::Stop).is_ok() {
             self.wake();
         }
+        let done = self.done.lock().ok().and_then(|mut d| d.take());
+        let finished = done.is_some_and(|d| d.recv_timeout(STOP_TIMEOUT).is_ok());
         let handle = self.thread.lock().ok().and_then(|mut t| t.take());
-        if let Some(h) = handle {
-            let _ = h.join();
+        match (finished, handle) {
+            (true, Some(h)) => {
+                let _ = h.join();
+            }
+            (false, _) => {
+                tracing::error!("the engine did not stop within 3 s; the watchdog restores what is left");
+            }
+            (true, None) => {}
         }
     }
 }
 
-fn stopped() -> Reply {
+pub(crate) fn stopped() -> Reply {
     Reply::Error {
         code: ErrorCode::Failed,
         message: "Mosaïk's engine has stopped.".into(),

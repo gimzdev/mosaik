@@ -7,6 +7,8 @@
 //! mosaik-watchdog --rescue --journal <path>        restore now
 //! ```
 //!
+//! `--quiet` writes to the log only, without the message box (for scripts and the probes).
+//!
 //! Each run appends a few lines to `watchdog.log` next to the journal (timings and results, never
 //! window titles), so a rescue that went wrong can be understood afterwards.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -29,25 +31,30 @@ mod windows_main {
     use std::io::Write;
     use std::time::Instant;
 
-    use mosaik_core::journal::Journal;
-    use mosaik_core::store::{Store, StoreError};
+    use mosaik_core::store::Store;
     use mosaik_win::process::Process;
-    use mosaik_win::rescue::{Report, restore_all};
+    use mosaik_win::rescue::{Outcome, restore_hidden};
     use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
     use windows::Win32::System::SystemInformation::GetLocalTime;
     use windows::Win32::UI::WindowsAndMessaging::{MB_ICONWARNING, MB_OK, MB_SETFOREGROUND, MessageBoxW};
     use windows::core::PCWSTR;
 
+    /// Exit code `mosaik.exe` uses when it stops itself after telling the user why it could not
+    /// start: the watchdog then has nothing to add.
+    const STARTUP_FAILURE_REPORTED: u32 = 2;
+
     pub fn run(args: Vec<String>) -> i32 {
         let mut watch: Option<u32> = None;
         let mut journal: Option<PathBuf> = None;
         let mut rescue = false;
+        let mut quiet = false;
         let mut it = args.into_iter();
         while let Some(a) = it.next() {
             match a.as_str() {
                 "--watch" => watch = it.next().and_then(|p| p.parse().ok()),
                 "--journal" => journal = it.next().map(PathBuf::from),
                 "--rescue" => rescue = true,
+                "--quiet" => quiet = true,
                 _ => return 2,
             }
         }
@@ -55,6 +62,8 @@ mod windows_main {
         let mut log = Log::open(journal.parent().unwrap_or(std::path::Path::new(".")));
         mosaik_win::dpi::make_process_per_monitor_v2();
 
+        // How the main process ended: `Some(0)` when it quit normally.
+        let mut ended_with = None;
         if let Some(pid) = watch {
             // Wait for the main process to end, however it ends. If it is already gone,
             // restore straight away.
@@ -62,7 +71,8 @@ mod windows_main {
             match Process::open(pid) {
                 Ok(p) => {
                     while !p.wait(u32::MAX) {}
-                    log.line(&format!("process {pid} ended"));
+                    ended_with = p.exit_code();
+                    log.line(&format!("process {pid} ended with code {ended_with:?}"));
                 }
                 Err(e) => log.line(&format!("process {pid} not found ({e}); restoring now")),
             }
@@ -76,19 +86,23 @@ mod windows_main {
         // SAFETY: initialises COM for this thread once, before any COM call (shell cloak).
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
         log.line("COM ready");
-        let (report, saved) = rescue_from(&journal, &mut log);
+        let dir = journal.parent().map(PathBuf::from).unwrap_or_default();
+        let outcome = restore_hidden(&Store::new(dir));
+        let report = &outcome.report;
         log.line(&format!(
             "done: {} restored, {} gone, {} failed{}",
             report.restored.len(),
             report.gone,
             report.failed.len(),
-            match &saved {
-                Ok(()) => String::new(),
-                Err(e) => format!("; journal not updated: {e}"),
-            }
+            outcome
+                .problem
+                .as_ref()
+                .map(|p| format!("; {p}"))
+                .unwrap_or_default()
         ));
-        if !report.failed.is_empty() || saved.is_err() {
-            tell_user(&report, saved.err());
+        let crashed = watch.is_some() && !matches!(ended_with, Some(0) | Some(STARTUP_FAILURE_REPORTED));
+        if !quiet && (crashed || !report.failed.is_empty() || outcome.problem.is_some()) {
+            tell_user(&outcome, crashed);
         }
         if report.restored.is_empty() && report.failed.is_empty() {
             0
@@ -99,48 +113,32 @@ mod windows_main {
         }
     }
 
-    /// Restores everything the journal lists (or, if the journal cannot be read, every window
-    /// carrying Mosaïk's marker) and keeps only what could not be restored. The exit code tells
-    /// the caller what happened: 0 nothing to do, 1 windows restored, 3 some could not be
-    /// restored.
-    fn rescue_from(journal_path: &std::path::Path, log: &mut Log) -> (Report, Result<(), StoreError>) {
-        let dir = journal_path.parent().map(PathBuf::from).unwrap_or_default();
-        let store = Store::new(dir);
-        // A damaged journal is kept aside by the store; the markers still find the windows.
-        let journal = match store.load::<Journal>() {
-            Ok(loaded) => loaded.value,
-            Err(e) => {
-                log.line(&format!("journal unreadable ({e}); using window markers"));
-                Journal::default()
-            }
+    /// The watchdog has no window of its own: it says what happened in a message box, with
+    /// what to do next.
+    fn tell_user(outcome: &Outcome, crashed: bool) {
+        let report = &outcome.report;
+        let mut text = if crashed {
+            String::from("Mosaïk has stopped.")
+        } else {
+            String::from("Mosaïk could not bring every window back.")
         };
-        log.line(&format!("journal lists {} window(s)", journal.hidden.len()));
-        let report = restore_all(&journal);
-        let mut saved = Ok(());
-        if !journal.hidden.is_empty() || !report.remaining.is_empty() {
-            let mut left = Journal::new(journal.owner_pid);
-            left.hidden.clone_from(&report.remaining);
-            saved = store.save(&left);
-        }
-        (report, saved)
-    }
-
-    /// The watchdog has no window of its own: when something could not be put right, it says
-    /// so in a message box, with what to do next.
-    fn tell_user(report: &Report, save_error: Option<StoreError>) {
-        let mut text = format!(
-            "Mosaïk stopped unexpectedly and brought your windows back.\n\n{}.",
-            report.summary()
-        );
-        if !report.failed.is_empty() {
-            text.push_str(
-                "\n\nWindows that could not be restored stay listed: start Mosaïk and choose Rescue windows in its tray menu, or run \"mosaikctl rescue\".",
-            );
-        }
-        if let Some(e) = save_error {
+        if !report.restored.is_empty() {
             text.push_str(&format!(
-                "\n\nThe list of hidden windows could not be updated: {e}"
+                " The {} window(s) it had hidden are back.",
+                report.restored.len()
             ));
+        }
+        if !report.failed.is_empty() {
+            text.push_str(&format!(
+                "\n\n{} window(s) could not be restored (usually apps running as administrator). Start Mosaïk and choose Rescue windows in its tray menu, or run \"mosaikctl rescue\" as administrator.",
+                report.failed.len()
+            ));
+        }
+        if let Some(p) = &outcome.problem {
+            text.push_str(&format!("\n\n{p}"));
+        }
+        if crashed {
+            text.push_str("\n\nStart Mosaïk again from the Start menu. What happened is in %LOCALAPPDATA%\\Mosaik\\logs.");
         }
         let text = mosaik_win::text::wide(&text);
         let title = mosaik_win::text::wide("Mosaïk");

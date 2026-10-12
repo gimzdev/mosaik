@@ -6,12 +6,14 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
-  server: { port: 1420, strictPort: true, host: '127.0.0.1' },
+  server: { port: 1420, strictPort: true, host: '127.0.0.1', fs: { allow: ['..', '../../crates/mosaik-ipc/fixtures'] } },
   build: {
     target: 'es2023',
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
+    // Fonts as files, never inlined as data: URLs (the content security policy allows 'self').
+    assetsInlineLimit: 0,
   },
   test: {
     environment: 'jsdom',

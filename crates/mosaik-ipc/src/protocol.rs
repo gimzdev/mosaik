@@ -98,6 +98,8 @@ pub struct StateSnapshot {
     pub protocol: u32,
     /// Started with `--safe-mode`: nothing is moved or hidden.
     pub safe_mode: bool,
+    /// The watchdog is running; without it Mosaïk hides nothing.
+    pub watchdog: bool,
     pub topology_fingerprint: String,
     pub monitors: Vec<MonitorState>,
     pub windows: Vec<WindowState>,
@@ -417,6 +419,7 @@ mod tests {
             app_version: "1.0.0".into(),
             protocol: PROTOCOL_VERSION,
             safe_mode: false,
+            watchdog: true,
             topology_fingerprint: "ab12".into(),
             monitors: vec![MonitorState {
                 id: "m1".into(),
@@ -454,5 +457,73 @@ mod tests {
         let r = Response::new(9, Reply::State(Box::new(state)));
         let bytes = encode(&r).unwrap();
         assert_eq!(decode_response(&bytes[..bytes.len() - 1]).unwrap(), r);
+    }
+}
+
+/// The wire format both sides rely on, checked against `fixtures/wire.json`, which the
+/// interface's own tests read too: a change here that the TypeScript types do not follow fails
+/// one side or the other. `UPDATE_FIXTURES=1 cargo test -p mosaik-ipc` rewrites the file.
+#[cfg(test)]
+mod wire {
+    use super::*;
+
+    fn samples() -> serde_json::Value {
+        let commands = vec![
+            Command::Hello {
+                client: "settings".into(),
+            },
+            Command::State,
+            Command::Workspaces,
+            Command::Switch {
+                workspace: "ship".into(),
+            },
+            Command::Save { workspace: None },
+            Command::Rescue,
+            Command::ShowSwitcher,
+            Command::ShowSettings,
+            Command::Quit,
+        ];
+        let replies = vec![
+            Reply::Hello {
+                app_version: "1.0.0".into(),
+                protocol: PROTOCOL_VERSION,
+            },
+            Reply::Workspaces {
+                workspaces: vec![WorkspaceSummary {
+                    id: WorkspaceId("ship".into()),
+                    name: "Ship the release".into(),
+                    windows: 4,
+                    zones: 3,
+                    hotkey: None,
+                }],
+                active: Some(WorkspaceId("ship".into())),
+            },
+            Reply::Done {
+                message: "2 window(s) restored".into(),
+            },
+            Reply::Error {
+                code: ErrorCode::NotFound,
+                message: "No workspace called \"x\".".into(),
+                hint: Some("mosaikctl workspaces lists them.".into()),
+            },
+        ];
+        serde_json::json!({ "commands": commands, "replies": replies })
+    }
+
+    #[test]
+    fn matches_the_shared_fixture() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/wire.json");
+        let now = samples();
+        if std::env::var_os("UPDATE_FIXTURES").is_some() {
+            let mut text = serde_json::to_string_pretty(&now).unwrap();
+            text.push('\n');
+            std::fs::write(&path, text).unwrap();
+        }
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved, now,
+            "run UPDATE_FIXTURES=1 cargo test -p mosaik-ipc and update protocol.ts"
+        );
     }
 }

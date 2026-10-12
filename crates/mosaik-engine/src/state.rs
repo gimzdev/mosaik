@@ -9,6 +9,7 @@ use mosaik_win::window::Scanner;
 pub(crate) struct Inputs<'a> {
     pub app_version: &'a str,
     pub safe_mode: bool,
+    pub watchdog: bool,
     pub topology: &'a Topology,
     pub scanner: &'a mut Scanner,
     pub rules: &'a Rules,
@@ -69,6 +70,7 @@ pub(crate) fn snapshot(i: Inputs<'_>) -> StateSnapshot {
         app_version: i.app_version.to_owned(),
         protocol: PROTOCOL_VERSION,
         safe_mode: i.safe_mode,
+        watchdog: i.watchdog,
         topology_fingerprint: i.topology.fingerprint(),
         monitors,
         windows,

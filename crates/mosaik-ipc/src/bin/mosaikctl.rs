@@ -38,7 +38,7 @@ mod windows_main {
     use mosaik_core::journal::Journal;
     use mosaik_core::store::Store;
     use mosaik_ipc::pipe::{Client, PipeError, Program, pipe_name};
-    use mosaik_ipc::protocol::{Command, Reply, StateSnapshot};
+    use mosaik_ipc::protocol::{Command, ErrorCode, Reply, StateSnapshot};
 
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
     const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -92,6 +92,20 @@ mod windows_main {
             client.request(cmd, REQUEST_TIMEOUT)
         });
         match reply {
+            // A busy engine cannot be trusted to bring windows back: do it here.
+            Ok(response)
+                if rescue
+                    && matches!(
+                        response.reply,
+                        Reply::Error {
+                            code: ErrorCode::Busy,
+                            ..
+                        }
+                    ) =>
+            {
+                eprintln!("Mosaïk is not answering; restoring windows directly.");
+                rescue_locally()
+            }
             Ok(response) => print_reply(&response.reply, json),
             // Without an answer from Mosaïk, a rescue is done here: bringing windows back must
             // never depend on the app that hid them.
@@ -249,12 +263,6 @@ mod windows_main {
     /// Without Mosaïk: restore what its journal lists and every window carrying its marker,
     /// here and now. Windows that could not be restored stay in the journal for the next try.
     fn rescue_locally() -> i32 {
-        let Ok(appdata) = std::env::var("APPDATA") else {
-            eprintln!(
-                "APPDATA is not set, so Mosaïk's data folder cannot be found. Restoring marked windows only."
-            );
-            return finish(mosaik_win::rescue::restore_all(&Journal::default()), None);
-        };
         mosaik_win::dpi::make_process_per_monitor_v2();
         // SAFETY: initialises COM once for this thread before the shell-cloak calls.
         let _ = unsafe {
@@ -263,34 +271,22 @@ mod windows_main {
                 windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
             )
         };
-        let store = Store::new(std::path::Path::new(&appdata).join("Mosaik"));
-        let journal = match store.load::<Journal>() {
-            Ok(loaded) => loaded.value,
-            Err(e) => {
-                eprintln!("{e}\nRestoring the windows Mosaïk marked instead.");
-                Journal::default()
+        let outcome = match std::env::var_os("APPDATA") {
+            Some(appdata) => {
+                mosaik_win::rescue::restore_hidden(&Store::new(std::path::Path::new(&appdata).join("Mosaik")))
             }
+            None => mosaik_win::rescue::Outcome {
+                report: mosaik_win::rescue::restore_all(&Journal::default()),
+                problem: Some(
+                    "APPDATA is not set, so Mosaïk's list of hidden windows was not found; the windows it marked were restored."
+                        .into(),
+                ),
+            },
         };
-        let report = mosaik_win::rescue::restore_all(&journal);
-        let mut left = Journal::new(journal.owner_pid);
-        left.hidden.clone_from(&report.remaining);
-        let saved = if journal.hidden.is_empty() && left.hidden.is_empty() {
-            None
-        } else {
-            Some(store.save(&left))
-        };
-        finish(report, saved)
-    }
-
-    fn finish(
-        report: mosaik_win::rescue::Report,
-        saved: Option<Result<(), mosaik_core::store::StoreError>>,
-    ) -> i32 {
-        println!("{}", printable(&report.summary()));
-        if let Some(Err(e)) = saved {
-            eprintln!("The list of hidden windows could not be updated: {e}");
-            return 1;
+        println!("{}", printable(&outcome.report.summary()));
+        if let Some(problem) = &outcome.problem {
+            eprintln!("{problem}");
         }
-        i32::from(!report.failed.is_empty())
+        i32::from(!outcome.report.failed.is_empty() || outcome.problem.is_some())
     }
 }

@@ -57,7 +57,10 @@ fn watchdog_exe() -> Result<std::path::PathBuf, String> {
 fn start_watchdog(watch: u32) -> Result<Process, String> {
     spawn(
         &watchdog_exe()?.to_string_lossy(),
-        &format!("--watch {watch} --journal \"{}\"", journal_path().display()),
+        &format!(
+            "--watch {watch} --quiet --journal \"{}\"",
+            journal_path().display()
+        ),
     )
     .map_err(|e| e.to_string())
 }
@@ -125,7 +128,7 @@ fn smoke_test() -> Result<(), String> {
     let w = spawn(
         &watchdog_exe()?.to_string_lossy(),
         &format!(
-            "--rescue --journal \"{}\"",
+            "--rescue --quiet --journal \"{}\"",
             dir.join("hidden-windows.json").display()
         ),
     )

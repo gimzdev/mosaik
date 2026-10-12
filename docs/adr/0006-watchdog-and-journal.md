@@ -17,8 +17,13 @@ promise.
   windowless process of about 250 KB that waits for Mosaïk to end, however it ends. If anything
   is left in the journal, or any window still carries the marker, it restores it, keeps in the
   journal only what it could not restore, and says so in a message box with the next step.
-- The same restore runs from the tray ("Rescue windows"), from `mosaikctl rescue` (which works
-  even when Mosaïk is not running or not answering), and from `mosaik --safe-mode`.
+- The same restore runs from the tray ("Rescue windows"), from `mosaikctl rescue` and from
+  `mosaik --rescue`, which both work even when Mosaïk is not running or not answering.
+  `mosaik --safe-mode` starts Mosaïk without moving or hiding anything.
+- When the main process ends with anything but a normal exit, the watchdog says so in a message
+  box once the windows are back, with what to do next (a crash, or Mosaïk ended from Task
+  Manager). A journal it cannot read (damaged, or from a newer Mosaïk) is left untouched; the
+  markers still find the windows.
 - The watchdog logs its steps with timings (never window titles) to `watchdog.log` next to the
   journal.
 

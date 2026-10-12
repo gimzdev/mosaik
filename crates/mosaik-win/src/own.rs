@@ -4,7 +4,7 @@ use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, IDC_ARROW, LoadCursorW,
-    RegisterClassExW, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW, WNDPROC,
+    RegisterClassExW, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASS_STYLES, WNDCLASSEXW, WNDPROC,
 };
 use windows::core::PCWSTR;
 
@@ -32,6 +32,11 @@ pub unsafe extern "system" fn plain_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM
 
 impl WindowClass {
     pub fn register(name: &str, wndproc: WNDPROC) -> Result<Self> {
+        Self::register_with(name, wndproc, CS_HREDRAW | CS_VREDRAW)
+    }
+
+    /// Like [`WindowClass::register`] with explicit class styles (a drop shadow, for example).
+    pub fn register_with(name: &str, wndproc: WNDPROC, style: WNDCLASS_STYLES) -> Result<Self> {
         // SAFETY: the module handle of the running executable.
         let module = unsafe { GetModuleHandleW(PCWSTR::null()) }.ctx("GetModuleHandleW")?;
         let instance = HINSTANCE(module.0);
@@ -40,7 +45,7 @@ impl WindowClass {
         let cursor = unsafe { LoadCursorW(None, IDC_ARROW) }.unwrap_or_default();
         let wc = WNDCLASSEXW {
             cbSize: u32::try_from(std::mem::size_of::<WNDCLASSEXW>()).unwrap_or(0),
-            style: CS_HREDRAW | CS_VREDRAW,
+            style,
             lpfnWndProc: wndproc,
             hInstance: instance,
             hCursor: cursor,

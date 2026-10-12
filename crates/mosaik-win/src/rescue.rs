@@ -6,6 +6,7 @@
 
 use mosaik_core::geometry::Rect;
 use mosaik_core::journal::{HiddenWindow, HideMethod, Journal};
+use mosaik_core::store::Store;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::GetPropW;
 use windows::core::w;
@@ -133,4 +134,42 @@ fn restore_one(hider: &mut Hider, h: HWND, entry: &HiddenWindow, report: &mut Re
 /// True when the window carries Mosaïk's hidden-window marker.
 pub fn has_marker(h: HWND) -> bool {
     marker(h).is_some()
+}
+
+/// What [`restore_hidden`] did, and anything the user should know about the journal.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Outcome {
+    pub report: Report,
+    /// A plain sentence when the journal could not be read or updated.
+    pub problem: Option<String>,
+}
+
+/// Restores what the journal in `store` lists and every window carrying Mosaïk's marker, then
+/// keeps in the journal only what could not be restored. A journal that cannot be read (damaged,
+/// or written by a newer Mosaïk) is left untouched: the markers still find the windows.
+/// Needs COM initialised on the calling thread.
+pub fn restore_hidden(store: &Store) -> Outcome {
+    match store.load::<Journal>() {
+        Ok(loaded) => {
+            let journal = loaded.value;
+            let report = restore_all(&journal);
+            let problem = if journal.hidden.is_empty() && report.remaining.is_empty() {
+                None
+            } else {
+                let mut left = Journal::new(journal.owner_pid);
+                left.hidden.clone_from(&report.remaining);
+                store
+                    .save(&left)
+                    .err()
+                    .map(|e| format!("The list of hidden windows could not be updated: {e}"))
+            };
+            Outcome { report, problem }
+        }
+        Err(e) => Outcome {
+            report: restore_all(&Journal::default()),
+            problem: Some(format!(
+                "{e} The windows Mosaïk had marked were restored without it."
+            )),
+        },
+    }
 }

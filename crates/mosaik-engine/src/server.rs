@@ -10,8 +10,9 @@ use mosaik_ipc::protocol::{Command, Request, Response};
 
 use crate::Engine;
 
-/// How long a pipe client waits for the engine before getting a "busy" answer.
-const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a pipe client waits for the engine before getting a "busy" answer: shorter than
+/// `mosaikctl`'s own 10 s, so it gets that answer (and can rescue locally) instead of timing out.
+const ENGINE_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Serves the pipe until stopped. Returns the thread and its stopper.
 pub fn spawn(
