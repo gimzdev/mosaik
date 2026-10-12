@@ -15,7 +15,7 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    ./mosaik1.sh --no-start  install, don't start anything
 #    ./mosaik1.sh --fresh     reinstall dependencies, rebuild from scratch
 #    ./mosaik1.sh --port 4000 another port (default 3000, or the next free one)
-#    ./mosaik1.sh --dir ~/m   install somewhere else (default ./mosaik)
+#    ./mosaik1.sh --dir ~/m   install somewhere else (default ./mosaik_site)
 #
 #  Updating
 #    This file is the source of truth. Change the settings below and run it
@@ -102,7 +102,7 @@ MARKER=".mosaik-site"
 MANIFEST=".mosaik-files"
 if [ -z "$APP_DIR" ]; then
   if [ -f "$MARKER" ]; then APP_DIR="."
-  else APP_DIR="./mosaik"; fi
+  else APP_DIR="./mosaik_site"; fi
 fi
 mkdir -p "$(dirname "$APP_DIR")"
 APP_DIR="$(cd "$(dirname "$APP_DIR")" && pwd -P)/$(basename "$APP_DIR")"
