@@ -2,28 +2,67 @@
 
 <h1>Mosaïk</h1>
 
-<h3>Every window, in its place.</h3>
+<h3>Workspace organizer for the desktop</h3>
 
-[![Windows 11 and 10](https://img.shields.io/badge/Windows_11_and_10-2B44D9?style=for-the-badge)](https://xn--mosak-fta.com/download)
-[![Rust](https://img.shields.io/badge/Rust-161B25?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![Tauri](https://img.shields.io/badge/Tauri_2-12786A?style=for-the-badge&logo=tauri&logoColor=white)](https://tauri.app)
-[![CC0](https://img.shields.io/badge/Public_domain-CC0-F4B13A?style=for-the-badge)](LICENSE)
+[![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![TailwindCSS](https://img.shields.io/badge/Tailwind-06B6D4?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
 
 <hr>
 
 <h2>About</h2>
 
 <p>Mosaïk gives every project its own workspace:<br>
-your apps and windows arranged and ready in one click.</p>
+your apps and windows arranged and ready in one click.<br>
+It is free and open source, and still in development.</p>
 
-<p>Free forever, with no account, no telemetry and no cloud.<br>
-Your layouts stay on your computer.</p>
-
-[![Download for Windows](https://img.shields.io/badge/Download_for_Windows-2B44D9?style=for-the-badge)](https://xn--mosak-fta.com/download)
+<p>The desktop app is built Windows first.<br>
+For now this repository holds the website at mosaïk.com,<br>
+where you can ask for early access.</p>
 
 <hr>
 
-<h2>What it does</h2>
+<h2>Screenshots</h2>
+
+<table align="center">
+<tr>
+<td align="center" width="50%">
+
+<img src="docs/screenshots/mosaik-home.png" alt="Home" width="100%">
+
+<sub>Home</sub>
+
+</td>
+<td align="center" width="50%">
+
+<img src="docs/screenshots/mosaik-zones.png" alt="Zones" width="100%">
+
+<sub>Zones</sub>
+
+</td>
+</tr>
+<tr>
+<td align="center" width="50%">
+
+<img src="docs/screenshots/mosaik-workspaces.png" alt="Workspaces" width="100%">
+
+<sub>Workspaces</sub>
+
+</td>
+<td align="center" width="50%">
+
+<img src="docs/screenshots/mosaik-platforms.png" alt="Platforms" width="100%">
+
+<sub>Platforms</sub>
+
+</td>
+</tr>
+</table>
+
+<hr>
+
+
+<h2>Ideas</h2>
 
 <table align="center">
 <tr>
@@ -31,10 +70,10 @@ Your layouts stay on your computer.</p>
 
 <h3>Zones</h3>
 
-Named, coloured areas<br>
-that belong to the project<br>
-Drag a window near one<br>
-and it is pulled in
+Named screen areas<br>
+Code, Terminal, Review<br>
+Windows snap in<br>
+Zones are per project
 
 </td>
 <td align="center" width="33%">
@@ -43,7 +82,7 @@ and it is pulled in
 
 Tabs for any app,<br>
 not only the browser<br>
-Drop a window on a tag<br>
+Saved per workspace<br>
 Pull a tab out to make it<br>
 a window again
 
@@ -52,40 +91,11 @@ a window again
 
 <h3>Workspaces</h3>
 
-Save the windows on screen<br>
-Switch from the tray<br>
-or the keyboard<br>
-Positions, sizes and tabs<br>
-return together
-
-</td>
-</tr>
-<tr>
-<td align="center" width="33%">
-
-<h3>Every monitor</h3>
-
-Zones are kept as proportions<br>
-and fit each monitor again,<br>
-whatever its scaling
-
-</td>
-<td align="center" width="33%">
-
-<h3>On your computer</h3>
-
-No network requests at all<br>
-Updates come through<br>
-the Microsoft Store
-
-</td>
-<td align="center" width="33%">
-
-<h3>Safe</h3>
-
-A watchdog brings back<br>
-every hidden window<br>
-if Mosaïk stops
+Save a workspace once<br>
+Positions, sizes, tabs<br>
+return together<br>
+Switch by keyboard<br>
+Saved locally
 
 </td>
 </tr>
@@ -93,87 +103,120 @@ if Mosaïk stops
 
 <hr>
 
-<h2>Using it</h2>
-
-<p>Arrange the apps of one project, press <kbd>Win</kbd> <kbd>Alt</kbd> <kbd>Space</kbd>, then <kbd>S</kbd> and a name.<br>
-Each place becomes a zone with its own colour.</p>
-
-<p>Press <kbd>Win</kbd> <kbd>Alt</kbd> <kbd>Space</kbd> again to switch: its windows come back and missing apps start.</p>
-
-<table align="center">
-<tr><td><kbd>1</kbd> … <kbd>9</kbd>, then <kbd>F1</kbd> …</td><td>open a workspace</td></tr>
-<tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Enter</kbd></td><td>pick and open</td></tr>
-<tr><td>typing</td><td>filters by name</td></tr>
-<tr><td><kbd>S</kbd></td><td>saves the windows on screen</td></tr>
-<tr><td><kbd>Esc</kbd></td><td>closes the switcher</td></tr>
-</table>
-
-<p>While dragging a window, hold <kbd>Shift</kbd> to move it freely.<br>
-Zones, shortcuts and everything else are in the settings, from the tray icon.</p>
-
-<hr>
-
-<h2>Two files</h2>
-
-<p>Everything travels in two files, each runnable on its own on another machine.</p>
+<h2>Workspaces for</h2>
 
 <table align="center">
 <tr>
-<td align="center" width="50%">
+<td align="center" width="25%">
 
-<h3><code>mosaik.ps1</code></h3>
+<h3>Developers</h3>
 
-The app: its whole source inside,<br>
-with the steps to check, build,<br>
-test, run and package it.<br>
-Right-click, <b>Run with PowerShell</b>.
+Editor<br>
+Terminal<br>
+Pull request<br>
+Team chat
 
 </td>
-<td align="center" width="50%">
+<td align="center" width="25%">
 
-<h3><code>mosaik1.sh</code></h3>
+<h3>Designers</h3>
 
-The website at mosaïk.com:<br>
-writes it, installs it, runs it<br>
-or deploys it.<br>
-<code>bash mosaik1.sh</code>
+Canvas<br>
+References<br>
+The brief<br>
+Client thread
+
+</td>
+<td align="center" width="25%">
+
+<h3>Researchers</h3>
+
+The paper<br>
+The draft<br>
+The data
+
+</td>
+<td align="center" width="25%">
+
+<h3>Streamers</h3>
+
+Broadcast<br>
+Live chat<br>
+Dashboards
 
 </td>
 </tr>
 </table>
 
-```powershell
-.\mosaik.ps1 check      # what building needs (Rust, C++ build tools, Node.js 22.13+, WebView2)
-.\mosaik.ps1 build      # the interface, then mosaik.exe, its watchdog and mosaikctl
-.\mosaik.ps1 test       # every test and check
-.\mosaik.ps1 run        # start the Mosaïk just built
-.\mosaik.ps1 package    # the Store package (MSIX)
-.\mosaik.ps1 pack       # a one-file copy with this source inside (target\mosaik.ps1)
+<hr>
+
+<h2>Platforms</h2>
+
+<table align="center">
+<tr>
+<td align="center" width="33%">
+
+<h3>Windows</h3>
+
+<b>In development</b><br>
+Zones, tabs and saved<br>
+layouts arrive here first
+
+</td>
+<td align="center" width="33%">
+
+<h3>macOS</h3>
+
+<b>Planned</b><br>
+Needs the Accessibility<br>
+permission. Tabs stack<br>
+and swap instead<br>
+of embedding
+
+</td>
+<td align="center" width="33%">
+
+<h3>Linux</h3>
+
+<b>Planned, X11 first</b><br>
+X11 allows the full set<br>
+Wayland limits what apps<br>
+can do to other windows
+
+</td>
+</tr>
+</table>
+
+<hr>
+
+<h2>Stack</h2>
+
+<p>The website in this repository:</p>
+
+```javascript
+const site = {
+  app: ["Next.js 16", "React 19", "TypeScript"],
+  styling: ["Tailwind CSS 4"],
+  fonts: ["Bricolage Grotesque", "Instrument Sans", "JetBrains Mono"]
+};
 ```
 
 <hr>
 
-<h2>Inside</h2>
+<h2>Setup</h2>
 
-<table align="center">
-<tr><td><code>crates/mosaik-core</code></td><td>zones, layouts, matching, tabs, settings: pure logic, tested on any OS</td></tr>
-<tr><td><code>crates/mosaik-win</code></td><td>windows, monitors, DPI, hiding, input: everything that talks to Windows</td></tr>
-<tr><td><code>crates/mosaik-overlay</code></td><td>zone frames, tags and tab strips, drawn natively</td></tr>
-<tr><td><code>crates/mosaik-engine</code></td><td>the engine thread: events, workspaces, the switcher, shortcuts</td></tr>
-<tr><td><code>crates/mosaik-watchdog</code></td><td>brings hidden windows back if Mosaïk stops</td></tr>
-<tr><td><code>crates/mosaik-ipc</code></td><td>the named-pipe protocol and <code>mosaikctl</code></td></tr>
-<tr><td><code>apps/desktop</code></td><td>the Tauri shell and the settings window (React, TypeScript)</td></tr>
-<tr><td><code>installer/</code></td><td>the Store package and the third-party notices</td></tr>
-<tr><td><code>docs/</code></td><td><a href="docs/architecture.md">architecture</a>, <a href="docs/STATUS.md">status and measurements</a>, <a href="docs/adr">decisions</a></td></tr>
-</table>
+<p>Needs Node.js 20.9 or newer. No environment variables.</p>
+
+```bash
+git clone https://github.com/gimzdev/mosaik.git
+cd mosaik
+
+npm install
+npm run dev
+```
 
 <hr>
 
-<h2>Licence</h2>
-
-<p>Mosaïk is dedicated to the public domain under <a href="LICENSE">CC0 1.0</a>: take it, change it, ship it.<br>
-The open-source software it is built with keeps its own licences, listed in <a href="THIRD-PARTY-NOTICES.txt">THIRD-PARTY-NOTICES.txt</a>.</p>
-
-<p><a href="https://xn--mosak-fta.com/conditions">Privacy and terms</a> · <a href="https://www.patreon.com/gimzdev">Support on Patreon</a></p>
+[![Early access](https://img.shields.io/badge/Early_access-000000?style=for-the-badge)](https://mosaïk.com)
 
 </div>
