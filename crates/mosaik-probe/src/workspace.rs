@@ -212,7 +212,11 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     }
     let _ = std::fs::remove_dir_all(&dir);
     let mut value = result?;
-    value["notices"] = json!(notices.lock().map(|n| n.clone()).unwrap_or_default());
+    let told = notices.lock().map(|n| n.clone()).unwrap_or_default();
+    for n in &told {
+        println!("notice: {n}");
+    }
+    value["notices"] = json!(told);
     Ok(value)
 }
 

@@ -71,7 +71,14 @@ the engine gathers windows and applies the result.
 - **Drag to snap**: while a window is dragged by its title bar, the open workspace's zones show
   under it; the zone under the pointer (or within 48 px) is tinted, and the window is pulled into
   it on release. Shift moves freely; a setting swaps that. A window that was not part of the
-  workspace joins it.
+  workspace joins it. A resize never snaps: Windows shows its resize arrows for the whole of one
+  (ADR 0010). A window Mosaïk must not move (an app running as administrator) gets no zones, and
+  the user is told why once.
+- **Living with other arrangers** (ADR 0010): Windows' own snapping stays on; a drop on a zone or
+  a tab at the edge of the screen ends where the user dropped it, and the first one tells the
+  user why Windows showed its preview too. Other programs that arrange, snap or group windows
+  (komorebi, GlazeWM, FancyZones...) are named once, ever, when Mosaïk starts or opens a
+  workspace while one runs, with what to do. Mosaïk never changes their settings or Windows'.
 - **Displays changing** (a monitor plugged in or out, a scale or taskbar change, waking up) fits
   the open workspace's windows to the new arrangement: zones are fractions of a monitor's work
   area, and each remembered monitor is matched to one connected now.

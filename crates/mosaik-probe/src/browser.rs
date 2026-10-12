@@ -17,7 +17,9 @@ use mosaik_win::process::shell_open;
 use mosaik_win::window::{Scanner, frame_rect, handle, title, top_level};
 use serde_json::{Value, json};
 use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos};
+use windows::Win32::UI::WindowsAndMessaging::{
+    HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+};
 
 use crate::workspace::{drag_path, state};
 
@@ -105,9 +107,29 @@ fn tabs(hwnd: HWND, at_least: usize) -> Vec<Rect> {
     }
 }
 
+/// Puts the probe's browser window above every other window, the probe's top-most ones too.
+fn on_top(window: HWND) {
+    // SAFETY: changes the stacking of a window this probe opened.
+    let _ = unsafe {
+        SetWindowPos(
+            window,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+    };
+    pump_until(300, || false);
+}
+
 /// Drags one browser tab from `tab` to `to`, out of its strip. The first steps go straight down,
 /// past the strip, as a person tears a tab off; then on to `to`.
 fn tear_off(tab: Rect, to: Point, owner: HWND) -> Result<(), String> {
+    // Above the probe's own top-most windows: a browser that has just started can set its
+    // window back to the normal stacking once it is ready.
+    on_top(owner);
     let from = tab.center();
     let below = Point::new(from.x, from.y + 160);
     drag_path(&[from, below, to], owner)
@@ -143,8 +165,7 @@ pub fn scenario(
         600,
     );
     let _ = move_frame(window, place);
-    // SAFETY: changes the stacking of the window this probe opened.
-    let _ = unsafe { SetWindowPos(window, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE) };
+    on_top(window);
     pump_until(1500, || false);
     let before = tabs(window, 3);
     let mut result = json!({
