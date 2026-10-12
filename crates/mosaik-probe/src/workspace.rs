@@ -112,6 +112,21 @@ struct Probe {
 
 pub fn run(args: &[String]) -> Result<Value, String> {
     let drag = args.iter().any(|a| a == "--drag");
+    // `--browser edge|chrome`: browser tabs dragged out into the workspace (browser.rs).
+    let browser = match args.iter().position(|a| a == "--browser") {
+        Some(i) => {
+            let name = args.get(i + 1).map(String::as_str).unwrap_or_default();
+            let b = crate::browser::browser(name).ok_or("--browser takes edge or chrome")?;
+            if crate::browser::on_screen(b.exe) > 0 {
+                return Err(format!(
+                    "{} windows are on screen: minimise them first, so the probe never touches them.",
+                    b.name
+                ));
+            }
+            Some(b)
+        }
+        None => None,
+    };
     let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
     let work = topology.primary().work_area;
     let dpi = topology.primary().dpi;
@@ -169,13 +184,20 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             app_version: "probe".into(),
             own_pids,
             watchdog: watchdog.as_ref().map(|w| w.pid),
-            manage_only: Some(vec!["mosaik-probe.exe".into()]),
+            manage_only: Some(
+                std::iter::once("mosaik-probe.exe".to_owned())
+                    .chain(browser.as_ref().map(|b| b.exe.to_owned()))
+                    .collect(),
+            ),
         },
         sink,
     )
     .map_err(|e| e.to_string())?;
 
-    let result = scenario(&engine, &probes, drag, dpi, &dir);
+    let result = match &browser {
+        Some(b) => browser_scenario(&engine, &probes, dpi, b, work),
+        None => scenario(&engine, &probes, drag, dpi, &dir),
+    };
     engine.stop();
     for p in &probes {
         crate::apps::close(p.hwnd);
@@ -349,6 +371,48 @@ fn scenario(
         "editing": edited,
         "private_mb": memory.map(|m| mb(m.0)),
     }))
+}
+
+/// Browser tabs dragged out into a workspace of the three probe windows: one onto the review
+/// zone, one onto the code window's tag. The workspace is deleted afterwards, so nothing of the
+/// browser stays where a switch could start it again.
+fn browser_scenario(
+    engine: &Engine,
+    probes: &[Probe],
+    dpi: u32,
+    b: &crate::browser::Browser,
+    work: Rect,
+) -> Result<Value, String> {
+    let style = FrameStyle::default();
+    let saved = done(
+        &ask(
+            engine,
+            Command::Save {
+                workspace: Some("Probe browser".into()),
+            },
+        )
+        .0,
+    )?;
+    pump_until(700, || false);
+    let (code, review) = (&probes[0], &probes[2]);
+    let c = frame_rect(code.hwnd).ok_or("the code window vanished")?;
+    #[allow(clippy::cast_possible_truncation)]
+    let band_middle = (14.0 * f64::from(dpi) / 96.0).round() as i32;
+    let tag_point = Point::new(c.left + c.width() / 2, c.top - band_middle);
+    let zone = (review.tiled.center(), style.window_area(review.tiled, dpi));
+    let result = crate::browser::scenario(engine, b, work, zone, tag_point, code.hwnd);
+    crate::browser::close_pages(b);
+    pump_until(800, || false);
+    let _ = ask(
+        engine,
+        Command::DeleteWorkspace {
+            workspace: "Probe browser".into(),
+        },
+    );
+    let mut value = result?;
+    value["saved"] = json!(saved);
+    println!("browser: {value}");
+    Ok(value)
 }
 
 fn zones(engine: &Engine, workspace: &str) -> Result<(Vec<ZoneEdit>, String), String> {
@@ -562,6 +626,16 @@ impl Probe {
 /// Presses the left button at `from` (only on a window of this probe: a probe window, or the
 /// tab strip the engine in this process draws), moves to `to` in small steps, releases.
 fn drag(from: Point, to: Point, expected: HWND) -> Result<(), String> {
+    drag_path(&[from, to], expected)
+}
+
+/// Presses the left button at the first point (only on `expected`, a window this probe opened,
+/// or on what the engine in this process draws), moves through the others in small steps,
+/// releases at the last.
+pub(crate) fn drag_path(points: &[Point], expected: HWND) -> Result<(), String> {
+    let (Some(&from), Some(_)) = (points.first(), points.get(1)) else {
+        return Err("a drag needs two points".into());
+    };
     // SAFETY: read-only hit test.
     let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: from.x, y: from.y }), GA_ROOT) };
     let ours = under == expected || mosaik_win::window::pid(under) == mosaik_win::process::own_pid();
@@ -573,13 +647,16 @@ fn drag(from: Point, to: Point, expected: HWND) -> Result<(), String> {
     {
         let _button = LeftButton::press();
         pump_until(200, || false);
-        let steps = 40;
-        for i in 1..=steps {
-            input::move_to(Point::new(
-                from.x + (to.x - from.x) * i / steps,
-                from.y + (to.y - from.y) * i / steps,
-            ));
-            pump_until(16, || false);
+        for pair in points.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let steps = 40;
+            for i in 1..=steps {
+                input::move_to(Point::new(
+                    a.x + (b.x - a.x) * i / steps,
+                    a.y + (b.y - a.y) * i / steps,
+                ));
+                pump_until(16, || false);
+            }
         }
         pump_until(250, || false);
     }

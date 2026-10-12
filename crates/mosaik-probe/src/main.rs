@@ -23,6 +23,8 @@ mod apps;
 #[cfg(windows)]
 mod backdrop;
 #[cfg(windows)]
+mod browser;
+#[cfg(windows)]
 mod capture;
 #[cfg(windows)]
 mod classify;
@@ -46,6 +48,8 @@ mod pixels;
 mod report;
 #[cfg(windows)]
 mod state;
+#[cfg(windows)]
+mod uia;
 #[cfg(windows)]
 mod watchdog;
 #[cfg(windows)]

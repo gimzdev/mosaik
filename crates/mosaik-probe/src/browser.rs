@@ -1,0 +1,220 @@
+//! Browser tabs into Mosaïk, with the real mouse: a private browser window with three tabs, one
+//! tab dragged out onto a zone (it should land in the zone, as a window of the workspace), and
+//! one dragged out onto another window's tag (it should become a Mosaïk tab of that window).
+//!
+//! The browser's own windows are never touched: the probe refuses to start while a window of
+//! that browser is on screen (minimise them first), opens a private window (no history, no
+//! session), and closes only the windows showing its own pages.
+
+use std::time::{Duration, Instant};
+
+use mosaik_core::classify::{Rules, Verdict, classify};
+use mosaik_core::geometry::{Point, Rect};
+use mosaik_engine::Engine;
+use mosaik_ipc::protocol::{Command, Reply};
+use mosaik_win::events::pump_until;
+use mosaik_win::place::{edge_error, move_frame};
+use mosaik_win::process::shell_open;
+use mosaik_win::window::{Scanner, frame_rect, handle, title, top_level};
+use serde_json::{Value, json};
+use windows::Win32::Foundation::HWND;
+use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos};
+
+/// A browser the probe can drive.
+pub struct Browser {
+    pub name: &'static str,
+    /// The program, as Mosaïk sees it (lower case).
+    pub exe: &'static str,
+    target: &'static str,
+    private: &'static str,
+}
+
+/// `edge` or `chrome`.
+pub fn browser(name: &str) -> Option<Browser> {
+    match name {
+        "edge" => Some(Browser {
+            name: "Edge",
+            exe: "msedge.exe",
+            target: "msedge.exe",
+            private: "--inprivate",
+        }),
+        "chrome" => Some(Browser {
+            name: "Chrome",
+            exe: "chrome.exe",
+            target: "chrome.exe",
+            private: "--incognito",
+        }),
+        _ => None,
+    }
+}
+
+/// The title of the probe's page `n`; the windows showing these pages are the probe's.
+fn page_title(n: usize) -> String {
+    format!("Mosaik probe tab {n}")
+}
+
+/// Writes three pages to the temp folder, each with its own title and colour.
+fn pages() -> Result<Vec<String>, String> {
+    let dir = std::env::temp_dir().join("mosaik-probe");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let colours = ["#2b44d9", "#12786a", "#c93450"];
+    let mut urls = Vec::new();
+    for (i, c) in colours.iter().enumerate() {
+        let n = i + 1;
+        let path = dir.join(format!("tab{n}.html"));
+        let html = format!(
+            "<!doctype html><meta charset=\"utf-8\"><title>{}</title><body style=\"margin:0;background:{c}\"></body>",
+            page_title(n)
+        );
+        std::fs::write(&path, html).map_err(|e| e.to_string())?;
+        let p = path.to_string_lossy().replace('\\', "/").replace(' ', "%20");
+        urls.push(format!("file:///{p}"));
+    }
+    Ok(urls)
+}
+
+/// Windows of `exe` on screen now (visible, not minimised, not cloaked).
+pub fn on_screen(exe: &str) -> usize {
+    let mut scanner = Scanner::new();
+    top_level()
+        .into_iter()
+        .filter_map(|h| scanner.facts(h))
+        .filter(|f| f.exe.as_deref() == Some(exe) && classify(f, &Rules::default()) == Verdict::Manage)
+        .count()
+}
+
+/// The top-level window of `exe` whose title starts with `wanted`, waiting up to `ms`.
+fn find(exe: &str, wanted: &str, ms: u64) -> Option<HWND> {
+    let mut scanner = Scanner::new();
+    let start = Instant::now();
+    loop {
+        let found = top_level().into_iter().find(|&h| {
+            title(h).starts_with(wanted) && scanner.facts(h).is_some_and(|f| f.exe.as_deref() == Some(exe))
+        });
+        if found.is_some() || start.elapsed() > Duration::from_millis(ms) {
+            return found;
+        }
+        pump_until(150, || false);
+    }
+}
+
+/// The probe's tabs in `hwnd`, retried while the browser builds its accessibility tree.
+fn tabs(hwnd: HWND, at_least: usize) -> Vec<Rect> {
+    let start = Instant::now();
+    loop {
+        let t = crate::uia::tab_rects(hwnd).unwrap_or_default();
+        if t.len() >= at_least || start.elapsed() > Duration::from_secs(5) {
+            return t;
+        }
+        pump_until(300, || false);
+    }
+}
+
+fn state(engine: &Engine) -> Result<Box<mosaik_ipc::protocol::StateSnapshot>, String> {
+    match engine.request(Command::State, Duration::from_secs(15)) {
+        Reply::State(s) => Ok(s),
+        other => Err(format!("state: {other:?}")),
+    }
+}
+
+/// Drags one browser tab from `tab` to `to`, out of its strip. The first steps go straight down,
+/// past the strip, as a person tears a tab off; then on to `to`.
+fn tear_off(tab: Rect, to: Point, owner: HWND) -> Result<(), String> {
+    let from = tab.center();
+    let below = Point::new(from.x, from.y + 160);
+    crate::workspace::drag_path(&[from, below, to], owner)
+}
+
+/// The scenario: `zone_target` is where a tab dropped onto a zone should land (a zone's window
+/// area), `tag_point` a point on another window's tag, `tag_owner` that window.
+pub fn scenario(
+    engine: &Engine,
+    b: &Browser,
+    work: Rect,
+    zone_target: (Point, Rect),
+    tag_point: Point,
+    tag_owner: HWND,
+) -> Result<Value, String> {
+    let urls = pages()?;
+    shell_open(
+        b.target,
+        &format!("{} --new-window {}", b.private, urls.join(" ")),
+    )
+    .map_err(|e| e.to_string())?;
+    let window =
+        find(b.exe, &page_title(1), 25_000).ok_or_else(|| format!("{}: its window did not open", b.name))?;
+    // Above the probe's own top-most windows, in the middle of the screen.
+    let place = Rect::from_origin_size(
+        work.left + work.width() / 6,
+        work.top + 120,
+        work.width() * 2 / 3,
+        600,
+    );
+    let _ = move_frame(window, place);
+    // SAFETY: changes the stacking of the window this probe opened.
+    let _ = unsafe { SetWindowPos(window, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE) };
+    pump_until(1500, || false);
+    let before = tabs(window, 3);
+    let mut result = json!({ "browser": b.name, "tabs_found": before.len() });
+    if before.len() < 3 {
+        result["skipped"] = json!("the browser's tabs were not found (UI Automation)");
+        return Ok(result);
+    }
+
+    // 1. Tab 2 onto a zone.
+    let (zone_point, zone_area) = zone_target;
+    tear_off(before[1], zone_point, window)?;
+    pump_until(1200, || false);
+    let second = find(b.exe, &page_title(2), 3000);
+    let st = state(engine)?;
+    result["onto_zone"] = match second {
+        Some(h) => {
+            let w = st.windows.iter().find(|w| w.handle == handle(h));
+            json!({
+                "new_window": true,
+                "error_px": frame_rect(h).map(|f| edge_error(f, zone_area)),
+                "zone": w.and_then(|w| w.zone.clone()),
+                "slot": w.and_then(|w| w.slot.clone()),
+            })
+        }
+        None => json!({ "new_window": false }),
+    };
+
+    // 2. Tab 3 (now the original window's second tab) onto the other window's tag.
+    let now = tabs(window, 2);
+    if now.len() >= 2 {
+        tear_off(now[1], tag_point, window)?;
+        pump_until(1500, || false);
+        let third = find(b.exe, &page_title(3), 3000);
+        let st = state(engine)?;
+        let strip = third.and_then(|h| {
+            st.tab_strips
+                .iter()
+                .find(|s| s.tabs.iter().any(|t| t.window == handle(h)))
+                .cloned()
+        });
+        result["onto_tag"] = json!({
+            "new_window": third.is_some(),
+            "strip_tabs": strip.as_ref().map_or(0, |s| s.tabs.len()),
+            "with_the_window_under_the_tag": strip
+                .as_ref()
+                .is_some_and(|s| s.tabs.iter().any(|t| t.window == handle(tag_owner))),
+        });
+    } else {
+        result["onto_tag"] = json!({ "skipped": "the original window has fewer than 2 tabs left" });
+    }
+    Ok(result)
+}
+
+/// Closes every window showing one of the probe's pages.
+pub fn close_pages(b: &Browser) {
+    for n in 1..=3 {
+        while let Some(h) = find(b.exe, &page_title(n), 0) {
+            crate::apps::close(h);
+            pump_until(600, || false);
+            if find(b.exe, &page_title(n), 0) == Some(h) {
+                break;
+            }
+        }
+    }
+}
