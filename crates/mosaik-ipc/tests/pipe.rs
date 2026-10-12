@@ -262,10 +262,11 @@ fn malformed_and_foreign_versions_get_plain_errors() {
         code(b"{\"v\":0,\"id\":8,\"cmd\":\"state\"}\n"),
         (8, ErrorCode::UnsupportedVersion)
     );
-    assert_eq!(
-        code(b"{\"v\":2,\"id\":9,\"cmd\":\"state\"}\n"),
-        (9, ErrorCode::UnsupportedVersion)
+    let newer = format!(
+        "{{\"v\":{},\"id\":9,\"cmd\":\"state\"}}\n",
+        mosaik_ipc::protocol::PROTOCOL_VERSION + 1
     );
+    assert_eq!(code(newer.as_bytes()), (9, ErrorCode::UnsupportedVersion));
     stop.stop();
     server.join().unwrap();
 }

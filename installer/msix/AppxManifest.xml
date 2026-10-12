@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mosaïk's package manifest. package.ps1 fills in the {{…}} values from identity.json and
+     Cargo.toml, so the identity reserved in Partner Center is written in one place. -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 desktop desktop4 rescap">
+
+  <Identity
+    Name="{{name}}"
+    Publisher="{{publisher}}"
+    Version="{{version}}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>{{displayName}}</DisplayName>
+    <PublisherDisplayName>{{publisherDisplayName}}</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>Give every project its own workspace.</Description>
+  </Properties>
+
+  <!-- Windows 10 22H2 and later (the brief's oldest supported release). -->
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19045.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Mosaik" Executable="mosaik.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="{{displayName}}"
+        Description="Give every project its own workspace."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <!-- "Start Mosaïk with Windows" (crates/mosaik-win/src/startup.rs): off until the user
+             turns it on; the user can also turn it off in Task Manager. -->
+        <desktop:Extension Category="windows.startupTask" Executable="mosaik.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="MosaikStartup" Enabled="false" DisplayName="{{displayName}}" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+
+    <!-- mosaikctl, as a command in any terminal; no Start menu entry of its own. -->
+    <Application
+      Id="Mosaikctl"
+      Executable="mosaikctl.exe"
+      EntryPoint="Windows.FullTrustApplication"
+      desktop4:Subsystem="console"
+      desktop4:SupportsMultipleInstances="true">
+      <uap:VisualElements
+        DisplayName="mosaikctl"
+        Description="Talk to Mosaïk from a terminal."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        AppListEntry="none" />
+      <Extensions>
+        <uap5:Extension Category="windows.appExecutionAlias" Executable="mosaikctl.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias desktop4:Subsystem="console">
+            <uap5:ExecutionAlias Alias="mosaikctl.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- A desktop app: it moves other apps' windows, registers global shortcuts, and runs its
+         watchdog beside it. -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

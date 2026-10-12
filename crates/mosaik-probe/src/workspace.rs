@@ -368,39 +368,29 @@ fn zones(engine: &Engine, workspace: &str) -> Result<(Vec<ZoneEdit>, String), St
 /// old name then saves a new workspace), a shortcut given and taken back, deleted while open.
 fn editing(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String> {
     let style = FrameStyle::default();
-    let (terminal, review) = (&probes[1], &probes[2]);
+    // The review window was closed by the step before; the code and terminal windows remain.
+    let (code, terminal) = (&probes[0], &probes[1]);
     let (before, revision) = zones(engine, "Probe workspace")?;
-    let review_area =
-        RatioRect::from_rect(review.tiled, review.tiled_monitor_work()).map_err(|e| e.to_string())?;
+    let code_area = RatioRect::from_rect(code.tiled, code.tiled_monitor_work()).map_err(|e| e.to_string())?;
     let at = |area: RatioRect| {
         before.iter().position(|z| {
             (z.area.left() - area.left()).abs() < 1e-3 && (z.area.top() - area.top()).abs() < 1e-3
         })
     };
-    let review_zone = at(review_area).ok_or("the review zone was not found")?;
+    let code_zone = at(code_area).ok_or("the code zone was not found")?;
 
-    // Split the review zone side by side: the review window keeps the left half.
+    // Split the code zone side by side: the code window keeps the left half.
     let mut split = before.clone();
-    let middle = (review_area.left() + review_area.right()) / 2.0;
-    let mut left = split[review_zone].clone();
-    left.area = RatioRect::new(
-        review_area.left(),
-        review_area.top(),
-        middle,
-        review_area.bottom(),
-    )
-    .map_err(|e| e.to_string())?;
+    let middle = (code_area.left() + code_area.right()) / 2.0;
+    let mut left = split[code_zone].clone();
+    left.area = RatioRect::new(code_area.left(), code_area.top(), middle, code_area.bottom())
+        .map_err(|e| e.to_string())?;
     let mut right = left.clone();
     right.id = None;
     right.name = "Probe notes".into();
-    right.area = RatioRect::new(
-        middle,
-        review_area.top(),
-        review_area.right(),
-        review_area.bottom(),
-    )
-    .map_err(|e| e.to_string())?;
-    split[review_zone] = left.clone();
+    right.area = RatioRect::new(middle, code_area.top(), code_area.right(), code_area.bottom())
+        .map_err(|e| e.to_string())?;
+    split[code_zone] = left.clone();
     split.push(right);
     let (reply, split_ms) = ask(
         engine,
@@ -415,13 +405,13 @@ fn editing(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String>
         other => return Err(format!("set_zones: {other:?}")),
     };
     pump_until(700, || false);
-    let work = review.tiled_monitor_work();
-    let review_frame = frame_rect(review.hwnd).ok_or("the review window vanished")?;
+    let work = code.tiled_monitor_work();
+    let code_frame = frame_rect(code.hwnd).ok_or("the code window vanished")?;
     let split_result = json!({
         "ms": split_ms,
         "zones": after_split.len(),
         "new_zone_has_an_id": after_split.iter().all(|z| z.id.is_some()),
-        "review_error_px": edge_error(review_frame, style.window_area(left.area.to_rect(work), dpi)),
+        "code_error_px": edge_error(code_frame, style.window_area(left.area.to_rect(work), dpi)),
     });
 
     // The editor that was open before the split is now stale: its save is refused.

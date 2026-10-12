@@ -1,0 +1,401 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+  Mosaik in one file: its whole source, and the steps to build, test, run and package it on any
+  Windows PC. (The site is the other file: mosaik1.sh.)
+
+.DESCRIPTION
+  Right-click this file and choose "Run with PowerShell" for a menu. From a terminal:
+
+    .\mosaik.ps1 unpack [folder]   put the source in a folder (default: mosaik-<version> beside this file)
+    .\mosaik.ps1 check             see what building needs; offers to install what is missing (winget)
+    .\mosaik.ps1 build             build the interface, then mosaik.exe, its watchdog and mosaikctl
+    .\mosaik.ps1 test              run the tests and checks
+    .\mosaik.ps1 run               start the Mosaik just built
+    .\mosaik.ps1 package           make the Store package (MSIX) to upload in Partner Center
+    .\mosaik.ps1 pack [folder]     make a new mosaik.ps1 with the source of a folder inside
+    .\mosaik.ps1 verify [folder]   check that the source inside matches a folder
+
+  In the repository this file carries no source: it works on the repository itself, and
+  "pack" makes the one-file copy (target\mosaik.ps1) to take to another PC.
+#>
+[CmdletBinding()]
+param(
+  [Parameter(Position = 0)]
+  [ValidateSet('menu', 'unpack', 'check', 'build', 'test', 'run', 'package', 'pack', 'verify')]
+  [string]$Command = 'menu',
+  [Parameter(Position = 1)]
+  [string]$Folder
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 3.0
+
+# Written by "pack": the version and a fingerprint of the source inside this file.
+$SourceVersion = ''
+$SourceSha256 = ''
+
+# Paths the source inside never includes: what building makes, the site (mosaik1.sh makes it),
+# and the README's pictures of the site.
+$Excluded = '^(\.git|\.agent|target|site|node_modules|dist|test-results|playwright-report)(/|$)|/(node_modules|dist|target|test-results|gen)/|^mosaik1\.sh$|^docs/screenshots/'
+$PayloadStart = '<#--- source: a zip, in base64 ---'
+$PayloadEnd = '---#>'
+
+function Say([string]$Text, [string]$Colour = 'Gray') { Write-Host $Text -ForegroundColor $Colour }
+# A path under a folder, with this system's separator.
+function Under([string]$Base) { [IO.Path]::Combine([string[]](@($Base) + $args)) }
+function Step([string]$Text) { Write-Host ''; Write-Host "== $Text" -ForegroundColor Cyan }
+function Fail([string]$Text) { throw $Text }
+
+# --- Where the source is -----------------------------------------------------------------------
+
+# A folder that holds Mosaik's source.
+function Test-Source([string]$Path) {
+  $Path -and (Test-Path (Under $Path 'Cargo.toml')) -and (Test-Path (Under $Path 'crates' 'mosaik-core'))
+}
+
+# The source to work on: the folder given, the repository this file is in, or the folder this
+# file unpacks to (unpacked first if it is not yet).
+function Get-Source {
+  if ($Folder) {
+    if (Test-Source $Folder) { return (Resolve-Path $Folder).Path }
+    Fail "There is no Mosaik source in $Folder."
+  }
+  if (Test-Source $PSScriptRoot) { return $PSScriptRoot }
+  $target = Get-DefaultFolder
+  if (-not (Test-Source $target)) { Expand-Source $target }
+  $target
+}
+
+function Get-DefaultFolder {
+  $name = if ($SourceVersion) { "mosaik-$SourceVersion" } else { 'mosaik' }
+  Under $PSScriptRoot $name
+}
+
+# --- The source inside this file -----------------------------------------------------------------
+
+function Read-Payload {
+  $text = [IO.File]::ReadAllText($PSCommandPath)
+  $start = $text.LastIndexOf($PayloadStart)
+  $end = $text.LastIndexOf($PayloadEnd)
+  if ($start -lt 0 -or $end -le $start) { return $null }
+  $base64 = $text.Substring($start + $PayloadStart.Length, $end - $start - $PayloadStart.Length) -replace '\s', ''
+  if (-not $base64) { return $null }
+  [Convert]::FromBase64String($base64)
+}
+
+function Get-Sha256([byte[]]$Bytes) {
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { -join ($sha.ComputeHash($Bytes) | ForEach-Object { $_.ToString('x2') }) } finally { $sha.Dispose() }
+}
+
+function Expand-Source([string]$Target) {
+  $zip = Read-Payload
+  if (-not $zip) {
+    Fail 'This copy of mosaik.ps1 carries no source (it is the one in the repository). Run it from the repository, or make a one-file copy with: .\mosaik.ps1 pack'
+  }
+  if ((Get-Sha256 $zip) -ne $SourceSha256) {
+    Fail 'The source inside this file is damaged (its fingerprint does not match). Get mosaik.ps1 again.'
+  }
+  if ((Test-Path $Target) -and @(Get-ChildItem -Force $Target).Count -gt 0) {
+    Fail "$Target is not empty. Choose another folder: .\mosaik.ps1 unpack <folder>"
+  }
+  Step "Unpacking Mosaik $SourceVersion to $Target"
+  Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+  $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "mosaik-source-$PID.zip")
+  [IO.File]::WriteAllBytes($temp, $zip)
+  try { [IO.Compression.ZipFile]::ExtractToDirectory($temp, $Target) } finally { Remove-Item $temp -Force }
+  Say "Done: the source is in $Target" Green
+}
+
+# The files of a source folder, relative, with forward slashes, sorted: the ones git tracks when
+# it is a repository, else every file outside the excluded folders.
+function Get-SourceFiles([string]$Source) {
+  $files = $null
+  if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Under $Source '.git'))) {
+    $files = & git -C $Source -c core.quotepath=off ls-files
+    if ($LASTEXITCODE -ne 0) { $files = $null }
+  }
+  if (-not $files) {
+    $prefix = (Resolve-Path $Source).Path.TrimEnd('\', '/').Length + 1
+    $files = Get-ChildItem -Recurse -File -Force $Source | ForEach-Object { $_.FullName.Substring($prefix).Replace('\', '/') }
+  }
+  @($files | Where-Object { $_ -and $_ -notmatch $Excluded } | Sort-Object -CaseSensitive)
+}
+
+# A zip of the source, the same bytes for the same files (fixed dates, sorted names).
+function New-SourceZip([string]$Source) {
+  Add-Type -AssemblyName System.IO.Compression
+  $stream = New-Object IO.MemoryStream
+  $archive = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Create, $true)
+  $date = New-Object DateTimeOffset(2026, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+  $count = 0
+  foreach ($file in Get-SourceFiles $Source) {
+    $entry = $archive.CreateEntry($file, [IO.Compression.CompressionLevel]::Optimal)
+    $entry.LastWriteTime = $date
+    $bytes = [IO.File]::ReadAllBytes((Under $Source $file))
+    $out = $entry.Open()
+    try { $out.Write($bytes, 0, $bytes.Length) } finally { $out.Dispose() }
+    $count++
+  }
+  $archive.Dispose()
+  [pscustomobject]@{ Bytes = $stream.ToArray(); Files = $count }
+}
+
+function Get-Version([string]$Source) {
+  $cargo = Get-Content -Raw -Encoding UTF8 (Under $Source 'Cargo.toml')
+  $match = [regex]::Match($cargo, '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"')
+  if (-not $match.Success) { Fail 'The version was not found in Cargo.toml.' }
+  $match.Groups[1].Value
+}
+
+function Invoke-Pack {
+  $source = Get-Source
+  $version = Get-Version $source
+  Step "Packing the source of $source"
+  $zip = New-SourceZip $source
+  $sha = Get-Sha256 $zip.Bytes
+  # This script without the source it may carry, with the new version and fingerprint.
+  $text = [IO.File]::ReadAllText($PSCommandPath)
+  $at = $text.LastIndexOf($PayloadStart)
+  $code = $text.Substring(0, $at).TrimEnd()
+  # Line ends may be CRLF (a Windows checkout): the patterns stop at the closing quote.
+  $code = $code -replace "(?m)^\`$SourceVersion = '[^']*'", "`$SourceVersion = '$version'"
+  $code = $code -replace "(?m)^\`$SourceSha256 = '[^']*'", "`$SourceSha256 = '$sha'"
+  $base64 = [Convert]::ToBase64String($zip.Bytes, [Base64FormattingOptions]::InsertLineBreaks)
+  $out = Under $source 'target' 'mosaik.ps1'
+  New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
+  # UTF-8 with a byte order mark, so Windows PowerShell reads the file as UTF-8.
+  $content = "$code`r`n`r`n$PayloadStart`r`n$base64`r`n$PayloadEnd`r`n"
+  [IO.File]::WriteAllText($out, $content, (New-Object Text.UTF8Encoding $true))
+  Say ('Done: {0} ({1:N1} MB, {2} files, Mosaik {3}).' -f $out, ((Get-Item $out).Length / 1MB), $zip.Files, $version) Green
+  Say 'Take it, with mosaik1.sh for the site, to any Windows PC: right-click, Run with PowerShell.'
+}
+
+# Checks that the source inside this file is exactly the files of a folder: the same names, the
+# same contents (compared file by file, since two zip libraries compress the same files
+# differently).
+function Invoke-Verify {
+  if (-not $Folder) { Fail 'Give the folder to compare with: .\mosaik.ps1 verify <folder>' }
+  $zip = Read-Payload
+  if (-not $zip) { Fail 'This copy of mosaik.ps1 carries no source.' }
+  if ((Get-Sha256 $zip) -ne $SourceSha256) { Fail 'The source inside this file is damaged.' }
+  Add-Type -AssemblyName System.IO.Compression
+  $inside = @{}
+  $archive = New-Object IO.Compression.ZipArchive((New-Object IO.MemoryStream(, $zip)), [IO.Compression.ZipArchiveMode]::Read)
+  try {
+    foreach ($entry in $archive.Entries) {
+      $buffer = New-Object IO.MemoryStream
+      $stream = $entry.Open()
+      try { $stream.CopyTo($buffer) } finally { $stream.Dispose() }
+      $inside[$entry.FullName] = Get-Sha256 $buffer.ToArray()
+    }
+  }
+  finally { $archive.Dispose() }
+  $root = (Resolve-Path $Folder).Path
+  $files = Get-SourceFiles $root
+  $different = @($files | Where-Object { $inside[$_] -ne (Get-Sha256 ([IO.File]::ReadAllBytes((Under $root $_)))) })
+  $extra = @($inside.Keys | Where-Object { $files -notcontains $_ })
+  if ($different.Count -gt 0 -or $extra.Count -gt 0) {
+    $sample = @($different + $extra | Select-Object -First 5) -join ', '
+    Fail ("The source inside this file is not the source of {0} ({1} files differ, {2} are not there; for example {3}). Make it again: .\mosaik.ps1 pack" -f $Folder, $different.Count, $extra.Count, $sample)
+  }
+  Say ("The source inside this file is the source of {0} ({1} files)." -f $Folder, $files.Count) Green
+}
+
+# --- What building needs -------------------------------------------------------------------------
+
+function Find-Program([string]$Name, [string[]]$Also = @()) {
+  $found = Get-Command $Name -ErrorAction SilentlyContinue
+  if ($found) { return $found.Source }
+  $Also | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+function Find-Vswhere {
+  Find-Program 'vswhere' @(Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe')
+}
+
+function Test-CppTools {
+  $vswhere = Find-Vswhere
+  if (-not $vswhere) { return $false }
+  $path = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+  [bool]$path
+}
+
+function Find-MakeAppx {
+  $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+  if (-not (Test-Path $kits)) { return $null }
+  Get-ChildItem $kits -Directory | Where-Object { $_.Name -match '^10\.\d+\.\d+\.\d+$' } |
+    Sort-Object { [version]$_.Name } -Descending |
+    ForEach-Object { Join-Path $_.FullName 'x64\makeappx.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+function Test-WebView2 {
+  $id = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+  foreach ($key in "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$id", "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$id") {
+    $pv = (Get-ItemProperty -Path $key -Name pv -ErrorAction SilentlyContinue)
+    if ($pv -and $pv.pv -and $pv.pv -ne '0.0.0.0') { return $true }
+  }
+  $false
+}
+
+function Get-NodeVersion {
+  $node = Find-Program 'node'
+  if (-not $node) { return $null }
+  $text = (& $node --version) -replace '^v', ''
+  try { [version]$text } catch { $null }
+}
+
+# What building needs, as (name, whether it is there, what installs it, why it is needed).
+function Get-Needs {
+  $cargoHome = Join-Path $env:USERPROFILE '.cargo\bin'
+  $node = Get-NodeVersion
+  @(
+    [pscustomobject]@{ Name = 'Rust (rustup)'; Ok = [bool](Find-Program 'rustup' @(Join-Path $cargoHome 'rustup.exe')); Id = 'Rustlang.Rustup'; Args = @(); Why = 'compiles Mosaik' }
+    [pscustomobject]@{ Name = 'Visual Studio C++ build tools'; Ok = (Test-CppTools); Id = 'Microsoft.VisualStudio.2022.BuildTools'; Args = @('--override', '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'); Why = 'Rust links Windows programs with them' }
+    [pscustomobject]@{ Name = 'Node.js 22.13 or later'; Ok = ($node -and $node -ge [version]'22.13'); Id = 'OpenJS.NodeJS.LTS'; Args = @(); Why = 'builds the interface' }
+    [pscustomobject]@{ Name = 'WebView2 runtime'; Ok = (Test-WebView2); Id = 'Microsoft.EdgeWebView2Runtime'; Args = @(); Why = 'shows the interface (Windows 11 has it)' }
+    [pscustomobject]@{ Name = 'Windows SDK (makeappx)'; Ok = [bool](Find-MakeAppx); Id = 'Microsoft.WindowsSDK.10.0.26100'; Args = @(); Why = 'only to make the Store package' }
+  )
+}
+
+function Invoke-Check {
+  Step 'What building Mosaik needs'
+  $needs = Get-Needs
+  foreach ($n in $needs) {
+    if ($n.Ok) { Say ("  ok       {0}" -f $n.Name) Green } else { Say ("  missing  {0}: {1}" -f $n.Name, $n.Why) Yellow }
+  }
+  $missing = @($needs | Where-Object { -not $_.Ok })
+  if ($missing.Count -eq 0) { Say 'Everything is there.' Green; return $true }
+  $winget = Find-Program 'winget'
+  if (-not $winget) {
+    Say 'winget (App Installer, from the Microsoft Store) installs these; it is not on this PC.' Yellow
+    return $false
+  }
+  foreach ($n in $missing) {
+    $answer = Read-Host ("Install {0} with winget ({1})? [y/N]" -f $n.Name, $n.Id)
+    if ($answer -notmatch '^(y|yes|o|oui)$') { continue }
+    & $winget install --id $n.Id --exact --source winget --accept-package-agreements @($n.Args)
+    if ($LASTEXITCODE -ne 0) { Say "  $($n.Name) was not installed (winget exit code $LASTEXITCODE)." Yellow }
+  }
+  Say 'Open a new PowerShell window so newly installed tools are found, then run this again.' Cyan
+  $false
+}
+
+# --- Building, testing, running, packaging -------------------------------------------------------
+
+# Runs a program in a folder; stops with its name when it fails.
+function Invoke-Tool([string]$In, [string]$Program, [string[]]$Arguments) {
+  Say ("  > {0} {1}" -f $Program, ($Arguments -join ' ')) DarkGray
+  Push-Location $In
+  try {
+    & $Program @Arguments
+    if ($LASTEXITCODE -ne 0) { Fail ("{0} {1} failed (exit code {2}); the lines above say why." -f $Program, ($Arguments -join ' '), $LASTEXITCODE) }
+  }
+  finally { Pop-Location }
+}
+
+function Use-Cargo {
+  $cargoHome = Join-Path $env:USERPROFILE '.cargo\bin'
+  if ((Test-Path $cargoHome) -and ($env:Path -notlike "*$cargoHome*")) { $env:Path = "$cargoHome;$env:Path" }
+  if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { Fail 'Rust is not installed. Run: .\mosaik.ps1 check' }
+  if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { Fail 'Node.js is not installed. Run: .\mosaik.ps1 check' }
+}
+
+function Invoke-Build {
+  $source = Get-Source
+  Use-Cargo
+  $ui = Under $source 'apps' 'desktop'
+  Step 'Building the interface'
+  Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund')
+  Invoke-Tool $ui 'npm' @('run', 'build')
+  Step 'Building Mosaik, its watchdog and mosaikctl (release)'
+  Invoke-Tool $source 'cargo' @('build', '--release', '-p', 'mosaik-desktop', '-p', 'mosaik-watchdog', '-p', 'mosaik-ipc')
+  Say ("Done: {0}" -f (Under $source 'target' 'release' 'mosaik.exe')) Green
+}
+
+function Invoke-Test {
+  $source = Get-Source
+  Use-Cargo
+  $ui = Under $source 'apps' 'desktop'
+  Step 'Engine tests'
+  Invoke-Tool $source 'cargo' @('test', '--no-fail-fast', '-p', 'mosaik-core', '-p', 'mosaik-ipc', '-p', 'mosaik-win', '-p', 'mosaik-overlay', '-p', 'mosaik-engine')
+  Step 'Lints (clippy)'
+  Invoke-Tool $source 'cargo' @('clippy', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings')
+  Step 'Interface checks and tests'
+  Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund')
+  foreach ($script in 'typecheck', 'lint', 'format:check', 'test') { Invoke-Tool $ui 'npm' @('run', $script) }
+  Say 'Every test passed.' Green
+}
+
+function Invoke-Run {
+  $source = Get-Source
+  $exe = Under $source 'target' 'release' 'mosaik.exe'
+  if (-not (Test-Path $exe)) { Fail 'Mosaik is not built yet. Run: .\mosaik.ps1 build' }
+  Start-Process $exe
+  Say 'Mosaik is starting: its icon is in the tray, and the welcome opens on a first run.' Green
+}
+
+function Invoke-Package {
+  $source = Get-Source
+  & (Under $source 'installer' 'msix' 'package.ps1')
+}
+
+# --- The menu ------------------------------------------------------------------------------------
+
+function Show-Menu {
+  $where = if (Test-Source $PSScriptRoot) { $PSScriptRoot } else { Get-DefaultFolder }
+  while ($true) {
+    Clear-Host
+    $title = if ($SourceVersion) { "Mosaik $SourceVersion" } else { 'Mosaik' }
+    Say "$title, the whole app in one file" Cyan
+    Say "Source: $where" DarkGray
+    Say ''
+    Say '  1  Unpack the source'
+    Say '  2  Check what building needs'
+    Say '  3  Build Mosaik'
+    Say '  4  Run the tests'
+    Say '  5  Start Mosaik'
+    Say '  6  Make the Store package'
+    Say '  7  Make a new mosaik.ps1 from the source'
+    Say '  Q  Quit'
+    Say ''
+    $choice = (Read-Host 'Choose').Trim().ToUpperInvariant()
+    if ($choice -eq 'Q' -or $choice -eq '') { return }
+    try {
+      switch ($choice) {
+        '1' { if (Test-Source $where) { Say "The source is already in $where." Green } else { Expand-Source $where } }
+        '2' { [void](Invoke-Check) }
+        '3' { Invoke-Build }
+        '4' { Invoke-Test }
+        '5' { Invoke-Run }
+        '6' { Invoke-Package }
+        '7' { Invoke-Pack }
+        default { Say 'Type a number from the list, or Q.' Yellow }
+      }
+    }
+    catch { Say $_.Exception.Message Red }
+    [void](Read-Host 'Press Enter to go back to the menu')
+  }
+}
+
+try {
+  switch ($Command) {
+    'menu' { Show-Menu }
+    'unpack' { Expand-Source $(if ($Folder) { $Folder } else { Get-DefaultFolder }) }
+    'check' { if (-not (Invoke-Check)) { exit 1 } }
+    'build' { Invoke-Build }
+    'test' { Invoke-Test }
+    'run' { Invoke-Run }
+    'package' { Invoke-Package }
+    'pack' { Invoke-Pack }
+    'verify' { Invoke-Verify }
+  }
+}
+catch {
+  Write-Host $_.Exception.Message -ForegroundColor Red
+  exit 1
+}
+
+<#--- source: a zip, in base64 ---
+---#>
