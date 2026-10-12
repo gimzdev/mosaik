@@ -111,16 +111,20 @@ impl WindowFacts {
 /// window placed over a monitor without a taskbar (by Mosaïk, in a zone as large as the
 /// monitor). Browsers, players and games in full screen drop both, or never had them.
 pub fn is_full_screen(frame: Rect, monitor: Rect, maximized: bool, caption: bool, resizable: bool) -> bool {
-    !maximized
-        && !(caption && resizable)
-        && [
-            frame.left - monitor.left,
-            frame.top - monitor.top,
-            frame.right - monitor.right,
-            frame.bottom - monitor.bottom,
-        ]
-        .iter()
-        .all(|d| d.abs() <= 2)
+    !maximized && !(caption && resizable) && covers_monitor(frame, monitor)
+}
+
+/// Whether a window whose visible frame is `frame` lies over the whole of `monitor` (its bounds,
+/// taskbar included), within 2 px.
+pub fn covers_monitor(frame: Rect, monitor: Rect) -> bool {
+    [
+        frame.left - monitor.left,
+        frame.top - monitor.top,
+        frame.right - monitor.right,
+        frame.bottom - monitor.bottom,
+    ]
+    .iter()
+    .all(|d| d.abs() <= 2)
 }
 
 #[cfg(test)]

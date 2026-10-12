@@ -99,5 +99,8 @@ behind it.
   as fixed: it keeps the size the user gives it.
 - A game that changes the display's mode for its full screen makes Mosaïk fit the open
   workspace to that mode, and again when the game ends: the windows end in their places.
+- An app that keeps Windows' title bar and resize frame in full screen cannot be told from a
+  window placed over a whole monitor: it is never moved below a band (no window over its whole
+  monitor is), but it wears its frame, and opening its workspace moves it like any window.
 - Steam itself was not dragged in the tests: its window was open on the owner's screen, and the
   probes touch only windows they open. Its classification was read: managed.

@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use mosaik_core::geometry::{Rect, Size};
 use mosaik_core::titlebar::{self, BandStep, Fit, TitleRoom};
-use mosaik_core::window::WindowHandle;
+use mosaik_core::window::{WindowHandle, covers_monitor};
 use mosaik_core::zone::FrameStyle;
 use mosaik_win::titlebar::Reading;
 use mosaik_win::window;
@@ -423,8 +423,15 @@ impl Engine {
         let Some(g) = window::geometry(window::hwnd(h)) else {
             return false;
         };
-        // A background tab Mosaïk keeps hidden (parked off screen, say) stays as it is.
-        if !g.framable() || self.hiding.hidden.contains_key(&h) {
+        // A background tab Mosaïk keeps hidden (parked off screen, say) stays as it is, and so
+        // does a window over its whole monitor: one that keeps Windows' title bar and resize
+        // frame in full screen is not told from one placed there, and moving it below a band
+        // would take it out of full screen.
+        let over_monitor = self
+            .topology
+            .as_ref()
+            .is_some_and(|t| covers_monitor(g.frame, t.monitor_for_rect(g.frame).bounds));
+        if !g.framable() || over_monitor || self.hiding.hidden.contains_key(&h) {
             return banded;
         }
         // The monitor's, as the tag and the strip are drawn with (a window that is not DPI aware
