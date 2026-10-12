@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { DeskThumb, Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
-import { Check, PlatformList } from '@/components/ui';
+import { Check, DownloadButton, PlatformList } from '@/components/ui';
 import { WORKSPACES } from '@/lib/data';
 import { site } from '@/lib/site';
 
@@ -23,7 +23,7 @@ const FEATURES = [
     id: 'layouts',
     title: 'Switch projects, not just windows',
     body: 'Save a workspace once and bring it back whenever you need it. Positions, sizes and tabs return together, so changing task takes a keystroke instead of ten minutes of rearranging.',
-    points: ['One workspace per project, role or mood', 'Saved on your computer, never in a cloud', 'Switch from the dock or the keyboard'],
+    points: ['One workspace per project, role or mood', 'Saved on your computer, never in a cloud', 'Switch from the tray, or press Win+Alt+Space'],
     Art: SwitcherArt,
   },
 ];
@@ -50,7 +50,15 @@ export default function Home() {
               <p className="max-w-[30rem] text-[18px] leading-[1.45] text-slate sm:text-[19px]">
                 Every project gets its own workspace: your apps and windows arranged and ready in one click.
               </p>
-              <p className="mt-2 text-[15px] text-slate">Free and open source.</p>
+              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
+                <DownloadButton className="btn btn-lapis" />
+                <p className="text-[15px] text-slate">
+                  Free and open source.{' '}
+                  <Link href="/download" className="font-semibold text-ink underline decoration-grout underline-offset-4 hover:decoration-ink">
+                    Requirements
+                  </Link>
+                </p>
+              </div>
             </div>
           </div>
           <div className="mt-10 md:mt-12">
@@ -116,13 +124,13 @@ export default function Home() {
         <div className="page-x grid gap-8 lg:grid-cols-12 lg:items-end lg:gap-14">
           <h2 className="font-display text-[clamp(2.2rem,4.4vw,3.6rem)] font-bold leading-[1.04] tracking-[-0.035em] lg:col-span-7">Put your work back together.</h2>
           <div className="lg:col-span-5">
-            <p className="max-w-[28rem] text-[17px] leading-[1.6] text-white/70">Mosaïk is free and open source.</p>
+            <p className="max-w-[28rem] text-[17px] leading-[1.6] text-white/70">
+              Mosaïk is free and open source, and stays that way. If it earns its place on your desktop, you can support its work on Patreon.
+            </p>
             <div className="mt-7 flex flex-wrap gap-3">
-              <Link href="/download" className="btn btn-saffron">
-                Get early access
-              </Link>
-              <a href={site.repo} rel="noopener noreferrer" className="btn btn-line-light">
-                View on GitHub
+              <DownloadButton className="btn btn-saffron" />
+              <a href={site.patreon} rel="noopener noreferrer" className="btn btn-line-light">
+                Support on Patreon
               </a>
             </div>
           </div>

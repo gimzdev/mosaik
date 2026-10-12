@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppBody, AppWindow, EditorApp, ZoneFrame } from '@/components/apps';
 import { Icon } from '@/components/ui';
-import { DESK_H, DESK_H_TALL, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Workspace, type Zone } from '@/lib/data';
+import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
 export const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
@@ -24,56 +24,26 @@ export const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: numb
 /** Dark wallpaper: a faint field of tiles with two soft pools of colour. */
 const Wallpaper = () => <div className="wallpaper absolute inset-0" />;
 
-/** Mosaïk's bar shows the workspace and its zones; without Mosaïk it is a plain system bar. */
-function MenuBar({ ws, plain }: { ws: Workspace; plain: boolean }) {
+/** The Windows taskbar, there with or without Mosaïk: apps in the middle, Mosaïk among the tray icons. */
+function Taskbar() {
   return (
-    <div className="absolute inset-x-0 top-0 z-[30] h-[42px] bg-black/35 text-[13px] text-white/75 backdrop-blur-[4px]">
-      <div className="absolute inset-0 flex items-center justify-between px-5 transition-opacity duration-300" style={{ opacity: plain ? 0 : 1 }}>
-        <div className="flex items-center gap-5">
-          <span className="flex items-center gap-2 font-semibold text-white">
-            <TileGlyph colors={TILES} />
-            {ws.name}
-          </span>
-          <span className="flex items-center gap-4">
-            {ws.windows.map((w) => (
-              <span key={w.id} className="flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full" style={{ background: ZONE[w.zone].bg }} />
-                {w.tag}
-              </span>
-            ))}
-          </span>
-        </div>
-        <span>{ws.windows.length} windows · saved</span>
-      </div>
-      <div className="absolute inset-0 flex items-center justify-between px-5 transition-opacity duration-300" style={{ opacity: plain ? 1 : 0 }}>
-        <span className="flex items-center gap-2 text-white/60">
-          <span className="h-3 w-3 rounded-[3px] bg-white/35" />
-          {ws.windows.length} windows open
-        </span>
-        <span>10:42</span>
-      </div>
-    </div>
-  );
-}
-
-function Taskbar({ visible }: { visible: boolean }) {
-  return (
-    <div className="absolute inset-x-0 bottom-0 z-[30] flex h-[40px] items-center justify-between bg-[#0B0D12]/90 px-4 transition-opacity duration-300" style={{ opacity: visible ? 1 : 0 }} aria-hidden="true">
-      <span className="flex items-center gap-2.5">
-        <span className="grid h-[22px] w-[22px] grid-cols-2 gap-[2px]">
+    <div className="absolute inset-x-0 bottom-0 z-[30] h-[40px] bg-[#0B0D12]/90" aria-hidden="true">
+      <span className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center gap-2">
+        <span className="mr-1 grid h-[22px] w-[22px] grid-cols-2 gap-[2px]">
           {TILES.map((c) => (
             <span key={c} className="rounded-[2px] bg-white/55" />
           ))}
         </span>
-        <span className="ml-3 flex items-center gap-2">
-          {['#2B44D9', '#12786A', '#F4B13A', '#C93450'].map((c, i) => (
-            <span key={c} className={`h-[22px] w-[34px] rounded-[5px] ${i ? 'bg-white/[0.07]' : 'bg-white/15'}`}>
-              <span className="mx-auto mt-[6px] block h-[10px] w-[10px] rounded-[3px]" style={{ background: c }} />
-            </span>
-          ))}
-        </span>
+        {TILES.map((c, i) => (
+          <span key={c} className={`h-[26px] w-[34px] rounded-[5px] ${i ? 'bg-white/[0.07]' : 'bg-white/15'}`}>
+            <span className="mx-auto mt-[8px] block h-[10px] w-[10px] rounded-[3px]" style={{ background: c }} />
+          </span>
+        ))}
       </span>
-      <span className="text-[12px] text-white/60">10:42</span>
+      <span className="absolute inset-y-0 right-4 flex items-center gap-3 text-[12px] text-white/60">
+        <TileGlyph colors={TILES} size={14} />
+        10:42
+      </span>
     </div>
   );
 }
@@ -223,8 +193,7 @@ export function Stage() {
       <div ref={stage} className="stage-shadow overflow-hidden rounded-[14px] sm:rounded-[20px]" role="group" aria-label="Interactive demo of a Mosaïk desktop">
         <Scaled tall>
           <Wallpaper />
-          <MenuBar ws={ws} plain={!ordered} />
-          <Taskbar visible={!ordered} />
+          <Taskbar />
           {windows}
         </Scaled>
       </div>
@@ -352,15 +321,18 @@ const Key = ({ children, dim }: { children: ReactNode; dim?: boolean }) => (
   <span className={`rounded-[6px] border border-white/15 px-1.5 py-0.5 text-[11.5px] ${dim ? 'text-[#8E97AA]' : ''}`}>{children}</span>
 );
 
-/** Saved layouts: a workspace switcher. */
+/** Saved layouts: Mosaïk's switcher as the app draws it (Win+Alt+Space opens it; 1 to 9 pick). */
 export function SwitcherArt() {
   return (
     <div className="switcher-bg relative overflow-hidden rounded-[20px] bg-ink px-5 py-10 ring-1 ring-black/10 sm:px-10 sm:py-14">
-      <div className="mx-auto w-full max-w-[470px] overflow-hidden rounded-[16px] border border-white/10 bg-[#1B1E26] text-[#E6E9F0] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)]" role="img" aria-label="A workspace switcher listing four saved workspaces with a preview of each layout. Brand refresh is selected.">
-        <div className="flex h-[52px] items-center gap-3 border-b border-white/10 px-4 text-[15px] text-[#8E97AA]">
-          <Icon n="search" s={16} />
+      <div className="mx-auto w-full max-w-[470px] overflow-hidden rounded-[16px] border border-white/10 bg-[#1B1E26] text-[#E6E9F0] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)]" role="img" aria-label="Mosaïk's switcher, opened with Windows, Alt and Space: four saved workspaces with a preview of each layout, each picked with its number. Brand refresh is selected.">
+        <div className="flex h-[52px] items-center gap-3 border-b border-white/10 pl-5 pr-4 text-[15px] text-[#8E97AA]">
           <span className="flex-1">Switch workspace</span>
-          <Key>Ctrl K</Key>
+          <span className="flex gap-1.5">
+            {SWITCHER_KEYS.map((k) => (
+              <Key key={k}>{k}</Key>
+            ))}
+          </span>
         </div>
         <div className="p-2">
           {WORKSPACES.map((w, i) => (
@@ -372,20 +344,22 @@ export function SwitcherArt() {
                 ))}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[15px] font-semibold">{w.name}</p>
-                <p className="text-[12.5px] text-[#8E97AA]">{w.windows.length} windows · {w.role.toLowerCase()}</p>
+                <p className="truncate text-[15px] font-semibold">
+                  {w.name}
+                  {i === 0 && <span className="font-normal text-[#8E97AA]"> · current</span>}
+                </p>
+                <p className="text-[12.5px] text-[#8E97AA]">
+                  {w.windows.length} windows · {new Set(w.windows.map((x) => x.zone)).size} zones
+                </p>
               </div>
-              <span className="flex gap-1.5">
-                <Key dim>Ctrl</Key>
-                <Key dim>{i + 1}</Key>
-              </span>
+              <Key dim>{i + 1}</Key>
             </div>
           ))}
         </div>
-        <div className="flex items-center gap-5 border-t border-white/10 px-4 py-2.5 text-[12px] text-[#8E97AA]">
-          <span><b className="text-[#C9CEDA]">Enter</b> open</span>
-          <span><b className="text-[#C9CEDA]">Ctrl S</b> save current layout</span>
-          <span><b className="text-[#C9CEDA]">Esc</b> close</span>
+        <div className="flex items-center gap-5 border-t border-white/10 px-5 py-2.5 text-[12px] text-[#8E97AA]">
+          <span><b className="font-semibold text-[#C9CEDA]">Enter</b> open</span>
+          <span><b className="font-semibold text-[#C9CEDA]">S</b> save current layout</span>
+          <span><b className="font-semibold text-[#C9CEDA]">Esc</b> close</span>
         </div>
       </div>
     </div>
@@ -397,10 +371,11 @@ export function DeskThumb({ index }: { index: number }) {
   return (
     <Scaled className="bg-ink">
       <Wallpaper />
+      <Taskbar />
       {WORKSPACES[index].windows.map((w) => {
         const b = slotBox(w.slot, DESK_H);
         return (
-          <div key={w.id} className="absolute" style={{ left: b.left, top: b.top + 8, width: b.width, height: b.height }}>
+          <div key={w.id} className="absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height }}>
             <AppWindow win={w} />
           </div>
         );

@@ -80,9 +80,11 @@ export const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
 export const TAG = 28; // room above a window for its zone tag
-export const BAR = 42; // menu bar
-const TASKBAR = 40; // system taskbar, shown without Mosaïk
-const [TOP, BOTTOM, SIDE, PAD] = [62, 22, 26, 12];
+const TASKBAR = 40; // the Windows taskbar, along the bottom
+const [TOP, BOTTOM, SIDE, PAD] = [22, TASKBAR + 14, 26, 12];
+
+/** The shortcut that opens Mosaïk's switcher (the app's default). */
+export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -92,8 +94,8 @@ export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + TAG), width: r1(cols * colW - PAD), height: r1(rows * rowH - TAG - PAD / 2) };
 }
 
-/** Where a maximised window sits: everything between the menu bar and the taskbar. */
-export const fullRect = (deskH: number): Rect => ({ left: 0, top: BAR, width: DESK_W, height: deskH - BAR - TASKBAR });
+/** Where a maximised window sits: everything above the taskbar. */
+export const fullRect = (deskH: number): Rect => ({ left: 0, top: 0, width: DESK_W, height: deskH - TASKBAR });
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -144,7 +146,7 @@ export function deskLayout(index: number, deskH: number): DeskLayout {
     const [fx, fy] = WHERE[WORKSPACES[index].windows[i].id] ?? [1, 0.5];
     placed[i] = {
       left: Math.round(16 + fx * Math.max(DESK_W - r.width - 32, 0)) + (fx > 0 && fx < 1 ? jit(10) : 0),
-      top: Math.round(56 + fy * Math.max(maxB - r.height - 56, 0)),
+      top: Math.round(TOP + fy * Math.max(maxB - r.height - TOP, 0)),
     };
   });
   return {

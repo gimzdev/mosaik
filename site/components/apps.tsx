@@ -138,8 +138,7 @@ export function EditorApp({ bare }: { bare?: boolean }) {
 const PROMPT: [string, string][] = [['sf', 'shop'], ['sm', ' on '], ['sv', ' feat/checkout'], ['ss', ' ❯ ']];
 const TERM: [string, string][][] = [
   [...PROMPT, ['', 'npm run dev']],
-  [['', '']],
-  [['', '  ▲ Next.js 14.2.35']],
+  [['', '  ▲ Next.js 16']],
   [['sm', '  - Local:        '], ['sf', 'http://localhost:3000']],
   [['ss', ' ✓ '], ['', 'Ready in 842ms']],
   [['sn', ' ○ '], ['sm', 'Compiling /checkout ...']],

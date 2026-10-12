@@ -1,6 +1,4 @@
-'use client';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { TILES } from '@/lib/data';
 import { site } from '@/lib/site';
 
@@ -31,6 +29,7 @@ const ICONS: Record<string, string> = {
   eye: 'M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z M8 9.8a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6z',
   mic: 'M8 2.5a2 2 0 0 0-2 2V8a2 2 0 0 0 4 0V4.5a2 2 0 0 0-2-2z M4 7.5a4 4 0 0 0 8 0M8 11.5v2',
   spk: 'M2.5 6v4h2.5L9 13V3L5 6z M11.5 5.5a3.5 3.5 0 0 1 0 5',
+  down: 'M8 2.5v8M4.5 7.5L8 11l3.5-3.5M3 13.5h10',
 };
 
 /** Bricolage Grotesque 800 outlines of the wordmark; the dots of the ï are drawn as two tiles. */
@@ -78,40 +77,31 @@ export const Check = ({ children, s = 16, top = 3 }: { children: React.ReactNode
   </li>
 );
 
-const NAV = [
-  ['/#how', 'How it works'],
-  ['/#people', 'Who it’s for'],
-  ['/#platforms', 'Platforms'],
-];
+/** Keys pressed together, as key caps: "Win Alt Space". */
+export const Keys = ({ k }: { k: string }) => (
+  <span className="inline-flex gap-1 whitespace-nowrap align-[0.08em]">
+    {k.split(' ').map((key) => (
+      <kbd key={key} className="rounded-[6px] border border-b-2 border-ink/20 bg-paper px-1.5 font-mono text-[0.78em] font-medium leading-[1.55] text-ink">
+        {key}
+      </kbd>
+    ))}
+  </span>
+);
 
-export function Header() {
-  const home = usePathname() === '/';
-  return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-grout/80 bg-plaster/85 backdrop-blur-md">
-      <div className="page-x flex h-16 items-center justify-between">
-        <Link href="/" aria-label="Mosaïk, home" className="text-ink" onClick={(e) => { if (home) { e.preventDefault(); history.replaceState(null, '', '/'); scrollTo({ top: 0 }); } }}>
-          <Wordmark className="block h-7 w-auto" decorative />
-        </Link>
-        <nav aria-label="Main" className="hidden items-center gap-8 md:flex">
-          {NAV.map(([href, label]) => (
-            <Link key={href} href={href} className="text-[15px] font-medium text-slate transition-colors hover:text-ink">
-              {label}
-            </Link>
-          ))}
-        </nav>
-        <Link href="/download" className="btn btn-lapis min-h-[40px] px-5 text-sm">
-          Get early access
-        </Link>
-      </div>
-    </header>
-  );
-}
+/** One click: Microsoft's small installer, which installs Mosaïk from the Store and starts it. */
+export const DownloadButton = ({ className, label = 'Download for Windows' }: { className: string; label?: string }) => (
+  <a href={site.download} className={`${className} gap-2.5`}>
+    <Icon n="down" s={17} w={1.8} />
+    {label}
+  </a>
+);
 
 export function Footer() {
   const links: [string, string][] = [
-    ['/download', 'Early access'],
+    ['/download', 'Download'],
     ['/conditions', 'Privacy and terms'],
     [site.repo, 'GitHub'],
+    [site.patreon, 'Support on Patreon'],
     [`mailto:${site.email}`, site.email],
   ];
   return (
@@ -140,8 +130,8 @@ export function Footer() {
 }
 
 const PLATFORMS = [
-  ['Windows', 'In development', '#12786A', 'First. Windows lets one app move, resize and group other apps’ windows, so zones, tabs and saved layouts arrive here first.'],
-  ['macOS', 'Planned', '#F4B13A', 'Next. Mosaïk asks for the Accessibility permission, then snaps and stacks windows into zones. Apps can’t be embedded in a tab there, so tabs stack and swap instead.'],
+  ['Windows', 'Available', '#12786A', 'Windows 11, and Windows 10 version 22H2. Windows lets one app move, resize and group other apps’ windows, which is all Mosaïk needs.'],
+  ['macOS', 'Planned', '#F4B13A', 'Next. Mosaïk will ask for the Accessibility permission, then place and group windows the same way.'],
   ['Linux', 'Planned, X11 first', '#2B44D9', 'X11 allows the full feature set. Wayland deliberately limits what an app can do to other apps’ windows, so support there depends on the desktop environment.'],
 ];
 

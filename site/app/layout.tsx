@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
-import { Footer, Header, Sprite } from '@/components/ui';
+import { Header } from '@/components/header';
+import { Footer, Sprite } from '@/components/ui';
 import { site } from '@/lib/site';
 import './globals.css';
 

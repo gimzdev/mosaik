@@ -16,10 +16,12 @@ by hand: change the script and run it again; the site updates in place and only 
 - `lib/data.ts`: the four demo workspaces and the desktop geometry (grid slots, the messy layout).
 - `components/apps.tsx`: the pretend apps drawn inside the demo (editor, terminal, browser, chat, design, notes, reader, charts, broadcast).
 - `components/desk.tsx`: the interactive desktop in the hero, the feature illustrations and the workspace thumbnails.
-- `components/ui.tsx`: header, footer, wordmark, icons and the platform list.
+- `components/header.tsx`: the header, the one part that runs in the browser besides the demo.
+- `components/ui.tsx`: footer, wordmark, icons, key caps, the download button and the platform list.
 - `app/`: the pages, plus the favicon (`icon.svg`, `favicon.ico`, `apple-icon.png`), `robots.txt` and `sitemap.xml`.
 
-## Before launch
+## Releasing
 
-- Set `SITE_URL` in `mosaik1.sh` to the real domain.
-- Have the copy on `/conditions` reviewed before the app collects any data.
+Every Download button installs Mosaïk from the Microsoft Store (`STORE_ID` in `mosaik1.sh`), so deploy a version of the site
+that offers a download only once the Store listing is live. What the site says the app does must match the release: the
+features on `/download` and the home page, the switcher shortcut (`Win+Alt+Space`) and `/conditions`.

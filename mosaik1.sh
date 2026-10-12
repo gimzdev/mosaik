@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="${MK_SCRIPT:-$0}"; export MK_SCRIPT; tr -d '\r' < "$0" > "${TMPDIR:-/tmp}/mosaik-v1.$$.sh" && exec bash "${TMPDIR:-/tmp}/mosaik-v1.$$.sh" "$@"; fi #
+if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/mosaik-site.$$.sh"; export MK_SCRIPT MK_COPY; tr -d '\r' < "$0" > "$MK_COPY" && exec bash "$MK_COPY" "$@"; fi # Windows line endings: run a copy without them
 # ════════════════════════════════════════════════════════════════════════
 #  Mosaïk marketing site · mosaik1.sh
 #
@@ -14,7 +14,7 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="${MK_SCRIPT:-$0}"; export MK_
 #    ./mosaik1.sh --build     install and build only (CI)
 #    ./mosaik1.sh --no-start  install, don't start anything
 #    ./mosaik1.sh --fresh     reinstall dependencies, rebuild from scratch
-#    ./mosaik1.sh --port 4000 another port (default 3000, or the next free one)
+#    ./mosaik1.sh --port 4000 another port (default 3000, or the next free one); -p
 #    ./mosaik1.sh --dir ~/m   install somewhere else (default ./site in the
 #                             Mosaïk repo, otherwise ./mosaik)
 #
@@ -37,9 +37,11 @@ SITE_NAME="Mosaïk"
 SITE_URL="https://xn--mosak-fta.com"     # your real domain: metadata, robots.txt and the sitemap use it
 CONTACT_EMAIL="contact@gimzdev.com"
 REPO_URL="https://github.com/gimzdev/mosaik"
+PATREON_URL="https://www.patreon.com/gimzdev"
+STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.0.0"
+MK_VERSION="1.1.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -66,12 +68,11 @@ while [ $# -gt 0 ]; do
     --dir=*) APP_DIR="${1#*=}"; shift ;;
     --port|-p) [ $# -ge 2 ] || die "--port needs a number"; PORT="$2"; PORT_SET=1; shift 2 ;;
     --port=*) PORT="${1#*=}"; PORT_SET=1; shift ;;
-    --dev) MODE="dev"; shift ;;
-    --prod|--start) MODE="prod"; shift ;;
+    --prod) MODE="prod"; shift ;;
     --build) MODE="prod"; START=0; shift ;;
-    --no-start|--install) START=0; shift ;;
+    --no-start) START=0; shift ;;
     --fresh) FRESH=1; shift ;;
-    --deploy|--vercel) DEPLOY=1; shift ;;
+    --deploy) DEPLOY=1; shift ;;
     --preview) DEPLOY=1; PREVIEW=1; shift ;;
     -h|--help) usage ;;
     *) die "Unknown option: $1 (try --help)" ;;
@@ -80,9 +81,12 @@ done
 case "$PORT" in ''|*[!0-9]*) die "Port must be a number, got \"$PORT\"" ;; esac
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "Port must be between 1 and 65535"
 case "$SITE_URL" in http://*|https://*) SITE_URL="${SITE_URL%/}" ;; *) die "SITE_URL must start with https:// (got \"$SITE_URL\")" ;; esac
+case "$PATREON_URL" in https://*) ;; *) die "PATREON_URL must start with https:// (got \"$PATREON_URL\")" ;; esac
+case "$STORE_ID" in ????????????) ;; *) die "STORE_ID is the 12-character Store ID from Partner Center (got \"$STORE_ID\")" ;; esac
+case "$STORE_ID" in *[!0-9A-Z]*) die "STORE_ID has only capital letters and digits (got \"$STORE_ID\")" ;; esac
 case "$VERCEL_PROJECT" in ''|*[!a-z0-9._-]*) die "VERCEL_PROJECT may only use lowercase letters, digits, '.', '_' and '-'" ;; esac
 
-printf '\n%s%s  mosaik v%s%s  %s%s marketing site%s\n\n' "$CB" "$CA" "$MK_VERSION" "$C0" "$CD" "$SITE_NAME" "$C0"
+printf '\n%s%s  %s site%s  %s%s %s%s\n\n' "$CB" "$CA" "$SITE_NAME" "$C0" "$CD" "$SCRIPT_NAME" "$MK_VERSION" "$C0"
 
 # ── Requirements ─────────────────────────────────────────────────────────
 command -v node >/dev/null 2>&1 || die "Node.js 20.9 or newer is required (https://nodejs.org)."
@@ -127,17 +131,12 @@ if [ -n "$BACKUP" ]; then
   [ ! -d "$BACKUP/.vercel" ] || { cp -R "$BACKUP/.vercel" .vercel && note "Kept the Vercel link"; }
 fi
 
-# A site written by the older v2 script has no file list yet: clear what v2 generated.
-if [ -f "$MARKER" ] && [ ! -f "$MANIFEST" ]; then
-  rm -rf app components lib .next node_modules package-lock.json next.config.mjs postcss.config.js tailwind.config.js .eslintrc.json next-env.d.ts
-  [ "$(cat public/robots.txt 2>/dev/null || true)" != "$(printf 'User-agent: *\nAllow: /')" ] || rm -f public/robots.txt
-  note "Cleared the files written by the v2 script"
-fi
 rmdir public 2>/dev/null || true
 
 FILES=0; CHANGED=0
 NEW_LIST="$(mktemp "${TMPDIR:-/tmp}/mosaik-files.XXXXXX")"
-trap 'rm -f "$NEW_LIST"' EXIT
+cleanup() { rm -f "$NEW_LIST"; [ "${MK_COPY:-}" != "$0" ] || rm -f "$0"; }
+trap cleanup EXIT
 # put FILE < content: writes FILE only when its content changed, and records it.
 put() {
   case "$1" in */*) mkdir -p "${1%/*}" ;; esac
@@ -155,10 +154,15 @@ put_b64() {
 }
 
 # ── Project files ────────────────────────────────────────────────────────
+# shellcheck disable=SC2016 # JavaScript template literals, not shell expansions
 node -e '
-const [name, url, email, repo, script] = process.argv.slice(1);
-process.stdout.write(`// Generated from the settings at the top of ${script}. Edit them there.\nexport const site = ${JSON.stringify({ name, url, email, repo }, null, 2)} as const;\n`);
-' "$SITE_NAME" "$SITE_URL" "$CONTACT_EMAIL" "$REPO_URL" "$SCRIPT_NAME" > lib.site.mk-gen
+const [name, url, email, repo, patreon, store, script] = process.argv.slice(1);
+// One click downloads the Store web installer, which installs Mosaïk and starts it.
+const download = `https://get.microsoft.com/installer/download/${store}?referrer=appbadge&source=${new URL(url).hostname}`;
+const storePage = `https://apps.microsoft.com/detail/${store}`;
+const site = { name, url, email, repo, patreon, download, storePage };
+process.stdout.write(`// Generated from the settings at the top of ${script}. Edit them there.\nexport const site = ${JSON.stringify(site, null, 2)} as const;\n`);
+' "$SITE_NAME" "$SITE_URL" "$CONTACT_EMAIL" "$REPO_URL" "$PATREON_URL" "$STORE_ID" "$SCRIPT_NAME" > lib.site.mk-gen
 put lib/site.ts < lib.site.mk-gen
 rm -f lib.site.mk-gen
 
@@ -198,13 +202,15 @@ by hand: change the script and run it again; the site updates in place and only 
 - `lib/data.ts`: the four demo workspaces and the desktop geometry (grid slots, the messy layout).
 - `components/apps.tsx`: the pretend apps drawn inside the demo (editor, terminal, browser, chat, design, notes, reader, charts, broadcast).
 - `components/desk.tsx`: the interactive desktop in the hero, the feature illustrations and the workspace thumbnails.
-- `components/ui.tsx`: header, footer, wordmark, icons and the platform list.
+- `components/header.tsx`: the header, the one part that runs in the browser besides the demo.
+- `components/ui.tsx`: footer, wordmark, icons, key caps, the download button and the platform list.
 - `app/`: the pages, plus the favicon (`icon.svg`, `favicon.ico`, `apple-icon.png`), `robots.txt` and `sitemap.xml`.
 
-## Before launch
+## Releasing
 
-- Set `SITE_URL` in `mosaik1.sh` to the real domain.
-- Have the copy on `/conditions` reviewed before the app collects any data.
+Every Download button installs Mosaïk from the Microsoft Store (`STORE_ID` in `mosaik1.sh`), so deploy a version of the site
+that offers a download only once the Store listing is live. What the site says the app does must match the release: the
+features on `/download` and the home page, the switcher shortcut (`Win+Alt+Space`) and `/conditions`.
 __MK_EOF__
 put app/apple-icon.tsx <<'__MK_EOF__'
 import { ImageResponse } from 'next/og';
@@ -236,30 +242,43 @@ import { site } from '@/lib/site';
 
 export const metadata: Metadata = {
   title: 'Privacy and terms',
-  description: 'How Mosaïk handles your data, and the terms it is released under.',
+  description: 'Mosaïk sends nothing anywhere. How the app, its updates and this website handle your data, and the terms it is released under.',
 };
 
 export default function ConditionsPage() {
   const mail = <a href={`mailto:${site.email}`}>{site.email}</a>;
+  const ext = (href: string, label: string) => (
+    <a href={href} rel="noopener noreferrer">
+      {label}
+    </a>
+  );
   return (
     <div className="page-x pb-24 pt-32 sm:pt-40">
       <h1 className="h1">Privacy and terms</h1>
-      <p className="mt-5 text-slate">Last updated October 1, 2026.</p>
+      <p className="mt-5 text-slate">Last updated October 12, 2026.</p>
       <div className="prose-page mt-8 max-w-2xl">
-        <h2>Privacy</h2>
-        <p>This website sets no cookies and runs no analytics or advertising trackers.</p>
+        <h2>The app</h2>
         <p>
-          If you email {mail}, we receive your address and your message. We use them to reply and, if you ask for early access, to tell you
-          when a build is ready. We don’t sell or share them.
+          Mosaïk makes no network requests. It has no telemetry, no account and no cloud: your workspaces, layouts and settings stay on your
+          computer, in Mosaïk’s own folder.
         </p>
         <p>
-          Mosaïk is designed to keep your workspaces on your own computer. Before any release adds a feature that sends data anywhere, this page
-          will say exactly what is sent and why.
+          It doesn’t check for updates itself. The Microsoft Store installs and updates it, as it does every Store app, and the Download
+          buttons on this site fetch Microsoft’s installer from get.microsoft.com. Microsoft’s{' '}
+          {ext('https://privacy.microsoft.com/privacystatement', 'privacy statement')} covers both.
         </p>
+        <p>
+          The Support on Patreon links, here and in Mosaïk’s About page and tray menu, open {ext(site.patreon, 'Patreon')} in your browser. The
+          app itself sends nothing to Patreon.
+        </p>
+        <p>If a release ever needs to send something, this page will say exactly what and why before that release ships.</p>
+        <h2>This website</h2>
+        <p>It sets no cookies and runs no analytics or advertising trackers.</p>
+        <p>If you email {mail}, we receive your address and your message, and use them only to reply. We don’t sell or share them.</p>
         <h2>License</h2>
         <p>
           Mosaïk is released under CC0 1.0, a public-domain dedication. You can use, copy, change and distribute it for any purpose, with no
-          attribution required.
+          attribution required. The open-source components it is built with keep their own licenses, listed in the app’s About page.
         </p>
         <h2>Warranty</h2>
         <p>Mosaïk is provided as is, without warranty of any kind. Use it at your own risk.</p>
@@ -283,50 +302,119 @@ export default function ConditionsPage() {
 __MK_EOF__
 put app/download/page.tsx <<'__MK_EOF__'
 import type { Metadata } from 'next';
-import { Check, PlatformList } from '@/components/ui';
+import { Check, DownloadButton, Keys, PlatformList } from '@/components/ui';
 import { site } from '@/lib/site';
 
 export const metadata: Metadata = {
-  title: 'Early access',
-  description: 'Mosaïk is in development. Get notified when the first build is ready.',
+  title: 'Download for Windows',
+  description: 'Download Mosaïk for Windows 11 and Windows 10: free, installed and kept up to date by the Microsoft Store.',
 };
 
-const MAIL = `mailto:${site.email}?${new URLSearchParams({ subject: 'Mosaïk early access', body: 'Hi, I’d like to hear when Mosaïk is ready.\n\nPlatform: \nWhat I do: ' }).toString().replace(/\+/g, '%20')}`;
+/* The same three steps as the welcome page in the app. */
+const STEPS: [string, React.ReactNode][] = [
+  ['Arrange', 'Open the apps you use for one project and place them side by side.'],
+  [
+    'Save',
+    <>
+      Press <Keys k="Win Alt Space" /> then <Keys k="S" /> and name it. Each place becomes a zone with its own colour.
+    </>,
+  ],
+  [
+    'Switch',
+    <>
+      Press <Keys k="Win Alt Space" /> and pick a workspace: its windows come back and missing apps start.
+    </>,
+  ],
+];
 
-const PLANNED = ['Window zones and saved layouts', 'Tabs for any app', 'One-click workspace switching', 'Multi-monitor support', 'Layouts stored on your computer'];
+const INSIDE = [
+  'Window zones and saved layouts',
+  'Tabs for any app',
+  'One-click switching from the tray or the keyboard',
+  'Multiple monitors, including different scaling',
+  'Layouts stored on your computer only',
+];
+
+const NOTES: [string, React.ReactNode][] = [
+  [
+    'Why the Microsoft Store',
+    'Windows trusts what the Store installs, so there is no warning about an unknown publisher, and the Store keeps Mosaïk up to date. Mosaïk itself never connects to the internet.',
+  ],
+  ['Uninstalling', 'Settings, Apps, Installed apps, then Uninstall next to Mosaïk. Windows removes the app and the layouts it saved.'],
+  [
+    'The source',
+    <>
+      Every line is on{' '}
+      <a href={site.repo} rel="noopener noreferrer" className="font-semibold text-lapis underline underline-offset-4">
+        GitHub
+      </a>
+      , in the public domain (CC0).
+    </>,
+  ],
+];
+
+const Row = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <section className="mt-20 grid gap-10 border-t border-grout pt-14 lg:grid-cols-12">
+    <h2 className="h2 lg:col-span-5">{title}</h2>
+    <div className="lg:col-span-7">{children}</div>
+  </section>
+);
 
 export default function DownloadPage() {
   return (
     <div className="page-x pb-24 pt-32 sm:pt-40">
       <div className="max-w-[calc(100%*8/12)] max-lg:max-w-none">
         <p className="mb-5 inline-flex items-center gap-2.5 rounded-full border border-grout bg-paper px-4 py-1.5 text-sm font-semibold">
-          <span className="h-2.5 w-2.5 rounded-full bg-saffron" aria-hidden="true" />
-          In development
+          <span className="h-2.5 w-2.5 rounded-full bg-verdigris" aria-hidden="true" />
+          Free, for Windows 11 and Windows 10
         </p>
-        <h1 className="h1">Mosaïk isn’t released yet.</h1>
-        <p className="mt-6 max-w-xl text-lg text-slate">
-          The Windows build comes first. Email us with your platform and what you do, and we’ll write when there is something to try.
-        </p>
+        <h1 className="h1">Download Mosaïk for Windows.</h1>
+        <p className="mt-6 max-w-xl text-lg text-slate">One click gets Microsoft’s installer. It installs Mosaïk from the Microsoft Store, then starts it.</p>
         <div className="mt-8 flex flex-wrap gap-3">
-          <a href={MAIL} className="btn btn-lapis">
-            Email for early access
-          </a>
-          <a href={site.repo} rel="noopener noreferrer" className="btn btn-line">
-            View on GitHub
+          <DownloadButton className="btn btn-lapis" />
+          <a href={site.storePage} rel="noopener noreferrer" className="btn btn-line">
+            See it in the Microsoft Store
           </a>
         </div>
+        <p className="mt-4 text-sm text-slate">Windows 11, or Windows 10 version 22H2, on a 64-bit (x64) PC.</p>
       </div>
 
-      <section className="mt-24 grid gap-10 border-t border-grout pt-14 lg:grid-cols-12">
-        <h2 className="h2 lg:col-span-5">Planned for the first release</h2>
-        <ul className="space-y-3.5 text-[17px] lg:col-span-7">
-          {PLANNED.map((t) => (
+      <Row title="Your first workspace in three steps">
+        <ol className="space-y-7">
+          {STEPS.map(([title, body], i) => (
+            <li key={title} className="flex gap-4">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink font-display font-bold text-paper" aria-hidden="true">
+                {i + 1}
+              </span>
+              <div>
+                <h3 className="font-display text-xl font-bold tracking-[-0.02em]">{title}</h3>
+                <p className="mt-1 text-[17px] leading-relaxed text-slate">{body}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </Row>
+
+      <Row title="What’s inside">
+        <ul className="space-y-3.5 text-[17px]">
+          {INSIDE.map((t) => (
             <Check key={t} s={17} top={5}>
               {t}
             </Check>
           ))}
         </ul>
-      </section>
+      </Row>
+
+      <Row title="Good to know">
+        <dl className="space-y-6">
+          {NOTES.map(([t, d]) => (
+            <div key={t}>
+              <dt className="font-semibold">{t}</dt>
+              <dd className="mt-1 text-[17px] leading-relaxed text-slate">{d}</dd>
+            </div>
+          ))}
+        </dl>
+      </Row>
 
       <section className="mt-20 border-t border-grout pt-14">
         <h2 className="h2 mb-10">Platforms</h2>
@@ -455,7 +543,8 @@ __MK_EOF__
 put app/layout.tsx <<'__MK_EOF__'
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
-import { Footer, Header, Sprite } from '@/components/ui';
+import { Header } from '@/components/header';
+import { Footer, Sprite } from '@/components/ui';
 import { site } from '@/lib/site';
 import './globals.css';
 
@@ -510,7 +599,7 @@ __MK_EOF__
 put app/page.tsx <<'__MK_EOF__'
 import Link from 'next/link';
 import { DeskThumb, Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
-import { Check, PlatformList } from '@/components/ui';
+import { Check, DownloadButton, PlatformList } from '@/components/ui';
 import { WORKSPACES } from '@/lib/data';
 import { site } from '@/lib/site';
 
@@ -533,7 +622,7 @@ const FEATURES = [
     id: 'layouts',
     title: 'Switch projects, not just windows',
     body: 'Save a workspace once and bring it back whenever you need it. Positions, sizes and tabs return together, so changing task takes a keystroke instead of ten minutes of rearranging.',
-    points: ['One workspace per project, role or mood', 'Saved on your computer, never in a cloud', 'Switch from the dock or the keyboard'],
+    points: ['One workspace per project, role or mood', 'Saved on your computer, never in a cloud', 'Switch from the tray, or press Win+Alt+Space'],
     Art: SwitcherArt,
   },
 ];
@@ -560,7 +649,15 @@ export default function Home() {
               <p className="max-w-[30rem] text-[18px] leading-[1.45] text-slate sm:text-[19px]">
                 Every project gets its own workspace: your apps and windows arranged and ready in one click.
               </p>
-              <p className="mt-2 text-[15px] text-slate">Free and open source.</p>
+              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
+                <DownloadButton className="btn btn-lapis" />
+                <p className="text-[15px] text-slate">
+                  Free and open source.{' '}
+                  <Link href="/download" className="font-semibold text-ink underline decoration-grout underline-offset-4 hover:decoration-ink">
+                    Requirements
+                  </Link>
+                </p>
+              </div>
             </div>
           </div>
           <div className="mt-10 md:mt-12">
@@ -626,13 +723,13 @@ export default function Home() {
         <div className="page-x grid gap-8 lg:grid-cols-12 lg:items-end lg:gap-14">
           <h2 className="font-display text-[clamp(2.2rem,4.4vw,3.6rem)] font-bold leading-[1.04] tracking-[-0.035em] lg:col-span-7">Put your work back together.</h2>
           <div className="lg:col-span-5">
-            <p className="max-w-[28rem] text-[17px] leading-[1.6] text-white/70">Mosaïk is free and open source.</p>
+            <p className="max-w-[28rem] text-[17px] leading-[1.6] text-white/70">
+              Mosaïk is free and open source, and stays that way. If it earns its place on your desktop, you can support its work on Patreon.
+            </p>
             <div className="mt-7 flex flex-wrap gap-3">
-              <Link href="/download" className="btn btn-saffron">
-                Get early access
-              </Link>
-              <a href={site.repo} rel="noopener noreferrer" className="btn btn-line-light">
-                View on GitHub
+              <DownloadButton className="btn btn-saffron" />
+              <a href={site.patreon} rel="noopener noreferrer" className="btn btn-line-light">
+                Support on Patreon
               </a>
             </div>
           </div>
@@ -799,8 +896,7 @@ export function EditorApp({ bare }: { bare?: boolean }) {
 const PROMPT: [string, string][] = [['sf', 'shop'], ['sm', ' on '], ['sv', ' feat/checkout'], ['ss', ' ❯ ']];
 const TERM: [string, string][][] = [
   [...PROMPT, ['', 'npm run dev']],
-  [['', '']],
-  [['', '  ▲ Next.js 14.2.35']],
+  [['', '  ▲ Next.js 16']],
   [['sm', '  - Local:        '], ['sf', 'http://localhost:3000']],
   [['ss', ' ✓ '], ['', 'Ready in 842ms']],
   [['sn', ' ○ '], ['sm', 'Compiling /checkout ...']],
@@ -1540,7 +1636,7 @@ put components/desk.tsx <<'__MK_EOF__'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppBody, AppWindow, EditorApp, ZoneFrame } from '@/components/apps';
 import { Icon } from '@/components/ui';
-import { DESK_H, DESK_H_TALL, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Workspace, type Zone } from '@/lib/data';
+import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
 export const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
@@ -1561,56 +1657,26 @@ export const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: numb
 /** Dark wallpaper: a faint field of tiles with two soft pools of colour. */
 const Wallpaper = () => <div className="wallpaper absolute inset-0" />;
 
-/** Mosaïk's bar shows the workspace and its zones; without Mosaïk it is a plain system bar. */
-function MenuBar({ ws, plain }: { ws: Workspace; plain: boolean }) {
+/** The Windows taskbar, there with or without Mosaïk: apps in the middle, Mosaïk among the tray icons. */
+function Taskbar() {
   return (
-    <div className="absolute inset-x-0 top-0 z-[30] h-[42px] bg-black/35 text-[13px] text-white/75 backdrop-blur-[4px]">
-      <div className="absolute inset-0 flex items-center justify-between px-5 transition-opacity duration-300" style={{ opacity: plain ? 0 : 1 }}>
-        <div className="flex items-center gap-5">
-          <span className="flex items-center gap-2 font-semibold text-white">
-            <TileGlyph colors={TILES} />
-            {ws.name}
-          </span>
-          <span className="flex items-center gap-4">
-            {ws.windows.map((w) => (
-              <span key={w.id} className="flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full" style={{ background: ZONE[w.zone].bg }} />
-                {w.tag}
-              </span>
-            ))}
-          </span>
-        </div>
-        <span>{ws.windows.length} windows · saved</span>
-      </div>
-      <div className="absolute inset-0 flex items-center justify-between px-5 transition-opacity duration-300" style={{ opacity: plain ? 1 : 0 }}>
-        <span className="flex items-center gap-2 text-white/60">
-          <span className="h-3 w-3 rounded-[3px] bg-white/35" />
-          {ws.windows.length} windows open
-        </span>
-        <span>10:42</span>
-      </div>
-    </div>
-  );
-}
-
-function Taskbar({ visible }: { visible: boolean }) {
-  return (
-    <div className="absolute inset-x-0 bottom-0 z-[30] flex h-[40px] items-center justify-between bg-[#0B0D12]/90 px-4 transition-opacity duration-300" style={{ opacity: visible ? 1 : 0 }} aria-hidden="true">
-      <span className="flex items-center gap-2.5">
-        <span className="grid h-[22px] w-[22px] grid-cols-2 gap-[2px]">
+    <div className="absolute inset-x-0 bottom-0 z-[30] h-[40px] bg-[#0B0D12]/90" aria-hidden="true">
+      <span className="absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center gap-2">
+        <span className="mr-1 grid h-[22px] w-[22px] grid-cols-2 gap-[2px]">
           {TILES.map((c) => (
             <span key={c} className="rounded-[2px] bg-white/55" />
           ))}
         </span>
-        <span className="ml-3 flex items-center gap-2">
-          {['#2B44D9', '#12786A', '#F4B13A', '#C93450'].map((c, i) => (
-            <span key={c} className={`h-[22px] w-[34px] rounded-[5px] ${i ? 'bg-white/[0.07]' : 'bg-white/15'}`}>
-              <span className="mx-auto mt-[6px] block h-[10px] w-[10px] rounded-[3px]" style={{ background: c }} />
-            </span>
-          ))}
-        </span>
+        {TILES.map((c, i) => (
+          <span key={c} className={`h-[26px] w-[34px] rounded-[5px] ${i ? 'bg-white/[0.07]' : 'bg-white/15'}`}>
+            <span className="mx-auto mt-[8px] block h-[10px] w-[10px] rounded-[3px]" style={{ background: c }} />
+          </span>
+        ))}
       </span>
-      <span className="text-[12px] text-white/60">10:42</span>
+      <span className="absolute inset-y-0 right-4 flex items-center gap-3 text-[12px] text-white/60">
+        <TileGlyph colors={TILES} size={14} />
+        10:42
+      </span>
     </div>
   );
 }
@@ -1760,8 +1826,7 @@ export function Stage() {
       <div ref={stage} className="stage-shadow overflow-hidden rounded-[14px] sm:rounded-[20px]" role="group" aria-label="Interactive demo of a Mosaïk desktop">
         <Scaled tall>
           <Wallpaper />
-          <MenuBar ws={ws} plain={!ordered} />
-          <Taskbar visible={!ordered} />
+          <Taskbar />
           {windows}
         </Scaled>
       </div>
@@ -1889,15 +1954,18 @@ const Key = ({ children, dim }: { children: ReactNode; dim?: boolean }) => (
   <span className={`rounded-[6px] border border-white/15 px-1.5 py-0.5 text-[11.5px] ${dim ? 'text-[#8E97AA]' : ''}`}>{children}</span>
 );
 
-/** Saved layouts: a workspace switcher. */
+/** Saved layouts: Mosaïk's switcher as the app draws it (Win+Alt+Space opens it; 1 to 9 pick). */
 export function SwitcherArt() {
   return (
     <div className="switcher-bg relative overflow-hidden rounded-[20px] bg-ink px-5 py-10 ring-1 ring-black/10 sm:px-10 sm:py-14">
-      <div className="mx-auto w-full max-w-[470px] overflow-hidden rounded-[16px] border border-white/10 bg-[#1B1E26] text-[#E6E9F0] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)]" role="img" aria-label="A workspace switcher listing four saved workspaces with a preview of each layout. Brand refresh is selected.">
-        <div className="flex h-[52px] items-center gap-3 border-b border-white/10 px-4 text-[15px] text-[#8E97AA]">
-          <Icon n="search" s={16} />
+      <div className="mx-auto w-full max-w-[470px] overflow-hidden rounded-[16px] border border-white/10 bg-[#1B1E26] text-[#E6E9F0] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)]" role="img" aria-label="Mosaïk's switcher, opened with Windows, Alt and Space: four saved workspaces with a preview of each layout, each picked with its number. Brand refresh is selected.">
+        <div className="flex h-[52px] items-center gap-3 border-b border-white/10 pl-5 pr-4 text-[15px] text-[#8E97AA]">
           <span className="flex-1">Switch workspace</span>
-          <Key>Ctrl K</Key>
+          <span className="flex gap-1.5">
+            {SWITCHER_KEYS.map((k) => (
+              <Key key={k}>{k}</Key>
+            ))}
+          </span>
         </div>
         <div className="p-2">
           {WORKSPACES.map((w, i) => (
@@ -1909,20 +1977,22 @@ export function SwitcherArt() {
                 ))}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[15px] font-semibold">{w.name}</p>
-                <p className="text-[12.5px] text-[#8E97AA]">{w.windows.length} windows · {w.role.toLowerCase()}</p>
+                <p className="truncate text-[15px] font-semibold">
+                  {w.name}
+                  {i === 0 && <span className="font-normal text-[#8E97AA]"> · current</span>}
+                </p>
+                <p className="text-[12.5px] text-[#8E97AA]">
+                  {w.windows.length} windows · {new Set(w.windows.map((x) => x.zone)).size} zones
+                </p>
               </div>
-              <span className="flex gap-1.5">
-                <Key dim>Ctrl</Key>
-                <Key dim>{i + 1}</Key>
-              </span>
+              <Key dim>{i + 1}</Key>
             </div>
           ))}
         </div>
-        <div className="flex items-center gap-5 border-t border-white/10 px-4 py-2.5 text-[12px] text-[#8E97AA]">
-          <span><b className="text-[#C9CEDA]">Enter</b> open</span>
-          <span><b className="text-[#C9CEDA]">Ctrl S</b> save current layout</span>
-          <span><b className="text-[#C9CEDA]">Esc</b> close</span>
+        <div className="flex items-center gap-5 border-t border-white/10 px-5 py-2.5 text-[12px] text-[#8E97AA]">
+          <span><b className="font-semibold text-[#C9CEDA]">Enter</b> open</span>
+          <span><b className="font-semibold text-[#C9CEDA]">S</b> save current layout</span>
+          <span><b className="font-semibold text-[#C9CEDA]">Esc</b> close</span>
         </div>
       </div>
     </div>
@@ -1934,10 +2004,11 @@ export function DeskThumb({ index }: { index: number }) {
   return (
     <Scaled className="bg-ink">
       <Wallpaper />
+      <Taskbar />
       {WORKSPACES[index].windows.map((w) => {
         const b = slotBox(w.slot, DESK_H);
         return (
-          <div key={w.id} className="absolute" style={{ left: b.left, top: b.top + 8, width: b.width, height: b.height }}>
+          <div key={w.id} className="absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height }}>
             <AppWindow win={w} />
           </div>
         );
@@ -1946,10 +2017,52 @@ export function DeskThumb({ index }: { index: number }) {
   );
 }
 __MK_EOF__
-put components/ui.tsx <<'__MK_EOF__'
+put components/header.tsx <<'__MK_EOF__'
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { DownloadButton, Wordmark } from '@/components/ui';
+
+const NAV = [
+  ['/#how', 'How it works'],
+  ['/#people', 'Who it’s for'],
+  ['/#platforms', 'Platforms'],
+];
+
+export function Header() {
+  const home = usePathname() === '/';
+  return (
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-grout/80 bg-plaster/85 backdrop-blur-md">
+      <div className="page-x flex h-16 items-center justify-between">
+        <Link
+          href="/"
+          aria-label="Mosaïk, home"
+          className="text-ink"
+          onClick={(e) => {
+            if (home) {
+              e.preventDefault();
+              history.replaceState(null, '', '/');
+              scrollTo({ top: 0 });
+            }
+          }}
+        >
+          <Wordmark className="block h-7 w-auto" decorative />
+        </Link>
+        <nav aria-label="Main" className="hidden items-center gap-8 md:flex">
+          {NAV.map(([href, label]) => (
+            <Link key={href} href={href} className="text-[15px] font-medium text-slate transition-colors hover:text-ink">
+              {label}
+            </Link>
+          ))}
+        </nav>
+        <DownloadButton className="btn btn-lapis min-h-[40px] px-5 text-sm" label="Download" />
+      </div>
+    </header>
+  );
+}
+__MK_EOF__
+put components/ui.tsx <<'__MK_EOF__'
+import Link from 'next/link';
 import { TILES } from '@/lib/data';
 import { site } from '@/lib/site';
 
@@ -1980,6 +2093,7 @@ const ICONS: Record<string, string> = {
   eye: 'M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z M8 9.8a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6z',
   mic: 'M8 2.5a2 2 0 0 0-2 2V8a2 2 0 0 0 4 0V4.5a2 2 0 0 0-2-2z M4 7.5a4 4 0 0 0 8 0M8 11.5v2',
   spk: 'M2.5 6v4h2.5L9 13V3L5 6z M11.5 5.5a3.5 3.5 0 0 1 0 5',
+  down: 'M8 2.5v8M4.5 7.5L8 11l3.5-3.5M3 13.5h10',
 };
 
 /** Bricolage Grotesque 800 outlines of the wordmark; the dots of the ï are drawn as two tiles. */
@@ -2027,40 +2141,31 @@ export const Check = ({ children, s = 16, top = 3 }: { children: React.ReactNode
   </li>
 );
 
-const NAV = [
-  ['/#how', 'How it works'],
-  ['/#people', 'Who it’s for'],
-  ['/#platforms', 'Platforms'],
-];
+/** Keys pressed together, as key caps: "Win Alt Space". */
+export const Keys = ({ k }: { k: string }) => (
+  <span className="inline-flex gap-1 whitespace-nowrap align-[0.08em]">
+    {k.split(' ').map((key) => (
+      <kbd key={key} className="rounded-[6px] border border-b-2 border-ink/20 bg-paper px-1.5 font-mono text-[0.78em] font-medium leading-[1.55] text-ink">
+        {key}
+      </kbd>
+    ))}
+  </span>
+);
 
-export function Header() {
-  const home = usePathname() === '/';
-  return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-grout/80 bg-plaster/85 backdrop-blur-md">
-      <div className="page-x flex h-16 items-center justify-between">
-        <Link href="/" aria-label="Mosaïk, home" className="text-ink" onClick={(e) => { if (home) { e.preventDefault(); history.replaceState(null, '', '/'); scrollTo({ top: 0 }); } }}>
-          <Wordmark className="block h-7 w-auto" decorative />
-        </Link>
-        <nav aria-label="Main" className="hidden items-center gap-8 md:flex">
-          {NAV.map(([href, label]) => (
-            <Link key={href} href={href} className="text-[15px] font-medium text-slate transition-colors hover:text-ink">
-              {label}
-            </Link>
-          ))}
-        </nav>
-        <Link href="/download" className="btn btn-lapis min-h-[40px] px-5 text-sm">
-          Get early access
-        </Link>
-      </div>
-    </header>
-  );
-}
+/** One click: Microsoft's small installer, which installs Mosaïk from the Store and starts it. */
+export const DownloadButton = ({ className, label = 'Download for Windows' }: { className: string; label?: string }) => (
+  <a href={site.download} className={`${className} gap-2.5`}>
+    <Icon n="down" s={17} w={1.8} />
+    {label}
+  </a>
+);
 
 export function Footer() {
   const links: [string, string][] = [
-    ['/download', 'Early access'],
+    ['/download', 'Download'],
     ['/conditions', 'Privacy and terms'],
     [site.repo, 'GitHub'],
+    [site.patreon, 'Support on Patreon'],
     [`mailto:${site.email}`, site.email],
   ];
   return (
@@ -2089,8 +2194,8 @@ export function Footer() {
 }
 
 const PLATFORMS = [
-  ['Windows', 'In development', '#12786A', 'First. Windows lets one app move, resize and group other apps’ windows, so zones, tabs and saved layouts arrive here first.'],
-  ['macOS', 'Planned', '#F4B13A', 'Next. Mosaïk asks for the Accessibility permission, then snaps and stacks windows into zones. Apps can’t be embedded in a tab there, so tabs stack and swap instead.'],
+  ['Windows', 'Available', '#12786A', 'Windows 11, and Windows 10 version 22H2. Windows lets one app move, resize and group other apps’ windows, which is all Mosaïk needs.'],
+  ['macOS', 'Planned', '#F4B13A', 'Next. Mosaïk will ask for the Accessibility permission, then place and group windows the same way.'],
   ['Linux', 'Planned, X11 first', '#2B44D9', 'X11 allows the full feature set. Wayland deliberately limits what an app can do to other apps’ windows, so support there depends on the desktop environment.'],
 ];
 
@@ -2194,9 +2299,11 @@ export const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
 export const TAG = 28; // room above a window for its zone tag
-export const BAR = 42; // menu bar
-const TASKBAR = 40; // system taskbar, shown without Mosaïk
-const [TOP, BOTTOM, SIDE, PAD] = [62, 22, 26, 12];
+const TASKBAR = 40; // the Windows taskbar, along the bottom
+const [TOP, BOTTOM, SIDE, PAD] = [22, TASKBAR + 14, 26, 12];
+
+/** The shortcut that opens Mosaïk's switcher (the app's default). */
+export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -2206,8 +2313,8 @@ export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + TAG), width: r1(cols * colW - PAD), height: r1(rows * rowH - TAG - PAD / 2) };
 }
 
-/** Where a maximised window sits: everything between the menu bar and the taskbar. */
-export const fullRect = (deskH: number): Rect => ({ left: 0, top: BAR, width: DESK_W, height: deskH - BAR - TASKBAR });
+/** Where a maximised window sits: everything above the taskbar. */
+export const fullRect = (deskH: number): Rect => ({ left: 0, top: 0, width: DESK_W, height: deskH - TASKBAR });
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -2258,7 +2365,7 @@ export function deskLayout(index: number, deskH: number): DeskLayout {
     const [fx, fy] = WHERE[WORKSPACES[index].windows[i].id] ?? [1, 0.5];
     placed[i] = {
       left: Math.round(16 + fx * Math.max(DESK_W - r.width - 32, 0)) + (fx > 0 && fx < 1 ? jit(10) : 0),
-      top: Math.round(56 + fy * Math.max(maxB - r.height - 56, 0)),
+      top: Math.round(TOP + fy * Math.max(maxB - r.height - TOP, 0)),
     };
   });
   return {
@@ -2298,20 +2405,20 @@ put package.json <<'__MK_EOF__'
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@fontsource-variable/bricolage-grotesque": "^5.3.0",
-    "@fontsource-variable/instrument-sans": "^5.3.0",
-    "@fontsource-variable/jetbrains-mono": "^5.3.0",
-    "next": "^16.3.8",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "@fontsource-variable/bricolage-grotesque": "5.3.0",
+    "@fontsource-variable/instrument-sans": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
+    "next": "16.3.8",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.3",
-    "@types/node": "^22.20.4",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3"
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "22.20.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
   }
 }
 __MK_EOF__
@@ -2381,7 +2488,7 @@ if [ -f "$MANIFEST" ]; then
     case "$f" in */*) rmdir -p "${f%/*}" 2>/dev/null || true ;; esac
   done <<< "$STALE"
 fi
-mv -f "$NEW_LIST" "$MANIFEST"
+cp "$NEW_LIST" "$MANIFEST" && chmod 644 "$MANIFEST" # a copy: mktemp's file is private to its owner
 printf '%s\n' "$MK_VERSION" > "$MARKER"
 ok "$FILES files: $CHANGED written, $((FILES - CHANGED)) unchanged$([ "$REMOVED" = 0 ] || echo ", $REMOVED old ones removed")"
 
@@ -2403,7 +2510,7 @@ fi
 
 # ── Deploy to Vercel ─────────────────────────────────────────────────────
 if [ "$DEPLOY" = 1 ]; then
-  read -r -a VC <<< "${VERCEL_BIN:-npx --yes --prefer-offline vercel@latest}"
+  read -r -a VC <<< "${VERCEL_BIN:-npx --yes --prefer-offline vercel@60.1.3}"
   G=()
   [ -z "${VERCEL_TOKEN:-}" ] || G+=(--token "$VERCEL_TOKEN")
   [ -z "${VERCEL_SCOPE:-}" ] || G+=(--scope "$VERCEL_SCOPE")
@@ -2438,7 +2545,8 @@ fi
 
 # ── Production build (only when the sources changed) ─────────────────────
 if [ "$MODE" = prod ]; then
-  SRC_SUM="$( { find app components lib public -type f -print0 2>/dev/null; printf '%s\0' package.json next.config.ts postcss.config.mjs tsconfig.json; } | LC_ALL=C sort -z | xargs -0 cksum | cksum | cut -d' ' -f1)"
+  SRC_SUM="$( { for d in app components lib public; do [ ! -d "$d" ] || find "$d" -type f -print0; done
+                printf '%s\0' package.json next.config.ts postcss.config.mjs tsconfig.json; } | LC_ALL=C sort -z | xargs -0 cksum | cksum | cut -d' ' -f1)"
   if [ "$FRESH" = 0 ] && [ -f .next/BUILD_ID ] && [ "$(cat .next/.mk-build 2>/dev/null || true)" = "$SRC_SUM" ]; then
     ok "Production build is current"
   else
@@ -2467,5 +2575,6 @@ if busy "$PORT"; then
   ! busy "$PORT" || die "No free port near $PORT. Pass one with --port."
 fi
 trap - ERR
+cleanup
 printf '\n  %s➜  http://localhost:%s%s   %s(Ctrl+C to stop)%s\n\n' "$CB" "$PORT" "$C0" "$CD" "$C0"
 if [ "$MODE" = dev ]; then exec "$NEXT" dev -p "$PORT"; else exec "$NEXT" start -p "$PORT"; fi

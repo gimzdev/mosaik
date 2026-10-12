@@ -6,10 +6,12 @@ on:
     branches: [master, v1-build]
     paths:
       - "mosaik1.sh"
+      - "site/**"
       - ".github/workflows/site.yml"
   pull_request:
     paths:
       - "mosaik1.sh"
+      - "site/**"
       - ".github/workflows/site.yml"
 
 permissions:
@@ -21,11 +23,27 @@ concurrency:
 
 jobs:
   build:
-    name: Generate and build
+    name: Generate, check and build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - run: bash mosaik1.sh --build --dir "$RUNNER_TEMP/site"
+      - name: Lint the script
+        run: shellcheck mosaik1.sh
+      - name: Generate and build site/, as the owner does
+        run: bash mosaik1.sh --build
+      - name: site/ is exactly what mosaik1.sh writes
+        run: |
+          drift="$(git status --porcelain -- site ':!site/package-lock.json')"
+          if [ -n "$drift" ]; then
+            echo "site/ differs from what mosaik1.sh writes. Change the script, not site/, then run it again:"
+            echo "$drift"
+            exit 1
+          fi
+      - name: Audit the site's dependencies
+        run: npm audit --audit-level=high
+        working-directory: site
+      - name: Build in a fresh folder, as on another machine
+        run: bash mosaik1.sh --build --dir "$RUNNER_TEMP/site"
