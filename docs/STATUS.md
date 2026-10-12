@@ -400,6 +400,14 @@ Found and fixed on the way:
 - **The probe pressed a chip while its strip was still moving** (job 0066, Git Bash): it now
   measures and presses only once no title bar is being read (`title_bars_reading` in
   `mosaikctl state --json`) and two reads 300 ms apart agree.
+- **An app shown again answers differently for a moment** (job 0070: Calculator, shown again as
+  a tab, had room for a strip in one reading and none 40 ms later, and moved out of its band
+  and back): a window moves into or out of a band only when a second reading, at least 250 ms
+  later, agrees (`titlebar::band_step`, with a test). Job 0071: one move.
+- **A reading right after a resize can catch the app mid-layout** (job 0071: VS Code, read 3 ms
+  after it was made narrower, had one free stretch instead of two and stayed below a band): a
+  window read at a new size is read once more 300 ms later. Job 0072: VS Code pulled out of a
+  group wears its tag in its title bar again. Readings take 3 to 30 ms each.
 
 Where apps' tags went (`--apps`, jobs 0062, 0063 and 0067, each app once per run): Notepad,
 Notepad++, Paint, Edge, Chrome, Windows Terminal, Explorer, Word, Excel and Git Bash in their
