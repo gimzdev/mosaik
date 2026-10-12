@@ -137,7 +137,7 @@ pub fn run(args: Vec<String>) -> i32 {
     let watchdog = match mosaik_engine::watchdog::start(&journal) {
         Ok(watchdog) => {
             own_pids.push(watchdog.pid);
-            true
+            Some(watchdog.pid)
         }
         Err(e) => {
             tracing::error!(error = %e, "watchdog not started");
@@ -147,7 +147,7 @@ pub fn run(args: Vec<String>) -> i32 {
                     "{e}. Until it is back, Mosaïk will not hide any window, so none can be lost if Mosaïk stops."
                 ),
             });
-            false
+            None
         }
     };
 

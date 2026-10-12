@@ -1,182 +1,188 @@
-//! A tab group at run time: windows that share one rectangle, one visible at a time.
+//! Which windows of tab groups show and which hide, as a decision on plain data. The engine says
+//! what it knows (each group's open tabs, the tab that should show, whether its strip can be on
+//! screen, which windows it keeps hidden) and applies the plan.
+//!
+//! The rule that keeps windows from being lost: a window stays hidden only while it is a
+//! background tab of a group of the open workspace whose other tabs can be reached, through its
+//! strip or through its visible tab's taskbar button. Every other window Mosaïk hid shows again.
 
+use std::collections::HashSet;
+
+use crate::layout::{SlotId, TabGroupId};
 use crate::window::WindowHandle;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TabStrip {
-    tabs: Vec<WindowHandle>,
-    active: usize,
-}
-
-/// What changed when a tab left the strip.
+/// How a group's background tabs can be reached right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Removed {
-    /// A background tab left; nothing else changes.
-    Background,
-    /// The visible tab left; this one must be shown in its place.
-    NewActive(WindowHandle),
-    /// That was the last tab: the group is gone.
-    Empty,
+pub enum Reach {
+    /// Through its strip, on screen above the visible tab.
+    Strip,
+    /// The visible tab is minimised or maximised: its strip comes back with it, and its taskbar
+    /// button leads there meanwhile.
+    Later,
+    /// No strip can be drawn (no room above the window, drawing failed, a window would not
+    /// hide): every tab shows, stacked in the group's place.
+    None,
 }
 
-impl TabStrip {
-    pub fn new(first: WindowHandle) -> Self {
-        Self {
-            tabs: vec![first],
-            active: 0,
-        }
-    }
+/// A tab group of the open workspace, as it is now.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupNow {
+    pub id: TabGroupId,
+    /// Every tab in order, open or not.
+    pub order: Vec<SlotId>,
+    /// The open windows filling its tabs, in tab order. Tabs whose window is closed, or hidden
+    /// by its own app (closed to the tray), are left out.
+    pub open: Vec<(SlotId, WindowHandle)>,
+    /// The tab that should show: the user's choice, or one an app brought forward.
+    pub wanted: Option<SlotId>,
+    pub reach: Reach,
+}
 
-    pub fn tabs(&self) -> &[WindowHandle] {
-        &self.tabs
-    }
-
-    pub fn active(&self) -> WindowHandle {
-        self.tabs[self.active]
-    }
-
-    pub fn len(&self) -> usize {
-        self.tabs.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.tabs.is_empty()
-    }
-
-    pub fn contains(&self, w: WindowHandle) -> bool {
-        self.tabs.contains(&w)
-    }
-
-    /// The tabs to keep hidden.
-    pub fn background(&self) -> impl Iterator<Item = WindowHandle> + '_ {
-        let active = self.active();
-        self.tabs.iter().copied().filter(move |w| *w != active)
-    }
-
-    /// Adds a window (at `at`, or at the end) and makes it the visible tab, as dropping a window
-    /// on a strip does. Adding a window already in the strip just activates it.
-    pub fn add(&mut self, w: WindowHandle, at: Option<usize>) {
-        if !self.contains(w) {
-            let at = at.unwrap_or(self.tabs.len()).min(self.tabs.len());
-            self.tabs.insert(at, w);
-        }
-        self.activate(w);
-    }
-
-    /// Makes `w` the visible tab. False when it is not in the strip.
-    pub fn activate(&mut self, w: WindowHandle) -> bool {
-        match self.tabs.iter().position(|t| *t == w) {
-            Some(i) => {
-                self.active = i;
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// The next (or previous) tab, wrapping around.
-    pub fn neighbour(&self, forward: bool) -> WindowHandle {
-        let n = self.tabs.len();
-        let i = if forward {
-            (self.active + 1) % n
-        } else {
-            (self.active + n - 1) % n
+impl GroupNow {
+    /// The tab that shows: the wanted one when it is open; else the open tab to its right, or
+    /// else to its left (as when the visible tab closes); else the first open one.
+    pub fn visible(&self) -> Option<&(SlotId, WindowHandle)> {
+        let open = |s: &SlotId| self.open.iter().find(|(o, _)| o == s);
+        let Some(wanted) = &self.wanted else {
+            return self.open.first();
         };
-        self.tabs[i]
-    }
-
-    /// Moves a tab to position `to` (clamped). The visible tab stays visible.
-    pub fn move_tab(&mut self, w: WindowHandle, to: usize) {
-        let active = self.active();
-        if let Some(from) = self.tabs.iter().position(|t| *t == w) {
-            let t = self.tabs.remove(from);
-            self.tabs.insert(to.min(self.tabs.len()), t);
-            self.activate(active);
+        if let Some(t) = open(wanted) {
+            return Some(t);
+        }
+        match self.order.iter().position(|s| s == wanted) {
+            Some(i) => self.order[i + 1..]
+                .iter()
+                .find_map(open)
+                .or_else(|| self.order[..i].iter().rev().find_map(open)),
+            None => self.open.first(),
         }
     }
+}
 
-    /// Takes a window out (pulled out to become a window again, or closed). When it was the
-    /// visible tab, the tab to its right (or else its left) becomes visible.
-    pub fn remove(&mut self, w: WindowHandle) -> Option<Removed> {
-        let i = self.tabs.iter().position(|t| *t == w)?;
-        let was_active = i == self.active;
-        self.tabs.remove(i);
-        if self.tabs.is_empty() {
-            self.active = 0;
-            return Some(Removed::Empty);
+/// What to do so the screen matches the groups.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TabPlan {
+    /// The tab each group shows.
+    pub visible: Vec<(TabGroupId, SlotId, WindowHandle)>,
+    /// Background tabs that are to be hidden (those hidden already included).
+    pub hide: Vec<WindowHandle>,
+    /// Windows Mosaïk hid that are to show again: visible tabs, tabs of groups that cannot be
+    /// reached, and windows that are no longer a tab of the open workspace.
+    pub show: Vec<WindowHandle>,
+}
+
+/// Decides which windows show and which hide. `hidden` lists the windows Mosaïk keeps hidden.
+pub fn plan_tabs(groups: &[GroupNow], hidden: &[WindowHandle]) -> TabPlan {
+    let mut plan = TabPlan::default();
+    for g in groups {
+        if let Some((slot, window)) = g.visible() {
+            plan.visible.push((g.id.clone(), slot.clone(), *window));
         }
-        if was_active {
-            self.active = i.min(self.tabs.len() - 1);
-            Some(Removed::NewActive(self.active()))
-        } else {
-            if i < self.active {
-                self.active -= 1;
+    }
+    // A window some group shows is never hidden, even if a damaged layout lists it twice.
+    let shown: HashSet<WindowHandle> = plan.visible.iter().map(|(_, _, w)| *w).collect();
+    for g in groups {
+        if g.open.len() < 2 || g.reach == Reach::None {
+            continue;
+        }
+        for (_, w) in &g.open {
+            if !shown.contains(w) && !plan.hide.contains(w) {
+                plan.hide.push(*w);
             }
-            Some(Removed::Background)
         }
     }
+    let keep: HashSet<WindowHandle> = plan.hide.iter().copied().collect();
+    plan.show = hidden.iter().copied().filter(|h| !keep.contains(h)).collect();
+    plan
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const A: WindowHandle = WindowHandle(1);
-    const B: WindowHandle = WindowHandle(2);
-    const C: WindowHandle = WindowHandle(3);
+    fn s(n: u32) -> SlotId {
+        SlotId(format!("s{n}"))
+    }
 
-    fn abc() -> TabStrip {
-        let mut s = TabStrip::new(A);
-        s.add(B, None);
-        s.add(C, None);
-        s
+    fn w(n: u64) -> WindowHandle {
+        WindowHandle(n)
+    }
+
+    /// A group of slots s1..=sN, where the slots in `open` have windows 1..
+    fn group(n: u32, open: &[u32], wanted: Option<u32>, reach: Reach) -> GroupNow {
+        GroupNow {
+            id: TabGroupId("g1".into()),
+            order: (1..=n).map(s).collect(),
+            open: open.iter().map(|i| (s(*i), w(u64::from(*i)))).collect(),
+            wanted: wanted.map(s),
+            reach,
+        }
     }
 
     #[test]
-    fn adding_activates_and_keeps_order() {
-        let s = abc();
-        assert_eq!(s.tabs(), &[A, B, C]);
-        assert_eq!(s.active(), C);
-        assert_eq!(s.background().collect::<Vec<_>>(), vec![A, B]);
+    fn the_wanted_tab_shows_and_the_others_hide() {
+        let p = plan_tabs(&[group(3, &[1, 2, 3], Some(2), Reach::Strip)], &[w(2), w(3)]);
+        assert_eq!(p.visible, vec![(TabGroupId("g1".into()), s(2), w(2))]);
+        assert_eq!(p.hide, vec![w(1), w(3)]);
+        assert_eq!(p.show, vec![w(2)], "the visible tab comes out of hiding");
     }
 
     #[test]
-    fn neighbours_wrap() {
-        let mut s = abc();
-        assert_eq!(s.neighbour(true), A);
-        s.activate(A);
-        assert_eq!(s.neighbour(false), C);
-    }
-
-    #[test]
-    fn removing_the_visible_tab_shows_its_neighbour() {
-        let mut s = abc();
-        s.activate(B);
-        assert_eq!(s.remove(B), Some(Removed::NewActive(C)));
+    fn a_closed_tab_gives_way_to_its_right_then_its_left() {
         assert_eq!(
-            s.remove(C),
-            Some(Removed::NewActive(A)),
-            "the last tab falls back to the left"
+            group(4, &[1, 3, 4], Some(2), Reach::Strip).visible(),
+            Some(&(s(3), w(3)))
         );
-        assert_eq!(s.remove(A), Some(Removed::Empty));
-        assert_eq!(s.remove(A), None);
+        assert_eq!(
+            group(4, &[1, 2], Some(4), Reach::Strip).visible(),
+            Some(&(s(2), w(2)))
+        );
+        assert_eq!(group(4, &[3], None, Reach::Strip).visible(), Some(&(s(3), w(3))));
+        assert_eq!(group(4, &[], Some(1), Reach::Strip).visible(), None);
+        // A wanted slot the group does not list (a stale choice): the first open tab.
+        assert_eq!(
+            group(3, &[2, 3], Some(9), Reach::Strip).visible(),
+            Some(&(s(2), w(2)))
+        );
     }
 
     #[test]
-    fn removing_a_background_tab_keeps_the_visible_one() {
-        let mut s = abc();
-        assert_eq!(s.remove(A), Some(Removed::Background));
-        assert_eq!(s.active(), C);
+    fn tabs_that_cannot_be_reached_all_show() {
+        let p = plan_tabs(&[group(3, &[1, 2, 3], Some(1), Reach::None)], &[w(2), w(3)]);
+        assert!(p.hide.is_empty());
+        assert_eq!(p.show, vec![w(2), w(3)]);
     }
 
     #[test]
-    fn reordering_keeps_the_visible_tab() {
-        let mut s = abc();
-        s.activate(B);
-        s.move_tab(C, 0);
-        assert_eq!(s.tabs(), &[C, A, B]);
-        assert_eq!(s.active(), B);
-        s.move_tab(C, 99);
-        assert_eq!(s.tabs(), &[A, B, C]);
+    fn a_minimised_group_keeps_its_background_tabs_hidden() {
+        let p = plan_tabs(&[group(2, &[1, 2], Some(1), Reach::Later)], &[w(2)]);
+        assert_eq!(p.hide, vec![w(2)]);
+        assert!(p.show.is_empty());
+    }
+
+    #[test]
+    fn a_group_with_one_open_tab_hides_nothing() {
+        let p = plan_tabs(&[group(3, &[2], Some(1), Reach::Strip)], &[w(2)]);
+        assert!(p.hide.is_empty());
+        assert_eq!(p.show, vec![w(2)]);
+    }
+
+    #[test]
+    fn windows_that_are_no_tab_any_more_show_again() {
+        // w(7) was a background tab of a group that ended, or of another workspace.
+        let p = plan_tabs(&[group(2, &[1, 2], Some(1), Reach::Strip)], &[w(2), w(7)]);
+        assert_eq!(p.hide, vec![w(2)]);
+        assert_eq!(p.show, vec![w(7)]);
+        let p = plan_tabs(&[], &[w(7)]);
+        assert_eq!(p.show, vec![w(7)]);
+    }
+
+    #[test]
+    fn a_window_shown_by_one_group_is_never_hidden_by_another() {
+        let mut other = group(2, &[1, 2], Some(1), Reach::Strip);
+        other.id = TabGroupId("g2".into());
+        let first = group(2, &[1, 2], Some(2), Reach::Strip);
+        let p = plan_tabs(&[first, other], &[]);
+        assert!(!p.hide.contains(&w(1)) && !p.hide.contains(&w(2)), "{p:?}");
     }
 }

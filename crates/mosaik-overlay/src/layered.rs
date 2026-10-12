@@ -8,10 +8,10 @@ use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, SIZE, W
 use windows::Win32::Graphics::Gdi::{AC_SRC_ALPHA, AC_SRC_OVER, BLENDFUNCTION, GetDC, ReleaseDC};
 use windows::Win32::UI::WindowsAndMessaging::{
     BeginDeferWindowPos, DefWindowProcW, DeferWindowPos, EndDeferWindowPos, GW_HWNDPREV, GWL_EXSTYLE,
-    GetWindow, GetWindowLongPtrW, HWND_TOP, HWND_TOPMOST, MA_NOACTIVATE, SW_HIDE, SW_SHOWNOACTIVATE,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowPos,
-    ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WM_CLOSE, WM_MOUSEACTIVATE, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    GetWindow, GetWindowLongPtrW, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, MA_NOACTIVATE, SW_HIDE,
+    SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
+    SWP_SHOWWINDOW, SetWindowPos, ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WM_CLOSE, WM_MOUSEACTIVATE,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 use crate::paint::Pixels;
@@ -250,6 +250,13 @@ fn topmost(h: HWND) -> bool {
 /// The window to insert after so that `ours` end up right above `target`: the first window above
 /// it that is not one of ours, or the top of its band.
 fn above(target: HWND, ours: &[HWND]) -> HWND {
+    // The top of the normal band. An overlay made top-most earlier (its window was top-most, as
+    // with an "always on top" tool) must leave the top-most band, which only HWND_NOTOPMOST does.
+    let top_of_normal = if ours.iter().any(|h| topmost(*h)) {
+        HWND_NOTOPMOST
+    } else {
+        HWND_TOP
+    };
     let mut prev = target;
     loop {
         // SAFETY: walks the z-order of top-level windows; a null result ends the walk.
@@ -259,12 +266,18 @@ fn above(target: HWND, ours: &[HWND]) -> HWND {
                 // A normal window at the top of its band has top-most windows above it: going
                 // after one of those would make the overlay top-most.
                 return if topmost(p) && !topmost(target) {
-                    HWND_TOP
+                    top_of_normal
                 } else {
                     p
                 };
             }
-            _ => return if topmost(target) { HWND_TOPMOST } else { HWND_TOP },
+            _ => {
+                return if topmost(target) {
+                    HWND_TOPMOST
+                } else {
+                    top_of_normal
+                };
+            }
         }
     }
 }

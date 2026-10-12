@@ -102,12 +102,24 @@ impl<'a> Resolver<'a> {
         Some((z.area.to_rect(m.work_area), m.dpi))
     }
 
+    /// Where a place lands. A tab lands where its group does, below a band with room for the
+    /// group's strip; a group whose own place is a tab (a damaged file) lands nowhere.
     pub fn target(&self, place: &Place) -> Option<Target> {
+        match place {
+            Place::Tab { group } => {
+                let g = self.layout.tab_group(group)?;
+                self.direct(&g.place, self.style.for_tabs())
+            }
+            other => self.direct(other, self.style),
+        }
+    }
+
+    fn direct(&self, place: &Place, style: FrameStyle) -> Option<Target> {
         match place {
             Place::Zone { zone } => {
                 let (rect, dpi) = self.zone_rect(zone)?;
                 Some(Target::Frame(reachable(
-                    self.style.window_area(rect, dpi),
+                    style.window_area(rect, dpi),
                     self.topology,
                 )))
             }
@@ -116,7 +128,7 @@ impl<'a> Resolver<'a> {
                 Some(Target::Frame(reachable(area.to_rect(m.work_area), self.topology)))
             }
             Place::Maximized { monitor } => Some(Target::Maximized(self.monitor(*monitor)?.id.clone())),
-            Place::Tab { group } => self.target(&self.layout.tab_group(group)?.place),
+            Place::Tab { .. } => None,
         }
     }
 }

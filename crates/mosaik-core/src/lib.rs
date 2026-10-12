@@ -12,6 +12,7 @@ pub mod place;
 pub mod settings;
 pub mod snap;
 pub mod store;
+pub mod strip;
 pub mod switcher;
 pub mod tabs;
 pub mod topology;

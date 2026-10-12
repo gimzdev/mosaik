@@ -153,25 +153,114 @@ impl Layout {
                 _ => {}
             }
         }
+        let mut group_ids = std::collections::HashSet::new();
+        // Which group lists each slot: a slot is a tab of one group at most.
+        let mut listed: std::collections::HashMap<&SlotId, &TabGroupId> = std::collections::HashMap::new();
         for g in &self.tab_groups {
-            let place_ok = match &g.place {
-                Place::Tab { .. } => false,
-                Place::Zone { zone } => self.zone(zone).is_some(),
-                Place::Free { monitor, .. } | Place::Maximized { monitor } => monitor_ok(*monitor),
-            };
-            if !place_ok || g.tabs.is_empty() || !g.tabs.contains(&g.active) {
+            if !group_ids.insert(g.id.0.as_str()) {
+                out.push(LayoutProblem::DuplicateId(g.id.0.clone()));
+            }
+            let distinct: std::collections::HashSet<&SlotId> = g.tabs.iter().collect();
+            if !self.place_usable(&g.place)
+                || g.tabs.len() < 2
+                || distinct.len() != g.tabs.len()
+                || !g.tabs.contains(&g.active)
+            {
                 out.push(LayoutProblem::TabGroupBroken(g.id.clone()));
             }
             for t in &g.tabs {
                 let points_back = self
                     .slot(t)
                     .is_some_and(|s| matches!(&s.place, Place::Tab { group } if *group == g.id));
-                if !points_back {
+                let elsewhere = listed.insert(t, &g.id).is_some_and(|other| *other != g.id);
+                if !points_back || elsewhere {
                     out.push(LayoutProblem::TabGroupMismatch(t.clone()));
                 }
             }
         }
         out
+    }
+
+    /// A place a window can go to: not a tab, and every reference in it exists.
+    fn place_usable(&self, place: &Place) -> bool {
+        match place {
+            Place::Tab { .. } => false,
+            Place::Zone { zone } => self.zone(zone).is_some(),
+            Place::Free { monitor, .. } | Place::Maximized { monitor } => *monitor < self.monitors.len(),
+        }
+    }
+
+    /// Mends the tab groups [`Layout::problems`] finds damaged (a file edited by hand, or written
+    /// by a faulty version): each one ends, and its windows become windows of their own in the
+    /// group's place, or maximised when that place is damaged too. Other problems only make
+    /// Mosaïk skip a zone or a window, so they are left for the user to see. Returns how many
+    /// groups ended.
+    pub fn repair_tabs(&mut self) -> usize {
+        let mut broken: std::collections::HashSet<TabGroupId> = std::collections::HashSet::new();
+        for p in self.problems() {
+            match p {
+                LayoutProblem::TabGroupBroken(g) => {
+                    broken.insert(g);
+                }
+                LayoutProblem::TabGroupMismatch(slot) => {
+                    for g in self.tab_groups.iter().filter(|g| g.tabs.contains(&slot)) {
+                        broken.insert(g.id.clone());
+                    }
+                    if let Some(Place::Tab { group }) = self.slot(&slot).map(|s| &s.place) {
+                        broken.insert(group.clone());
+                    }
+                }
+                LayoutProblem::DuplicateId(id)
+                    if self.tab_groups.iter().filter(|g| g.id.0 == id).count() > 1 =>
+                {
+                    broken.insert(TabGroupId(id));
+                }
+                _ => {}
+            }
+        }
+        if broken.is_empty() {
+            return 0;
+        }
+        let fallback = Place::Maximized { monitor: 0 };
+        let place_of = |layout: &Layout, group: &TabGroupId| -> Place {
+            layout
+                .tab_groups
+                .iter()
+                .find(|g| &g.id == group)
+                .map(|g| g.place.clone())
+                .filter(|p| layout.place_usable(p))
+                .unwrap_or_else(|| fallback.clone())
+        };
+        let places: Vec<(usize, Place)> = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| match &s.place {
+                Place::Tab { group } if broken.contains(group) || self.tab_group(group).is_none() => {
+                    Some((i, place_of(self, group)))
+                }
+                _ => None,
+            })
+            .collect();
+        for (i, place) in places {
+            self.slots[i].place = place;
+        }
+        let before = self.tab_groups.len();
+        self.tab_groups.retain(|g| !broken.contains(&g.id));
+        before - self.tab_groups.len()
+    }
+}
+
+impl Layout {
+    /// The index of `monitor` among the layout's monitors, adding it when it is new; the entry
+    /// of a monitor already there is refreshed, so the layout remembers the latest arrangement.
+    pub fn monitor_index(&mut self, monitor: &crate::topology::Monitor) -> usize {
+        if let Some(i) = self.monitors.iter().position(|r| r.id == monitor.id) {
+            self.monitors[i] = monitor.to_ref();
+            return i;
+        }
+        self.monitors.push(monitor.to_ref());
+        self.monitors.len() - 1
     }
 }
 
@@ -204,11 +293,11 @@ impl Layout {
         )
     }
 
-    /// Makes `slot` a tab next to `onto` (in `onto`'s group, or a new group in `onto`'s place)
-    /// at position `at` (the end when `None`), and the visible one. A slot already in another
-    /// group leaves it first. Returns the group, or `None` when either slot is unknown or they
-    /// are the same.
-    pub fn join_tab(&mut self, onto: &SlotId, slot: &SlotId, at: Option<usize>) -> Option<TabGroupId> {
+    /// Makes `slot` a tab next to `onto` (in `onto`'s group, or a new group in `onto`'s place),
+    /// just before the tab `before` (at the end when `None`), and the visible one. A slot already
+    /// in another group leaves it first. Returns the group, or `None` when either slot is
+    /// unknown or they are the same.
+    pub fn join_tab(&mut self, onto: &SlotId, slot: &SlotId, before: Option<&SlotId>) -> Option<TabGroupId> {
         if onto == slot || self.slot(slot).is_none() {
             return None;
         }
@@ -238,13 +327,47 @@ impl Layout {
         };
         let g = self.group_mut(&group)?;
         g.tabs.retain(|t| t != slot);
-        let at = at.unwrap_or(g.tabs.len()).min(g.tabs.len());
+        let at = before
+            .and_then(|b| g.tabs.iter().position(|t| t == b))
+            .unwrap_or(g.tabs.len());
         g.tabs.insert(at, slot.clone());
         g.active = slot.clone();
         if let Some(s) = self.slot_mut(slot) {
             s.place = Place::Tab { group: group.clone() };
         }
         Some(group)
+    }
+
+    /// Makes a new tab group of `tabs` (in that order: at least two different slots, none of
+    /// them a tab yet) at `place`, showing `active`. Returns its id, or `None` when that would
+    /// not be a sound group.
+    pub fn make_group(&mut self, tabs: &[SlotId], active: &SlotId, place: Place) -> Option<TabGroupId> {
+        let distinct: std::collections::HashSet<&SlotId> = tabs.iter().collect();
+        let free = tabs.iter().all(|t| {
+            self.slot(t)
+                .is_some_and(|s| !matches!(s.place, Place::Tab { .. }))
+        });
+        if matches!(place, Place::Tab { .. })
+            || tabs.len() < 2
+            || distinct.len() != tabs.len()
+            || !tabs.contains(active)
+            || !free
+        {
+            return None;
+        }
+        let id = self.new_group_id();
+        for t in tabs {
+            if let Some(s) = self.slot_mut(t) {
+                s.place = Place::Tab { group: id.clone() };
+            }
+        }
+        self.tab_groups.push(TabGroup {
+            id: id.clone(),
+            tabs: tabs.to_vec(),
+            active: active.clone(),
+            place,
+        });
+        Some(id)
     }
 
     /// Takes `slot` out of its tab group and gives it `place`. When the visible tab leaves, its
@@ -283,18 +406,26 @@ impl Layout {
         true
     }
 
-    /// Moves a tab to position `to` in its group (clamped).
-    pub fn move_tab(&mut self, slot: &SlotId, to: usize) {
+    /// Moves a tab just before the tab `before` of its group (to the end when `None` or when
+    /// `before` is not in the group). Positions are by slot, so tabs whose window is closed (and
+    /// so not on the strip) keep their places around it. Returns whether the order changed.
+    pub fn move_tab_before(&mut self, slot: &SlotId, before: Option<&SlotId>) -> bool {
         let Some(id) = self.group_of(slot).map(|g| g.id.clone()) else {
-            return;
+            return false;
         };
-        if let Some(g) = self.group_mut(&id)
-            && let Some(from) = g.tabs.iter().position(|t| t == slot)
-        {
-            let t = g.tabs.remove(from);
-            let to = to.min(g.tabs.len());
-            g.tabs.insert(to, t);
-        }
+        let Some(g) = self.group_mut(&id) else {
+            return false;
+        };
+        let Some(from) = g.tabs.iter().position(|t| t == slot) else {
+            return false;
+        };
+        let t = g.tabs.remove(from);
+        let at = before
+            .filter(|b| *b != slot)
+            .and_then(|b| g.tabs.iter().position(|x| x == b))
+            .unwrap_or(g.tabs.len());
+        g.tabs.insert(at, t);
+        at != from
     }
 
     /// Makes `slot` the visible tab of its group.
@@ -459,7 +590,10 @@ mod tests {
             }
         );
         // A third joins at the front.
-        assert_eq!(l.join_tab(&sid("s3"), &sid("s2"), Some(0)), Some(g.clone()));
+        assert_eq!(
+            l.join_tab(&sid("s3"), &sid("s2"), Some(&sid("s1"))),
+            Some(g.clone())
+        );
         assert_eq!(
             l.tab_group(&g).unwrap().tabs,
             vec![sid("s2"), sid("s1"), sid("s3")]
@@ -504,7 +638,8 @@ mod tests {
         let mut l = three_in_zones();
         let g1 = l.join_tab(&sid("s1"), &sid("s2"), None).unwrap();
         l.join_tab(&sid("s1"), &sid("s3"), None);
-        l.move_tab(&sid("s3"), 0);
+        assert!(l.move_tab_before(&sid("s3"), Some(&sid("s1"))));
+        assert!(!l.move_tab_before(&sid("s3"), Some(&sid("s1"))), "already there");
         assert_eq!(
             l.tab_group(&g1).unwrap().tabs,
             vec![sid("s3"), sid("s1"), sid("s2")]
@@ -541,5 +676,226 @@ mod tests {
         );
         let back: Layout = serde_json::from_value(json).unwrap();
         assert_eq!(back, layout());
+    }
+
+    #[test]
+    fn damaged_groups_are_found_and_mended() {
+        let g = |id: &str| TabGroupId(id.into());
+        let tab = |id: &str| Place::Tab { group: g(id) };
+        // A group of one, a slot listed by two groups, a group whose place is a tab (which once
+        // made placing loop forever), a duplicate id and a slot pointing at no group.
+        let mut l = three_in_zones();
+        l.slots.push(Slot {
+            id: sid("s4"),
+            app: AppMatch::exe("notepad.exe"),
+            launch: None,
+            place: tab("gone"),
+        });
+        l.slots[0].place = tab("g1");
+        l.slots[1].place = tab("g2");
+        l.slots[2].place = tab("g3");
+        l.tab_groups = vec![
+            TabGroup {
+                id: g("g1"),
+                tabs: vec![sid("s1")],
+                active: sid("s1"),
+                place: Place::Zone {
+                    zone: ZoneId::new("z1"),
+                },
+            },
+            TabGroup {
+                id: g("g2"),
+                tabs: vec![sid("s2"), sid("s1")],
+                active: sid("s2"),
+                place: tab("g2"),
+            },
+            TabGroup {
+                id: g("g3"),
+                tabs: vec![sid("s3"), sid("s3")],
+                active: sid("s3"),
+                place: Place::Free {
+                    monitor: 9,
+                    area: RatioRect::FULL,
+                },
+            },
+            TabGroup {
+                id: g("g3"),
+                tabs: vec![sid("s3"), sid("s2")],
+                active: sid("s3"),
+                place: Place::Maximized { monitor: 0 },
+            },
+        ];
+        let p = l.problems();
+        for expected in [
+            LayoutProblem::TabGroupBroken(g("g1")),
+            LayoutProblem::TabGroupBroken(g("g2")),
+            LayoutProblem::TabGroupBroken(g("g3")),
+            LayoutProblem::DuplicateId("g3".into()),
+            LayoutProblem::TabGroupMismatch(sid("s1")),
+            LayoutProblem::TabGroupMismatch(sid("s4")),
+        ] {
+            assert!(p.contains(&expected), "{expected:?} not in {p:?}");
+        }
+        // Placing a slot of the self-referencing group ends instead of looping.
+        let t = fixtures::single_1080p_100();
+        let r = crate::place::Resolver::new(&l, &t, crate::zone::FrameStyle::default());
+        assert_eq!(r.target(&tab("g2")), None);
+
+        assert_eq!(l.repair_tabs(), 4);
+        assert_eq!(l.problems(), vec![]);
+        assert!(l.tab_groups.is_empty());
+        // Each window keeps its group's place when that place is sound, else it is maximised.
+        assert_eq!(
+            l.slot(&sid("s1")).unwrap().place,
+            Place::Zone {
+                zone: ZoneId::new("z1")
+            }
+        );
+        assert_eq!(l.slot(&sid("s2")).unwrap().place, Place::Maximized { monitor: 0 });
+        assert_eq!(l.slot(&sid("s4")).unwrap().place, Place::Maximized { monitor: 0 });
+        assert_eq!(layout().clone().repair_tabs(), 0, "a sound layout is left alone");
+    }
+
+    #[test]
+    fn make_group_refuses_unsound_groups() {
+        let mut l = three_in_zones();
+        let z1 = Place::Zone {
+            zone: ZoneId::new("z1"),
+        };
+        assert_eq!(
+            l.make_group(&[sid("s1")], &sid("s1"), z1.clone()),
+            None,
+            "one tab"
+        );
+        assert_eq!(
+            l.make_group(&[sid("s1"), sid("s1")], &sid("s1"), z1.clone()),
+            None,
+            "the same slot twice"
+        );
+        assert_eq!(
+            l.make_group(&[sid("s1"), sid("s2")], &sid("s3"), z1.clone()),
+            None,
+            "showing a slot that is not a tab"
+        );
+        assert_eq!(
+            l.make_group(&[sid("s1"), sid("nope")], &sid("s1"), z1.clone()),
+            None,
+            "an unknown slot"
+        );
+        let g = l
+            .make_group(&[sid("s2"), sid("s1")], &sid("s1"), z1.clone())
+            .unwrap();
+        assert_eq!(l.problems(), vec![]);
+        assert_eq!(l.tab_group(&g).unwrap().tabs, vec![sid("s2"), sid("s1")]);
+        assert_eq!(
+            l.make_group(&[sid("s1"), sid("s3")], &sid("s1"), z1),
+            None,
+            "a slot that is a tab already"
+        );
+    }
+
+    #[test]
+    fn tabs_move_relative_to_other_tabs() {
+        let mut l = three_in_zones();
+        let g = l.join_tab(&sid("s1"), &sid("s2"), None).unwrap();
+        l.join_tab(&sid("s1"), &sid("s3"), None);
+        // s2 is closed, so the strip shows [s1, s3]: dragging s3 before s1 moves it before s1,
+        // whatever the closed tab's position.
+        assert!(l.move_tab_before(&sid("s3"), Some(&sid("s1"))));
+        assert_eq!(
+            l.tab_group(&g).unwrap().tabs,
+            vec![sid("s3"), sid("s1"), sid("s2")]
+        );
+        assert!(l.move_tab_before(&sid("s3"), None));
+        assert_eq!(
+            l.tab_group(&g).unwrap().tabs,
+            vec![sid("s1"), sid("s2"), sid("s3")]
+        );
+        assert!(
+            !l.move_tab_before(&sid("s3"), Some(&sid("s3"))),
+            "before itself: no change"
+        );
+        assert!(
+            !l.move_tab_before(&sid("s3"), Some(&sid("nope"))),
+            "already at the end"
+        );
+    }
+
+    mod properties {
+        use super::*;
+        use proptest::prelude::*;
+
+        #[derive(Clone, Debug)]
+        enum Op {
+            Join(usize, usize, Option<usize>),
+            Leave(usize),
+            MoveBefore(usize, Option<usize>),
+            Show(usize),
+            MoveGroup(usize),
+        }
+
+        fn op(n: usize) -> impl Strategy<Value = Op> {
+            prop_oneof![
+                (0..n, 0..n, proptest::option::of(0..n)).prop_map(|(a, b, c)| Op::Join(a, b, c)),
+                (0..n).prop_map(Op::Leave),
+                (0..n, proptest::option::of(0..n)).prop_map(|(a, b)| Op::MoveBefore(a, b)),
+                (0..n).prop_map(Op::Show),
+                (0..n).prop_map(Op::MoveGroup),
+            ]
+        }
+
+        fn slots(n: usize) -> Layout {
+            let mut l = layout();
+            l.tab_groups.clear();
+            l.slots = (0..n)
+                .map(|i| Slot {
+                    id: SlotId(format!("s{i}")),
+                    app: AppMatch::exe("app.exe"),
+                    launch: None,
+                    place: Place::Zone {
+                        zone: ZoneId::new("z1"),
+                    },
+                })
+                .collect();
+            l
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(512))]
+            /// Whatever the user does with tabs, the layout stays sound: every group has two
+            /// tabs or more, shows one of them, sits in a real place, and each slot is a tab of
+            /// one group at most, pointing back at it.
+            #[test]
+            fn tab_operations_keep_layouts_sound(ops in proptest::collection::vec(op(5), 1..40)) {
+                let mut l = slots(5);
+                let id = |i: usize| SlotId(format!("s{i}"));
+                for o in ops {
+                    match o {
+                        Op::Join(a, b, before) => {
+                            let before = before.map(id);
+                            let _ = l.join_tab(&id(a), &id(b), before.as_ref());
+                        }
+                        Op::Leave(a) => {
+                            let _ = l.leave_tab(&id(a), Place::Maximized { monitor: 0 });
+                        }
+                        Op::MoveBefore(a, b) => {
+                            let b = b.map(id);
+                            let _ = l.move_tab_before(&id(a), b.as_ref());
+                        }
+                        Op::Show(a) => {
+                            let _ = l.show_tab(&id(a));
+                        }
+                        Op::MoveGroup(a) => {
+                            if let Some(g) = l.group_of(&id(a)).map(|g| g.id.clone()) {
+                                l.move_group(&g, Place::Free { monitor: 0, area: RatioRect::FULL });
+                            }
+                        }
+                    }
+                    prop_assert_eq!(l.problems(), vec![]);
+                    let mut clone = l.clone();
+                    prop_assert_eq!(clone.repair_tabs(), 0);
+                }
+            }
+        }
     }
 }

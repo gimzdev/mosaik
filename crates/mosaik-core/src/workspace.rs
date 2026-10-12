@@ -387,7 +387,12 @@ pub fn remember(
         let Some(slot) = out.layout.slots.iter_mut().find(|s| s.id == p.slot) else {
             continue;
         };
-        // A tab moves its whole group: the others follow when they are shown.
+        // The latest title, unless the user wrote a title rule of their own.
+        if matches!(slot.app.title, None | Some(TitleMatch::Like(_))) && !w.title.trim().is_empty() {
+            slot.app.title = Some(TitleMatch::Like(w.title.clone()));
+        }
+        // A tab moves its whole group: the others follow when they are shown. A hidden tab
+        // says nothing about where its group is.
         if let Place::Tab { group } = &slot.place {
             let group = group.clone();
             if matches!(w.cloak, crate::window::Cloak::None) {
@@ -396,10 +401,6 @@ pub fn remember(
             continue;
         }
         slot.place = place;
-        // The latest title, unless the user wrote a title rule of their own.
-        if matches!(slot.app.title, None | Some(TitleMatch::Like(_))) && !w.title.trim().is_empty() {
-            slot.app.title = Some(TitleMatch::Like(w.title.clone()));
-        }
     }
     out.layout.monitors = refs;
     // Front to back: windows on screen in their current order, then the others as they were.
@@ -423,6 +424,9 @@ pub struct Move {
 /// the front one.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SwitchPlan {
+    /// Every slot an open window fills, background tabs included, front to back.
+    pub assigned: Vec<(SlotId, WindowHandle)>,
+    /// Background tabs are not moved: a tab goes to its group's place when it is shown.
     pub moves: Vec<Move>,
     pub launch: Vec<(SlotId, Launch)>,
     /// Slots with no open window and no way to start one.
@@ -464,10 +468,59 @@ pub fn plan_switch(
     let assigned: HashMap<SlotId, WindowHandle> = assign(&slots, windows).into_iter().collect();
     let resolver = Resolver::new(&to.layout, topology, style);
     let mut plan = SwitchPlan::default();
-    for slot in &to.layout.slots {
+    // Tab groups: the visible tab shows, or when its window is not open, the tab next to it
+    // (the same rule the engine applies on screen, `crate::tabs`).
+    for g in &to.layout.tab_groups {
+        let now = crate::tabs::GroupNow {
+            id: g.id.clone(),
+            order: g.tabs.clone(),
+            open: g
+                .tabs
+                .iter()
+                .filter_map(|s| assigned.get(s).map(|w| (s.clone(), *w)))
+                .collect(),
+            wanted: Some(g.active.clone()),
+            reach: crate::tabs::Reach::Strip,
+        };
+        let Some((_, active)) = now.visible().cloned() else {
+            continue;
+        };
+        plan.tabs.push(TabShow {
+            group: g.id.clone(),
+            windows: now.open.iter().map(|(_, w)| *w).collect(),
+            active,
+        });
+    }
+    let background: HashSet<WindowHandle> = plan.tabs.iter().flat_map(TabShow::background).collect();
+    // Front to back by slot; a tab group is as far forward as its front-most tab, whichever tab
+    // shows (a hidden tab saved last takes the group's place when the others are closed).
+    let position: HashMap<&SlotId, usize> = to
+        .layout
+        .slots
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (&s.id, i))
+        .collect();
+    let rank = |slot: &Slot| -> usize {
+        let own = position.get(&slot.id).copied().unwrap_or(usize::MAX);
+        to.layout.group_of(&slot.id).map_or(own, |g| {
+            g.tabs
+                .iter()
+                .filter_map(|t| position.get(t).copied())
+                .min()
+                .unwrap_or(own)
+        })
+    };
+    let mut ordered: Vec<&Slot> = to.layout.slots.iter().collect();
+    ordered.sort_by_key(|s| rank(s));
+    for slot in ordered {
         match assigned.get(&slot.id) {
             Some(window) => {
-                if let Some(target) = to.layout.effective_place(slot).and_then(|p| resolver.target(p)) {
+                plan.assigned.push((slot.id.clone(), *window));
+                if background.contains(window) {
+                    continue;
+                }
+                if let Some(target) = resolver.target(&slot.place) {
                     plan.moves.push(Move {
                         slot: slot.id.clone(),
                         window: *window,
@@ -492,52 +545,88 @@ pub fn plan_switch(
             .filter(|h| previous.contains(h) && !used.contains(h))
             .collect();
     }
-    // Tab groups: the visible tab shows (or the first open one, when it is not open).
-    for g in &to.layout.tab_groups {
-        let windows: Vec<WindowHandle> = g.tabs.iter().filter_map(|s| assigned.get(s).copied()).collect();
-        let Some(first) = windows.first().copied() else {
-            continue;
-        };
-        let active = assigned.get(&g.active).copied().unwrap_or(first);
-        plan.tabs.push(TabShow {
-            group: g.id.clone(),
-            windows,
-            active,
-        });
-    }
-    let background: HashSet<WindowHandle> = plan.tabs.iter().flat_map(TabShow::background).collect();
     // Slots are front to back: raise from the back so the first slot ends on top.
-    plan.raise = plan
-        .moves
-        .iter()
-        .rev()
-        .map(|m| m.window)
-        .filter(|w| !background.contains(w))
-        .collect();
-    plan.focus = plan
-        .moves
-        .iter()
-        .map(|m| m.window)
-        .find(|w| !background.contains(w));
+    plan.raise = plan.moves.iter().rev().map(|m| m.window).collect();
+    plan.focus = plan.moves.first().map(|m| m.window);
     plan
 }
 
-/// After [`capture`]: windows that were tabs of one group become a tab group again. Each entry
-/// lists positions in the captured windows (in tab order) and the position of the visible one.
-pub fn regroup(ws: &mut Workspace, groups: &[(Vec<usize>, usize)]) {
-    for (tabs, active) in groups {
-        let slots: Vec<SlotId> = tabs
-            .iter()
-            .filter_map(|i| ws.layout.slots.get(*i).map(|s| s.id.clone()))
-            .collect();
-        let Some(first) = slots.first() else { continue };
-        for t in slots.iter().skip(1) {
-            ws.layout.join_tab(first, t, None);
+/// One tab of a tab group on screen, when saving.
+#[derive(Clone, Debug)]
+pub enum TabSeen<'a> {
+    /// A window that was captured, at this position among the captured windows.
+    Captured(usize),
+    /// A tab Mosaïk keeps hidden: it becomes a slot of the group (it has no place of its own).
+    Hidden(Seen<'a>),
+}
+
+/// A tab group on screen, when saving: its tabs in order and the one that shows.
+#[derive(Clone, Debug)]
+pub struct GroupSeen<'a> {
+    pub tabs: Vec<TabSeen<'a>>,
+    /// Position in `tabs` of the tab that shows; it must be a captured one, since the group
+    /// goes where it is.
+    pub visible: usize,
+}
+
+/// After [`capture`]: the tab groups on screen become tab groups of the workspace again, where
+/// their visible tab was captured. Hidden tabs become slots of their group; the slots made for
+/// them are returned with their windows. A group that would not be sound (its visible tab not
+/// captured, fewer than two tabs) is left out, and its captured windows stay windows of their
+/// own.
+pub fn regroup(ws: &mut Workspace, groups: &[GroupSeen<'_>]) -> Vec<(SlotId, WindowHandle)> {
+    let mut made = Vec::new();
+    for g in groups {
+        let Some(TabSeen::Captured(v)) = g.tabs.get(g.visible) else {
+            continue;
+        };
+        let Some((visible, place)) = ws.layout.slots.get(*v).map(|s| (s.id.clone(), s.place.clone())) else {
+            continue;
+        };
+        if matches!(place, Place::Tab { .. }) {
+            continue;
         }
-        if let Some(a) = ws.layout.slots.get(*active).map(|s| s.id.clone()) {
-            ws.layout.show_tab(&a);
+        let mut taken: HashSet<String> = ws.layout.slots.iter().map(|s| s.id.0.clone()).collect();
+        let mut tabs: Vec<SlotId> = Vec::with_capacity(g.tabs.len());
+        let mut added: Vec<(Slot, WindowHandle)> = Vec::new();
+        for t in &g.tabs {
+            match t {
+                TabSeen::Captured(i) => {
+                    if let Some(s) = ws.layout.slots.get(*i)
+                        && !matches!(s.place, Place::Tab { .. })
+                        && !tabs.contains(&s.id)
+                    {
+                        tabs.push(s.id.clone());
+                    }
+                }
+                TabSeen::Hidden(seen) => {
+                    let id = SlotId(next_id("s", &taken));
+                    taken.insert(id.0.clone());
+                    tabs.push(id.clone());
+                    added.push((
+                        Slot {
+                            id,
+                            app: app_match(seen.facts),
+                            launch: seen.launch.clone(),
+                            place: place.clone(),
+                        },
+                        seen.facts.handle,
+                    ));
+                }
+            }
         }
+        if tabs.len() < 2 {
+            continue;
+        }
+        for (slot, window) in added {
+            made.push((slot.id.clone(), window));
+            ws.layout.slots.push(slot);
+        }
+        // Sound by the checks above; were it not, the hidden tabs would simply stay windows of
+        // their own in the group's place.
+        let _ = ws.layout.make_group(&tabs, &visible, place);
     }
+    made
 }
 
 /// Where the windows already filling a workspace's slots go on the monitors connected now:
@@ -555,7 +644,7 @@ pub fn plan_refit(
         .filter(|(_, w)| !w.minimized)
         .filter_map(|(slot, w)| {
             let s = ws.layout.slot(slot)?;
-            let target = ws.layout.effective_place(s).and_then(|p| resolver.target(p))?;
+            let target = resolver.target(&s.place)?;
             Some(Move {
                 slot: slot.clone(),
                 window: w.handle,
@@ -1039,7 +1128,8 @@ mod tests {
     #[test]
     fn tab_groups_show_one_window_and_regroup_after_saving() {
         let t = fixtures::single_1080p_100();
-        // Two editors stacked in the left half (one of them a hidden tab), a browser on the right.
+        // An editor in the left half with a second editor as its hidden tab, a browser on the
+        // right.
         let ws = [
             win(
                 1,
@@ -1047,12 +1137,15 @@ mod tests {
                 "a - x - Visual Studio Code",
                 Rect::new(0, 0, 960, 1032),
             ),
-            win(
-                2,
-                "code.exe",
-                "b - y - Visual Studio Code",
-                Rect::new(0, 0, 960, 1032),
-            ),
+            WindowFacts {
+                cloak: crate::window::Cloak::ByMosaik,
+                ..win(
+                    2,
+                    "code.exe",
+                    "b - y - Visual Studio Code",
+                    Rect::new(0, 0, 960, 1032),
+                )
+            },
             win(
                 3,
                 "chrome.exe",
@@ -1060,15 +1153,23 @@ mod tests {
                 Rect::new(960, 0, 1920, 1032),
             ),
         ];
-        let seen: Vec<Seen> = ws.iter().map(|w| seen(w, "App")).collect();
-        let mut w = capture(WorkspaceId("w".into()), "W".into(), &seen, &t, style(), None);
-        regroup(&mut w, &[(vec![0, 1], 0)]);
+        let captured = [seen(&ws[0], "Code"), seen(&ws[2], "Chrome")];
+        let mut w = capture(WorkspaceId("w".into()), "W".into(), &captured, &t, style(), None);
+        let _ = regroup(
+            &mut w,
+            &[GroupSeen {
+                tabs: vec![TabSeen::Captured(0), TabSeen::Hidden(seen(&ws[1], "Code"))],
+                visible: 0,
+            }],
+        );
         assert_eq!(w.layout.problems(), vec![]);
+        assert_eq!(w.layout.zones.len(), 2, "a hidden tab makes no zone of its own");
         assert_eq!(w.layout.tab_groups.len(), 1);
         let g = &w.layout.tab_groups[0];
         assert_eq!(g.tabs.len(), 2);
         assert_eq!(g.active, w.layout.slots[0].id);
         assert!(matches!(g.place, Place::Zone { .. }));
+        assert_eq!(w.layout.slots.len(), 3);
 
         let plan = plan_switch(
             &w,
@@ -1078,21 +1179,147 @@ mod tests {
             style(),
             SwitchSettings::default(),
         );
+        assert_eq!(plan.assigned.len(), 3, "the hidden tab belongs to the workspace");
         assert_eq!(plan.tabs.len(), 1);
         assert_eq!(plan.tabs[0].active, WindowHandle(1));
         assert_eq!(
             plan.tabs[0].background().collect::<Vec<_>>(),
             vec![WindowHandle(2)]
         );
-        assert_eq!(plan.moves.len(), 3, "hidden tabs move with their group");
+        assert_eq!(
+            plan.moves.iter().map(|m| m.window).collect::<Vec<_>>(),
+            vec![WindowHandle(1), WindowHandle(3)],
+            "a background tab moves when it is shown, not before"
+        );
         assert!(
             !plan.raise.contains(&WindowHandle(2)),
             "a background tab is not raised"
         );
         assert_eq!(plan.focus, Some(WindowHandle(1)));
+        // The visible tab sits below a band with room for the strip, tags or not.
+        let no_tags = style().without_tags();
+        let plan = plan_switch(&w, &[&ws[0], &ws[2]], &[], &t, no_tags, SwitchSettings::default());
+        let code = plan.moves.iter().find(|m| m.window == WindowHandle(1)).unwrap();
+        let browser = plan.moves.iter().find(|m| m.window == WindowHandle(3)).unwrap();
+        let (Target::Frame(code), Target::Frame(browser)) = (&code.target, &browser.target) else {
+            panic!("both go to zones");
+        };
+        assert_eq!(code.top - browser.top, style().tag_band);
         // The visible tab's window is closed: the other one shows.
         let plan = plan_switch(&w, &[&ws[1], &ws[2]], &[], &t, style(), SwitchSettings::default());
         assert_eq!(plan.tabs[0].active, WindowHandle(2));
+        assert_eq!(plan.focus, Some(WindowHandle(2)));
+    }
+
+    #[test]
+    fn regroup_puts_the_group_where_its_visible_tab_is() {
+        let t = fixtures::single_1080p_100();
+        // X was the group's first tab; the user showed Y and dragged it to the right half. X is
+        // hidden where the group used to be.
+        let x = WindowFacts {
+            cloak: crate::window::Cloak::ByMosaik,
+            ..win(1, "code.exe", "X", Rect::new(0, 32, 956, 1028))
+        };
+        let y = win(2, "notepad.exe", "Y", Rect::new(964, 32, 1916, 1028));
+        let captured = [seen(&y, "Notepad")];
+        let mut w = capture(WorkspaceId("w".into()), "W".into(), &captured, &t, style(), None);
+        let _ = regroup(
+            &mut w,
+            &[GroupSeen {
+                tabs: vec![TabSeen::Hidden(seen(&x, "Code")), TabSeen::Captured(0)],
+                visible: 1,
+            }],
+        );
+        assert_eq!(w.layout.problems(), vec![]);
+        let g = &w.layout.tab_groups[0];
+        assert_eq!(
+            g.tabs,
+            vec![w.layout.slots[1].id.clone(), w.layout.slots[0].id.clone()]
+        );
+        assert_eq!(g.active, w.layout.slots[0].id, "Y shows");
+        let plan = plan_switch(&w, &[&x, &y], &[], &t, style(), SwitchSettings::default());
+        assert_eq!(plan.moves.len(), 1);
+        assert!(
+            matches!(plan.moves[0].target, Target::Frame(r) if r.left > 960),
+            "the group stays on the right, where Y is: {:?}",
+            plan.moves[0].target
+        );
+        // A group whose visible tab was not captured, or of one tab, is left out.
+        let mut w2 = capture(WorkspaceId("w".into()), "W".into(), &captured, &t, style(), None);
+        let _ = regroup(
+            &mut w2,
+            &[
+                GroupSeen {
+                    tabs: vec![TabSeen::Hidden(seen(&x, "Code")), TabSeen::Captured(0)],
+                    visible: 0,
+                },
+                GroupSeen {
+                    tabs: vec![TabSeen::Captured(0), TabSeen::Captured(0)],
+                    visible: 0,
+                },
+            ],
+        );
+        assert!(w2.layout.tab_groups.is_empty());
+        assert_eq!(w2.layout.slots.len(), 1);
+        assert_eq!(w2.layout.problems(), vec![]);
+    }
+
+    #[test]
+    fn remembering_a_tab_keeps_its_title_and_moves_its_group() {
+        let t = fixtures::single_1080p_100();
+        let a = win(
+            1,
+            "code.exe",
+            "a - Visual Studio Code",
+            Rect::new(0, 32, 956, 1028),
+        );
+        let b = WindowFacts {
+            cloak: crate::window::Cloak::ByMosaik,
+            ..win(
+                2,
+                "code.exe",
+                "b - Visual Studio Code",
+                Rect::new(0, 32, 956, 1028),
+            )
+        };
+        let captured = [seen(&a, "Code")];
+        let mut w = capture(WorkspaceId("w".into()), "W".into(), &captured, &t, style(), None);
+        let _ = regroup(
+            &mut w,
+            &[GroupSeen {
+                tabs: vec![TabSeen::Captured(0), TabSeen::Hidden(seen(&b, "Code"))],
+                visible: 0,
+            }],
+        );
+        let (sa, sb) = (w.layout.slots[0].id.clone(), w.layout.slots[1].id.clone());
+        // The visible tab, renamed, is dragged to the right half by hand.
+        let moved = win(
+            1,
+            "code.exe",
+            "c - Visual Studio Code",
+            Rect::new(1000, 100, 1800, 900),
+        );
+        let after = remember(
+            &w,
+            &[Present {
+                slot: sa.clone(),
+                window: &moved,
+            }],
+            &t,
+            style(),
+        );
+        assert_eq!(after.layout.problems(), vec![]);
+        assert_eq!(
+            after.layout.slot(&sa).unwrap().app.title,
+            Some(TitleMatch::Like("c - Visual Studio Code".into()))
+        );
+        assert!(matches!(after.layout.tab_groups[0].place, Place::Free { .. }));
+        // A hidden tab says nothing about where its group is.
+        let after2 = remember(&after, &[Present { slot: sb, window: &b }], &t, style());
+        assert_eq!(
+            after2.layout.tab_groups[0].place,
+            after.layout.tab_groups[0].place
+        );
     }
 
     #[test]

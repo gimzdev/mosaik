@@ -48,6 +48,12 @@ pub fn exists(hwnd: HWND) -> bool {
     unsafe { IsWindow(Some(hwnd)) }.as_bool()
 }
 
+/// `IsWindowVisible`: shown by its app (true for minimised and cloaked windows too).
+pub fn is_visible(hwnd: HWND) -> bool {
+    // SAFETY: read-only query; any value is accepted.
+    unsafe { IsWindowVisible(hwnd) }.as_bool()
+}
+
 unsafe extern "system" fn push_window(hwnd: HWND, data: LPARAM) -> BOOL {
     // SAFETY: `data` is the `&mut Vec<HWND>` passed by `top_level` below, alive for the whole
     // EnumWindows call that invokes this callback on the same thread.

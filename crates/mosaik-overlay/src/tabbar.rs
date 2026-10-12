@@ -16,6 +16,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
 };
 
+use mosaik_core::strip;
+
 use crate::canvas::{Align, Area, Canvas, Rgba, Weight};
 use crate::layered::{LayeredWindow, Stack, restack};
 
@@ -124,10 +126,20 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             let _ = unsafe { ReleaseCapture() };
             LRESULT(0)
         }
-        WM_CAPTURECHANGED | WM_CANCELMODE => {
+        WM_CAPTURECHANGED => {
             if CAPTURED.with(Cell::take) == Some(bar) {
                 push(BarInput::Cancel { bar });
             }
+            LRESULT(0)
+        }
+        // Windows asks every window to end what it is doing (a dialog, Ctrl+Alt+Del): the press
+        // ends, and the mouse goes back.
+        WM_CANCELMODE => {
+            if CAPTURED.with(Cell::take) == Some(bar) {
+                push(BarInput::Cancel { bar });
+            }
+            // SAFETY: gives the mouse back.
+            let _ = unsafe { ReleaseCapture() };
             LRESULT(0)
         }
         WM_CLOSE => LRESULT(0),
@@ -137,11 +149,31 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
     }
 }
 
+/// Ends a press on any tab strip (Esc during a drag): the mouse goes back and no `Cancel` is
+/// queued, since the caller is the one cancelling.
+pub fn cancel_press() {
+    if CAPTURED.with(Cell::take).is_some() {
+        // SAFETY: gives the mouse back; the strip's WM_CAPTURECHANGED then finds no press.
+        let _ = unsafe { ReleaseCapture() };
+    }
+}
+
 /// One tab as the strip shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TabView {
+    /// Who the tab is (its window's handle), so a click names the tab it landed on even if the
+    /// tabs changed since the strip was drawn.
+    pub id: u64,
     pub title: String,
     pub active: bool,
+}
+
+/// What a press on a strip landed on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hit {
+    Tab(u64),
+    /// The "+N" chip of tabs that do not fit.
+    More,
 }
 
 /// How a strip looks.
@@ -184,11 +216,21 @@ struct Drawn {
     drop_at: Option<usize>,
 }
 
+/// Where the chips are, as last drawn, in the strip's own pixels.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Placed {
+    layout: strip::Layout,
+    /// The tabs' ids, in tab order (the layout names tabs by index).
+    ids: Vec<u64>,
+    /// The chips' top and bottom.
+    top: f32,
+    bottom: f32,
+}
+
 /// A group's tab strip.
 pub struct TabBar {
     window: LayeredWindow,
-    /// Where each chip is inside the strip, in tab order, as last drawn.
-    chips: Vec<Rect>,
+    placed: Placed,
     drawn: Option<Drawn>,
 }
 
@@ -196,7 +238,7 @@ impl TabBar {
     pub fn new() -> Result<Self> {
         Ok(Self {
             window: LayeredWindow::with_proc("MosaikTabBar", false, false, bar_proc)?,
-            chips: Vec::new(),
+            placed: Placed::default(),
             drawn: None,
         })
     }
@@ -209,28 +251,34 @@ impl TabBar {
         self.window.hwnd().0 as isize == bar
     }
 
-    /// `p` (on screen) inside the strip.
-    fn local(&self, p: Point) -> Option<Point> {
+    /// `p` (on screen) in the strip's own pixels, when it is shown.
+    fn local(&self, p: Point) -> Option<(f32, f32)> {
         let at = self.window.shown_at()?;
-        Some(Point::new(p.x - at.left, p.y - at.top))
+        Some((f(p.x - at.left), f(p.y - at.top)))
     }
 
-    /// The tab whose chip is under `p` (on screen).
-    pub fn hit(&self, p: Point) -> Option<usize> {
-        let p = self.local(p)?;
-        self.chips.iter().position(|c| c.contains(p))
+    /// What is under `p` (on screen): a tab's chip or the "+N" chip.
+    pub fn hit(&self, p: Point) -> Option<Hit> {
+        let (x, y) = self.local(p)?;
+        if y < self.placed.top || y >= self.placed.bottom {
+            return None;
+        }
+        if let Some(i) = self.placed.layout.tab_at(x) {
+            return self.placed.ids.get(i).map(|id| Hit::Tab(*id));
+        }
+        self.placed
+            .layout
+            .more
+            .filter(|(span, _)| span.contains(x))
+            .map(|_| Hit::More)
     }
 
-    /// Where a tab dropped (or dragged) at `p` (on screen) goes: before the first chip whose
-    /// middle is to the right of `p`.
-    pub fn slot_for(&self, p: Point) -> usize {
-        let Some(p) = self.local(p) else {
-            return self.chips.len();
-        };
-        self.chips
-            .iter()
-            .position(|c| p.x < c.center().x)
-            .unwrap_or(self.chips.len())
+    /// Where a tab dropped (or dragged) at `p` (on screen) goes: before the tab with this id,
+    /// or at the end (`None`, also when the strip is hidden).
+    pub fn insert_before(&self, p: Point) -> Option<u64> {
+        let (x, _) = self.local(p)?;
+        let i = self.placed.layout.insert_before(x)?;
+        self.placed.ids.get(i).copied()
     }
 
     /// The strip on screen, when shown.
@@ -238,16 +286,33 @@ impl TabBar {
         self.window.shown_at()
     }
 
-    /// Each chip on screen, in tab order (empty when hidden).
-    pub fn chips(&self) -> Vec<Rect> {
+    /// Each drawn chip on screen with its tab's id, in tab order (empty when hidden).
+    pub fn chips(&self) -> Vec<(u64, Rect)> {
         let Some(at) = self.window.shown_at() else {
             return Vec::new();
         };
-        self.chips.iter().map(|c| c.offset(at.left, at.top)).collect()
+        self.placed
+            .layout
+            .chips
+            .iter()
+            .filter_map(|(i, span)| {
+                let id = self.placed.ids.get(*i)?;
+                Some((
+                    *id,
+                    Rect::new(
+                        px(span.x),
+                        px(self.placed.top),
+                        px(span.end()),
+                        px(self.placed.bottom),
+                    )
+                    .offset(at.left, at.top),
+                ))
+            })
+            .collect()
     }
 
-    /// Shows the strip across `band` (the band above the group's window), right above `window`
-    /// in the stacking order. `drop_at` shows the "Drop to add" slot at that position.
+    /// Shows the strip across `band`, stacked as `stack` says. `drop_at` shows the "Drop to
+    /// add" slot before that tab (after the last one when it is the number of tabs).
     pub fn show(
         &mut self,
         canvas: &mut Canvas,
@@ -272,21 +337,17 @@ impl TabBar {
             drop_at,
         };
         if self.drawn.as_ref() != Some(&want) {
-            // Layout, left to right: the zone's tag, then the chips (shrunk to fit), then the
-            // drop slot.
             let h = 21.0 * s;
-            let top = f(band.height()) - h - 3.0 * s;
+            let top = (f(band.height()) - h - 3.0 * s).max(0.0);
             let text = 11.5 * s;
             let pad = 10.0 * s;
-            let gap = 4.0 * s;
-            let tag_w = canvas.text_width(&look.label, text, Weight::SemiBold) + 22.0 * s;
-            let drop_label = "Drop to add";
-            let drop_w = if drop_at.is_some() {
-                canvas.text_width(drop_label, text, Weight::SemiBold) + 2.0 * pad + 14.0 * s
-            } else {
+            let drop_label = "+ Drop to add";
+            let tag_w = if look.label.trim().is_empty() {
                 0.0
+            } else {
+                canvas.text_width(&look.label, text, Weight::SemiBold) + 22.0 * s
             };
-            let natural: Vec<f32> = tabs
+            let naturals: Vec<f32> = tabs
                 .iter()
                 .map(|t| {
                     let weight = if t.active {
@@ -294,31 +355,20 @@ impl TabBar {
                     } else {
                         Weight::Normal
                     };
-                    (canvas.text_width(&t.title, text, weight) + 2.0 * pad).min(220.0 * s)
+                    canvas.text_width(&t.title, text, weight) + 2.0 * pad
                 })
                 .collect();
-            let room = f(band.width()) - tag_w - gap * 2.0 - drop_w;
-            let total: f32 = natural.iter().sum::<f32>() + gap * f(i32::try_from(tabs.len()).unwrap_or(0));
-            let shrink = if total > room && total > 0.0 {
-                (room / total).max(0.2)
-            } else {
-                1.0
-            };
-            let mut chips = Vec::with_capacity(tabs.len());
-            let mut x = tag_w + gap * 2.0;
-            let mut drop_x = None;
-            for (i, w) in natural.iter().enumerate() {
-                if drop_at == Some(i) {
-                    drop_x = Some(x);
-                    x += drop_w + gap;
-                }
-                let w = (w * shrink).max(36.0 * s);
-                chips.push((x, w));
-                x += w + gap;
-            }
-            if drop_at.is_some() && drop_x.is_none() {
-                drop_x = Some(x);
-            }
+            let drop_w = canvas.text_width(drop_label, text, Weight::SemiBold) + 2.0 * pad;
+            let layout = strip::layout(
+                &strip::Input {
+                    width: f(band.width()),
+                    tag: tag_w,
+                    tabs: &naturals,
+                    active: tabs.iter().position(|t| t.active),
+                    drop: drop_at.map(|at| (at, drop_w)),
+                },
+                strip::Metrics::at(s),
+            );
             let panel = if look.dark {
                 hex(0x1B1E26, 0.96)
             } else {
@@ -342,28 +392,33 @@ impl TabBar {
                 usize::try_from(band.height()).unwrap_or(1),
             )?;
             canvas.render(surface, |pen| {
-                let tag = Area::new(0.0, top, tag_w, top + h);
-                pen.fill_round(tag, h / 2.0, zone);
-                pen.text(
-                    &look.label,
-                    tag.inset(0.0),
-                    text,
-                    Weight::SemiBold,
-                    Align::Center,
-                    label,
-                )?;
-                for (t, (x, w)) in tabs.iter().zip(&chips) {
-                    let chip = Area::new(*x, top, x + w, top + h);
+                if let Some(t) = layout.tag {
+                    let tag = Area::new(t.x, top, t.end(), top + h);
+                    pen.fill_round(tag, h / 2.0, zone);
+                    pen.text(
+                        &look.label,
+                        Area::new(t.x + 8.0 * s, top, t.end() - 8.0 * s, top + h),
+                        text,
+                        Weight::SemiBold,
+                        Align::Center,
+                        label,
+                    )?;
+                }
+                for (i, span) in &layout.chips {
+                    let Some(t) = tabs.get(*i) else { continue };
+                    let chip = Area::new(span.x, top, span.end(), top + h);
+                    // Chips are opaque, so their text keeps its contrast whatever is behind
+                    // the strip; the visible one is lighter and carries the zone's colour.
                     if t.active {
                         pen.fill_round(chip, 6.0 * s, panel);
-                        // The visible tab carries the zone's colour along its top, as on the site.
                         pen.fill_round(
-                            Area::new(x + 4.0 * s, top, x + w - 4.0 * s, top + 2.5 * s),
+                            Area::new(span.x + 4.0 * s, top, span.end() - 4.0 * s, top + 2.5 * s),
                             1.25 * s,
                             zone,
                         );
                     } else {
-                        pen.fill_round(chip, 6.0 * s, Rgba(panel.0, panel.1, panel.2, 0.72));
+                        pen.fill_round(chip, 6.0 * s, panel);
+                        pen.stroke_round(chip, 6.0 * s, 1.0 * s, Rgba(muted.0, muted.1, muted.2, 0.35));
                     }
                     let weight = if t.active {
                         Weight::SemiBold
@@ -372,20 +427,33 @@ impl TabBar {
                     };
                     pen.text(
                         &t.title,
-                        Area::new(x + pad, top, x + w - pad, top + h),
+                        Area::new(span.x + pad, top, span.end() - pad, top + h),
                         text,
                         weight,
                         Align::Leading,
                         if t.active { ink } else { muted },
                     )?;
                 }
-                if let Some(x) = drop_x {
-                    let slot = Area::new(x, top, x + drop_w, top + h);
-                    pen.fill_round(slot, 6.0 * s, Rgba(panel.0, panel.1, panel.2, 0.85));
+                if let Some((span, hidden)) = layout.more {
+                    let chip = Area::new(span.x, top, span.end(), top + h);
+                    pen.fill_round(chip, 6.0 * s, panel);
+                    pen.stroke_round(chip, 6.0 * s, 1.0 * s, Rgba(muted.0, muted.1, muted.2, 0.35));
+                    pen.text(
+                        &format!("+{hidden}"),
+                        chip,
+                        text,
+                        Weight::SemiBold,
+                        Align::Center,
+                        ink,
+                    )?;
+                }
+                if let Some(span) = layout.drop {
+                    let slot = Area::new(span.x, top, span.end(), top + h);
+                    pen.fill_round(slot, 6.0 * s, panel);
                     pen.dash_round(slot, 6.0 * s, 1.6 * s, saffron);
                     pen.text(
-                        &format!("+ {drop_label}"),
-                        slot,
+                        drop_label,
+                        Area::new(span.x + 4.0 * s, top, span.end() - 4.0 * s, top + h),
                         text,
                         Weight::SemiBold,
                         Align::Center,
@@ -394,11 +462,14 @@ impl TabBar {
                 }
                 Ok(())
             })?;
-            self.chips = chips
-                .iter()
-                .map(|(x, w)| Rect::new(px(*x), px(top), px(x + w), px(top + h)))
-                .collect();
             self.window.present(band.origin(), 255)?;
+            // Clicks map to what is on screen: the new places count once the new picture is up.
+            self.placed = Placed {
+                layout,
+                ids: tabs.iter().map(|t| t.id).collect(),
+                top,
+                bottom: top + h,
+            };
             self.drawn = Some(want);
         } else if self.window.shown_at().is_none() {
             self.window.present(band.origin(), 255)?;
@@ -409,11 +480,30 @@ impl TabBar {
         Ok(())
     }
 
+    /// Hides the strip. A press on it ends (the engine gets `Cancel`): a strip that is not on
+    /// screen cannot be dragged.
     pub fn hide(&mut self) {
+        self.release_press();
         self.window.hide();
+    }
+
+    fn release_press(&self) {
+        let bar = self.window.hwnd().0 as isize;
+        if CAPTURED.with(Cell::get) == Some(bar) {
+            CAPTURED.with(|c| c.set(None));
+            push(BarInput::Cancel { bar });
+            // SAFETY: gives the mouse back.
+            let _ = unsafe { ReleaseCapture() };
+        }
     }
 
     pub fn is_shown(&self) -> bool {
         self.window.shown_at().is_some()
+    }
+}
+
+impl Drop for TabBar {
+    fn drop(&mut self) {
+        self.release_press();
     }
 }

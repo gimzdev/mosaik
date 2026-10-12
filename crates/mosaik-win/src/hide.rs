@@ -1,9 +1,9 @@
 //! Hiding and showing other apps' windows (background tabs), three ways:
 //!
 //! - **Shell cloak**: Explorer stops drawing the window, like a window on another virtual
-//!   desktop. Instant, no animation, geometry untouched, taskbar button kept. Uses an
-//!   undocumented shell interface, so it is feature-checked at run time and verified after
-//!   every call.
+//!   desktop. Instant, no animation, geometry untouched; the window leaves the taskbar and
+//!   Alt+Tab while hidden. Uses an undocumented shell interface, so it is feature-checked at run
+//!   time and verified after every call.
 //! - **Minimise** without activating: documented and recoverable by the user, but animates and
 //!   lets UWP apps suspend.
 //! - **Park** off-screen: documented, instant, but the window stays in Alt+Tab, Chromium sees it
@@ -186,6 +186,21 @@ impl Hider {
         let restore_rect = window_rect(hwnd).ok_or(Error::WindowGone)?;
         // SAFETY: read-only state query.
         let was_maximized = unsafe { IsZoomed(hwnd) }.as_bool();
+        // The marker before the window hides, so a rescue finds it even if Mosaïk stops in
+        // between (ADR 0006); taken off again if it does not hide.
+        mark(hwnd, Some(method));
+        let hidden = self.hide_marked(hwnd, method, restore_rect);
+        if hidden.is_err() {
+            mark(hwnd, None);
+        }
+        hidden.map(|()| Hidden {
+            method,
+            restore_rect,
+            was_maximized,
+        })
+    }
+
+    fn hide_marked(&mut self, hwnd: HWND, method: HideMethod, restore_rect: Rect) -> Result<()> {
         match method {
             HideMethod::ShellCloak => {
                 let r = self.shell().and_then(|s| s.cloak(hwnd, true));
@@ -219,12 +234,36 @@ impl Hider {
                 .ctx("SetWindowPos")?;
             }
         }
-        mark(hwnd, Some(method));
-        Ok(Hidden {
-            method,
-            restore_rect,
-            was_maximized,
-        })
+        Ok(())
+    }
+
+    /// Brings a window back minimised: in the taskbar, not on screen (a window that is no longer
+    /// a tab of the workspace on screen). It is minimised while still hidden, so it never flashes
+    /// up over other windows.
+    pub fn show_minimized(&mut self, hwnd: HWND, hidden: &Hidden) -> Result<()> {
+        if !exists(hwnd) {
+            return Err(Error::WindowGone);
+        }
+        match hidden.method {
+            // Minimised already: only the marker goes.
+            HideMethod::Minimize => {}
+            HideMethod::ShellCloak => {
+                // SAFETY: minimises without activating; the window is cloaked, so nothing shows.
+                let _ = unsafe { ShowWindow(hwnd, SW_SHOWMINNOACTIVE) };
+                let r = self.shell().and_then(|s| s.cloak(hwnd, false));
+                if r.is_err() {
+                    self.shell = None;
+                    self.shell()?.cloak(hwnd, false)?;
+                }
+            }
+            HideMethod::Park => {
+                self.show(hwnd, hidden)?;
+                // SAFETY: minimises without activating.
+                let _ = unsafe { ShowWindow(hwnd, SW_SHOWMINNOACTIVE) };
+            }
+        }
+        mark(hwnd, None);
+        Ok(())
     }
 
     pub fn show(&mut self, hwnd: HWND, hidden: &Hidden) -> Result<()> {

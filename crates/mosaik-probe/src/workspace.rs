@@ -149,14 +149,25 @@ pub fn run(args: &[String]) -> Result<Value, String> {
         });
     }
     pump_until(400, || false);
+    // The watchdog, as in the app: without it nothing hides (tab groups then show all their
+    // windows, stacked, which the results show).
+    let watchdog = match mosaik_engine::watchdog::start(&dir.join("hidden-windows.json")) {
+        Ok(w) => Some(w),
+        Err(e) => {
+            println!("watchdog not started ({e}): tabs will not hide windows");
+            None
+        }
+    };
+    let mut own_pids = vec![mosaik_win::process::own_pid()];
+    own_pids.extend(watchdog.as_ref().map(|w| w.pid));
     // The engine manages the probe windows and nothing else.
     let engine = Engine::start(
         Config {
             data_dir: dir.clone(),
             safe_mode: false,
             app_version: "probe".into(),
-            own_pids: vec![mosaik_win::process::own_pid()],
-            watchdog: false,
+            own_pids,
+            watchdog: watchdog.as_ref().map(|w| w.pid),
             manage_only: Some(vec!["mosaik-probe.exe".into()]),
         },
         sink,

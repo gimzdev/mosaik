@@ -37,6 +37,8 @@ pub(crate) struct Outcome {
 
 /// How long a switch waits for the apps it moves.
 pub(crate) const WAIT: Duration = Duration::from_millis(2500);
+/// How long one window's move (a tab shown, a window dropped) is waited for.
+pub(crate) const WAIT_ONE: Duration = Duration::from_millis(1500);
 
 /// Moves every window at once and waits until each has answered or `wait` has passed, handling
 /// this thread's messages meanwhile. Results come back in no particular order.
@@ -91,7 +93,7 @@ pub(crate) fn move_all(moves: &[(WindowHandle, To)], wait: Duration) -> Vec<Outc
 /// Handles this thread's messages for up to `ms` milliseconds. Messages for the engine's own
 /// window only record what arrived (it is busy), and are acted on when it is done. A request to
 /// end the loop is put back for the main loop.
-fn pump_for(ms: u32) {
+pub(crate) fn pump_for(ms: u32) {
     // SAFETY: waits for input on this thread's queue or the timeout.
     let r = unsafe { MsgWaitForMultipleObjects(None, false, ms, QS_ALLINPUT) };
     if r == WAIT_TIMEOUT {

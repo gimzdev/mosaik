@@ -9,6 +9,7 @@
 //! Windows only; an empty library elsewhere so the workspace builds everywhere.
 #![cfg(windows)]
 
+mod hider;
 mod hotkeys;
 mod mover;
 pub mod server;
@@ -40,8 +41,9 @@ pub struct Config {
     pub app_version: String,
     /// Process ids that are Mosaïk's own (its WebView2 processes, the watchdog): never managed.
     pub own_pids: Vec<u32>,
-    /// The watchdog is running. Without it Mosaïk hides nothing (ADR 0006).
-    pub watchdog: bool,
+    /// The watchdog's process id. Without a running watchdog Mosaïk hides nothing (ADR 0006);
+    /// one that stops is started again.
+    pub watchdog: Option<u32>,
     /// For probes and tests: manage only the windows of these programs (file names such as
     /// `mosaik-probe.exe`), so a test run never touches the user's own windows, and apps it
     /// starts are recognised too. `None` in the app.

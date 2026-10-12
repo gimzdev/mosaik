@@ -65,6 +65,15 @@ impl Saved for WorkspacesFile {
 
     fn repair(&mut self) -> Vec<String> {
         let mut notes = Vec::new();
+        for w in &mut self.workspaces {
+            let ended = w.layout.repair_tabs();
+            if ended > 0 {
+                notes.push(format!(
+                    "Workspace \"{}\" had {ended} damaged tab group(s); their windows are separate windows again.",
+                    w.name
+                ));
+            }
+        }
         for w in &self.workspaces {
             let problems = w.layout.problems();
             if !problems.is_empty() {
@@ -396,5 +405,33 @@ mod tests {
         let loaded = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
         assert_eq!(loaded.value.active, None);
         assert_eq!(loaded.notes.len(), 1);
+    }
+
+    #[test]
+    fn damaged_tab_groups_are_mended_on_load() {
+        let d = TempDir::new("tabs");
+        // A group whose place is itself (once a stack overflow when the workspace opened).
+        fs::write(
+            d.0.join("workspaces.json"),
+            br#"{"version":1,"workspaces":[{"id":"w","name":"W","layout":{
+                "monitors":[{"id":"m","name":"M","bounds":{"left":0,"top":0,"right":1920,"bottom":1080},
+                  "work_area":{"left":0,"top":0,"right":1920,"bottom":1032},"dpi":96,"primary":true}],
+                "zones":[],
+                "slots":[
+                  {"id":"s1","app":{"exe":"a.exe"},"place":{"kind":"tab","group":"g1"}},
+                  {"id":"s2","app":{"exe":"b.exe"},"place":{"kind":"tab","group":"g1"}}],
+                "tab_groups":[{"id":"g1","tabs":["s1","s2"],"active":"s1","place":{"kind":"tab","group":"g1"}}]
+            }}],"active":"w"}"#,
+        )
+        .unwrap();
+        let loaded = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
+        let layout = &loaded.value.workspaces[0].layout;
+        assert_eq!(layout.problems(), vec![]);
+        assert!(layout.tab_groups.is_empty());
+        assert!(
+            loaded.notes.iter().any(|n| n.contains("damaged tab group")),
+            "{:?}",
+            loaded.notes
+        );
     }
 }

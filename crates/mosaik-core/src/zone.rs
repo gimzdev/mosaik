@@ -109,9 +109,26 @@ impl Default for FrameStyle {
     }
 }
 
+/// The least band height a tab strip needs (its chips are 21 px high at 100%).
+pub const TAB_STRIP_BAND: i32 = 24;
+
 impl FrameStyle {
     pub const fn without_tags(self) -> Self {
         Self { tag_band: 0, ..self }
+    }
+
+    /// The style a tab group's windows are placed with: the band above them always has room
+    /// for the tab strip, even when tags are hidden, since the strip is the way to the group's
+    /// other tabs.
+    pub fn for_tabs(self) -> Self {
+        if self.tag_band >= TAB_STRIP_BAND {
+            self
+        } else {
+            Self {
+                tag_band: Self::default().tag_band,
+                ..self
+            }
+        }
     }
 
     /// Where the window's visible frame goes inside a zone on a monitor at `dpi`.
@@ -155,6 +172,9 @@ mod tests {
             Rect::new(8, 64, 1912, 2056)
         );
         assert_eq!(style.without_tags().tag_area(zone, 96), None);
+        // A tab group keeps its strip's band when tags are hidden.
+        assert_eq!(style.without_tags().for_tabs(), style);
+        assert_eq!(style.for_tabs(), style);
     }
 
     #[test]

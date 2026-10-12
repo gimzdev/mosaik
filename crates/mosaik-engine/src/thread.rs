@@ -10,6 +10,7 @@
 //! messages Windows broadcasts: display changes, work-area changes, resume from sleep, sign-out.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
@@ -19,6 +20,7 @@ use mosaik_core::settings::Settings;
 use mosaik_core::store::{Store, WorkspacesFile};
 use mosaik_core::switcher::Entry;
 use mosaik_core::topology::Topology;
+use mosaik_core::window::WindowHandle;
 use mosaik_ipc::protocol::{Command, ErrorCode, HotkeyState, Reply, WorkspaceSummary};
 use mosaik_win::apps::Apps;
 use mosaik_win::own::{WindowClass, destroy};
@@ -141,8 +143,8 @@ pub(crate) struct Engine {
     pub(crate) watch: Watch,
     /// Background tabs Mosaïk has hidden, and the journal the watchdog reads.
     pub(crate) hiding: Hiding,
-    /// Why tabs could not hide a window was told once.
-    pub(crate) told_tabs: bool,
+    /// Notices given once per session, by key.
+    pub(crate) told: HashSet<&'static str>,
 }
 
 pub(crate) fn run(
@@ -201,6 +203,10 @@ pub(crate) fn run(
     }
     let mut scanner = Scanner::new();
     scanner.own_pids.clone_from(&config.own_pids);
+    // Mosaïk hides nothing unless its watchdog runs (ADR 0006); it is watched from here on.
+    let watchdog = config
+        .watchdog
+        .and_then(|pid| mosaik_win::process::Process::open(pid).ok());
     let mut engine = Engine {
         config,
         store,
@@ -218,8 +224,12 @@ pub(crate) fn run(
         save_failed_told: false,
         active: None,
         watch: Watch::new(),
-        hiding: Hiding::new(mosaik_win::process::own_pid()),
-        told_tabs: false,
+        hiding: Hiding::new(
+            mosaik_win::process::own_pid(),
+            watchdog,
+            leftovers.report.remaining.clone(),
+        ),
+        told: HashSet::new(),
     };
     for n in notices {
         engine.notice("Mosaïk's settings", n);
@@ -241,7 +251,7 @@ pub(crate) fn run(
     let hotkey = engine.hotkey_state();
     tracing::info!(
         safe_mode = engine.config.safe_mode,
-        watchdog = engine.config.watchdog,
+        watchdog = engine.hiding.watchdog_running(),
         hotkey = %hotkey.shortcut,
         registered = hotkey.registered,
         workspaces = engine.file.workspaces.len(),
@@ -584,7 +594,7 @@ impl Engine {
         let mut snapshot = state::snapshot(state::Inputs {
             app_version: &self.config.app_version,
             safe_mode: self.config.safe_mode,
-            watchdog: self.config.watchdog,
+            watchdog: self.hiding.watchdog_running(),
             topology: &topology,
             scanner: &mut self.scanner,
             rules: &self.settings.rules,
@@ -602,7 +612,7 @@ impl Engine {
                     w.zone = active.zone_for(w.frame_rect, style).map(|z| z.id.clone());
                     w.tab_group = groups
                         .iter()
-                        .find(|g| g.tabs.iter().any(|(_, h)| *h == w.handle))
+                        .find(|g| g.open.iter().any(|(_, h)| *h == w.handle))
                         .map(|g| g.id.clone());
                 }
             }
@@ -612,18 +622,17 @@ impl Engine {
                 continue;
             };
             let Some(rect) = bar.rect() else { continue };
-            let chips = bar.chips();
+            let visible = g.visible().map(|(_, w)| *w);
             snapshot.tab_strips.push(mosaik_ipc::protocol::TabStripState {
                 group: g.id.clone(),
                 rect,
-                tabs: g
-                    .tabs
-                    .iter()
-                    .zip(chips)
-                    .map(|((_, h), chip)| mosaik_ipc::protocol::TabState {
-                        window: *h,
+                tabs: bar
+                    .chips()
+                    .into_iter()
+                    .map(|(id, chip)| mosaik_ipc::protocol::TabState {
+                        window: WindowHandle(id),
                         chip,
-                        visible: g.visible.as_ref().is_some_and(|(_, v)| v == h),
+                        visible: visible == Some(WindowHandle(id)),
                     })
                     .collect(),
             });
@@ -652,7 +661,8 @@ impl Engine {
     fn rescue(&mut self) -> Reply {
         self.show_all_hidden();
         let outcome = mosaik_win::rescue::restore_hidden(&self.store);
-        self.hiding = Hiding::new(mosaik_win::process::own_pid());
+        // Tab groups show all their windows until the user next picks a tab or a workspace.
+        self.hiding.rescued(outcome.report.remaining.clone());
         self.refresh_frames();
         log_report("rescue", &outcome.report);
         let mut message = outcome.report.summary();

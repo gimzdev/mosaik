@@ -12,15 +12,15 @@ use std::time::{Duration, Instant};
 
 use mosaik_core::classify::{Pending, Verdict, classify};
 use mosaik_core::geometry::Rect;
-use mosaik_core::layout::{Place, SlotId, Workspace, WorkspaceId};
+use mosaik_core::layout::{Place, SlotId, TabGroupId, Workspace, WorkspaceId};
 use mosaik_core::matching::AppMatch;
 use mosaik_core::place::{Resolver, Target};
 use mosaik_core::store::StoreError;
 use mosaik_core::topology::Topology;
 use mosaik_core::window::{Cloak, WindowFacts, WindowHandle};
 use mosaik_core::workspace::{
-    Move, Present, Seen, capture, edge_distance, holds, plan_refit, plan_switch, regroup, remember,
-    same_name, workspace_id,
+    GroupSeen, Move, Present, Seen, TabSeen, capture, edge_distance, holds, plan_refit, plan_switch, regroup,
+    remember, same_name, workspace_id,
 };
 use mosaik_core::zone::{FrameStyle, ZoneColor, ZoneId};
 use mosaik_ipc::protocol::{ErrorCode, Reply};
@@ -61,6 +61,9 @@ pub(crate) struct Active {
     /// Windows just moved, with where they were meant to land, checked again by `settle`.
     pub placed: Vec<(WindowHandle, Rect)>,
     pub launching: Vec<Launching>,
+    /// Tabs shown for now rather than by the user's choice (an app brought one forward): the
+    /// layout keeps the user's choice.
+    pub shown: HashMap<TabGroupId, SlotId>,
 }
 
 impl Active {
@@ -252,9 +255,9 @@ impl Engine {
             zones,
             placed,
             launching: Vec::new(),
+            shown: HashMap::new(),
         });
         self.file.active = Some(id);
-        self.refresh_frames();
     }
 
     /// The user moved or resized one of the open workspace's windows by hand: the workspace
@@ -320,10 +323,11 @@ impl Engine {
             .unwrap_or_else(|| mosaik_core::workspace::suggested_name(&self.file.workspaces));
         let name: String = name.chars().take(mosaik_core::switcher::MAX_NAME).collect();
 
+        // The windows on screen; background tabs Mosaïk hid are saved with their group below.
         let windows: Vec<WindowFacts> = self
             .scan_marked()
             .into_iter()
-            .filter(|f| self.manageable(f))
+            .filter(|f| self.manageable(f) && !self.hiding.hidden.contains_key(&f.handle))
             .collect();
         if windows.is_empty() {
             return error(
@@ -361,33 +365,67 @@ impl Engine {
             style,
             previous.as_ref(),
         );
-        // Tab groups on screen stay tab groups.
-        let groups: Vec<(Vec<usize>, usize)> = self
-            .groups_now()
-            .into_iter()
-            .filter_map(|g| {
-                let at = |h: WindowHandle| windows.iter().position(|w| w.handle == h);
-                let tabs: Vec<usize> = g.tabs.iter().filter_map(|(_, w)| at(*w)).collect();
-                let visible = g.visible.and_then(|(_, w)| at(w))?;
-                (tabs.len() > 1).then_some((tabs, visible))
+        // Tab groups on screen stay tab groups, where their visible tab is. Their hidden tabs
+        // (minimised ones too, when tabs are minimised) come from Mosaïk's own list.
+        let groups = self.groups_now();
+        let hidden_facts: Vec<WindowFacts> = groups
+            .iter()
+            .flat_map(|g| g.open.iter().map(|(_, w)| *w))
+            .filter(|w| self.hiding.hidden.contains_key(w))
+            .filter_map(|w| self.scanner.facts(window::hwnd(w)))
+            .collect();
+        let hidden_seen: Vec<Seen> = hidden_facts
+            .iter()
+            .map(|f| {
+                let path = self.scanner.process_path(f.pid);
+                Seen {
+                    facts: f,
+                    label: self.apps.label(f, path.as_deref()),
+                    launch: apps::launch_for(f, path.as_deref()),
+                }
             })
             .collect();
-        regroup(&mut ws, &groups);
-        let assigned: HashMap<SlotId, WindowHandle> = ws
+        let at = |h: WindowHandle| windows.iter().position(|w| w.handle == h);
+        let group_seen: Vec<GroupSeen> = groups
+            .iter()
+            .filter_map(|g| {
+                let (_, visible) = g.visible()?;
+                let visible_at = at(*visible)?;
+                let tabs: Vec<TabSeen> = g
+                    .open
+                    .iter()
+                    .filter_map(|(_, w)| match at(*w) {
+                        Some(i) => Some(TabSeen::Captured(i)),
+                        None => hidden_seen
+                            .iter()
+                            .find(|s| s.facts.handle == *w)
+                            .map(|s| TabSeen::Hidden(s.clone())),
+                    })
+                    .collect();
+                let visible = tabs
+                    .iter()
+                    .position(|t| matches!(t, TabSeen::Captured(i) if *i == visible_at))?;
+                Some(GroupSeen { tabs, visible })
+            })
+            .collect();
+        let tab_slots = regroup(&mut ws, &group_seen);
+        let mut assigned: HashMap<SlotId, WindowHandle> = ws
             .layout
             .slots
             .iter()
             .zip(&windows)
             .map(|(s, w)| (s.id.clone(), w.handle))
             .collect();
-        // Windows in zones move inside them, below their tags.
+        assigned.extend(tab_slots);
+        // Windows in zones move inside them, below their tags; a group's visible tab below the
+        // band of its strip.
         let resolver = Resolver::new(&ws.layout, &topology, style);
         let moves: Vec<(WindowHandle, To)> = ws
             .layout
             .slots
             .iter()
             .zip(&windows)
-            .filter(|(s, _)| matches!(s.place, Place::Zone { .. }))
+            .filter(|(s, _)| matches!(s.place, Place::Zone { .. } | Place::Tab { .. }))
             .filter_map(|(s, w)| match resolver.target(&s.place) {
                 Some(Target::Frame(r)) => Some((w.handle, To::Frame(r))),
                 _ => None,
@@ -411,6 +449,7 @@ impl Engine {
             .collect();
         self.activate(id, assigned, placed);
         self.persist();
+        self.refresh_frames();
         self.set_timer(timer::SETTLE, 400);
         tracing::info!(
             windows = windows_n,
@@ -498,15 +537,17 @@ impl Engine {
                 }
             }
         }
-        // Every window the plan picked belongs to the workspace, moved or not.
-        let assigned: HashMap<SlotId, WindowHandle> =
-            plan.moves.iter().map(|m| (m.slot.clone(), m.window)).collect();
+        // Every window the plan picked belongs to the workspace, moved or not, background tabs
+        // included.
+        let assigned: HashMap<SlotId, WindowHandle> = plan.assigned.iter().cloned().collect();
         for h in &plan.minimize {
             arrange::minimize(window::hwnd(*h));
         }
-        // Tab groups: the visible tab shows, the others hide.
+        // Tab groups: the visible tab shows, the others hide; windows hidden for the workspace
+        // being left come back (minimised, unless this one uses them).
+        self.hiding.resume();
         self.activate(ws.id.clone(), assigned, placed);
-        self.apply_groups();
+        self.sync_tabs();
         for h in &plan.raise {
             let _ = arrange::raise(window::hwnd(*h));
         }
@@ -717,6 +758,8 @@ impl Engine {
             a.placed.extend(placed);
         }
         self.set_timer(timer::SETTLE, 600);
+        // A tab of a group shows only if it is the group's tab to show.
         self.refresh_frame(h);
+        self.sync_tabs();
     }
 }
