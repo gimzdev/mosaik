@@ -24,7 +24,8 @@ thread_local! {
     /// window and says where it is (the top 32 px, but for its own buttons at the right), as
     /// Steam's and many launchers' windows do (SDL, CEF).
     static BORDERLESS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// `--fixed`: it cannot be resized, as most games' windows.
+    /// `--fixed`: no frame to resize it by, as most games' windows. It takes whatever size it is
+    /// given, as many games do: Mosaïk is the one that must keep its size.
     static FIXED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 

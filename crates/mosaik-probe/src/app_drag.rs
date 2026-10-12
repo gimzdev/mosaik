@@ -421,6 +421,25 @@ pub fn kinds(engine: &Engine, t: &Targets) -> Value {
         println!("kind {name}: {r}");
         out.insert(name.into(), r);
     }
+    // A borderless game of a fixed size that moves itself when dragged anywhere, with no title
+    // bar to grab and no room for a tag: it keeps its size in the middle of its zone, below a
+    // band right above it.
+    let small_self = Rect::from_origin_size(
+        t.work.left + t.work.width() / 3,
+        t.work.top + t.work.height() / 4,
+        560,
+        360,
+    );
+    let r = self_moved_as(
+        engine,
+        t,
+        "Probe borderless game moving itself",
+        small_self,
+        " --topmost --borderless --fixed --no-title-room --self-move",
+    )
+    .unwrap_or_else(|e| json!({ "failed": e }));
+    println!("kind Probe borderless game moving itself: {r}");
+    out.insert("Probe borderless game moving itself".into(), r);
     let full = full_screen(engine).unwrap_or_else(|e| json!({ "failed": e }));
     println!("kind full screen: {full}");
     out.insert("Probe game in full screen".into(), full);
@@ -481,11 +500,24 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
         t.work.width() / 3,
         t.work.height() / 2,
     );
-    let (process, w) = crate::dummy::spawn_with(
+    self_moved_as(
+        engine,
+        t,
         "Probe moves itself",
         place,
         " --topmost --self-move --no-title-room",
-    )?;
+    )
+}
+
+/// [`self_moved`] with a window of another kind, as `options` to the dummy say.
+fn self_moved_as(
+    engine: &Engine,
+    t: &Targets,
+    title: &str,
+    place: Rect,
+    options: &str,
+) -> Result<Value, String> {
+    let (process, w) = crate::dummy::spawn_with(title, place, options)?;
     pump_until(500, || false);
     let result = (|| {
         let mut out = json!({});
@@ -496,6 +528,7 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
         out["into_zone"] = json!({
             "drag": drag,
             "error_px": error_in(&st, w, t.zone, t),
+            "kept_size": kept_size(&st, w, t.zone, t),
             "band_solid": band_solid(&st, w, t),
             "tag_above": wears_above(&st, w),
             "tag": tag_place(&st, w),

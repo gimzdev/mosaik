@@ -195,12 +195,18 @@ pub struct Opened {
     pub open_ms: f64,
 }
 
-/// Opens `app` and waits (up to 25 s) for a new, manageable window of it.
+/// Opens `app` and waits (up to 25 s) for a new, manageable window of it. A window the app kept
+/// hidden until now counts as new: an app that closes to the tray (Steam) shows the window it
+/// has rather than making another.
 pub fn open(app: &App, scanner: &mut Scanner) -> Result<Opened, String> {
     if app.target.is_empty() {
         return Err(format!("{}: not installed", app.name));
     }
-    let before: HashSet<u64> = top_level().into_iter().map(|h| handle(h).0).collect();
+    let before: HashSet<u64> = top_level()
+        .into_iter()
+        .filter(|h| mosaik_win::window::is_visible(*h))
+        .map(|h| handle(h).0)
+        .collect();
     let start = Instant::now();
     shell_open(&app.target, &app.args).map_err(|e| e.to_string())?;
     while start.elapsed() < Duration::from_secs(25) {
@@ -227,7 +233,50 @@ pub fn open(app: &App, scanner: &mut Scanner) -> Result<Opened, String> {
             }
         }
     }
-    Err(format!("{}: no new window within 25 s", app.name))
+    Err(format!(
+        "{}: no new window within 25 s; its windows: {}",
+        app.name,
+        windows_of(app, scanner)
+    ))
+}
+
+/// What Mosaïk sees of `app`'s top-level windows (no titles), to tell why none was taken.
+fn windows_of(app: &App, scanner: &mut Scanner) -> serde_json::Value {
+    let mut out = Vec::new();
+    for h in top_level() {
+        let Some(f) = scanner.facts(h) else { continue };
+        if !f
+            .exe
+            .as_deref()
+            .is_some_and(|e| app.exe.split('|').any(|x| x == e))
+        {
+            continue;
+        }
+        let flags: Vec<&str> = [
+            (f.visible, "visible"),
+            (f.cloak != mosaik_core::window::Cloak::None, "cloaked"),
+            (f.minimized, "minimized"),
+            (f.popup, "popup"),
+            (f.caption, "caption"),
+            (f.resizable, "resizable"),
+            (f.minimize_box, "minimize_box"),
+            (f.owned, "owned"),
+            (f.tool_window, "tool_window"),
+            (f.alt_tab, "alt_tab"),
+            (!f.title.is_empty(), "titled"),
+        ]
+        .into_iter()
+        .filter_map(|(on, name)| on.then_some(name))
+        .collect();
+        out.push(serde_json::json!({
+            "exe": f.exe,
+            "class": f.class,
+            "flags": flags,
+            "frame": [f.frame_rect.left, f.frame_rect.top, f.frame_rect.width(), f.frame_rect.height()],
+            "verdict": classify(&f, &Rules::default()),
+        }));
+    }
+    serde_json::Value::Array(out)
 }
 
 /// Asks a window to close, like clicking its close button.
