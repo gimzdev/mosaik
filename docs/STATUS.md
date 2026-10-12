@@ -179,7 +179,11 @@ four times out of four, a minute apart ("An Application Control policy has block
 the tests never ran), while `mosaik-win`'s ran on a second try. Jobs now run each package's
 tests on their own and try a blocked program again; a test program blocked for good is
 reported as such, never as passing, and its tests are counted from the last run that executed
-them (on Windows, or on Linux for `mosaik-core`).
+them (on Windows, or on Linux for `mosaik-core`). Job 0084 had every test program blocked (the
+`mosaik-win`, overlay and engine ones, three tries each) while the debug probe and the app ran:
+the Windows tests last ran at commit b993011 (job 0082: all passing), and what changed since in
+`mosaik-win` and the engine is the band drag, which the probe drove with the real mouse. CI on
+`windows-latest` has no Smart App Control and runs every test.
 
 ### Still to do in step 1
 
@@ -416,11 +420,13 @@ game in full screen                    left alone ("pending: full screen"); the 
 (`fit_size`); 306, 302 and 318 px from the group's edges are what the middle is for those sizes
 (job 0080 measured it directly: kept, 0 px from the middle of the group's place).
 
-Dragged by its band (job 0082, after the review below): the borderless fixed-size game that
-moves itself, pressed on its band and dragged into the editor's zone, landed there at its own
-size, in the middle, 0 px, below a band again; Calculator, by its band, into the editor's zone,
-0 px. The window follows the pointer, moved by Mosaïk; a posted `SC_MOVE` (job 0080) had moved
-nothing.
+Dragged by its band (jobs 0082 and 0084, after the reviews below): the borderless fixed-size
+game that moves itself, pressed on its band and dragged into the editor's zone, landed there at
+its own size, in the middle, 0 px, below a band again; Calculator, by its band, into the
+editor's zone, 0 px; the game made a tab of the editor's group, the group dragged by its strip's
+band beside the chips into the other zone and back: both tabs went along, the game at its own
+size in the middle, 0 px each way. The window follows the pointer, moved by Mosaïk from a thread
+of its own; a posted `SC_MOVE` (job 0080) had moved nothing.
 
 - Steam's library window (job 0078): class `SDL_app` of `steamwebhelper.exe`, a popup with a
   caption, a resize frame and a minimise button, in Alt+Tab: Mosaïk manages it now (it took it
@@ -443,6 +449,13 @@ nothing.
   screen (a window with Windows' title bar and resize frame never is); with zones that overlap,
   a window filling the larger was counted in the smaller (the nearest middle wins); the solid
   band let presses through to whatever was behind it (the window can be dragged by it now).
+- Found by a second review, of the band drags (job 0084 checks them with the real mouse): a
+  group dragged by its strip's band cancelled its own drag as soon as the strip hid (the strip
+  now keeps the press); the window was moved on Mosaïk's own thread, so an app slow to answer
+  would have frozen Mosaïk (a thread of its own moves it now); a window could be dragged by its
+  band below every screen (it stays reachable); Esc also reached the app in front (Mosaïk holds
+  Esc while the button is down); a cancelled drag left a "Drop to add" slot on the strip it
+  crossed; a window over its whole monitor could wear its tag over its own title bar.
 
 ### Tags and tabs in title bars (jobs 0062 to 0070) — ADR 0011
 
