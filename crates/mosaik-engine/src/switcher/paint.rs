@@ -16,9 +16,10 @@ use windows::Win32::Graphics::Direct2D::{
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT,
     DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_MEASURING_MODE_NATURAL,
-    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING,
-    DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP,
-    DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
+    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT, DWRITE_TEXT_ALIGNMENT_CENTER,
+    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TRIMMING, DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+    DWRITE_WORD_WRAPPING_NO_WRAP, DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory,
+    IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::HDC;
@@ -183,6 +184,7 @@ fn format(
     size: f32,
     weight: DWRITE_FONT_WEIGHT,
     wrap: bool,
+    align: DWRITE_TEXT_ALIGNMENT,
 ) -> windows::core::Result<IDWriteTextFormat> {
     // SAFETY: plain DirectWrite object creation with static strings.
     unsafe {
@@ -196,7 +198,7 @@ fn format(
             w!("en-us"),
         )?;
         f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
-        f.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING)?;
+        f.SetTextAlignment(align)?;
         if wrap {
             f.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
         } else {
@@ -235,21 +237,36 @@ impl Painter {
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             let brush = target.CreateSolidColorBrush(&Theme::DARK.text.d2d(), None)?;
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-            let mut p = Self {
-                title: format(&dwrite, 15.0, DWRITE_FONT_WEIGHT_SEMI_BOLD, false)?,
-                subtitle: format(&dwrite, 12.5, DWRITE_FONT_WEIGHT_NORMAL, false)?,
-                small: format(&dwrite, 11.5, DWRITE_FONT_WEIGHT_NORMAL, false)?,
-                header: format(&dwrite, 15.0, DWRITE_FONT_WEIGHT_NORMAL, false)?,
-                body: format(&dwrite, 13.0, DWRITE_FONT_WEIGHT_NORMAL, true)?,
+            let [title, subtitle, small, header, body] = Self::formats(&dwrite, dpi)?;
+            Ok(Self {
+                title,
+                subtitle,
+                small,
+                header,
+                body,
                 factory,
                 target,
                 brush,
-                dpi: 96,
+                dpi,
                 dwrite,
-            };
-            p.set_dpi(dpi)?;
-            Ok(p)
+            })
         }
+    }
+
+    /// The text formats at `dpi`: title, subtitle, small (key caps and hints, centred in their
+    /// boxes), header, and body (the empty list's explanation, wrapped and centred under its
+    /// title). One place for them, so every DPI gets the same alignment.
+    fn formats(dwrite: &IDWriteFactory, dpi: u32) -> windows::core::Result<[IDWriteTextFormat; 5]> {
+        let s = dpi as f32 / 96.0;
+        let (normal, semi_bold) = (DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        let (leading, centre) = (DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_ALIGNMENT_CENTER);
+        Ok([
+            format(dwrite, 15.0 * s, semi_bold, false, leading)?,
+            format(dwrite, 12.5 * s, normal, false, leading)?,
+            format(dwrite, 11.5 * s, normal, false, centre)?,
+            format(dwrite, 15.0 * s, normal, false, leading)?,
+            format(dwrite, 13.0 * s, normal, true, centre)?,
+        ])
     }
 
     /// Text formats are made for one DPI; remake them when it changes.
@@ -257,17 +274,7 @@ impl Painter {
         if dpi == self.dpi {
             return Ok(());
         }
-        let s = dpi as f32 / 96.0;
-        self.title = format(&self.dwrite, 15.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, false)?;
-        self.subtitle = format(&self.dwrite, 12.5 * s, DWRITE_FONT_WEIGHT_NORMAL, false)?;
-        self.small = format(&self.dwrite, 11.5 * s, DWRITE_FONT_WEIGHT_NORMAL, false)?;
-        self.header = format(&self.dwrite, 15.0 * s, DWRITE_FONT_WEIGHT_NORMAL, false)?;
-        self.body = format(&self.dwrite, 13.0 * s, DWRITE_FONT_WEIGHT_NORMAL, true)?;
-        // SAFETY: setting the alignment of a format this painter owns.
-        unsafe {
-            let _ = self.small.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            let _ = self.body.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        }
+        [self.title, self.subtitle, self.small, self.header, self.body] = Self::formats(&self.dwrite, dpi)?;
         self.dpi = dpi;
         Ok(())
     }

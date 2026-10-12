@@ -53,6 +53,20 @@ mod workspace;
 
 #[cfg(windows)]
 fn main() {
+    // MOSAIK_LOG=debug (or info, trace): what the engine under test decides, on stderr.
+    if let Ok(level) = std::env::var("MOSAIK_LOG") {
+        let level = match level.as_str() {
+            "trace" => tracing_subscriber::filter::LevelFilter::TRACE,
+            "debug" => tracing_subscriber::filter::LevelFilter::DEBUG,
+            _ => tracing_subscriber::filter::LevelFilter::INFO,
+        };
+        let _ = tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .with_max_level(level)
+            .with_target(false)
+            .try_init();
+    }
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     // Started with no arguments by the engine under test, which starts a workspace's missing
     // apps by their program file: the workspace probe says which window to show.

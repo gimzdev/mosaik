@@ -882,16 +882,34 @@ impl Engine {
         before: Option<WindowHandle>,
     ) {
         self.hiding.resume();
+        // Each way this can fail says so: the window stays where it was dropped.
+        let not_joined = |engine: &mut Self, why: &str| {
+            tracing::warn!(why, "window not made a tab");
+            engine.tell_once(
+                "tab-join",
+                "A window did not become a tab",
+                format!("{why} It stays where it was dropped."),
+            );
+        };
         let Some(onto_slot) = self.active.as_ref().and_then(|a| a.slot_of(onto)).cloned() else {
+            not_joined(
+                self,
+                "The window it was dropped on is not part of the open workspace any more.",
+            );
             return;
         };
         let left = self.group_of_window(dropped).map(|g| g.id);
         let Some(dropped_slot) = self.slot_for_window(dropped, Place::Maximized { monitor: 0 }) else {
+            not_joined(
+                self,
+                "Mosaïk could not read the dropped window (it may have closed).",
+            );
             return;
         };
         let before = before.and_then(|b| self.active.as_ref().and_then(|a| a.slot_of(b)).cloned());
         let Some(Some(group)) = self.edit_layout(|l| l.join_tab(&onto_slot, &dropped_slot, before.as_ref()))
         else {
+            not_joined(self, "These two windows cannot share a tab group.");
             return;
         };
         if let Some(a) = &mut self.active {

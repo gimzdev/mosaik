@@ -738,6 +738,13 @@ impl Engine {
             return;
         }
         let Some(d) = self.watch.drag.take() else { return };
+        tracing::debug!(
+            kind = ?d.kind,
+            onto_tab = d.tab_target.is_some(),
+            zone = ?d.target.and_then(|i| d.zones.get(i)).map(|z| &z.id),
+            pointer = ?input::cursor(),
+            "drag ended"
+        );
         self.kill_timer(timer::DRAG);
         self.watch.preview.hide();
         self.watch.preview_visible = false;

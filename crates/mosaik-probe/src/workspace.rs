@@ -675,6 +675,26 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, S
         terminal.hwnd,
     )?;
     let back = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
+
+    // 5. Drop it on the code window's tag again, at the tag's left end: in the screen's top-left
+    // corner, where Windows' own snapping also watches the pointer.
+    let c = frame_rect(code.hwnd).ok_or("the code window vanished")?;
+    let t = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
+    let corner = Point::new(c.left + px(30.0), c.top - px(10.0));
+    drag(
+        Point::new(t.left + t.width() / 3, t.top + 12),
+        corner,
+        terminal.hwnd,
+    )?;
+    let st = state(engine)?;
+    let at_tag_start = json!({
+        "pointer": [corner.x, corner.y],
+        "strips": st.tab_strips.len(),
+        "tabs": st.tab_strips.first().map_or(0, |s| s.tabs.len()),
+        "terminal_hidden": hidden(&st, terminal.hwnd),
+        "code_hidden": hidden(&st, code.hwnd),
+        "terminal_frame": frame_rect(terminal.hwnd).map(|f| [f.left, f.top, f.right, f.bottom]),
+    });
     input::move_to(original);
     Ok(json!({
         "joined": joined,
@@ -684,5 +704,6 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, S
             "error_px": edge_error(back, style.window_area(terminal.tiled, dpi)),
             "frame": frame_colours(back, ZoneColor::Verdigris, dpi),
         },
+        "joined_at_tag_start": at_tag_start,
     }))
 }

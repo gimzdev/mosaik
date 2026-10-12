@@ -42,10 +42,13 @@ Options:
 
 - Every release goes through Store certification (usually a day or two). Publishing stays the
   owner's action.
-- The app is packaged with `makeappx` in CI. Inside the package, `%APPDATA%\Mosaik` is
-  redirected by Windows to the package's own folder and removed on uninstall; Mosaïk does not
-  need to know. "Start with Windows" uses the package's startup task (the user can turn it off
-  in Task Manager too), and `mosaikctl` is an app execution alias.
+- The app is packaged with `makepri` and `makeappx` (`installer/msix/package.ps1`, also in CI).
+  Inside the package, Windows keeps what Mosaïk writes under AppData in the package's own folder
+  and removes it on uninstall. Mosaïk reads and writes its usual paths; only where it shows a
+  folder to the user (the logs) does it point File Explorer at the package's copy
+  (`mosaik_win::package::visible_path`). "Start with Windows" uses the package's startup task
+  (the user can turn it off in Task Manager too), and `mosaikctl` is an app execution alias.
+- The package carries `THIRD-PARTY-NOTICES.txt` (`installer/notices.mjs`), which About opens.
 - The watchdog, the named pipe, global hotkeys, window hooks and moving other apps' windows all
   work in a full-trust desktop package.
 - The installer needs an internet connection, and organisations that block `get.microsoft.com`

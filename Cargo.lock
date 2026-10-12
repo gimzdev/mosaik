@@ -1893,6 +1893,7 @@ dependencies = [
  "mosaik-overlay",
  "mosaik-win",
  "serde_json",
+ "tracing-subscriber",
  "windows",
 ]
 

@@ -15,9 +15,9 @@ re-run before each release.
 | 3. Zones | done: capture, frames and tags, drag to snap, zone editor | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces), [Step 6](#step-6-product-ui) |
 | 4. Workspaces | done: save, switch, start missing apps, switcher, tray, workspace shortcuts | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
 | 5. Tabs | done; multi-monitor and app matrix runs left for step 7 | [Step 5](#step-5-tabs) |
-| 6. Product UI | in progress: welcome, workspaces, zone editor, settings, about, themes done; tested in a browser; first run on Windows pending | [Step 6](#step-6-product-ui) |
-| 7. Hardening | not started | |
-| 8. Release | decided: Microsoft Store, direct download from mosaïk.com (ADR 0008) | |
+| 6. Product UI | in progress: every page done, reviewed and tested in a browser; embedded and run on Windows; the on-screen check of every page on Windows is next | [Step 6](#step-6-product-ui) |
+| 7. Hardening | started: idle budget, other window managers and Windows snapping next | |
+| 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
 
 ## Step 1: verify assumptions
 
@@ -262,11 +262,55 @@ build; releases are signed by the Microsoft Store.
   the lines between zones, split, rename, recolour, remove, presets; nothing changes until
   saved), settings (shortcut recorder that refuses AltGr, start with Windows, theme, snapping,
   frames, tags, switching, tabs), about (privacy, Patreon, website, source, rescue, logs).
-- Interface checks (Linux): typecheck, ESLint (strict, type-checked), 27 component tests, and 5
-  browser smoke tests on the development server's stand-in engine, each with axe-core's WCAG 2.1
-  A and AA rules: no serious or critical violation in the light or dark theme; the keyboard
-  reaches every page; a zone line moves with the arrow keys. The first axe run found shortcut
-  keys labelled in a way screen readers ignore, fixed.
+- Interface checks (Linux and Windows): typecheck, ESLint (strict, type-checked), Prettier, 39
+  component tests, and 9 browser smoke tests on the development server's stand-in engine, each
+  with axe-core's WCAG 2.1 A and AA rules: no serious or critical violation in the light, dark
+  or high-contrast theme, nor at the smallest window size; the keyboard reaches every page; a
+  zone line moves with the arrow keys; the welcome fits the window; when the engine does not
+  answer, the window says so and offers to try again. The first axe run found shortcut keys
+  labelled in a way screen readers ignore, fixed.
+- Adversarial review (2026-10-12) of the engine commands (18 findings) and the interface (24),
+  all fixed with tests: a zone editor opened before the monitors or zones changed can no longer
+  save over them (its save carries a revision); the shortcut recorder holds Mosaïk's own
+  shortcuts while it listens; messages survive moving between pages; high-contrast mode keeps
+  chips, swatches and disabled buttons visible; and more (commits bfdb563, 93487ca).
+- On Windows (jobs 0033 to 0038, release build): the interface is embedded in `mosaik.exe` (a
+  compile-time check refuses a build that would load it from a development server). First run:
+  `engine ready ... hotkey=Win+Alt+Space registered=true`; the welcome opens. With the settings
+  window open: 8 processes, 165.7 MB private, nearly all of it WebView2 (the window is destroyed
+  when closed; the idle budget is measured with no window open).
+- The editing commands, through the engine (`mosaik-probe workspace`, job 0036): splitting the
+  code zone moved its window to the new half, 0 px off, in 47 ms; the editor opened before was
+  refused; removing the terminal's zone left the terminal where it was (0 px) and in no zone;
+  after a rename the old name saved a new workspace; Win+Ctrl+Alt+F9 given and taken back;
+  deleting the open workspace left no workspace open and no window hidden.
+
+## Step 8: release
+
+- **Store package** (`installer/msix/package.ps1`; `mosaik.ps1 package`): makepri indexes the
+  logos at every size, makeappx packs (job 0038): `Mosaik_0.1.0.0_x64.msix`, 2.6 MB, 30 files:
+  `mosaik.exe` 4.3 MB, `mosaik-watchdog.exe` 0.35 MB, `mosaikctl.exe` 0.59 MB,
+  `THIRD-PARTY-NOTICES.txt`, `LICENSE.txt` (CC0 1.0 legal code), 21 logos. The first attempt
+  failed makeappx's manifest validation (logos named in one size only), fixed. Not yet installed
+  from the package: that needs the Store, or Developer Mode on this PC (off).
+- **Licences**: `THIRD-PARTY-NOTICES.txt`, made by `installer/notices.mjs` from what ships: 134
+  crates (as `cargo tree` resolves them for Windows x64, without build-only, test-only and
+  procedural-macro crates) and 10 packages and fonts of the settings window. The same file is
+  made on Linux and on Windows; CI fails when it is out of date. About opens it.
+- **The one-file app**: `mosaik.ps1 pack`, `verify`, `unpack`, `verify`, `check` (job 0035),
+  then `build` (120 s), `test` (every test, clippy and interface check passed) and `package` (job
+  0038), all with Windows PowerShell 5.1 and output redirected as in CI. The first `build` run
+  stopped at npm's first warning (Windows PowerShell 5.1 turns a program's stderr into errors
+  when output is redirected), fixed.
+- **Site** (`mosaik1.sh`): one-click download through the Store's web installer
+  (`get.microsoft.com/installer/download/9PHR0L7S1QVD`) in the header, the hero and the closing
+  call to action; `/download` with requirements, the welcome's three steps and what is inside;
+  the switcher illustration drawn like the app's switcher (Win Alt Space, 1 to 4, S); the demo
+  desktop like Windows (no top bar, the taskbar stays); Support on Patreon; `/conditions` as
+  shipped (no network requests from the app, updates through the Store). `bash mosaik1.sh
+  --build`: 7 static routes, type-checked; checked at desktop and phone widths; shellcheck clean;
+  `npm audit`: 0 vulnerabilities; a fresh build from a copy with Windows line endings works.
+  Deploy only once the Store listing is live (the Download buttons install from it).
 
 ## Owner decisions
 
@@ -278,3 +322,6 @@ build; releases are signed by the Microsoft Store.
 - 2026-10-11: Store developer account "Gimzdev" registered; the name "Mosaïk" is reserved
   (Store ID 9PHR0L7S1QVD, identity in `installer/msix/identity.json`). The first submission is
   due by 2027-01-11 or the name is released.
+- 2026-10-11: everything travels in two files that run on another machine: `mosaik.ps1` (the app,
+  source inside) and `mosaik1.sh` (the site).
+- 2026-10-11: `mosaik1.sh` reviewed end to end, optimised and cleaned as the final version.

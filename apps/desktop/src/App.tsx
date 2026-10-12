@@ -274,11 +274,12 @@ export function App() {
       </>
     );
 
-    // The welcome has the whole window: one thing to read, one thing to do.
+    // The welcome has the whole window: one thing to read, one thing to do, in the middle of the
+    // window when it has room (auto margins never push it off the top when it does not).
     if (view.page === 'welcome') {
       return (
-        <main className="relative h-full overflow-y-auto px-10 py-10">
-          <div className="mx-auto max-w-3xl">
+        <main className="relative flex h-full flex-col overflow-y-auto px-10 py-10">
+          <div className="m-auto w-full max-w-3xl">
             {notes}
             <div className={notices.length ? 'mt-6' : ''}>{content}</div>
           </div>

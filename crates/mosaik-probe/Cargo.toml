@@ -11,6 +11,8 @@ publish.workspace = true
 [dependencies]
 mosaik-core.workspace = true
 serde_json.workspace = true
+# MOSAIK_LOG=debug prints what the engine under test decides (to stderr).
+tracing-subscriber.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 mosaik-engine.workspace = true

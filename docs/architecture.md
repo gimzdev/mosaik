@@ -38,6 +38,12 @@ and `mosaikctl` send it the same commands (`mosaik_ipc::protocol`); the interfac
 hands each move to a short-lived thread and keeps handling its messages while it waits, at most
 2.5 s (`mover.rs`).
 
+The settings window is the same app: its commands reach the engine in process, in protocol
+version 2. A save from the zone editor carries the revision of the zones it was opened on, so it
+is refused, with the reason, when the monitors or the zones changed meanwhile. While the shortcut
+recorder listens, Mosaïk's own shortcuts let go (`hold_hotkeys`, at most a minute), so pressing
+one records it instead of opening the switcher.
+
 ## How workspaces behave
 
 The decisions are pure functions in `mosaik_core::workspace`, tested on every monitor fixture;
@@ -116,3 +122,12 @@ another app's window; background tabs are hidden with the shell's cloak (ADR 000
 
 The brief's layout lists five crates; `mosaik-engine` is added so the engine can be tested and
 measured without the interface, and the Tauri crate stays a thin shell.
+
+## Two files
+
+The repository travels as two files that each run on their own on another machine:
+`mosaik.ps1` (the app: its source inside, with check, build, test, run and package steps, for
+Windows PowerShell 5.1 and later; `pack` makes the one-file copy, `verify` checks it) and
+`mosaik1.sh` (the website: it writes `site/`, installs it, runs it or deploys it). CI runs the
+same `mosaik.ps1` steps the owner does, and checks that `site/` is exactly what `mosaik1.sh`
+writes.
