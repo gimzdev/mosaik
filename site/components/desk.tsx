@@ -145,7 +145,7 @@ export function Stage() {
               : { m: pose, mt: poseT, o: 1, t: `transform .8s ${EASE} ${st}, opacity .24s ease-out ${st}` };
       return [
         <div key={`${ws.id}-${w.id}`} className="win" style={vars(g.a.rects[i], g.b.rects[i], look, z)}>
-          <div className="relative h-full pt-[28px]">
+          <div className="relative h-full">
             <AppWindow win={w} plain={!ordered} />
             <div className="dim inset-x-0 bottom-0 top-[28px] rounded-[10px]" style={{ opacity: dim }} />
           </div>
@@ -175,7 +175,7 @@ export function Stage() {
             : { m: HOME, mt: HOME, o: 1, t: `transform .8s ${EASE} ${st}, opacity .25s ease-out .18s` };
     return [
       <div key={`${ws.id}-${w.id}`} className="win pointer-events-none" style={vars(g.a.rects[i], g.b.rects[i], tiled, z)}>
-        <div className="h-full pt-[28px]">
+        <div className="h-full">
           <AppWindow win={w} plain={!ordered} />
         </div>
       </div>,
@@ -291,23 +291,26 @@ export function TabsArt() {
       <Scaled className={ART}>
         <Wallpaper />
         <div className="absolute" style={{ left: 36, top: 52, width: 1090, height: 710 }}>
-          {/* The zone's tag starts the strip, as in the app. */}
-          <ZoneFrame tag="Code" zone="lapis" tagAt={{ top: 17, right: 'auto', left: 14 }}>
-            <div className="flex h-full flex-col bg-[#16181D]">
-              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] pl-[80px] pr-3 text-[14px]">
+          {/* The zone's tag starts the strip, in the bar above the window, as in the app. */}
+          <ZoneFrame
+            tag="Code"
+            zone="lapis"
+            strip={
+              <>
                 {TABS.map(([name, c], i) => (
-                  <div key={name} className={`flex h-[38px] items-center gap-2.5 rounded-t-[10px] px-5 ${i ? 'text-[#8E97AA]' : 'bg-[#1E2027] font-semibold text-white'}`} style={i ? undefined : { boxShadow: `inset 0 3px 0 ${c}` }}>
-                    <span className="h-3 w-3 rounded-[4px]" style={{ background: c }} />
+                  <div key={name} className={`flex h-[22px] items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] ${i ? 'text-[#8E97AA]' : 'bg-[#272B37] font-semibold text-white'}`}>
+                    <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: c }} />
                     {name}
                   </div>
                 ))}
-                <div className="mb-1.5 ml-1 flex h-[30px] items-center gap-1.5 rounded-[8px] border-2 border-dashed border-[#F4B13A] px-3 text-[13px] font-semibold text-[#F4B13A]">
-                  <Icon n="plus" s={14} w={2} /> Drop to add
+                <div className="flex h-[22px] items-center gap-1 rounded-[6px] border-[1.5px] border-dashed border-[#F4B13A] px-2 text-[12px] font-semibold text-[#F4B13A]">
+                  <Icon n="plus" s={12} w={2} /> Drop to add
                 </div>
-              </div>
-              <div className="min-h-0 flex-1">
-                <EditorApp bare />
-              </div>
+              </>
+            }
+          >
+            <div className="h-full bg-[#16181D]">
+              <EditorApp bare />
             </div>
           </ZoneFrame>
         </div>

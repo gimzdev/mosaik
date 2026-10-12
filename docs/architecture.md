@@ -39,7 +39,7 @@ hands each move to a short-lived thread and keeps handling its messages while it
 2.5 s (`mover.rs`).
 
 The settings window is the same app: its commands reach the engine in process, in protocol
-version 2. A save from the zone editor carries the revision of the zones it was opened on, so it
+version 3. A save from the zone editor carries the revision of the zones it was opened on, so it
 is refused, with the reason, when the monitors or the zones changed meanwhile. While the shortcut
 recorder listens, Mosaïk's own shortcuts let go (`hold_hotkeys`, at most a minute), so pressing
 one records it instead of opening the switcher.
@@ -63,12 +63,13 @@ the engine gathers windows and applies the result.
 - **Being in a zone** has one rule everywhere (`holds`): the window's centre is in the zone and
   the window and the zone's window area cover at least 70% of each other. A browser that will
   not shrink to a narrow zone still counts; a small window floating over a zone does not. A
-  window without a frame to resize it by (most games) is never resized, only moved to the middle
-  of its zone; it is in the zone when its middle is (or the zone's middle is in it) and it
-  overlaps the zone by 70% of as much as its size allows (`holds_fixed`). A window that covers
-  two zones stays in the one it was put in; with zones that overlap, the nearest middle wins.
-- **A layout changes only by the user's hand**: saving, dropping a window into a zone, or moving
-  one of the workspace's windows by mouse. Windows an app moved on its own, or a window
+  window without a frame to resize it by (most games) is never resized, only moved: centred
+  across its zone, at its top, on the same line as its neighbours; it is in the zone when, along
+  each axis, its middle is in the zone or the zone's middle is in it, and it overlaps the zone by
+  70% of as much as its size allows (`holds_fixed`). A window that covers two zones stays in the
+  one it was put in; with zones that overlap, the nearest middle wins.
+- **A layout changes only by the user's hand**: saving, dropping a window into a zone, moving or
+  resizing one of the workspace's windows by mouse, Arrange, or the zone editor. Windows an app moved on its own, or a window
   maximised for a moment, go back to their places the next time the workspace opens.
 - **Opening** a workspace finds its windows (program, then window class and title to tell
   several windows of one app apart), moves them all at once, starts missing apps, minimises the
@@ -77,20 +78,34 @@ the engine gathers windows and applies the result.
 - **Frames**: every window in a zone of the open workspace wears a ring in the zone's colour and
   a tag with its name, drawn right above the window in the stacking order, so windows that
   cover it cover its frame too. Frames follow moves through window events, hooked per process.
-- **Tags in title bars** (ADR 0011): the tag goes in a free stretch of the window's own title
-  bar, against its buttons. Mosaïk finds the free stretches by asking the window what is under a
-  row of points, as Windows does wherever the pointer goes (`WM_NCHITTEST`), on a thread of its
-  own (`titles`): when it first needs a tag, after a resize (and once more when the app has
-  settled), when its title changes or it comes to the front. A window whose title bar has no
-  room wears its tag above it, below a band at the top of its zone, once two readings a quarter
-  of a second apart agree; the band is solid and inside the window's ring, so the two read as
-  one, and the window can be dragged by it as by its title bar (Mosaïk moves it with the
-  pointer). A setting puts every tag above its window.
+- **Tags** (ADR 0011): every window in a zone sits right below a bar at the top of its zone that
+  carries its tag (or its group's strip), so windows side by side start at the same line,
+  whatever their title bars. The bar is solid and inside the window's ring, so the two read as
+  one window, and the window can be dragged by it as by its title bar (Mosaïk moves it with the
+  pointer). A setting puts tags in title bars instead: the tag goes in a free stretch of the
+  window's own title bar, against its buttons, found by asking the window what is under a row
+  of points, as Windows does wherever the pointer goes (`WM_NCHITTEST`), on a thread of its own
+  (`titles`); a window whose title bar has no room then sits below a bar, once two readings a
+  quarter of a second apart agree.
 - **Drag to snap**: while a window is dragged by its title bar, the open workspace's zones show
   under it; the zone under the pointer (or within 48 px) is tinted, and the window is pulled into
   it on release. Shift moves freely; a setting swaps that. A window that was not part of the
   workspace joins it. A resize never snaps: Windows shows its resize arrows for the whole of one
-  (ADR 0010). Apps that drag their window themselves, without Windows' move loop, are followed
+  (ADR 0010).
+- **Zones follow a resize** (ADR 0013): resizing one of the workspace's windows in a zone by an
+  edge it shares with other zones moves the line between them, the zones on both sides and their
+  windows with it; the zones show as they will be while the resize lasts. An app that keeps a
+  larger size than its new zone pushes the line back, once. An edge on the monitor's border has
+  no line: the window goes back to its zone. Shift resizes freely.
+- **Arrange** (ADR 0014): one command puts every window on screen in the zone that suits it, by a
+  pure planner (`mosaik_core::arrange`): zones named after an app or a kind of app draw those
+  windows, the windows used most get the largest zones, windows stay where they are when they
+  fit, and windows left over become tabs. A monitor without zones gets a preset for its windows;
+  with no workspace open, a new one is made. Undo puts everything back, for ten minutes.
+- **The quick menu** (ADR 0015): a thin line on an edge of the main monitor opens, when the
+  pointer rests on it, onto Arrange, the switcher, saving, the zone editor, snapping and the
+  settings, without taking the keyboard. It hides while a game or a video fills the main monitor.
+  Dragged along its edge, it stays there. Apps that drag their window themselves, without Windows' move loop, are followed
   too: a window that took the mouse and moves at the same size is being dragged. A window Mosaïk must not move (an app running as administrator, or one Windows
   protects) gets no zones, and the user is told why once, when the drag ends.
 - **Living with other arrangers** (ADR 0010): Windows' own snapping stays on; a drop on a zone or
@@ -105,8 +120,8 @@ the engine gathers windows and applies the result.
 ## How tabs behave
 
 A tab group is several windows of any apps sharing one place, one visible at a time, with a
-strip in the visible tab's title bar (or in a band above it, ADR 0011): the zone's tag, then one
-chip per tab. Mosaïk never reparents another app's window; background tabs are hidden with the
+strip in the bar above the visible tab (or in its title bar, with that setting, ADR 0011): the
+zone's tag, then one chip per tab. Mosaïk never reparents another app's window; background tabs are hidden with the
 shell's cloak (ADR 0003).
 
 - **Making a group**: drag a window by its title bar onto another window's tag, or onto a
@@ -140,7 +155,7 @@ shell's cloak (ADR 0003).
 | --- | --- |
 | `mosaik-core` | Pure logic, no Win32: geometry, topologies, zones, layouts, matching, classification, snapping, placement maths, tabs, the journal, settings and the store. Tested on every platform. |
 | `mosaik-win` | The Win32 adapter: enumerating and classifying windows, placing them by their visible frame, hiding them, monitors and DPI, hooks, hotkeys, processes, rescue. Decides nothing. |
-| `mosaik-overlay` | Native overlays drawn with Direct2D in software: rings as four thin windows, name tags, the drop-target tint, tab strips. |
+| `mosaik-overlay` | Native overlays drawn with Direct2D in software: rings as four thin windows, name tags, the drop-target tint, tab strips, the quick menu. |
 | `mosaik-engine` | The engine thread, its commands, the pipe server and the watchdog launcher. |
 | `mosaik-ipc` | The versioned protocol, the named pipe and `mosaikctl`. |
 | `mosaik-watchdog` | The watchdog process. |

@@ -762,16 +762,25 @@ fn quick_menu(
     let px = |v: f64| (v * scale).round() as i32;
     let mut out = serde_json::Map::new();
 
-    // 4a. The handle: on the work area's right edge, 30% of the way down.
+    // 4a. The handle: on the work area's right edge, 30% of the way down; 8 px wide where the
+    // pointer stops at that edge, 12 px where it goes on (another monitor, the taskbar).
     let st = state(engine)?;
     let q = st
         .quick_menu
         .clone()
         .ok_or("the quick menu's handle is not on screen")?;
     let wanted = work.top + work.height() * 300 / 1000;
+    let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
+    let main = topology.primary();
+    let through = work.right != main.bounds.right
+        || topology
+            .monitors()
+            .iter()
+            .any(|m| m.id != main.id && m.bounds.contains(Point::new(work.right, wanted)));
+    let strip = if through { 12.0 } else { 8.0 };
     let place_ok = !q.open
         && q.rect.right == work.right
-        && q.rect.width() == px(8.0)
+        && q.rect.width() == px(strip)
         && q.rect.height() == px(76.0)
         && (q.rect.center().y - wanted).abs() <= 1;
     out.insert(
@@ -779,6 +788,7 @@ fn quick_menu(
         json!({
             "rect": [q.rect.left, q.rect.top, q.rect.right, q.rect.bottom],
             "middle_wanted": wanted,
+            "pointer_goes_past_the_edge": through,
             "ok": place_ok,
         }),
     );

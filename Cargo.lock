@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "mosaik-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "proptest",
  "serde",
@@ -1833,7 +1833,7 @@ dependencies = [
 
 [[package]]
 name = "mosaik-desktop"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "mosaik-core",
  "mosaik-engine",
@@ -1850,7 +1850,7 @@ dependencies = [
 
 [[package]]
 name = "mosaik-engine"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "mosaik-core",
  "mosaik-ipc",
@@ -1864,7 +1864,7 @@ dependencies = [
 
 [[package]]
 name = "mosaik-ipc"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "mosaik-core",
  "mosaik-win",
@@ -1876,7 +1876,7 @@ dependencies = [
 
 [[package]]
 name = "mosaik-overlay"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "mosaik-core",
  "mosaik-win",
@@ -1885,7 +1885,7 @@ dependencies = [
 
 [[package]]
 name = "mosaik-probe"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "mosaik-core",
  "mosaik-engine",
@@ -1899,7 +1899,7 @@ dependencies = [
 
 [[package]]
 name = "mosaik-watchdog"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "mosaik-core",
  "mosaik-win",
@@ -1908,7 +1908,7 @@ dependencies = [
 
 [[package]]
 name = "mosaik-win"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "mosaik-core",
  "thiserror 2.0.21",

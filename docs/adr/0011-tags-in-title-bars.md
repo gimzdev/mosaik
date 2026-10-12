@@ -75,8 +75,25 @@ stretches of its title bar.
   is only for windows whose title bar has no room. A window of a fixed size gets its band right
   above it, wherever it sits in its zone (ADR 0012).
 - **The setting** "Tags and tabs: in each window's title bar / above each window" keeps the band
-  for everyone who prefers it (`FrameSettings::tags_in_title_bar`, on by default; settings saved
-  before keep it on).
+  for everyone who prefers it (`FrameSettings::tags_in_title_bar`).
+
+## Amended 2026-10-12 (1.1): the band is the default
+
+The owner, using 1.0 every day: "sometimes apps don't go all the way to top ... lets normalize all
+apps stopping before top bar". With tags in title bars, windows side by side started at
+different heights: one with room in its title bar filled its zone, its neighbour without room
+(Calculator, VS Code as a group's visible tab, an app drawing its own title bar) sat below a
+band, 28 px lower; and a window of a fixed size sat in the middle of its zone (ADR 0012, now at
+its top).
+
+- **Every window in a zone now sits right below a bar at the top of its zone** that carries its
+  tag, or its group's strip: windows side by side start at the same line, whatever their title
+  bars (`tags_in_title_bar` is off by default).
+- **Settings saved by 1.0 move to it once** (settings format 2, `Settings::migrate_step`), with a
+  notice saying where to put tags back in title bars (Settings, Tags and tabs), which is still
+  there for whoever prefers one row: the setting's description says that windows without room
+  then sit lower.
+- Everything above about reading title bars still holds when the setting is on.
 
 ## Consequences
 

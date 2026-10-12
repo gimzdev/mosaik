@@ -34,7 +34,8 @@ Your layouts stay on your computer.</p>
 Named, coloured areas<br>
 that belong to the project<br>
 Drag a window near one<br>
-and it is pulled in
+and it is pulled in;<br>
+resize it and they follow
 
 </td>
 <td align="center" width="33%">
@@ -52,9 +53,10 @@ a window again
 
 <h3>Workspaces</h3>
 
-Save the windows on screen<br>
-Switch from the tray<br>
-or the keyboard<br>
+Arrange every window<br>
+in one click, or save yours<br>
+Switch from the tray, the<br>
+screen's edge or the keyboard<br>
 Positions, sizes and tabs<br>
 return together
 
@@ -108,7 +110,11 @@ Each place becomes a zone with its own colour.</p>
 <tr><td><kbd>Esc</kbd></td><td>closes the switcher</td></tr>
 </table>
 
-<p>While dragging a window, hold <kbd>Shift</kbd> to move it freely.<br>
+<p>Or rest the pointer on the thin line at the right edge of the screen and pick <b>Arrange windows</b>:<br>
+every window goes into the zone that suits it, and <b>Undo arrange</b> puts them back.</p>
+
+<p>Resize a window in a zone and the zones beside it follow.<br>
+While dragging or resizing a window, hold <kbd>Shift</kbd> to move it freely.<br>
 Zones, shortcuts and everything else are in the settings, from the tray icon.</p>
 
 <hr>
@@ -158,7 +164,7 @@ or deploys it.<br>
 <table align="center">
 <tr><td><code>crates/mosaik-core</code></td><td>zones, layouts, matching, tabs, settings: pure logic, tested on any OS</td></tr>
 <tr><td><code>crates/mosaik-win</code></td><td>windows, monitors, DPI, hiding, input: everything that talks to Windows</td></tr>
-<tr><td><code>crates/mosaik-overlay</code></td><td>zone frames, tags and tab strips, drawn natively</td></tr>
+<tr><td><code>crates/mosaik-overlay</code></td><td>zone frames, tags, tab strips and the quick menu, drawn natively</td></tr>
 <tr><td><code>crates/mosaik-engine</code></td><td>the engine thread: events, workspaces, the switcher, shortcuts</td></tr>
 <tr><td><code>crates/mosaik-watchdog</code></td><td>brings hidden windows back if Mosaïk stops</td></tr>
 <tr><td><code>crates/mosaik-ipc</code></td><td>the named-pipe protocol and <code>mosaikctl</code></td></tr>

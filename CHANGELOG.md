@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.1.0
+
+### Every window on one line
+
+- Every window in a zone now sits right below a bar at the top of its zone that carries its tag,
+  so windows side by side start at the same line, whatever their title bars. Settings from 1.0
+  move to it once, with a note; tags can still go in title bars (Settings, Tags and tabs).
+- A window that cannot be resized keeps its size centred across its zone and at its top, on the
+  same line as its neighbours, no longer in the middle.
+
+### Zones that follow a resize
+
+- Resize a window in a zone by an edge it shares with other zones, and the line between them
+  moves with it: the zones on both sides, and their windows, follow. While you resize, the zones
+  show as they will be. Hold Shift to resize the window alone; a setting turns it off.
+- An app that will not get as small as its new zone (a browser keeps about 500 px) pushes the
+  line back, so windows never overlap.
+
+### Arrange
+
+- One click puts every window on screen in the zone that suits it: from the tray menu, the quick
+  menu, the Workspaces page or `mosaikctl arrange`. Zones named after an app or a kind of app
+  ("Browser", "Terminal") draw those windows; the windows you use most get the largest zones;
+  windows already in a zone stay there; windows more than the zones become tabs.
+- A monitor without zones gets a layout for its windows: halves, a half beside two stacked
+  zones, quarters; columns on an ultrawide, rows on a monitor turned on its side. With no
+  workspace open, Arrange makes a new one.
+- Undo arrange puts every window back where it was, for ten minutes.
+
+### The quick menu
+
+- A thin line at the right edge of the main screen. Rest the pointer on it for Arrange, Undo
+  arrange, the switcher, Save layout, Edit zones, snapping on or off, and the settings. It never
+  takes the keyboard from the app you are typing in, steps aside for a game or a video in full
+  screen, and stays where you drag it along the edge. Settings: show it, and on which edge.
+
+### Zone editor
+
+- Four more presets: a half beside two stacked zones, its mirror, two rows and three rows.
+
+### Under the hood
+
+- `mosaikctl state` lists the quick menu, where it is and its rows. The protocol is version 3;
+  settings are format 2.
+
 ## 1.0.0
 
 The first release. Mosaïk gives every project its own workspace: your apps and windows arranged

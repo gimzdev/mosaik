@@ -8,7 +8,7 @@ const FEATURES = [
   {
     id: 'zones',
     title: 'Zones give every window a home',
-    body: 'Carve the screen into named areas, like Code, Terminal and Review. Drag a window near one and Mosaïk pulls it in. Open a project and everything lands where you left it.',
+    body: 'Carve the screen into named areas, like Code, Terminal and Review, or let Arrange do it in one click. Drag a window near a zone and Mosaïk pulls it in; resize it and the zones beside it make room. Open a project and everything lands where you left it.',
     points: ['Zones belong to the project, not the monitor', 'Every window wears its zone’s colour, so you can tell at a glance', 'Works across multiple displays'],
     Art: ZonesArt,
   },
@@ -23,7 +23,7 @@ const FEATURES = [
     id: 'layouts',
     title: 'Switch projects, not just windows',
     body: 'Save a workspace once and bring it back whenever you need it. Positions, sizes and tabs return together, so changing task takes a keystroke instead of ten minutes of rearranging.',
-    points: ['One workspace per project, role or mood', 'Saved on your computer, never in a cloud', 'Switch from the tray, or press Win+Alt+Space'],
+    points: ['One workspace per project, role or mood', 'Saved on your computer, never in a cloud', 'Switch from the tray, the screen’s edge, or press Win+Alt+Space'],
     Art: SwitcherArt,
   },
 ];

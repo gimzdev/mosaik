@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 /* The same three steps as the welcome page in the app. */
 const STEPS: [string, React.ReactNode][] = [
-  ['Arrange', 'Open the apps you use for one project and place them side by side.'],
+  ['Arrange', 'Open the apps you use for one project and place them side by side, or rest the pointer on the line at the screen’s right edge and pick Arrange windows.'],
   [
     'Save',
     <>
@@ -25,9 +25,9 @@ const STEPS: [string, React.ReactNode][] = [
 ];
 
 const INSIDE = [
-  'Window zones and saved layouts',
+  'Window zones and saved layouts, arranged in one click',
   'Tabs for any app',
-  'One-click switching from the tray or the keyboard',
+  'One-click switching from the tray, the screen’s edge or the keyboard',
   'Multiple monitors, including different scaling',
   'Layouts stored on your computer only',
 ];

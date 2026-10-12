@@ -69,7 +69,7 @@ export function Welcome({
   const steps = [
     {
       title: 'Arrange',
-      body: 'Open the apps you use for one project and place them side by side.',
+      body: 'Open the apps you use for one project and place them side by side, or rest the pointer on the line at the screen’s right edge and pick Arrange windows.',
       screen: (
         <Screen
           tiles={[

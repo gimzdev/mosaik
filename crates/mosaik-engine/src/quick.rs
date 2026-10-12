@@ -79,17 +79,34 @@ impl Engine {
         if !edge.enabled || self.config.safe_mode {
             return None;
         }
-        let monitor = self.topology.as_ref()?.primary().clone();
+        let topology = self.topology.as_ref()?;
+        let monitor = topology.primary().clone();
         let work = monitor.work_area;
         let middle = work.top + work.height() * edge.position.clamp(0, 1000) / 1000;
+        let side = match edge.side {
+            EdgeSide::Left => Side::Left,
+            EdgeSide::Right => Side::Right,
+        };
+        // The pointer goes on past the edge when the taskbar is there, or another monitor.
+        let (edge_x, beyond) = match side {
+            Side::Left => (monitor.bounds.left, work.left - 1),
+            Side::Right => (monitor.bounds.right, work.right),
+        };
+        let at_bounds = match side {
+            Side::Left => work.left == edge_x,
+            Side::Right => work.right == edge_x,
+        };
+        let through = !at_bounds
+            || topology
+                .monitors()
+                .iter()
+                .any(|m| m.id != monitor.id && m.bounds.contains(Point::new(beyond, middle)));
         let place = Place {
             work,
-            side: match edge.side {
-                EdgeSide::Left => Side::Left,
-                EdgeSide::Right => Side::Right,
-            },
+            side,
             middle,
             dpi: monitor.dpi,
+            through,
         };
         Some(Place {
             middle: edge::clamp_middle(place, middle),

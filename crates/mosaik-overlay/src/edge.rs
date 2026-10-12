@@ -173,6 +173,9 @@ pub struct Place {
     pub side: Side,
     pub middle: i32,
     pub dpi: u32,
+    /// The pointer goes on past that edge (another monitor, or the taskbar, is there), so it
+    /// does not stop on the handle by itself: the handle takes a wider strip.
+    pub through: bool,
 }
 
 /// The colours of the handle and the menu.
@@ -270,12 +273,14 @@ pub struct Row {
 
 /// Sizes at 96 DPI.
 mod size {
-    /// The line, and the strip around it that takes the pointer: narrow, since the pointer
-    /// stops at the screen's edge anyway, and a window in a zone there is only 4 px from it.
+    /// The line, and the strip around it that takes the pointer: narrow where the pointer
+    /// stops at the screen's edge anyway (a window in a zone there is only 4 px from it),
+    /// wider where it goes on past the edge.
     pub const LINE: f32 = 4.0;
     pub const LINE_WIDE: f32 = 6.0;
     pub const LINE_LENGTH: f32 = 56.0;
     pub const STRIP: f32 = 8.0;
+    pub const STRIP_THROUGH: f32 = 12.0;
     pub const STRIP_LENGTH: f32 = 76.0;
     pub const PANEL: f32 = 256.0;
     pub const HEADER: f32 = 50.0;
@@ -333,7 +338,12 @@ pub struct Edge {
 /// Where the handle's strip goes on screen.
 pub fn handle_rect(place: Place) -> Rect {
     let s = scale(place.dpi);
-    let (w, h) = (px(size::STRIP * s), px(size::STRIP_LENGTH * s));
+    let strip = if place.through {
+        size::STRIP_THROUGH
+    } else {
+        size::STRIP
+    };
+    let (w, h) = (px(strip * s), px(size::STRIP_LENGTH * s));
     let top = (place.middle - h / 2).clamp(place.work.top, (place.work.bottom - h).max(place.work.top));
     let left = match place.side {
         Side::Left => place.work.left,
@@ -632,6 +642,7 @@ mod tests {
 
     fn place(side: Side, middle: i32) -> Place {
         Place {
+            through: false,
             work: Rect::new(0, 0, 1920, 1032),
             side,
             middle,
@@ -650,6 +661,14 @@ mod tests {
         assert_eq!(handle_rect(place(Side::Right, 5000)).bottom, 1032);
         assert_eq!(clamp_middle(place(Side::Right, 0), -40), 38);
         assert_eq!(clamp_middle(place(Side::Right, 0), 2000), 1032 - 38);
+    }
+
+    #[test]
+    fn it_takes_a_wider_strip_where_the_pointer_goes_on_past_the_edge() {
+        let mut p = place(Side::Right, 310);
+        p.through = true;
+        let r = handle_rect(p);
+        assert_eq!((r.right, r.width()), (1920, 12));
     }
 
     #[test]
