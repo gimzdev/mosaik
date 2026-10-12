@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 use mosaik_core::store::Store;
 use mosaik_engine::{Config, Engine, UiEvent, UiSink};
 use mosaik_ipc::pipe::{Client, PipeError, Program, Server, Stopper, pipe_name};
-use mosaik_ipc::protocol::{Command, Reply};
+use mosaik_ipc::protocol::{Command, Reply, WorkspaceSummary};
 use serde::Serialize;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
@@ -30,6 +30,11 @@ const SOURCE: &str = "https://github.com/gimzdev/mosaik";
 const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Exit code after Mosaïk has told the user why it could not start (the watchdog stays quiet).
 const STARTUP_FAILURE_REPORTED: i32 = 2;
+/// The tray icon, and its menu items that open a workspace: this prefix, then the workspace's id.
+const TRAY: &str = "mosaik";
+const TRAY_WORKSPACE: &str = "workspace:";
+/// At most this many workspaces in the tray menu; the switcher has them all.
+const TRAY_WORKSPACES: usize = 20;
 
 // The interface is built into mosaik.exe. Without Tauri's `custom-protocol` feature a plain
 // `cargo build` makes a development build whose windows load a local dev server, which shows a
@@ -240,13 +245,13 @@ fn setup(
         },
         None => None,
     };
+    build_tray(app, &engine).map_err(|e| format!("the tray icon could not be created: {e}"))?;
     app.manage(AppState {
         engine,
         pipe: Mutex::new(pipe),
         notices: Mutex::new(Vec::new()),
         data_dir,
     });
-    build_tray(app).map_err(|e| format!("the tray icon could not be created: {e}"))?;
     let first_run = app
         .try_state::<AppState>()
         .map(|s| s.engine.request(Command::Settings, ENGINE_TIMEOUT))
@@ -353,6 +358,7 @@ fn on_ui_event(handle: &AppHandle, event: UiEvent) {
         UiEvent::Notice { title, body } => show_notice(&h, Notice { title, body }),
         UiEvent::WorkspacesChanged => {
             let _ = h.emit("workspaces:changed", ());
+            refresh_tray(&h);
         }
         UiEvent::Exit => h.exit(0),
     });
@@ -399,25 +405,78 @@ fn show_settings(app: &AppHandle) {
     }
 }
 
-fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let switcher = MenuItem::with_id(app, "switcher", "Open the switcher", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
-    let rescue = MenuItem::with_id(app, "rescue", "Rescue windows", true, None::<&str>)?;
-    let patreon = MenuItem::with_id(app, "patreon", "Support on Patreon", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Mosaïk", true, None::<&str>)?;
-    let menu = Menu::with_items(
-        app,
-        &[
-            &switcher,
-            &settings,
-            &PredefinedMenuItem::separator(app)?,
-            &rescue,
-            &PredefinedMenuItem::separator(app)?,
-            &patreon,
-            &quit,
-        ],
-    )?;
-    let mut tray = TrayIconBuilder::with_id("mosaik")
+/// The saved workspaces and the open one, as the engine has them now.
+fn workspaces(engine: &Engine) -> (Vec<WorkspaceSummary>, Option<mosaik_core::layout::WorkspaceId>) {
+    match engine.request(Command::Workspaces, ENGINE_TIMEOUT) {
+        Reply::Workspaces { workspaces, active } => (workspaces, active),
+        _ => (Vec::new(), None),
+    }
+}
+
+/// The tray menu: the saved workspaces first (a click opens one; the open one is checked), then
+/// the switcher, settings, rescue, Patreon and quit.
+fn tray_menu(
+    app: &AppHandle,
+    workspaces: &[WorkspaceSummary],
+    active: Option<&mosaik_core::layout::WorkspaceId>,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::new(app)?;
+    for w in workspaces.iter().take(TRAY_WORKSPACES) {
+        // `&` marks a menu's shortcut letter on Windows; doubled, it shows as itself.
+        let item = CheckMenuItem::with_id(
+            app,
+            format!("{TRAY_WORKSPACE}{}", w.id.0),
+            w.name.replace('&', "&&"),
+            true,
+            active == Some(&w.id),
+            None::<&str>,
+        )?;
+        menu.append(&item)?;
+    }
+    if !workspaces.is_empty() {
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+    }
+    menu.append_items(&[
+        &MenuItem::with_id(app, "switcher", "Open the switcher", true, None::<&str>)?,
+        &MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "rescue", "Rescue windows", true, None::<&str>)?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "patreon", "Support on Patreon", true, None::<&str>)?,
+        &MenuItem::with_id(app, "quit", "Quit Mosaïk", true, None::<&str>)?,
+    ])?;
+    Ok(menu)
+}
+
+/// Builds the tray menu again from the engine's workspaces, off the interface thread (the
+/// engine answers on its own thread), then sets it on the interface thread.
+fn refresh_tray(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let engine = Arc::clone(&state.engine);
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let (list, active) = workspaces(&engine);
+        let h = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            let Some(tray) = h.tray_by_id(TRAY) else { return };
+            match tray_menu(&h, &list, active.as_ref()) {
+                Ok(menu) => {
+                    if let Err(e) = tray.set_menu(Some(menu)) {
+                        tracing::warn!(error = %e, "tray menu not updated");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "tray menu not built"),
+            }
+        });
+    });
+}
+
+fn build_tray(app: &AppHandle, engine: &Engine) -> tauri::Result<()> {
+    let (list, active) = workspaces(engine);
+    let menu = tray_menu(app, &list, active.as_ref())?;
+    let mut tray = TrayIconBuilder::with_id(TRAY)
         .tooltip("Mosaïk")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -431,7 +490,16 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
             "quit" => app.exit(0),
-            _ => {}
+            id => {
+                if let Some(workspace) = id.strip_prefix(TRAY_WORKSPACE) {
+                    ask_engine(
+                        app,
+                        Command::Switch {
+                            workspace: workspace.to_owned(),
+                        },
+                    );
+                }
+            }
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
