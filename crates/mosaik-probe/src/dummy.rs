@@ -14,13 +14,18 @@ thread_local! {
     static SELF_MOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// While such a drag is on: where the pointer is in the window.
     static GRAB: std::cell::Cell<Option<(i32, i32)>> = const { std::cell::Cell::new(None) };
+    /// `--no-title-room`: no point of the title bar answers "caption" (an app that draws its own
+    /// title bar and moves the window itself): Mosaïk finds no room in it for a tag.
+    static NO_ROOM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost] [--self-move]`: shows the window
-/// and runs until it is closed or the process is killed. `--topmost` keeps it above the user's
-/// windows, so a probe that presses the mouse on its title bar never lands on something else.
+/// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost] [--self-move] [--no-title-room]`:
+/// shows the window and runs until it is closed or the process is killed. `--topmost` keeps it
+/// above the user's windows, so a probe that presses the mouse on its title bar never lands on
+/// something else.
 pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
     SELF_MOVE.with(|m| m.set(args.iter().any(|a| a == "--self-move")));
+    NO_ROOM.with(|m| m.set(args.iter().any(|a| a == "--no-title-room")));
     let title = args
         .iter()
         .position(|a| a == "--title")
@@ -71,6 +76,15 @@ unsafe extern "system" fn dummy_proc(
         // SAFETY: ends this process's message loop.
         unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0) };
         return windows::Win32::Foundation::LRESULT(0);
+    }
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST && NO_ROOM.with(std::cell::Cell::get) {
+        use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, HTCAPTION, HTCLIENT};
+        // SAFETY: default handling of our own window's hit test.
+        let hit = unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+        if usize::try_from(hit.0) == Ok(HTCAPTION as usize) {
+            return windows::Win32::Foundation::LRESULT(HTCLIENT as isize);
+        }
+        return hit;
     }
     if SELF_MOVE.with(std::cell::Cell::get) {
         let cursor = || {

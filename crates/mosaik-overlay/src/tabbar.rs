@@ -1,7 +1,8 @@
-//! The tab strip of a tab group: the zone's tag, then one chip per tab, in the band above the
-//! group's window (where a single window shows its tag). Unlike the other overlays it takes the
-//! mouse: a click shows a tab, a drag reorders the tabs or pulls one out. It never takes the
-//! keyboard focus. Transparent pixels let clicks through, as with every layered window.
+//! The tab strip of a tab group: the zone's tag, then one chip per tab, where a single window
+//! shows its tag: in the visible tab's own title bar, against its buttons, or in the band above
+//! it. Unlike the other overlays it takes the mouse: a click shows a tab, a drag reorders the
+//! tabs or pulls one out. It never takes the keyboard focus. Transparent pixels let clicks
+//! through, as with every layered window, so the title bar between chips still moves the window.
 
 use std::cell::{Cell, RefCell};
 
@@ -176,6 +177,16 @@ pub enum Hit {
     More,
 }
 
+/// Where a strip's chips sit in the rectangle it is given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarPlace {
+    /// A band above the window: chips from the left, at the band's bottom.
+    Band,
+    /// A free stretch of the window's title bar: chips against its right end, next to the
+    /// window's buttons, centred.
+    TitleBar,
+}
+
 /// How a strip looks.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BarLook {
@@ -211,6 +222,7 @@ fn hex(rgb: u32, alpha: f32) -> Rgba {
 struct Drawn {
     width: i32,
     height: i32,
+    place: BarPlace,
     look: BarLook,
     tabs: Vec<TabView>,
     drop_at: Option<usize>,
@@ -311,12 +323,15 @@ impl TabBar {
             .collect()
     }
 
-    /// Shows the strip across `band`, stacked as `stack` says. `drop_at` shows the "Drop to
-    /// add" slot before that tab (after the last one when it is the number of tabs).
+    /// Shows the strip in `band`, placed as `place` says and stacked as `stack` says. `drop_at`
+    /// shows the "Drop to add" slot before that tab (after the last one when it is the number of
+    /// tabs).
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         canvas: &mut Canvas,
         band: Rect,
+        place: BarPlace,
         look: &BarLook,
         tabs: &[TabView],
         drop_at: Option<usize>,
@@ -332,13 +347,17 @@ impl TabBar {
         let want = Drawn {
             width: band.width(),
             height: band.height(),
+            place,
             look: look.clone(),
             tabs: tabs.to_vec(),
             drop_at,
         };
         if self.drawn.as_ref() != Some(&want) {
-            let h = 21.0 * s;
-            let top = (f(band.height()) - h - 3.0 * s).max(0.0);
+            let h = f(mosaik_core::zone::CHIP_HEIGHT) * s;
+            let top = match place {
+                BarPlace::Band => (f(band.height()) - h - 3.0 * s).max(0.0),
+                BarPlace::TitleBar => ((f(band.height()) - h) / 2.0).max(0.0),
+            };
             let text = 11.5 * s;
             let pad = 10.0 * s;
             let drop_label = "+ Drop to add";
@@ -369,6 +388,10 @@ impl TabBar {
                 },
                 strip::Metrics::at(s),
             );
+            let layout = match place {
+                BarPlace::Band => layout,
+                BarPlace::TitleBar => layout.align_right(f(band.width())),
+            };
             let panel = if look.dark {
                 hex(0x1B1E26, 0.96)
             } else {

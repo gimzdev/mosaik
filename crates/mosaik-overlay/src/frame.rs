@@ -42,11 +42,20 @@ pub struct FrameLook {
     pub rounded: bool,
     pub ring: bool,
     pub tag: bool,
+    /// Where the tag goes: at the right end of this free stretch of the window's own title bar,
+    /// or above the window when `None`.
+    pub tag_in: Option<Rect>,
 }
 
-/// The ring around a window in a zone and the tag above it. Both sit right above the window in
-/// the z-order (and below anything above it), so they are covered by whatever covers the window
-/// and are not darkened by its shadow.
+/// The width a zone's tag needs to show all of `label` on a monitor at `dpi`.
+pub fn tag_width(canvas: &mut Canvas, label: &str, dpi: u32) -> i32 {
+    crate::shapes::tag_width(canvas, label, scale(dpi))
+}
+
+/// The ring around a window in a zone and its tag, in its title bar or above it. Both sit right
+/// above the window in the z-order (and below anything above it), so they are covered by whatever
+/// covers the window and are not darkened by its shadow. The tag lets clicks through: pressing
+/// on it grabs the title bar under it.
 pub struct Frame {
     ring: Ring,
     tag: Tag,
@@ -84,12 +93,26 @@ impl Frame {
                 ink: Rgba::of(look.color.label(), 1.0),
                 scale: s,
             };
-            let at = Point::new(frame.left, frame.top - px(25.0 * s));
-            self.tag.show(canvas, at, &tag, frame.width(), stack)?;
+            match look.tag_in {
+                Some(room) => {
+                    let width = self.tag.width(canvas, &tag, room.width());
+                    let at = Point::new(room.right - width, room.top + (room.height() - tag.height()) / 2);
+                    self.tag.show(canvas, at, &tag, room.width(), stack)?;
+                }
+                None => {
+                    let at = Point::new(frame.left, frame.top - px(25.0 * s));
+                    self.tag.show(canvas, at, &tag, frame.width(), stack)?;
+                }
+            }
         } else {
             self.tag.hide();
         }
         Ok(())
+    }
+
+    /// Where the tag is on screen, when it shows.
+    pub fn tag_rect(&self) -> Option<Rect> {
+        self.tag.window().shown_at()
     }
 
     /// Puts the frame back right above its window (after the window came to the front).

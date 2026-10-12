@@ -1,0 +1,380 @@
+//! Windows' title bars, read on a thread of their own: where a window's zone tag, or its tab
+//! group's strip, can go in it (`mosaik_core::titlebar`, ADR 0011).
+//!
+//! Reading a title bar asks the window's app about a few hundred points, which takes a few
+//! milliseconds, longer when the app is busy: never on the engine's thread. A window is read when
+//! it first needs a tag or a strip, and again when its size or title changes or it comes to the
+//! front (its app may have changed its title bar: a browser opened a tab). Meanwhile the last
+//! reading is used, its free stretches kept next to the window's edges.
+//!
+//! A window whose title bar has no room wears its tag (or its group's strip) above it, in a
+//! band at the top of its zone, as when tags are set to go above windows: it is "banded", and
+//! wherever Mosaïk puts it in a zone, it goes below that band ([`Engine::banded_area`]).
+
+use std::collections::{HashMap, HashSet};
+use std::ffi::c_void;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+use mosaik_core::geometry::{Rect, Size};
+use mosaik_core::titlebar::{Fit, TitleRoom};
+use mosaik_core::window::WindowHandle;
+use mosaik_core::zone::FrameStyle;
+use mosaik_win::titlebar::Reading;
+use mosaik_win::window;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
+
+use crate::mover::{self, To};
+use crate::thread::{Engine, WM_EVENTS};
+
+/// How long before a window whose app did not answer is read again, if nothing else changes.
+const RETRY: Duration = Duration::from_secs(3);
+
+/// A window whose title alone changes is read again at most this often (a title showing
+/// progress can change many times a second).
+const TITLE_EVERY: Duration = Duration::from_secs(1);
+
+/// What Mosaïk knows of a window's title bar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Bar {
+    /// Read: its free stretches (none when it has no room).
+    Room(TitleRoom),
+    /// Not read yet: nothing goes in it until it is.
+    Pending,
+    /// Its app does not answer, or title bars cannot be read: the tag goes above the window.
+    Unread,
+}
+
+/// Where a window's tag, or its group's strip, goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TitleSpot {
+    /// In this free stretch of its title bar.
+    In(Rect),
+    /// Above the window: tags go above windows, or its title bar has no room.
+    Above,
+    /// Its title bar is not read yet: nothing for a moment.
+    NotYet,
+    /// Its app does not answer: no tag until it does; a tab group's strip goes above it.
+    NoAnswer,
+}
+
+struct Known {
+    size: Size,
+    title: String,
+    /// `None`: the app did not answer in time.
+    room: Option<TitleRoom>,
+    at: Instant,
+    /// Read again at the next chance.
+    stale: bool,
+}
+
+/// The thread that reads title bars, one window at a time, in the order asked.
+struct Reader {
+    jobs: mpsc::Sender<WindowHandle>,
+    answers: mpsc::Receiver<(WindowHandle, Option<Reading>)>,
+}
+
+impl Reader {
+    /// Starts the thread; it posts `WM_EVENTS` to the engine's window (`wake`) with each reading.
+    fn start(wake: isize) -> Result<Self, String> {
+        let (jobs, job_rx) = mpsc::channel::<WindowHandle>();
+        let (answer_tx, answers) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("mosaik-titles".into())
+            .spawn(move || {
+                // Ends when the engine drops its end of the channel.
+                while let Ok(w) = job_rx.recv() {
+                    let reading = mosaik_win::titlebar::read(window::hwnd(w));
+                    if answer_tx.send((w, reading)).is_err() {
+                        return;
+                    }
+                    // SAFETY: posts to the engine's window; harmless if it has gone.
+                    let _ = unsafe {
+                        PostMessageW(Some(HWND(wake as *mut c_void)), WM_EVENTS, WPARAM(0), LPARAM(0))
+                    };
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(Self { jobs, answers })
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Titles {
+    reader: Option<Reader>,
+    /// Title bars cannot be read this session (the thread did not start): tags go above windows.
+    broken: bool,
+    known: HashMap<WindowHandle, Known>,
+    /// Asked and not answered yet.
+    asked: HashSet<WindowHandle>,
+    /// Windows wearing their tag above them for want of room in their title bar.
+    pub(crate) banded: HashSet<WindowHandle>,
+    /// Tag widths by zone name and DPI (measuring text lays it out).
+    tag_widths: HashMap<(String, u32), i32>,
+}
+
+impl Titles {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// The window came to the front: its app may have changed its title bar.
+    pub(crate) fn stale(&mut self, h: WindowHandle) {
+        if let Some(k) = self.known.get_mut(&h) {
+            k.stale = true;
+        }
+    }
+
+    pub(crate) fn forget(&mut self, h: WindowHandle) {
+        self.known.remove(&h);
+        self.banded.remove(&h);
+    }
+
+    /// Forgets which windows are banded (tags moved between title bars and bands).
+    pub(crate) fn unband_all(&mut self) {
+        self.banded.clear();
+    }
+}
+
+impl Engine {
+    /// What is known of `h`'s title bar while its frame is `frame`, asking for a reading when
+    /// there is none for this size and title (the last one is still the best guess meanwhile).
+    pub(crate) fn title_bar(&mut self, h: WindowHandle, frame: Rect) -> Bar {
+        if self.titles.broken {
+            return Bar::Unread;
+        }
+        let title = window::title(window::hwnd(h));
+        let (bar, fresh) = match self.titles.known.get(&h) {
+            Some(k) => {
+                let fresh = !k.stale
+                    && k.size == frame.size()
+                    && (k.title == title || k.at.elapsed() < TITLE_EVERY)
+                    && (k.room.is_some() || k.at.elapsed() < RETRY);
+                (k.room.clone().map_or(Bar::Unread, Bar::Room), fresh)
+            }
+            None => (Bar::Pending, false),
+        };
+        if !fresh {
+            self.ask_title(h);
+        }
+        if bar == Bar::Pending && self.titles.broken {
+            return Bar::Unread;
+        }
+        bar
+    }
+
+    /// Asks the reader for `h`'s title bar, unless it is being read already.
+    fn ask_title(&mut self, h: WindowHandle) {
+        if self.titles.asked.contains(&h) {
+            return;
+        }
+        if self.titles.reader.is_none() && !self.titles.broken {
+            match Reader::start(self.window.0 as isize) {
+                Ok(r) => self.titles.reader = Some(r),
+                Err(e) => {
+                    self.titles.broken = true;
+                    tracing::error!(error = %e, "title bars cannot be read");
+                    self.tell_once(
+                        "titles",
+                        "Tags go above windows",
+                        format!("Mosaïk could not start reading title bars ({e}), so each window wears its tag and tab strip above it."),
+                    );
+                    return;
+                }
+            }
+        }
+        if let Some(r) = &self.titles.reader
+            && r.jobs.send(h).is_ok()
+        {
+            self.titles.asked.insert(h);
+        }
+    }
+
+    /// Takes the readings that arrived: each window read shows its tag or strip where it now
+    /// goes, and moves into or out of a band when that changed.
+    pub(crate) fn take_titles(&mut self) {
+        let Some(reader) = &self.titles.reader else {
+            return;
+        };
+        let answers: Vec<(WindowHandle, Option<Reading>)> = reader.answers.try_iter().collect();
+        let mut read = Vec::new();
+        for (w, reading) in answers {
+            self.titles.asked.remove(&w);
+            let Some(reading) = reading else {
+                self.titles.forget(w);
+                continue;
+            };
+            let changed = self
+                .titles
+                .known
+                .get(&w)
+                .is_none_or(|before| before.room != reading.room);
+            self.titles.known.insert(
+                w,
+                Known {
+                    size: reading.frame.size(),
+                    title: reading.title,
+                    room: reading.room,
+                    at: Instant::now(),
+                    stale: false,
+                },
+            );
+            if changed {
+                read.push(w);
+            }
+        }
+        if read.is_empty() {
+            return;
+        }
+        self.update_bands(&read);
+        for w in read {
+            self.refresh_frame(w);
+        }
+    }
+
+    /// The width `label`'s tag needs on a monitor at `dpi` (0 when nothing can be drawn).
+    fn tag_width(&mut self, label: &str, dpi: u32) -> i32 {
+        let key = (label.to_owned(), dpi);
+        if let Some(w) = self.titles.tag_widths.get(&key) {
+            return *w;
+        }
+        if self.canvas_ready().is_none() {
+            return 0;
+        }
+        let Some(mut canvas) = self.watch.take_canvas() else {
+            return 0;
+        };
+        let w = mosaik_overlay::frame::tag_width(&mut canvas, label, dpi);
+        self.watch.put_canvas(canvas);
+        self.titles.tag_widths.insert(key, w);
+        w
+    }
+
+    /// Where the tag `label` of `h` (whose frame is `frame`, on a monitor at `dpi`) goes.
+    pub(crate) fn tag_spot(&mut self, h: WindowHandle, frame: Rect, label: &str, dpi: u32) -> TitleSpot {
+        let need = self.tag_width(label, dpi);
+        self.title_spot(h, frame, Fit::tag(need, dpi))
+    }
+
+    /// Where the strip of a tab group whose visible tab is `h` goes.
+    pub(crate) fn strip_spot_in_title(&mut self, h: WindowHandle, frame: Rect, dpi: u32) -> TitleSpot {
+        // A strip takes the widest stretch: the more room, the more chips.
+        self.title_spot(h, frame, Fit::strip(i32::MAX, dpi))
+    }
+
+    fn title_spot(&mut self, h: WindowHandle, frame: Rect, fit: Fit) -> TitleSpot {
+        if !self.style().title_bars || self.titles.banded.contains(&h) {
+            return TitleSpot::Above;
+        }
+        match self.title_bar(h, frame) {
+            Bar::Room(room) => room.spot(frame, fit).map_or(TitleSpot::Above, TitleSpot::In),
+            Bar::Pending => TitleSpot::NotYet,
+            Bar::Unread => TitleSpot::NoAnswer,
+        }
+    }
+
+    /// The style a window is placed with: below a band when it wears its tag above it.
+    pub(crate) fn style_of(&self, h: WindowHandle) -> FrameStyle {
+        if self.titles.banded.contains(&h) {
+            self.settings.frames.banded_style().for_tabs()
+        } else {
+            self.style()
+        }
+    }
+
+    /// Where `h` goes in the zone `zone` (on a monitor at `dpi`) when it wears its tag above it:
+    /// below the band. `None` when it does not, and goes where the layout says.
+    pub(crate) fn banded_area(&self, h: WindowHandle, zone: Rect, dpi: u32) -> Option<Rect> {
+        self.titles
+            .banded
+            .contains(&h)
+            .then(|| self.style_of(h).window_area(zone, dpi))
+    }
+
+    /// Whether `h` must wear its tag (or its group's strip) above it: tags go in title bars, it
+    /// shows one, and its title bar has no room for it. Unchanged while its title bar is not read.
+    fn wants_band(&mut self, h: WindowHandle) -> bool {
+        let banded = self.titles.banded.contains(&h);
+        if !self.style().title_bars || self.titles.broken {
+            return false;
+        }
+        let Some(g) = window::geometry(window::hwnd(h)) else {
+            return false;
+        };
+        if !g.framable() {
+            return banded;
+        }
+        let dpi = g.dpi.max(96);
+        let strip = self
+            .group_of_window(h)
+            .is_some_and(|grp| grp.open.len() > 1 && grp.visible().is_some_and(|(_, w)| *w == h));
+        let fit = if strip {
+            Fit::strip(i32::MAX, dpi)
+        } else {
+            let style = self.style();
+            let label = match (self.settings.frames.show_tags, &self.active) {
+                (true, Some(a)) if a.slot_of(h).is_some() => {
+                    a.zone_for(g.frame, style).map(|z| z.name.clone())
+                }
+                _ => None,
+            };
+            let Some(label) = label else { return false };
+            Fit::tag(self.tag_width(&label, dpi), dpi)
+        };
+        match self.title_bar(h, g.frame) {
+            Bar::Room(room) => room.spot(g.frame, fit).is_none(),
+            // Not read yet, or its app is busy: as it is until it answers.
+            Bar::Pending | Bar::Unread => banded,
+        }
+    }
+
+    /// Puts each of `windows` into or out of a band when its title bar's room says so, and moves
+    /// it to its place again (not while the user is moving it).
+    pub(crate) fn update_bands(&mut self, windows: &[WindowHandle]) {
+        let mut moves = Vec::new();
+        for &h in windows {
+            if self.watch.moving == Some(h) {
+                continue;
+            }
+            let want = self.wants_band(h);
+            if want == self.titles.banded.contains(&h) {
+                continue;
+            }
+            // The zone it is in, found before it moves.
+            let zone = window::geometry(window::hwnd(h)).and_then(|g| {
+                self.active
+                    .as_ref()
+                    .and_then(|a| a.zone_for(g.frame, self.style_of(h)))
+                    .map(|z| (z.rect, z.dpi))
+            });
+            if want {
+                self.titles.banded.insert(h);
+            } else {
+                self.titles.banded.remove(&h);
+            }
+            tracing::debug!(banded = want, "title bar room");
+            // Its group's place, or its zone's, with or without the band now.
+            let target = match self.group_of_window(h) {
+                Some(g) => self.group_target(&g.id, h),
+                None => zone.map(|(rect, dpi)| {
+                    To::Frame(
+                        self.banded_area(h, rect, dpi)
+                            .unwrap_or_else(|| self.style().window_area(rect, dpi)),
+                    )
+                }),
+            };
+            if let Some(to) = target {
+                moves.push((h, to));
+            }
+        }
+        if moves.is_empty() {
+            return;
+        }
+        for o in mover::move_all(&moves, mover::WAIT_ONE) {
+            if let Err(e) = o.result {
+                tracing::debug!(error = %e, "window not moved into or out of its band");
+            }
+        }
+    }
+}

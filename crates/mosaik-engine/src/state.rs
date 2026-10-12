@@ -63,6 +63,8 @@ pub(crate) fn snapshot(i: Inputs<'_>) -> StateSnapshot {
                 slot: None,
                 tab_group: None,
                 hidden,
+                tag: None,
+                tab_drop: None,
             })
         })
         .collect();

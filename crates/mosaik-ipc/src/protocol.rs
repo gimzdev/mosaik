@@ -240,6 +240,13 @@ pub struct WindowState {
     pub slot: Option<SlotId>,
     pub tab_group: Option<TabGroupId>,
     pub hidden: Option<HideMethod>,
+    /// Where the window's zone tag is drawn (in its title bar, or above it), when it shows.
+    #[serde(default)]
+    pub tag: Option<Rect>,
+    /// Where dropping another window on this one makes them tabs: the stretch of its title bar
+    /// holding its tag, or the band above it.
+    #[serde(default)]
+    pub tab_drop: Option<Rect>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -589,6 +596,8 @@ mod tests {
                 slot: None,
                 tab_group: None,
                 hidden: None,
+                tag: Some(Rect::new(820, 5, 890, 26)),
+                tab_drop: Some(Rect::new(42, 5, 890, 26)),
             }],
             active_workspace: None,
             hotkey: HotkeyState {

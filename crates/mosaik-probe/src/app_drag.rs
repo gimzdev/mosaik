@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::apps::{App, catalog, close, open};
-use crate::workspace::{drag_path, hidden, state};
+use crate::workspace::{Styles, drag_path, hidden, state, wears_above};
 
 /// Where the apps go.
 pub struct Targets {
@@ -28,11 +28,13 @@ pub struct Targets {
     pub code: HWND,
     /// A point on that tag.
     pub tag_point: Point,
-    /// Where a tab of that window sits (the window's frame).
-    pub group_area: Rect,
-    /// A point in the zone the apps are dragged into, and where a window lands in it.
+    /// That window's zone, where its tabs sit.
+    pub group_zone: Rect,
+    /// A point in the zone the apps are dragged into, and that zone.
     pub zone_point: Point,
-    pub zone_area: Rect,
+    pub zone: Rect,
+    /// How windows sit in zones.
+    pub styles: Styles,
     pub work: Rect,
 }
 
@@ -103,8 +105,10 @@ fn click(at: Point, expected: HWND) -> Result<(), String> {
     drag_path(&[at, at], expected)
 }
 
-fn error_to(w: HWND, area: Rect) -> Option<i32> {
-    frame_rect(w).map(|f| edge_error(f, area))
+/// How far `w` is from where it belongs in `zone`: filling it (its tag in its title bar), or
+/// below a band when it wears its tag or its group's strip above it.
+fn error_in(st: &StateSnapshot, w: HWND, zone: Rect, t: &Targets) -> Option<i32> {
+    frame_rect(w).map(|f| edge_error(f, t.styles.area(zone, wears_above(st, w))))
 }
 
 /// What Windows reported for `w`'s process during `drag`: the mouse captured or let go (an app
@@ -197,7 +201,8 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     let st = state(engine)?;
     out["into_zone"] = json!({
         "drag": drag,
-        "error_px": error_to(w, t.zone_area),
+        "error_px": error_in(&st, w, t.zone, t),
+            "tag_above": wears_above(&st, w),
         "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
     });
 
@@ -209,7 +214,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         "drag": drag,
         "tabs": strip.as_ref().map_or(0, |s| s.tabs.len()),
         "with_the_tag_owner": strip.as_ref().is_some_and(|s| s.tabs.iter().any(|x| x.window == handle(t.code))),
-        "error_px": error_to(w, t.group_area),
+        "error_px": error_in(&st, w, t.group_zone, t),
         "tag_owner_hidden": hidden(&st, t.code),
     });
     let Some(strip) = strip else { return Ok(out) };
@@ -233,7 +238,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     out["app_tab_clicked"] = json!({
         "app_hidden": hidden(&st, w),
         "app_cloaked": geometry(w).is_some_and(|g| g.cloaked),
-        "error_px": error_to(w, t.group_area),
+        "error_px": error_in(&st, w, t.group_zone, t),
         "tag_owner_hidden": hidden(&st, t.code),
     });
 
@@ -246,7 +251,8 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     out["pulled_out"] = json!({
         "drag": drag,
         "in_a_strip": strip_with(&st, w).is_some(),
-        "error_px": error_to(w, t.zone_area),
+        "error_px": error_in(&st, w, t.zone, t),
+            "tag_above": wears_above(&st, w),
         "tag_owner_hidden": hidden(&st, t.code),
     });
     Ok(out)
@@ -328,7 +334,8 @@ fn hit(p: Point, root: HWND) -> Option<u32> {
 
 /// A window whose app drags it itself (no move loop of Windows': the probe's own window with
 /// `--self-move`), dragged by a press in it into the zone, then onto the tag, then pulled out of
-/// its group by its tab.
+/// its group by its tab. Its title bar has no caption to grab (`--no-title-room`), as with such
+/// apps, so it wears its tag and strip above it, below a band.
 pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
     let place = Rect::from_origin_size(
         t.work.left + t.work.width() / 3,
@@ -336,7 +343,11 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
         t.work.width() / 3,
         t.work.height() / 2,
     );
-    let (process, w) = crate::dummy::spawn_with("Probe moves itself", place, " --topmost --self-move")?;
+    let (process, w) = crate::dummy::spawn_with(
+        "Probe moves itself",
+        place,
+        " --topmost --self-move --no-title-room",
+    )?;
     pump_until(500, || false);
     let result = (|| {
         let mut out = json!({});
@@ -346,7 +357,8 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
         let st = state(engine)?;
         out["into_zone"] = json!({
             "drag": drag,
-            "error_px": error_to(w, t.zone_area),
+            "error_px": error_in(&st, w, t.zone, t),
+            "tag_above": wears_above(&st, w),
             "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
         });
         // 2. Onto the other window's tag.
@@ -358,7 +370,7 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
             "drag": drag,
             "tabs": strip.as_ref().map_or(0, |s| s.tabs.len()),
             "with_the_tag_owner": strip.as_ref().is_some_and(|s| s.tabs.iter().any(|x| x.window == handle(t.code))),
-            "error_px": error_to(w, t.group_area),
+            "error_px": error_in(&st, w, t.group_zone, t),
         });
         // 3. Its tab pulled out into the zone.
         if let Some(chip) = strip.as_ref().and_then(|s| chip_of(s, w)) {
@@ -366,7 +378,8 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
             let st = state(engine)?;
             out["pulled_out"] = json!({
                 "in_a_strip": strip_with(&st, w).is_some(),
-                "error_px": error_to(w, t.zone_area),
+                "error_px": error_in(&st, w, t.zone, t),
+            "tag_above": wears_above(&st, w),
             });
         }
         Ok(out)
@@ -379,13 +392,18 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
 }
 
 /// Every app of the user's Start menu that `apps::skip_reason` lets through, opened, put
-/// through the same steps as the catalog's apps, and closed. With `dry_run`, only the list: what
-/// would be opened, and what is skipped and why. An app the test started that keeps running
-/// once its window is closed (in the tray) is stopped; nothing that ran before is.
+/// through the same steps as the catalog's apps, and closed; each program once (entries that run
+/// a program already tested, every console program after the first, are listed, not tested
+/// again). With `dry_run`, only the list: what would be opened, and what is skipped and why. An
+/// app the test started that keeps running once its window is closed (in the tray) is stopped;
+/// nothing that ran before is.
 pub fn installed(engine: &Engine, scope: &Scope, t: &Targets, dry_run: bool) -> Result<Value, String> {
     let apps = crate::apps::start_apps()?;
     let mut skipped = serde_json::Map::new();
     let mut tested = serde_json::Map::new();
+    // The entry that tested each program, by what the entry runs and by the window it opened.
+    let mut programs: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut windows_seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let before = mosaik_win::process::running_pids().map_err(|e| e.to_string())?;
     let mut scanner = Scanner::new();
     for app in &apps {
@@ -393,7 +411,18 @@ pub fn installed(engine: &Engine, scope: &Scope, t: &Targets, dry_run: bool) -> 
             skipped.insert(app.name.clone(), json!(why));
             continue;
         }
+        let program = app.program();
+        if let Some(first) = program.as_ref().and_then(|p| programs.get(p)) {
+            skipped.insert(
+                app.name.clone(),
+                json!(format!("runs the same program as {first}")),
+            );
+            continue;
+        }
         if dry_run {
+            if let Some(p) = program {
+                programs.insert(p, app.name.clone());
+            }
             tested.insert(app.name.clone(), json!("would be opened"));
             continue;
         }
@@ -406,10 +435,24 @@ pub fn installed(engine: &Engine, scope: &Scope, t: &Targets, dry_run: bool) -> 
         };
         let w = opened.hwnd;
         let pid = mosaik_win::window::pid(w);
-        if let Ok(mut windows) = scope.windows.lock() {
-            windows.insert(handle(w));
+        let window_key = format!("{}|{}", opened.exe.to_lowercase(), opened.class);
+        let first = windows_seen.get(&window_key).cloned();
+        let mut result = match &first {
+            // Its window is one of a program tested already: closed at once.
+            Some(first) => json!({ "same_program_as": first }),
+            None => {
+                if let Ok(mut windows) = scope.windows.lock() {
+                    windows.insert(handle(w));
+                }
+                steps(engine, w, t).unwrap_or_else(|e| json!({ "failed": e }))
+            }
+        };
+        if first.is_none() {
+            windows_seen.insert(window_key, app.name.clone());
+            if let Some(p) = program {
+                programs.insert(p, app.name.clone());
+            }
         }
-        let mut result = steps(engine, w, t).unwrap_or_else(|e| json!({ "failed": e }));
         result["exe"] = json!(opened.exe);
         result["class"] = json!(opened.class);
         close(w);

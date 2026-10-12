@@ -111,8 +111,11 @@ impl Settings {
 pub struct FrameSettings {
     /// Draw each zone's coloured ring around its windows.
     pub show_frames: bool,
-    /// Leave room above windows for the zone's tag.
+    /// Show the zone's name on its windows.
     pub show_tags: bool,
+    /// Tags and tab strips go in each window's own title bar, so windows fill their zones;
+    /// otherwise in a band above each window.
+    pub tags_in_title_bar: bool,
     pub style: FrameStyle,
 }
 
@@ -121,18 +124,37 @@ impl Default for FrameSettings {
         Self {
             show_frames: true,
             show_tags: true,
+            tags_in_title_bar: true,
             style: FrameStyle::default(),
         }
     }
 }
 
 impl FrameSettings {
-    /// The style windows are placed with: no tag band when tags are hidden.
+    /// The style windows are placed with: no band with tags in title bars or hidden.
     pub fn effective_style(self) -> FrameStyle {
-        if self.show_tags {
-            self.style
+        if self.tags_in_title_bar {
+            FrameStyle {
+                title_bars: true,
+                ..self.style.without_tags()
+            }
         } else {
-            self.style.without_tags()
+            self.banded_style()
+        }
+    }
+
+    /// The style of a window that wears its tag above it: every window when tags go above
+    /// windows, and with tags in title bars, a window whose title bar has no room for its tag or
+    /// its group's strip.
+    pub fn banded_style(self) -> FrameStyle {
+        let style = FrameStyle {
+            title_bars: false,
+            ..self.style
+        };
+        if self.show_tags {
+            style
+        } else {
+            style.without_tags()
         }
     }
 }
@@ -180,6 +202,34 @@ mod tests {
         assert!(s.notice_shown("windows-snapping", OnDisk::Readable));
         assert!(!s.notice_shown("windows-snapping", OnDisk::Readable));
         assert_eq!(s.notices_shown.len(), 1);
+    }
+
+    #[test]
+    fn tags_go_in_title_bars_unless_set_to_go_above_windows() {
+        let s = Settings::default();
+        let style = s.frames.effective_style();
+        assert!(style.title_bars);
+        assert_eq!(style.tag_band, 0, "windows fill their zones");
+        // A window whose title bar has no room wears its tag above it, in the usual band.
+        assert_eq!(s.frames.banded_style(), FrameStyle::default());
+        // Settings saved before tags went in title bars get them there too; the choice is saved,
+        // the session-only flag is not.
+        let older: Settings = serde_json::from_str(r#"{"version":1,"frames":{"show_frames":true,"show_tags":true,"style":{"gap":8,"tag_band":28,"border":2}}}"#).unwrap();
+        assert!(older.frames.tags_in_title_bar);
+        let json = serde_json::to_string(&older).unwrap();
+        assert!(
+            json.contains("\"tags_in_title_bar\":true") && !json.contains("title_bars"),
+            "{json}"
+        );
+        // Above windows: the band, or none when tags are hidden.
+        let mut above = FrameSettings {
+            tags_in_title_bar: false,
+            ..FrameSettings::default()
+        };
+        assert_eq!(above.effective_style(), FrameStyle::default());
+        above.show_tags = false;
+        assert_eq!(above.effective_style().tag_band, 0);
+        assert!(!above.effective_style().title_bars);
     }
 
     #[test]

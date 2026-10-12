@@ -121,6 +121,24 @@ describe('Mosaïk’s window', () => {
     expect(await screen.findByText('Win+Alt+Space is taken; using Win+Alt+S.')).toBeTruthy();
   });
 
+  it('puts tags in title bars, or above windows when asked', async () => {
+    let saved: Command | null = null;
+    engine.request.mockImplementation((c) => {
+      if (c.cmd === 'set_settings') {
+        saved = c;
+        return Promise.resolve({ reply: 'done', message: 'Settings saved.' });
+      }
+      if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      return Promise.resolve(settingsReply({ ...firstRun, onboarding_done: true }));
+    });
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const place = await screen.findByRole('group', { name: 'Tags and tabs' });
+    expect(within(place).getByRole('radio', { name: 'In each window’s title bar' })).toHaveProperty('checked', true);
+    await userEvent.click(within(place).getByRole('radio', { name: 'Above each window' }));
+    expect(saved).toMatchObject({ cmd: 'set_settings', settings: { frames: { tags_in_title_bar: false } } });
+  });
+
   it('says plainly when the engine cannot be reached, and tries again', async () => {
     engine.request.mockResolvedValueOnce({
       reply: 'error',

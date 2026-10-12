@@ -23,6 +23,7 @@ pub mod rescue;
 pub mod startup;
 pub mod text;
 pub mod time;
+pub mod titlebar;
 pub mod window;
 
 pub use error::{Error, Result};

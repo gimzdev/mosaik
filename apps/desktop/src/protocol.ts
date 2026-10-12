@@ -42,7 +42,12 @@ export interface Settings {
   version: number;
   switcher_hotkey: string;
   snap: { enabled: boolean; invert_shift: boolean; near: number };
-  frames: { show_frames: boolean; show_tags: boolean; style: { gap: number; tag_band: number; border: number } };
+  frames: {
+    show_frames: boolean;
+    show_tags: boolean;
+    tags_in_title_bar: boolean;
+    style: { gap: number; tag_band: number; border: number };
+  };
   tab_hiding: HideMethod | null;
   switching: { minimize_others: boolean; launch_missing: boolean };
   theme: Theme;
@@ -192,6 +197,7 @@ export function isSettings(x: unknown): x is Settings {
     isObject(frames) &&
     isBoolean(frames.show_frames) &&
     isBoolean(frames.show_tags) &&
+    isBoolean(frames.tags_in_title_bar) &&
     (x.tab_hiding === null || (isString(x.tab_hiding) && HIDE_METHODS.has(x.tab_hiding))) &&
     isObject(switching) &&
     isBoolean(switching.minimize_others) &&

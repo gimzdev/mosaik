@@ -156,14 +156,18 @@ pub struct TagLook {
 }
 
 impl TagLook {
-    /// Height, text size and side padding at 100%, as on mosaïk.com.
-    const HEIGHT: f32 = 21.0;
+    /// Text size and side padding at 100%, as on mosaïk.com.
     const TEXT: f32 = 11.5;
     const PAD: f32 = 11.0;
 
     pub fn height(&self) -> i32 {
-        px(Self::HEIGHT * self.scale)
+        px(f(mosaik_core::zone::CHIP_HEIGHT) * self.scale)
     }
+}
+
+/// The width a tag needs to show all of `text` at `scale` (1.0 at 100%).
+pub fn tag_width(canvas: &mut Canvas, text: &str, scale: f32) -> i32 {
+    px(canvas.text_width(text, TagLook::TEXT * scale, Weight::SemiBold) + 2.0 * TagLook::PAD * scale)
 }
 
 /// A pill-shaped name tag.
@@ -184,6 +188,22 @@ impl Tag {
         })
     }
 
+    /// How wide the tag is drawn for `look`, at most `max_width` pixels.
+    pub fn width(&mut self, canvas: &mut Canvas, look: &TagLook, max_width: i32) -> i32 {
+        // Scales are a few hundred percent at most.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let scale_key = (look.scale * 100.0).round() as u32;
+        let natural = match &self.natural {
+            Some((text, key, width)) if *text == look.text && *key == scale_key => *width,
+            _ => {
+                let width = tag_width(canvas, &look.text, look.scale);
+                self.natural = Some((look.text.clone(), scale_key, width));
+                width
+            }
+        };
+        natural.min(max_width)
+    }
+
     /// Shows the tag with its top-left corner at `at`, at most `max_width` pixels wide.
     pub fn show(
         &mut self,
@@ -195,18 +215,7 @@ impl Tag {
     ) -> Result<()> {
         let text_size = TagLook::TEXT * look.scale;
         let pad = TagLook::PAD * look.scale;
-        // Scales are a few hundred percent at most.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let scale_key = (look.scale * 100.0).round() as u32;
-        let natural = match &self.natural {
-            Some((text, key, width)) if *text == look.text && *key == scale_key => *width,
-            _ => {
-                let width = px(canvas.text_width(&look.text, text_size, Weight::SemiBold) + 2.0 * pad);
-                self.natural = Some((look.text.clone(), scale_key, width));
-                width
-            }
-        };
-        let width = natural.min(max_width);
+        let width = self.width(canvas, look, max_width);
         let height = look.height();
         if width < height || look.text.trim().is_empty() {
             self.hide();

@@ -19,6 +19,7 @@ mod state;
 mod switcher;
 mod tabs;
 mod thread;
+mod titles;
 mod watch;
 pub mod watchdog;
 mod workspace;

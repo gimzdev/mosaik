@@ -188,7 +188,14 @@ impl Engine {
         if old.theme != self.settings.theme {
             switcher::set_theme(self.settings.theme);
         }
-        if old.frames != self.settings.frames
+        if old.frames.effective_style() != self.settings.frames.effective_style() {
+            // Tags moved between title bars and bands above windows, or bands came or went:
+            // windows take their places again.
+            self.titles.unband_all();
+            if let Some(topology) = self.topology.clone() {
+                self.refit_open_workspace(&topology);
+            }
+        } else if old.frames != self.settings.frames
             || old.theme != self.settings.theme
             || old.tab_hiding != self.settings.tab_hiding
         {

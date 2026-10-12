@@ -1,8 +1,9 @@
 //! Zones: named, coloured areas of a monitor that belong to a workspace.
 //!
 //! A zone is stored as a fraction of its monitor's work area, so it keeps its shape when the
-//! resolution, the scale or the taskbar changes. Inside the zone, the window sits below a band
-//! that carries the zone's tag, with a small gap between neighbouring zones.
+//! resolution, the scale or the taskbar changes. Inside the zone, with a small gap between
+//! neighbouring zones, the window wears the zone's tag in its own title bar, or sits below a band
+//! that carries the tag (tags set to go above windows, or no room in its title bar).
 
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +98,11 @@ pub struct FrameStyle {
     pub tag_band: i32,
     /// Width of the coloured ring around the window.
     pub border: i32,
+    /// Tags and tab strips go in each window's own title bar (`crate::titlebar`): windows fill
+    /// their zones, tab groups too. Set from the settings for the session; not saved with the
+    /// style.
+    #[serde(skip)]
+    pub title_bars: bool,
 }
 
 impl Default for FrameStyle {
@@ -105,11 +111,15 @@ impl Default for FrameStyle {
             gap: 8,
             tag_band: 28,
             border: 2,
+            title_bars: false,
         }
     }
 }
 
-/// The least band height a tab strip needs (its chips are 21 px high at 100%).
+/// The height of a tag and of a tab's chip at 100%.
+pub const CHIP_HEIGHT: i32 = 21;
+
+/// The least band height a tab strip needs.
 pub const TAB_STRIP_BAND: i32 = 24;
 
 impl FrameStyle {
@@ -119,9 +129,9 @@ impl FrameStyle {
 
     /// The style a tab group's windows are placed with: the band above them always has room
     /// for the tab strip, even when tags are hidden, since the strip is the way to the group's
-    /// other tabs.
+    /// other tabs. With tags in title bars, the strip goes in the visible tab's title bar.
     pub fn for_tabs(self) -> Self {
-        if self.tag_band >= TAB_STRIP_BAND {
+        if self.title_bars || self.tag_band >= TAB_STRIP_BAND {
             self
         } else {
             Self {
@@ -175,6 +185,14 @@ mod tests {
         // A tab group keeps its strip's band when tags are hidden.
         assert_eq!(style.without_tags().for_tabs(), style);
         assert_eq!(style.for_tabs(), style);
+        // With tags in title bars, windows and tab groups fill their zones but for the gap.
+        let title_bars = FrameStyle {
+            title_bars: true,
+            ..style.without_tags()
+        };
+        assert_eq!(title_bars.for_tabs(), title_bars);
+        assert_eq!(title_bars.window_area(zone, 96), Rect::new(4, 4, 956, 1028));
+        assert_eq!(title_bars.tag_area(zone, 96), None);
     }
 
     #[test]

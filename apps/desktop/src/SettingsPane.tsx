@@ -17,6 +17,11 @@ const SHIFT: readonly { value: 'free' | 'snap'; label: string }[] = [
   { value: 'snap', label: 'Hold Shift to snap' },
 ];
 
+const TAG_PLACES: readonly { value: 'title' | 'above'; label: string }[] = [
+  { value: 'title', label: 'In each window’s title bar' },
+  { value: 'above', label: 'Above each window' },
+];
+
 const HIDING: readonly { value: 'auto' | 'minimize'; label: string }[] = [
   { value: 'auto', label: 'Hide them (recommended)' },
   { value: 'minimize', label: 'Minimise them' },
@@ -113,10 +118,18 @@ export function SettingsPane({
         />
         <Toggle
           label="Zone tags"
-          description="The zone’s name above its windows. Drop a window on a tag to make them tabs."
+          description="The zone’s name on its windows. Drop a window on a tag to make them tabs."
           checked={settings.frames.show_tags}
           onChange={(on) => {
             save({ ...settings, frames: { ...settings.frames, show_tags: on } });
+          }}
+        />
+        <Choice
+          label="Tags and tabs"
+          value={settings.frames.tags_in_title_bar ? 'title' : 'above'}
+          options={TAG_PLACES}
+          onChange={(v) => {
+            save({ ...settings, frames: { ...settings.frames, tags_in_title_bar: v === 'title' } });
           }}
         />
       </Section>

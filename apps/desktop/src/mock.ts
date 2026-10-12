@@ -39,7 +39,12 @@ const settings: Settings = {
   version: 1,
   switcher_hotkey: 'Win+Alt+Space',
   snap: { enabled: true, invert_shift: false, near: 48 },
-  frames: { show_frames: true, show_tags: true, style: { gap: 8, tag_band: 28, border: 2 } },
+  frames: {
+    show_frames: true,
+    show_tags: true,
+    tags_in_title_bar: true,
+    style: { gap: 8, tag_band: 28, border: 2 },
+  },
   tab_hiding: null,
   switching: { minimize_others: true, launch_missing: true },
   theme: 'system',

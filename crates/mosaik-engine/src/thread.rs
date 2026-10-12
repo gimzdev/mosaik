@@ -37,6 +37,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::hotkeys::{self, Registered};
 use crate::state;
 use crate::tabs::Hiding;
+use crate::titles::Titles;
 use crate::watch::Watch;
 use crate::workspace::Active;
 use crate::{Config, Message, UiEvent, UiSink, WM_WAKE, switcher};
@@ -159,6 +160,8 @@ pub(crate) struct Engine {
     pub(crate) watch: Watch,
     /// Background tabs Mosaïk has hidden, and the journal the watchdog reads.
     pub(crate) hiding: Hiding,
+    /// Windows' title bars, where tags and tab strips go.
+    pub(crate) titles: Titles,
     /// Notices given once per session, by key.
     pub(crate) told: HashSet<&'static str>,
 }
@@ -248,6 +251,7 @@ pub(crate) fn run(
             watchdog,
             leftovers.report.remaining.clone(),
         ),
+        titles: Titles::new(),
         told: HashSet::new(),
     };
     for n in notices {
@@ -687,6 +691,8 @@ impl Engine {
                         .find(|g| g.open.iter().any(|(_, h)| *h == w.handle))
                         .map(|g| g.id.clone());
                 }
+                w.tag = self.watch.tag_rect(w.handle);
+                w.tab_drop = self.watch.drop_area(w.handle);
             }
         }
         for g in &groups {

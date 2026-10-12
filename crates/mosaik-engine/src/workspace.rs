@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mosaik_core::classify::{Pending, Verdict, classify};
-use mosaik_core::geometry::Rect;
+use mosaik_core::geometry::{Rect, scale_for_dpi};
 use mosaik_core::layout::{Place, SlotId, TabGroupId, Workspace, WorkspaceId};
 use mosaik_core::matching::AppMatch;
 use mosaik_core::place::{Resolver, Target};
@@ -122,19 +122,6 @@ fn slot_label(ws: &Workspace, slot: &SlotId) -> String {
         .unwrap_or_else(|| "a window".to_owned())
 }
 
-/// The moves of a plan, in the form the mover takes.
-fn to_moves(moves: &[Move], topology: &Topology) -> Vec<(WindowHandle, To)> {
-    moves
-        .iter()
-        .filter_map(|m| match &m.target {
-            Target::Frame(r) => Some((m.window, To::Frame(*r))),
-            Target::Maximized(monitor) => topology
-                .get(monitor)
-                .map(|mon| (m.window, To::Maximized(mon.work_area))),
-        })
-        .collect()
-}
-
 fn error(code: ErrorCode, message: impl Into<String>, hint: Option<&str>) -> Reply {
     Reply::Error {
         code,
@@ -146,6 +133,27 @@ fn error(code: ErrorCode, message: impl Into<String>, hint: Option<&str>) -> Rep
 impl Engine {
     pub(crate) fn style(&self) -> FrameStyle {
         self.settings.frames.effective_style()
+    }
+
+    /// The moves of a plan, in the form the mover takes: a window wearing its tag above it goes
+    /// below a band in its zone.
+    fn to_moves(&self, moves: &[Move], topology: &Topology) -> Vec<(WindowHandle, To)> {
+        moves
+            .iter()
+            .filter_map(|m| {
+                if let Some((zone, dpi)) = m.zone
+                    && let Some(area) = self.banded_area(m.window, zone, dpi)
+                {
+                    return Some((m.window, To::Frame(area)));
+                }
+                match &m.target {
+                    Target::Frame(r) => Some((m.window, To::Frame(*r))),
+                    Target::Maximized(monitor) => topology
+                        .get(monitor)
+                        .map(|mon| (m.window, To::Maximized(mon.work_area))),
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn allowed(&self, f: &WindowFacts) -> bool {
@@ -353,11 +361,18 @@ impl Engine {
         let name: String = name.chars().take(mosaik_core::editing::MAX_NAME).collect();
 
         // The windows on screen; background tabs Mosaïk hid are saved with their group below.
-        let windows: Vec<WindowFacts> = self
+        let mut windows: Vec<WindowFacts> = self
             .scan_marked()
             .into_iter()
             .filter(|f| self.manageable(f) && !self.hiding.hidden.contains_key(&f.handle))
             .collect();
+        // A window wearing its tag above it takes the band with it: the zone made for it
+        // includes the band.
+        for f in &mut windows {
+            if self.titles.banded.contains(&f.handle) {
+                f.frame_rect.top -= scale_for_dpi(self.style_of(f.handle).tag_band, f.dpi.max(96));
+            }
+        }
         if windows.is_empty() {
             return error(
                 ErrorCode::Failed,
@@ -456,9 +471,15 @@ impl Engine {
             .iter()
             .zip(&windows)
             .filter(|(s, _)| matches!(s.place, Place::Zone { .. } | Place::Tab { .. }))
-            .filter_map(|(s, w)| match resolver.target(&s.place) {
-                Some(Target::Frame(r)) => Some((w.handle, To::Frame(r))),
-                _ => None,
+            .filter_map(|(s, w)| {
+                let banded = resolver
+                    .zone_of(&s.place)
+                    .and_then(|(zone, dpi)| self.banded_area(w.handle, zone, dpi));
+                match (banded, resolver.target(&s.place)) {
+                    (Some(area), _) => Some((w.handle, To::Frame(area))),
+                    (None, Some(Target::Frame(r))) => Some((w.handle, To::Frame(r))),
+                    _ => None,
+                }
             })
             .collect();
         let (windows_n, zones_n) = (ws.layout.slots.len(), ws.layout.zones.len());
@@ -550,7 +571,7 @@ impl Engine {
         );
 
         self.hide_frames();
-        let outcomes = mover::move_all(&to_moves(&plan.moves, &topology), mover::WAIT);
+        let outcomes = mover::move_all(&self.to_moves(&plan.moves, &topology), mover::WAIT);
         let mut placed = Vec::new();
         let mut trouble: Vec<String> = Vec::new();
         for o in outcomes {
@@ -729,10 +750,11 @@ impl Engine {
             .collect();
         let moves = plan_refit(&ws, &on_screen, topology, self.style());
         self.hide_frames();
-        let placed: Vec<(WindowHandle, Rect)> = mover::move_all(&to_moves(&moves, topology), mover::WAIT)
-            .into_iter()
-            .filter_map(|o| o.result.ok().map(|r| (o.window, r)))
-            .collect();
+        let placed: Vec<(WindowHandle, Rect)> =
+            mover::move_all(&self.to_moves(&moves, topology), mover::WAIT)
+                .into_iter()
+                .filter_map(|o| o.result.ok().map(|r| (o.window, r)))
+                .collect();
         let zones = live_zones(&ws, topology, self.style());
         if let Some(a) = &mut self.active {
             a.zones = zones;
@@ -787,7 +809,7 @@ impl Engine {
         active.windows.insert(launched.slot.clone(), h);
         let moves = plan_refit(&ws, &[(launched.slot, &facts)], &topology, style);
         let placed: Vec<(WindowHandle, Rect)> =
-            mover::move_all(&to_moves(&moves, &topology), Duration::from_millis(1500))
+            mover::move_all(&self.to_moves(&moves, &topology), Duration::from_millis(1500))
                 .into_iter()
                 .filter_map(|o| o.result.ok().map(|r| (o.window, r)))
                 .collect();

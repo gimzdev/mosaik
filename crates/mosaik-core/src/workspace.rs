@@ -407,6 +407,9 @@ pub struct Move {
     pub slot: SlotId,
     pub window: WindowHandle,
     pub target: Target,
+    /// The zone the target fills (with its monitor's DPI), for a window in a zone or a tab of a
+    /// group in one: a window wearing its tag above it goes below a band in it instead.
+    pub zone: Option<(Rect, u32)>,
 }
 
 /// Everything opening a workspace does, in order: move, start what is missing, minimise what
@@ -515,6 +518,7 @@ pub fn plan_switch(
                         slot: slot.id.clone(),
                         window: *window,
                         target,
+                        zone: resolver.zone_of(&slot.place),
                     });
                 }
             }
@@ -639,6 +643,7 @@ pub fn plan_refit(
                 slot: slot.clone(),
                 window: w.handle,
                 target,
+                zone: resolver.zone_of(&s.place),
             })
         })
         .collect()

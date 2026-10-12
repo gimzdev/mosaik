@@ -1,5 +1,6 @@
 //! Tabs for any app: windows that share one place, one visible at a time, with a tab strip in
-//! the band above them (ADR 0003 for how background tabs are hidden).
+//! the visible one's title bar, or in the band above it (ADR 0003 for how background tabs are
+//! hidden, ADR 0011 for where strips go).
 //!
 //! Which window shows is decided in one place, [`Engine::sync_tabs`], with the rule of
 //! `mosaik_core::tabs`: a window stays hidden only while it is a background tab of a group of the
@@ -21,7 +22,7 @@ use mosaik_core::window::{Cloak, WindowHandle};
 use mosaik_core::workspace::{app_match, edge_distance};
 use mosaik_core::zone::{ZoneColor, ZoneId};
 use mosaik_overlay::layered::Stack;
-use mosaik_overlay::tabbar::{self, BarInput, BarLook, Hit, TabBar, TabView};
+use mosaik_overlay::tabbar::{self, BarInput, BarLook, BarPlace, Hit, TabBar, TabView};
 use mosaik_win::hide::Hidden;
 use mosaik_win::process::Process;
 use mosaik_win::{apps, arrange, window};
@@ -30,6 +31,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
 use crate::hider::{self, Answer, Kind, Request, Worker};
 use crate::mover::{self, To};
 use crate::thread::{Engine, timer};
+use crate::titles::TitleSpot;
 use crate::watch::{DRAG_TICK_MS, shift_down};
 
 /// Windows Mosaïk has hidden, how, and the journal the watchdog reads.
@@ -115,15 +117,17 @@ pub(crate) enum BarMode {
 pub(crate) enum Spot {
     At {
         band: Rect,
+        /// In the visible tab's title bar, or in a band above it.
+        place: BarPlace,
         color: ZoneColor,
         /// The zone's name; empty outside zones.
         label: String,
         dpi: u32,
     },
-    /// The visible tab is minimised, maximised or on another desktop: the strip comes back
-    /// with it.
+    /// The visible tab is minimised or on another desktop, maximised with no room in its title
+    /// bar, or its title bar is being read: the strip comes back with it.
     Later,
-    /// No room for a strip above the visible tab.
+    /// No room for a strip, in the visible tab's title bar or above it.
     Nowhere,
 }
 
@@ -202,36 +206,47 @@ impl Engine {
             .find(|g| g.open.iter().any(|(_, w)| *w == h))
     }
 
-    fn resolve(&self, place: &Place) -> Option<To> {
+    /// Where `window` goes at `place`, from the layout: below a band in its zone when it wears
+    /// its tag above it.
+    fn resolve(&self, place: &Place, window: WindowHandle) -> Option<To> {
         let active = self.active.as_ref()?;
         let ws = self.file.workspaces.iter().find(|w| w.id == active.id)?;
         let topology = self.topology.as_ref()?;
-        match Resolver::new(&ws.layout, topology, self.style()).target(place)? {
+        let resolver = Resolver::new(&ws.layout, topology, self.style());
+        if let Some((zone, dpi)) = resolver.zone_of(place)
+            && let Some(area) = self.banded_area(window, zone, dpi)
+        {
+            return Some(To::Frame(area));
+        }
+        match resolver.target(place)? {
             Target::Frame(r) => Some(To::Frame(r)),
             Target::Maximized(m) => topology.get(&m).map(|mon| To::Maximized(mon.work_area)),
         }
     }
 
-    /// Where a group's windows go, from the layout: below a band with room for the strip.
-    pub(crate) fn group_target(&self, group: &TabGroupId) -> Option<To> {
-        self.resolve(&Place::Tab { group: group.clone() })
+    /// Where `window`, a tab of `group`, goes: the group's place, from the layout (with tags
+    /// above windows, below a band with room for the strip).
+    pub(crate) fn group_target(&self, group: &TabGroupId, window: WindowHandle) -> Option<To> {
+        self.resolve(&Place::Tab { group: group.clone() }, window)
     }
 
-    /// Where a slot's window goes, from the layout.
-    pub(crate) fn slot_target(&self, slot: &SlotId) -> Option<To> {
+    /// Where the window of a slot goes, from the layout.
+    pub(crate) fn slot_target(&self, slot: &SlotId, window: WindowHandle) -> Option<To> {
         let active = self.active.as_ref()?;
         let ws = self.file.workspaces.iter().find(|w| w.id == active.id)?;
         let place = ws.layout.slot(slot)?.place.clone();
-        self.resolve(&place)
+        self.resolve(&place, window)
     }
 
-    /// Where a group's strip goes, given its visible tab: in the band of the zone holding it, or
-    /// right above it outside zones, when there is room on its monitor.
-    pub(crate) fn strip_spot(&self, group: &TabGroupId, visible: WindowHandle) -> Spot {
-        let frame = if self.hiding.hidden.contains_key(&visible) {
+    /// Where a group's strip goes, given its visible tab: in its title bar (tags in title bars,
+    /// with room there), else in the band of the zone holding it, or right above it outside
+    /// zones when there is room on its monitor.
+    pub(crate) fn strip_spot(&mut self, group: &TabGroupId, visible: WindowHandle) -> Spot {
+        let style = self.style();
+        let (frame, maximized) = if self.hiding.hidden.contains_key(&visible) {
             // Still hidden: it shows in the group's place.
-            match self.group_target(group) {
-                Some(To::Frame(r)) => r,
+            match self.group_target(group, visible) {
+                Some(To::Frame(r)) => (r, false),
                 Some(To::Maximized(_)) => return Spot::Later,
                 None => return Spot::Nowhere,
             }
@@ -239,29 +254,59 @@ impl Engine {
             let Some(g) = window::geometry(window::hwnd(visible)) else {
                 return Spot::Nowhere;
             };
-            if g.minimized || g.maximized || g.cloaked {
+            if g.minimized || g.cloaked || (g.maximized && !style.title_bars) {
                 return Spot::Later;
             }
-            g.frame
+            (g.frame, g.maximized)
         };
-        let style = self.style();
-        if let Some(z) = self.active.as_ref().and_then(|a| a.zone_for(frame, style))
-            && let Some(band) = style.for_tabs().tag_area(z.rect, z.dpi)
+        let zone = self
+            .active
+            .as_ref()
+            .and_then(|a| a.zone_for(frame, style))
+            .filter(|_| !maximized)
+            .cloned();
+        let monitor = self.topology.as_ref().map(|t| t.monitor_for_rect(frame).clone());
+        let dpi = zone
+            .as_ref()
+            .map(|z| z.dpi)
+            .or_else(|| monitor.as_ref().map(|m| m.dpi))
+            .unwrap_or(96);
+        let (color, label) = zone
+            .as_ref()
+            .map_or((ZoneColor::Slate, String::new()), |z| (z.color, z.name.clone()));
+        match self.strip_spot_in_title(visible, frame, dpi) {
+            TitleSpot::In(band) => {
+                return Spot::At {
+                    band,
+                    place: BarPlace::TitleBar,
+                    color,
+                    label,
+                    dpi,
+                };
+            }
+            TitleSpot::NotYet => return Spot::Later,
+            // A maximised window has no room above it.
+            TitleSpot::Above | TitleSpot::NoAnswer if maximized => return Spot::Later,
+            TitleSpot::Above | TitleSpot::NoAnswer => {}
+        }
+        let banded = self.style_of(visible).for_tabs();
+        if let Some(z) = &zone
+            && let Some(band) = banded.tag_area(z.rect, z.dpi)
         {
             return Spot::At {
                 band,
-                color: z.color,
-                label: z.name.clone(),
-                dpi: z.dpi,
+                place: BarPlace::Band,
+                color,
+                label,
+                dpi,
             };
         }
-        let Some(topology) = &self.topology else {
+        let Some(monitor) = monitor else {
             return Spot::Nowhere;
         };
-        let monitor = topology.monitor_for_rect(frame);
         let band = Rect::new(
             frame.left,
-            frame.top - scale_for_dpi(style.for_tabs().tag_band, monitor.dpi),
+            frame.top - scale_for_dpi(banded.tag_band, monitor.dpi),
             frame.right,
             frame.top,
         );
@@ -270,9 +315,10 @@ impl Engine {
         }
         Spot::At {
             band,
-            color: ZoneColor::Slate,
-            label: String::new(),
-            dpi: monitor.dpi,
+            place: BarPlace::Band,
+            color,
+            label,
+            dpi,
         }
     }
 
@@ -322,8 +368,8 @@ impl Engine {
         for w in &plan.show {
             let slot = self.active.as_ref().and_then(|a| a.slot_of(*w)).cloned();
             let target = match (member.get(w), &slot) {
-                (Some(g), _) => self.group_target(g),
-                (None, Some(s)) => self.slot_target(s),
+                (Some(g), _) => self.group_target(g, *w),
+                (None, Some(s)) => self.slot_target(s, *w),
                 (None, None) => None,
             };
             if let Some(to) = target
@@ -393,6 +439,7 @@ impl Engine {
             Some(visible),
             Some(Spot::At {
                 band,
+                place,
                 color,
                 label,
                 dpi,
@@ -431,7 +478,7 @@ impl Engine {
             (Some(_), Some(d)) => d,
             _ => visible,
         };
-        let band = *band;
+        let (band, place) = (*band, *place);
         if self.canvas_ready().is_none() {
             return Some(false);
         }
@@ -442,6 +489,7 @@ impl Engine {
             Some(bar) => match bar.show(
                 &mut canvas,
                 band,
+                place,
                 &look,
                 &tabs,
                 drop_at,
@@ -918,7 +966,7 @@ impl Engine {
                 a.shown.remove(l);
             }
         }
-        if let Some(to) = self.group_target(&group) {
+        if let Some(to) = self.group_target(&group, dropped) {
             for o in mover::move_all(&[(dropped, to)], mover::WAIT_ONE) {
                 if let Err(e) = o.result {
                     self.tell_once(
@@ -957,9 +1005,11 @@ impl Engine {
         });
         // Its zone's window area, or its own size centred under the pointer.
         let target = match &live {
-            Some(z) => style.window_area(z.rect, z.dpi),
+            Some(z) => self
+                .banded_area(window, z.rect, z.dpi)
+                .unwrap_or_else(|| style.window_area(z.rect, z.dpi)),
             None => {
-                let size = match self.group_target(group) {
+                let size = match self.group_target(group, window) {
                     Some(To::Frame(r)) => (r.width(), r.height()),
                     _ => (800, 600),
                 };

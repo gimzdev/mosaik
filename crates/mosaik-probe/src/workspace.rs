@@ -3,6 +3,7 @@
 //! their colours, scramble them, switch back and time it, then (with `--drag`) drag a window
 //! into another zone with the mouse. `--browser edge|chrome` drags browser tabs out into the
 //! workspace (`browser.rs`); `--apps` puts real apps into zones and tabs (`app_drag.rs`).
+//! Tags go in title bars, as in the app; `--tags-above` puts them above windows.
 //!
 //! Everything happens in a scratch folder: the user's own workspaces and settings are not read
 //! or written. The probe windows are top-most so the mouse never lands on the user's windows.
@@ -12,10 +13,11 @@ use std::time::{Duration, Instant};
 
 use mosaik_core::editing::ZoneEdit;
 use mosaik_core::geometry::{Point, RatioRect, Rect};
+use mosaik_core::settings::Settings;
 use mosaik_core::store::{Store, WorkspacesFile};
 use mosaik_core::zone::{FrameStyle, Rgb, ZoneColor};
 use mosaik_engine::{Config, Engine, Scope, UiEvent, UiSink};
-use mosaik_ipc::protocol::{Command, Reply};
+use mosaik_ipc::protocol::{Command, Reply, StateSnapshot};
 use mosaik_win::events::pump_until;
 use mosaik_win::input::{self, LeftButton};
 use mosaik_win::place::{edge_error, move_frame};
@@ -74,24 +76,21 @@ fn close_to(a: Rgb, b: Rgb) -> bool {
     (0.6..=1.05).contains(&factor) && near(a.0, b.0) && near(a.1, b.1) && near(a.2, b.2)
 }
 
-/// Checks the ring around a window and its tag: the pixel just outside the middle of each side,
-/// and one inside the tag pill.
-fn frame_colours(frame: Rect, color: ZoneColor, dpi: u32) -> Value {
+/// Checks the ring around a window and its tag (`tag`, as the engine reports it): the pixel just
+/// outside the middle of each side, and one inside the tag pill.
+fn frame_colours(frame: Rect, color: ZoneColor, dpi: u32, tag: Option<Rect>) -> Value {
     let s = f64::from(dpi) / 96.0;
     // Inside the pill: a few pixels from its left end, half way down.
     #[allow(clippy::cast_possible_truncation)]
-    let tag = Point::new(
-        frame.left + (4.0 * s).round() as i32,
-        frame.top - (14.5 * s).round() as i32,
-    );
-    let points = [
+    let tag = tag.map(|t| Point::new(t.left + (4.0 * s).round() as i32, t.center().y));
+    let mut points = vec![
         ("top", Point::new(frame.center().x, frame.top - 1)),
         ("bottom", Point::new(frame.center().x, frame.bottom)),
         ("left", Point::new(frame.left - 1, frame.center().y)),
         ("right", Point::new(frame.right, frame.center().y)),
-        ("tag", tag),
     ];
-    let mut ok = true;
+    points.extend(tag.map(|t| ("tag", t)));
+    let mut ok = tag.is_some();
     let mut seen = serde_json::Map::new();
     for (name, p) in points {
         let got = pixel(p);
@@ -110,6 +109,64 @@ struct Probe {
     process: mosaik_win::process::Process,
     hwnd: HWND,
     tiled: Rect,
+}
+
+/// The styles the engine places windows with: its own (tags in title bars, or in a band above
+/// windows), and that of a window wearing its tag above it for want of room in its title bar.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Styles {
+    pub style: FrameStyle,
+    pub banded: FrameStyle,
+    pub dpi: u32,
+}
+
+impl Styles {
+    fn of(engine: &Engine, dpi: u32) -> Result<Self, String> {
+        match engine.request(Command::Settings, TIMEOUT) {
+            Reply::Settings { settings, .. } => Ok(Self {
+                style: settings.frames.effective_style(),
+                banded: settings.frames.banded_style().for_tabs(),
+                dpi,
+            }),
+            other => Err(format!("settings: {other:?}")),
+        }
+    }
+
+    /// Where a window lands in `zone`: below a band when it wears its tag or strip above it.
+    pub(crate) fn area(&self, zone: Rect, above: bool) -> Rect {
+        if above { self.banded } else { self.style }.window_area(zone, self.dpi)
+    }
+}
+
+/// Whether `w` wears its tag, or its group's strip, above its frame (tags set to go above
+/// windows, or no room in its title bar).
+pub(crate) fn wears_above(st: &StateSnapshot, w: HWND) -> bool {
+    let Some(me) = st.windows.iter().find(|x| x.handle == handle(w)) else {
+        return false;
+    };
+    let top = me.frame_rect.top;
+    me.tag.is_some_and(|t| t.bottom <= top + 1)
+        || st
+            .tab_strips
+            .iter()
+            .filter(|s| s.tabs.iter().any(|t| t.window == me.handle && t.visible))
+            .any(|s| s.rect.bottom <= top + 1)
+}
+
+/// Where the engine draws `w`'s tag and where dropping a window on it makes them tabs, once its
+/// tag shows (the engine reads its title bar first).
+pub(crate) fn tag_of(engine: &Engine, w: HWND) -> Result<(Rect, Rect), String> {
+    let mut found = None;
+    pump_until(2000, || {
+        found = state(engine).ok().and_then(|st| {
+            st.windows
+                .iter()
+                .find(|x| x.handle == handle(w))
+                .and_then(|x| x.tag.zip(x.tab_drop))
+        });
+        found.is_some()
+    });
+    found.ok_or_else(|| "the window shows no tag".to_owned())
 }
 
 pub fn run(args: &[String]) -> Result<Value, String> {
@@ -139,6 +196,11 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     let dir = std::env::temp_dir().join(format!("mosaik-probe-workspace-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    if args.iter().any(|a| a == "--tags-above") {
+        let mut settings = Settings::default();
+        settings.frames.tags_in_title_bar = false;
+        Store::new(&dir).save(&settings).map_err(|e| e.to_string())?;
+    }
     let notices: Arc<Mutex<Vec<String>>> = Arc::default();
     let sink: UiSink = {
         let notices = Arc::clone(&notices);
@@ -204,7 +266,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
 
     let result = match &browser {
         Some(b) => browser_scenario(&engine, &probes, dpi, b, work),
-        None if soak.is_some() => soak_scenario(&engine, &probes, dpi, work, soak.unwrap_or_default()),
+        None if soak.is_some() => soak_scenario(&engine, &probes, work, soak.unwrap_or_default()),
         None if args.iter().any(|a| a == "--eight") => {
             let aside: Vec<HWND> = probes.iter().map(|p| p.hwnd).collect();
             crate::soak::eight(&engine, &aside, work)
@@ -250,7 +312,7 @@ fn scenario(
     dpi: u32,
     dir: &std::path::Path,
 ) -> Result<Value, String> {
-    let style = FrameStyle::default();
+    let styles = Styles::of(engine, dpi)?;
     // 1. Save the tiled windows as a workspace.
     let (reply, save_ms) = ask(
         engine,
@@ -275,13 +337,17 @@ fn scenario(
     };
     let mut after_save = Vec::new();
     for p in probes {
+        let tag = tag_of(engine, p.hwnd).ok().map(|(t, _)| t);
         let frame = frame_rect(p.hwnd).ok_or("a probe window vanished")?;
-        let wanted = style.window_area(p.tiled, dpi);
-        let colours = colour_of(p.title).map(|c| frame_colours(frame, c, dpi));
+        let wanted = styles.area(p.tiled, false);
+        let colours = colour_of(p.title).map(|c| frame_colours(frame, c, dpi, tag));
         after_save.push(json!({
             "window": p.title,
             "error_px": edge_error(frame, wanted),
             "frame": colours,
+            // Relative to the frame: in the title bar, against its buttons; or above the window.
+            "tag": tag.map(|t| [t.left - frame.left, t.top - frame.top, t.right - frame.right, t.bottom - frame.top]),
+            "tag_in_title_bar": tag.is_some_and(|t| t.top >= frame.top && t.right <= frame.right),
         }));
     }
 
@@ -306,12 +372,13 @@ fn scenario(
     pump_until(900, || false);
     let mut after_switch = Vec::new();
     for p in probes {
+        let tag = tag_of(engine, p.hwnd).ok().map(|(t, _)| t);
         let frame = frame_rect(p.hwnd).ok_or("a probe window vanished")?;
-        let wanted = style.window_area(p.tiled, dpi);
+        let wanted = styles.area(p.tiled, false);
         after_switch.push(json!({
             "window": p.title,
             "error_px": edge_error(frame, wanted),
-            "frame": colour_of(p.title).map(|c| frame_colours(frame, c, dpi)),
+            "frame": colour_of(p.title).map(|c| frame_colours(frame, c, dpi, tag)),
         }));
     }
     let state = match engine.request(Command::State, TIMEOUT) {
@@ -330,8 +397,8 @@ fn scenario(
     // 4. With --drag: tabs and drag to snap, with the mouse; then the same drop where Windows'
     // own snapping also reacts (the screen's top edge, its top centre).
     let dragged = if drag {
-        let mut d = tabs_and_snap(engine, probes, dpi)?;
-        d["with_windows_snapping"] = windows_snapping(engine, probes, dpi)?;
+        let mut d = tabs_and_snap(engine, probes, styles)?;
+        d["with_windows_snapping"] = windows_snapping(engine, probes, styles)?;
         Some(d)
     } else {
         None
@@ -361,7 +428,7 @@ fn scenario(
     let restarted = match again {
         Some(hwnd) => {
             let frame = frame_rect(hwnd).ok_or("the restarted window vanished")?;
-            let error = edge_error(frame, style.window_area(probes[2].tiled, dpi));
+            let error = edge_error(frame, styles.area(probes[2].tiled, false));
             crate::apps::close(hwnd);
             json!({ "reply": restarted_reply, "started": true, "error_px": error })
         }
@@ -369,7 +436,7 @@ fn scenario(
     };
 
     // 6. Editing from the interface: zones, name, shortcut, deleting.
-    let edited = editing(engine, probes, dpi)?;
+    let edited = editing(engine, probes, styles)?;
 
     println!("saved: {saved} ({save_ms:.0} ms)");
     for v in &after_save {
@@ -396,6 +463,7 @@ fn scenario(
         );
     }
     Ok(json!({
+        "tags_in_title_bars": styles.style.title_bars,
         "save_ms": save_ms,
         "switch_ms": switch_ms,
         "after_save": after_save,
@@ -418,7 +486,7 @@ fn browser_scenario(
     b: &crate::browser::Browser,
     work: Rect,
 ) -> Result<Value, String> {
-    let style = FrameStyle::default();
+    let styles = Styles::of(engine, dpi)?;
     let saved = done(
         &ask(
             engine,
@@ -430,11 +498,8 @@ fn browser_scenario(
     )?;
     pump_until(700, || false);
     let (code, review) = (&probes[0], &probes[2]);
-    let c = frame_rect(code.hwnd).ok_or("the code window vanished")?;
-    #[allow(clippy::cast_possible_truncation)]
-    let band_middle = (14.0 * f64::from(dpi) / 96.0).round() as i32;
-    let tag_point = Point::new(c.left + c.width() / 2, c.top - band_middle);
-    let zone = (review.tiled.center(), style.window_area(review.tiled, dpi));
+    let tag_point = tag_of(engine, code.hwnd)?.0.center();
+    let zone = (review.tiled.center(), styles.area(review.tiled, false));
     // The probe's windows stop being top-most (still above every other window), so the browser's
     // window can come in front of them: browsers take back their normal stacking when made
     // top-most.
@@ -469,20 +534,14 @@ fn browser_scenario(
 
 /// Switches between two workspaces of the probe windows, `cycles` times (soak.rs); both are
 /// deleted afterwards.
-fn soak_scenario(
-    engine: &Engine,
-    probes: &[Probe],
-    dpi: u32,
-    work: Rect,
-    cycles: usize,
-) -> Result<Value, String> {
+fn soak_scenario(engine: &Engine, probes: &[Probe], work: Rect, cycles: usize) -> Result<Value, String> {
     let windows = [
         (probes[0].hwnd, probes[0].tiled),
         (probes[1].hwnd, probes[1].tiled),
         (probes[2].hwnd, probes[2].tiled),
     ];
     let original = input::cursor();
-    let result = crate::soak::run(engine, windows, dpi, work, cycles);
+    let result = crate::soak::run(engine, windows, work, cycles);
     input::move_to(original);
     for name in ["Soak A", "Soak B"] {
         let _ = ask(
@@ -513,7 +572,7 @@ fn apps_scenario(
     only: Option<&str>,
     installed: Option<Installed>,
 ) -> Result<Value, String> {
-    let style = FrameStyle::default();
+    let styles = Styles::of(engine, dpi)?;
     let saved = done(
         &ask(
             engine,
@@ -525,15 +584,13 @@ fn apps_scenario(
     )?;
     pump_until(700, || false);
     let (code, review) = (&probes[0], &probes[2]);
-    let c = frame_rect(code.hwnd).ok_or("the code window vanished")?;
-    #[allow(clippy::cast_possible_truncation)]
-    let band_middle = (14.0 * f64::from(dpi) / 96.0).round() as i32;
     let targets = crate::app_drag::Targets {
         code: code.hwnd,
-        tag_point: Point::new(c.left + c.width() / 2, c.top - band_middle),
-        group_area: c,
+        tag_point: tag_of(engine, code.hwnd)?.0.center(),
+        group_zone: code.tiled,
         zone_point: review.tiled.center(),
-        zone_area: style.window_area(review.tiled, dpi),
+        zone: review.tiled,
+        styles,
         work,
     };
     let original = input::cursor();
@@ -590,8 +647,7 @@ fn zones(engine: &Engine, workspace: &str) -> Result<(Vec<ZoneEdit>, String), St
 /// What the interface does to a workspace, through the engine: split a zone (the window in it
 /// moves at once), a stale editor refused, a zone removed (its window stays put), renamed (the
 /// old name then saves a new workspace), a shortcut given and taken back, deleted while open.
-fn editing(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String> {
-    let style = FrameStyle::default();
+fn editing(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Value, String> {
     // The review window was closed by the step before; the code and terminal windows remain.
     let (code, terminal) = (&probes[0], &probes[1]);
     let (before, revision) = zones(engine, "Probe workspace")?;
@@ -635,7 +691,7 @@ fn editing(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String>
         "ms": split_ms,
         "zones": after_split.len(),
         "new_zone_has_an_id": after_split.iter().all(|z| z.id.is_some()),
-        "code_error_px": edge_error(code_frame, style.window_area(left.area.to_rect(work), dpi)),
+        "code_error_px": edge_error(code_frame, styles.area(left.area.to_rect(work), false)),
     });
 
     // The editor that was open before the split is now stale: its save is refused.
@@ -863,32 +919,39 @@ fn shell_windows() -> Vec<(u64, String)> {
 }
 
 /// Drops where Windows' own snapping also watches the pointer: the review window onto the code
-/// group's strip at the screen's top edge and at its top centre (Windows 11's snap layouts
-/// bar), and into the code zone at the screen's left edge. After each: where the window ended,
-/// whether Windows maximised or arranged it, which shell windows appeared. Then the window goes
-/// back to its zone.
-fn windows_snapping(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String> {
-    let style = FrameStyle::default();
+/// group's strip (with tags above windows, at the screen's top edge and at its top centre, where
+/// Windows 11 shows its snap layouts bar; with tags in title bars the strip is in the code
+/// window's title bar, below the edge), and into the code zone at the screen's left edge. After
+/// each: where the window ended, whether Windows maximised or arranged it, which shell windows
+/// appeared. Then the window goes back to its zone.
+fn windows_snapping(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Value, String> {
     let (code, review) = (&probes[0], &probes[2]);
     let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
     let screen = topology.monitor_for_rect(code.tiled).bounds;
     let zone = code.tiled;
+    let strip = state(engine)?
+        .tab_strips
+        .iter()
+        .find(|s| s.tabs.iter().any(|t| t.window == handle(code.hwnd)))
+        .map(|s| s.rect)
+        .ok_or("the code window is not in a tab group")?;
     #[allow(clippy::cast_possible_truncation)]
     let along = |share: f64| {
-        let x = (f64::from(screen.left) + f64::from(screen.width()) * share).round() as i32;
-        x.clamp(zone.left + 40, zone.right - 40)
+        if styles.style.title_bars {
+            (f64::from(strip.left) + f64::from(strip.width()) * share).round() as i32
+        } else {
+            let x = (f64::from(screen.left) + f64::from(screen.width()) * share).round() as i32;
+            x.clamp(zone.left + 40, zone.right - 40)
+        }
+    };
+    let y = if styles.style.title_bars {
+        strip.center().y
+    } else {
+        screen.top
     };
     let drops = [
-        (
-            "onto the strip at the top edge",
-            Point::new(along(0.3), screen.top),
-            true,
-        ),
-        (
-            "onto the strip at the top centre",
-            Point::new(along(0.5), screen.top),
-            true,
-        ),
+        ("onto the strip", Point::new(along(0.3), y), true),
+        ("onto the strip, at its middle", Point::new(along(0.5), y), true),
         (
             "into the zone at the left edge",
             Point::new(screen.left, zone.center().y),
@@ -919,7 +982,7 @@ fn windows_snapping(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value
             "drop": name,
             "pointer": [to.x, to.y],
             "became_a_tab": strip.is_some(),
-            "zone_error_px": (!onto_strip).then(|| frame.map(|f| edge_error(f, style.window_area(zone, dpi)))).flatten(),
+            "zone_error_px": (!onto_strip).then(|| frame.map(|f| edge_error(f, styles.area(zone, false)))).flatten(),
             "maximized": maximized,
             "arranged_by_windows": mosaik_win::window::is_arranged(review.hwnd),
             "moved_in_the_next_second": soon.zip(frame).map(|(a, b)| edge_error(b, a)),
@@ -961,20 +1024,19 @@ fn windows_snapping(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value
 /// Tabs with the mouse: the terminal is dropped on the code window's tag (they become tabs), the
 /// code tab is clicked, then the terminal's tab is pulled out into the review zone. Then a
 /// window is dragged back into its own zone.
-fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String> {
-    let style = FrameStyle::default();
+fn tabs_and_snap(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Value, String> {
     let (code, terminal, review) = (&probes[0], &probes[1], &probes[2]);
     let original = input::cursor();
-    let s = f64::from(dpi) / 96.0;
+    let s = f64::from(styles.dpi) / 96.0;
     #[allow(clippy::cast_possible_truncation)]
     let px = |v: f64| (v * s).round() as i32;
 
     // 1. Drop the terminal on the code window's tag.
     let t = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
-    let c = frame_rect(code.hwnd).ok_or("the code window vanished")?;
+    let (tag, _) = tag_of(engine, code.hwnd)?;
     drag(
         Point::new(t.left + t.width() / 3, t.top + 12),
-        Point::new(c.left + c.width() / 2, c.top - px(14.0)),
+        tag.center(),
         terminal.hwnd,
     )?;
     let after_join = state(engine)?;
@@ -982,7 +1044,7 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, S
     let joined = json!({
         "strips": after_join.tab_strips.len(),
         "tabs": strip.as_ref().map_or(0, |st| st.tabs.len()),
-        "terminal_error_px": frame_rect(terminal.hwnd).map(|f| edge_error(f, style.window_area(code.tiled, dpi))),
+        "terminal_error_px": frame_rect(terminal.hwnd).map(|f| edge_error(f, styles.area(code.tiled, false))),
         "code_hidden": hidden(&after_join, code.hwnd),
         "terminal_hidden": hidden(&after_join, terminal.hwnd),
     });
@@ -999,7 +1061,7 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, S
             json!({
                 "code_hidden": hidden(&st, code.hwnd),
                 "terminal_hidden": hidden(&st, terminal.hwnd),
-                "code_error_px": frame_rect(code.hwnd).map(|f| edge_error(f, style.window_area(code.tiled, dpi))),
+                "code_error_px": frame_rect(code.hwnd).map(|f| edge_error(f, styles.area(code.tiled, false))),
             })
         }
         None => json!({ "skipped": "no strip with the code tab" }),
@@ -1020,7 +1082,7 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, S
             json!({
                 "strips": st.tab_strips.len(),
                 "terminal_hidden": hidden(&st, terminal.hwnd),
-                "terminal_error_px": frame_rect(terminal.hwnd).map(|f| edge_error(f, style.window_area(review.tiled, dpi))),
+                "terminal_error_px": frame_rect(terminal.hwnd).map(|f| edge_error(f, styles.area(review.tiled, false))),
                 "code_hidden": hidden(&st, code.hwnd),
             })
         }
@@ -1034,15 +1096,16 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, S
         terminal.tiled.center(),
         terminal.hwnd,
     )?;
+    let back_tag = tag_of(engine, terminal.hwnd).ok().map(|(t, _)| t);
     let back = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
     // Its ring and tag, read now: the next step moves it again.
-    let back_colours = frame_colours(back, ZoneColor::Verdigris, dpi);
+    let back_colours = frame_colours(back, ZoneColor::Verdigris, styles.dpi, back_tag);
 
-    // 5. Drop it on the code window's tag again, at the tag's left end: in the screen's top-left
-    // corner, where Windows' own snapping also watches the pointer.
-    let c = frame_rect(code.hwnd).ok_or("the code window vanished")?;
+    // 5. Drop it on the code window again, at the left end of where a drop makes tabs: near the
+    // screen's top-left corner, where Windows' own snapping also watches the pointer.
+    let (_, drop) = tag_of(engine, code.hwnd)?;
     let t = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
-    let corner = Point::new(c.left + px(30.0), c.top - px(10.0));
+    let corner = Point::new(drop.left + px(10.0), drop.center().y);
     drag(
         Point::new(t.left + t.width() / 3, t.top + 12),
         corner,
@@ -1063,7 +1126,7 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, S
         "clicked_code_tab": clicked,
         "pulled_out": pulled,
         "snapped_back": {
-            "error_px": edge_error(back, style.window_area(terminal.tiled, dpi)),
+            "error_px": edge_error(back, styles.area(terminal.tiled, false)),
             "frame": back_colours,
         },
         "joined_at_tag_start": at_tag_start,

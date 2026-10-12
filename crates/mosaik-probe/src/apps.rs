@@ -225,6 +225,71 @@ pub struct StartApp {
     pub id: String,
 }
 
+impl StartApp {
+    /// What the entry runs, when that is known before opening it: "console" for a console
+    /// program (every one shows in the same terminal window), else its program's file name.
+    /// Packaged apps and entries Windows names otherwise are known only once open.
+    pub fn program(&self) -> Option<String> {
+        let path = program_path(&self.id)?;
+        if is_console_program(&path) {
+            return Some("console".into());
+        }
+        Some(path.file_name()?.to_string_lossy().to_lowercase())
+    }
+}
+
+/// The program a Start menu entry runs, when Windows names it by its file (most desktop apps),
+/// with the known folder its id starts with (`{GUID}\...`) resolved.
+fn program_path(id: &str) -> Option<std::path::PathBuf> {
+    let (folder, rest) = match id.strip_prefix('{') {
+        Some(after) => {
+            let (guid, rest) = after.split_once('}')?;
+            (Some(guid), rest.trim_start_matches('\\'))
+        }
+        None => (None, id),
+    };
+    if !rest.to_lowercase().ends_with(".exe") {
+        return None;
+    }
+    let base = match folder {
+        Some(guid) => known_folder(&windows::core::GUID::try_from(guid).ok()?)?,
+        None => std::path::PathBuf::new(),
+    };
+    Some(base.join(rest))
+}
+
+fn known_folder(id: &windows::core::GUID) -> Option<std::path::PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{KNOWN_FOLDER_FLAG, SHGetKnownFolderPath};
+    // SAFETY: Windows allocates the path and the probe frees it once copied.
+    unsafe {
+        let p = SHGetKnownFolderPath(id, KNOWN_FOLDER_FLAG(0), None).ok()?;
+        let path = p.to_string().ok();
+        CoTaskMemFree(Some(p.0.cast_const().cast()));
+        path.map(std::path::PathBuf::from)
+    }
+}
+
+/// Whether the program at `path` is a console program: its file's header names the console
+/// subsystem (PE optional header field `Subsystem`, 3).
+fn is_console_program(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    let mut head = vec![0u8; 4096];
+    let Ok(n) = std::fs::File::open(path).and_then(|mut f| f.read(&mut head)) else {
+        return false;
+    };
+    let head = &head[..n];
+    let word = |at: usize| head.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    let pe = head
+        .get(0x3C..0x40)
+        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .and_then(|v| usize::try_from(v).ok());
+    head.starts_with(b"MZ")
+        && pe.is_some_and(|pe| {
+            head.get(pe..pe + 4) == Some(b"PE\0\0".as_slice()) && word(pe + 24 + 68) == Some(3)
+        })
+}
+
 /// Every app of the Start menu (desktop apps and packaged apps), as Windows lists them
 /// (`Get-StartApps`, in Windows PowerShell).
 pub fn start_apps() -> Result<Vec<StartApp>, String> {

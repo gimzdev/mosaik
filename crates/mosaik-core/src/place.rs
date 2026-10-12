@@ -103,6 +103,19 @@ impl<'a> Resolver<'a> {
         Some((z.area.to_rect(m.work_area), m.dpi))
     }
 
+    /// The zone a place fills, on screen now: the zone of a zone place, or of the group a tab
+    /// belongs to. `None` for other places (free, maximised) and unknown zones.
+    pub fn zone_of(&self, place: &Place) -> Option<(Rect, u32)> {
+        match place {
+            Place::Zone { zone } => self.zone_rect(zone),
+            Place::Tab { group } => match &self.layout.tab_group(group)?.place {
+                Place::Zone { zone } => self.zone_rect(zone),
+                _ => None,
+            },
+            Place::Free { .. } | Place::Maximized { .. } => None,
+        }
+    }
+
     /// Where a place lands. A tab lands where its group does, below a band with room for the
     /// group's strip; a group whose own place is a tab (a damaged file) lands nowhere.
     pub fn target(&self, place: &Place) -> Option<Target> {
@@ -222,6 +235,14 @@ mod tests {
             }),
             Some(Target::Frame(Rect::new(4, 32, 1148, 1028)))
         );
+        // The zone it fills, for a window that goes below a band of its own in it.
+        assert_eq!(
+            r.zone_of(&Place::Zone {
+                zone: ZoneId::new("a")
+            }),
+            Some((Rect::new(0, 0, 1152, 1032), 96))
+        );
+        assert_eq!(r.zone_of(&Place::Maximized { monitor: 0 }), None);
         // Same layout with the taskbar moved to the left edge: the zones shift right with it.
         let left = fixtures::single_with_taskbar(fixtures::TaskbarSpec::on(fixtures::Edge::Left));
         let r = Resolver::new(&layout, &left, FrameStyle::default());

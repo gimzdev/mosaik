@@ -86,6 +86,30 @@ impl Layout {
             .find(|(_, s)| x < s.x + s.w / 2.0)
             .map(|(i, _)| *i)
     }
+
+    /// Where the last thing drawn ends (0 when nothing is).
+    pub fn end(&self) -> f32 {
+        self.chips
+            .iter()
+            .map(|(_, s)| *s)
+            .chain(self.tag)
+            .chain(self.more.map(|(s, _)| s))
+            .chain(self.drop)
+            .map(Span::end)
+            .fold(0.0, f32::max)
+    }
+
+    /// The same layout against the right end of a strip `width` wide, as in a title bar, where
+    /// the strip sits next to the window's buttons.
+    pub fn align_right(mut self, width: f32) -> Self {
+        let dx = (width - self.end()).max(0.0);
+        let shift = |s: &mut Span| s.x += dx;
+        self.chips.iter_mut().for_each(|(_, s)| shift(s));
+        self.tag.iter_mut().for_each(shift);
+        self.more.iter_mut().for_each(|(s, _)| shift(s));
+        self.drop.iter_mut().for_each(shift);
+        self
+    }
 }
 
 /// Shares `room` among chips of these natural widths, none below `min`: chips that would go
@@ -324,6 +348,15 @@ mod tests {
             }
             if let (Some(a), false) = (active, drawn.is_empty()) {
                 prop_assert!(drawn.contains(&a), "visible tab {a} not drawn: {drawn:?}");
+            }
+            // Against the right end (in a title bar): the same chips, still inside, ending there.
+            let right = l.clone().align_right(width);
+            prop_assert_eq!(right.chips.len(), l.chips.len());
+            if l.end() > 0.0 {
+                prop_assert!((right.end() - width).abs() < 0.01, "ends at {} not {width}", right.end());
+            }
+            for ((_, a), (_, b)) in l.chips.iter().zip(&right.chips) {
+                prop_assert!((b.w - a.w).abs() < 0.001 && b.x >= a.x - 0.001 && b.end() <= width + 0.01);
             }
         }
     }

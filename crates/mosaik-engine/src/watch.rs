@@ -22,7 +22,7 @@ use mosaik_core::window::WindowHandle;
 use mosaik_overlay::canvas::Canvas;
 use mosaik_overlay::frame::{Frame, FrameLook, Preview, ZoneView};
 use mosaik_overlay::layered::Stack;
-use mosaik_overlay::tabbar::{self, BarLook, TabBar, TabView};
+use mosaik_overlay::tabbar::{self, BarLook, BarPlace, TabBar, TabView};
 use mosaik_win::events::{self, Hooks, WinEvent};
 use mosaik_win::{input, window};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
@@ -36,6 +36,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::mover::{self, To};
 use crate::tabs::{AsIsize, BarDrag};
 use crate::thread::{Engine, WM_EVENTS, timer};
+use crate::titles::TitleSpot;
 
 /// Events hooked for every window.
 const GLOBAL: [(u32, u32); 6] = [
@@ -87,6 +88,9 @@ const SELF_MOVE_RELEASE_MS: u128 = 400;
 struct Framed {
     pid: u32,
     frame: Frame,
+    /// Where dropping a window on this one makes them tabs: the stretch of its title bar that
+    /// holds its tag, or the band above it.
+    drop_area: Option<(Rect, BarPlace)>,
 }
 
 /// What a framed window wears.
@@ -95,6 +99,7 @@ struct FrameInfo {
     look: FrameLook,
     pid: u32,
     zone: ZoneView,
+    drop_area: Option<(Rect, BarPlace)>,
 }
 
 #[derive(Default)]
@@ -142,6 +147,19 @@ impl Watch {
 
     pub(crate) fn put_canvas(&mut self, canvas: Canvas) {
         self.canvas = Some(canvas);
+    }
+
+    /// Where `h`'s zone tag is drawn, when it shows.
+    pub(crate) fn tag_rect(&self, h: WindowHandle) -> Option<Rect> {
+        self.frames.get(&h).and_then(|f| f.frame.tag_rect())
+    }
+
+    /// Where dropping a window on `h` makes them tabs, while its tag shows.
+    pub(crate) fn drop_area(&self, h: WindowHandle) -> Option<Rect> {
+        self.frames
+            .get(&h)
+            .filter(|f| f.frame.tag_rect().is_some())
+            .and_then(|f| f.drop_area.map(|(r, _)| r))
     }
 }
 
@@ -217,6 +235,7 @@ impl Engine {
     /// Moves are merged per window: only where a window ended up matters. Tab groups are made to
     /// match the screen once, after the whole batch.
     pub(crate) fn on_events(&mut self) {
+        self.take_titles();
         let batch = events::drain();
         let mut moved: Vec<WindowHandle> = Vec::new();
         let mut sync = false;
@@ -257,9 +276,12 @@ impl Engine {
                     sync |= tab(self);
                 }
                 // Some apps show their window first and name it a moment later; a tab's chip
-                // shows its window's title.
+                // shows its window's title; a new title may come with a new title bar.
                 EVENT_OBJECT_NAMECHANGE => {
                     self.adopt(h);
+                    if self.watch.frames.contains_key(&h) {
+                        self.refresh_ring(h);
+                    }
                     if let Some(g) = self.group_of_window(h) {
                         self.refresh_strip(&g.id);
                     }
@@ -305,11 +327,20 @@ impl Engine {
         if let Some(f) = self.watch.frames.get(&h) {
             f.frame.restack(h.0.cast_signed_isize());
         }
-        if let Some(g) = self.group_of_window(h)
+        let group = self.group_of_window(h);
+        if let Some(g) = &group
             && let Some(bar) = self.watch.bars.get(&g.id)
             && bar.is_shown()
         {
             mosaik_overlay::layered::restack_windows(&[bar.hwnd()], Stack::Above(h.0.cast_signed_isize()));
+        }
+        // Its app may have changed its title bar while it was behind (a browser opened a tab):
+        // read again, and the tag or strip moves if it must.
+        if (self.watch.frames.contains_key(&h) || group.is_some())
+            && let Some(g) = window::geometry(window::hwnd(h))
+        {
+            self.titles.stale(h);
+            let _ = self.title_bar(h, g.frame);
         }
         false
     }
@@ -318,6 +349,7 @@ impl Engine {
     /// time). Returns whether tabs must be synced (it was a tab: the next one shows).
     fn forget(&mut self, h: WindowHandle) -> bool {
         let tab = self.hiding.hidden.contains_key(&h) || self.group_of_window(h).is_some();
+        self.titles.forget(h);
         if self.watch.frames.remove(&h).is_some() {
             self.sync_location_hooks();
         }
@@ -356,7 +388,8 @@ impl Engine {
         }
     }
 
-    /// Shows, moves or hides the frames and strips of every window of the open workspace.
+    /// Shows, moves or hides the frames and strips of every window of the open workspace, each
+    /// window first in or out of a band as its title bar's room says.
     pub(crate) fn refresh_frames(&mut self) {
         let windows: Vec<WindowHandle> = self
             .active
@@ -365,6 +398,8 @@ impl Engine {
             .unwrap_or_default();
         let keep: HashSet<WindowHandle> = windows.iter().copied().collect();
         self.watch.frames.retain(|h, _| keep.contains(h));
+        self.titles.banded.retain(|h| keep.contains(h));
+        self.update_bands(&windows);
         for h in windows {
             self.refresh_ring(h);
         }
@@ -394,7 +429,11 @@ impl Engine {
         if let std::collections::hash_map::Entry::Vacant(slot) = self.watch.frames.entry(h) {
             match Frame::new() {
                 Ok(frame) => {
-                    slot.insert(Framed { pid: info.pid, frame });
+                    slot.insert(Framed {
+                        pid: info.pid,
+                        frame,
+                        drop_area: None,
+                    });
                     self.sync_location_hooks();
                 }
                 Err(e) => {
@@ -409,6 +448,7 @@ impl Engine {
         let (Some(canvas), Some(framed)) = (self.watch.canvas.as_mut(), self.watch.frames.get_mut(&h)) else {
             return;
         };
+        framed.drop_area = info.drop_area;
         if let Err(e) = framed
             .frame
             .show(canvas, info.rect, &info.look, h.0.cast_signed_isize())
@@ -436,6 +476,26 @@ impl Engine {
             return None;
         }
         let zone = active.zone_for(g.frame, style)?.clone();
+        // The tag goes in the window's title bar, or above it; not at all for the moment its
+        // title bar is being read.
+        let (tag, tag_in, drop_area) = if tag {
+            match self.tag_spot(h, g.frame, &zone.name, zone.dpi) {
+                TitleSpot::In(r) => (true, Some(r), Some((r, BarPlace::TitleBar))),
+                TitleSpot::Above => (
+                    true,
+                    None,
+                    self.style_of(h)
+                        .tag_area(zone.rect, zone.dpi)
+                        .map(|band| (band, BarPlace::Band)),
+                ),
+                TitleSpot::NotYet | TitleSpot::NoAnswer => (false, None, None),
+            }
+        } else {
+            (false, None, None)
+        };
+        if !(ring || tag) {
+            return None;
+        }
         let look = FrameLook {
             color: zone.color,
             label: zone.name.clone(),
@@ -443,6 +503,7 @@ impl Engine {
             rounded: self.watch.rounded,
             ring,
             tag,
+            tag_in,
         };
         Some(FrameInfo {
             rect: g.frame,
@@ -454,6 +515,7 @@ impl Engine {
                 name: zone.name,
                 dpi: zone.dpi,
             },
+            drop_area,
         })
     }
 
@@ -733,12 +795,8 @@ impl Engine {
             let Some((_, onto)) = g.visible() else { continue };
             return Some((*onto, bar.insert_before(p).map(WindowHandle)));
         }
-        // A single window's tag: the window goes before it or after it.
-        let style = self.style();
-        if style.tag_band <= 0 {
-            return None;
-        }
-        let active = self.active.as_ref()?;
+        // A single window's tag (the stretch of its title bar holding it, or the band above it):
+        // the window goes before it or after it.
         for (&w, framed) in &self.watch.frames {
             if w == dragged || !framed.frame.is_shown() {
                 continue;
@@ -749,19 +807,13 @@ impl Engine {
             {
                 continue;
             }
-            let Some(geo) = window::geometry(window::hwnd(w)) else {
+            let Some((area, _)) = framed.drop_area else {
                 continue;
             };
-            let Some(zone) = active.zone_for(geo.frame, style) else {
-                continue;
-            };
-            let Some(band) = style.tag_area(zone.rect, zone.dpi) else {
-                continue;
-            };
-            if !band.outset(Insets::new(0, 4, 0, 2)).contains(p) {
+            if !area.outset(Insets::new(0, 4, 0, 2)).contains(p) {
                 continue;
             }
-            return Some((w, (p.x < band.center().x).then_some(w)));
+            return Some((w, (p.x < area.center().x).then_some(w)));
         }
         None
     }
@@ -774,7 +826,7 @@ impl Engine {
             return;
         }
         let Some(info) = self.frame_for(onto) else { return };
-        let Some(band) = self.style().tag_area(info.zone.rect, info.zone.dpi) else {
+        let Some((band, place)) = info.drop_area else {
             return;
         };
         let tabs = [TabView {
@@ -803,6 +855,7 @@ impl Engine {
             && let Err(e) = bar.show(
                 &mut canvas,
                 band,
+                place,
                 &look,
                 &tabs,
                 Some(usize::from(before != Some(onto))),
@@ -942,7 +995,7 @@ impl Engine {
         }
         let Some(topology) = &self.topology else { return };
         let work = topology.monitor_for_rect(geo.frame).work_area;
-        let band = scale_for_dpi(self.style().for_tabs().tag_band, geo.dpi.max(96));
+        let band = scale_for_dpi(self.style_of(h).for_tabs().tag_band, geo.dpi.max(96));
         let top = work.top + band;
         if geo.frame.top >= top {
             return;
@@ -976,7 +1029,9 @@ impl Engine {
             Some(_) => self.style().for_tabs(),
             None => self.style(),
         };
-        let target = style.window_area(live.rect, live.dpi);
+        let target = self
+            .banded_area(h, live.rect, live.dpi)
+            .unwrap_or_else(|| style.window_area(live.rect, live.dpi));
         let moved = mover::move_all(&[(h, To::Frame(target))], mover::WAIT_ONE);
         if let Some(Err(e)) = moved.into_iter().next().map(|o| o.result) {
             if !window::exists(window::hwnd(h)) {
