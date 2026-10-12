@@ -14,7 +14,7 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    ./mosaik1.sh --build     install and build only (CI)
 #    ./mosaik1.sh --no-start  install, don't start anything
 #    ./mosaik1.sh --fresh     reinstall dependencies, rebuild from scratch
-#    ./mosaik1.sh --port 4000 another port (default 3000, or the next free one); -p
+#    ./mosaik1.sh --port 4000 another port (default 3000, or the next free one)
 #    ./mosaik1.sh --dir ~/m   install somewhere else (default ./site in the
 #                             Mosaïk repo, otherwise ./mosaik)
 #
@@ -31,6 +31,8 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #      npx vercel domains add <your-domain>
 # ════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
+# The copy made for Windows line endings (line 2) goes when the script ends.
+[ "${MK_COPY:-}" != "$0" ] || trap 'rm -f "$0"' EXIT
 
 # ── Your settings ────────────────────────────────────────────────────────
 SITE_NAME="Mosaïk"
@@ -66,7 +68,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dir) [ $# -ge 2 ] || die "--dir needs a path"; APP_DIR="$2"; shift 2 ;;
     --dir=*) APP_DIR="${1#*=}"; shift ;;
-    --port|-p) [ $# -ge 2 ] || die "--port needs a number"; PORT="$2"; PORT_SET=1; shift 2 ;;
+    --port) [ $# -ge 2 ] || die "--port needs a number"; PORT="$2"; PORT_SET=1; shift 2 ;;
     --port=*) PORT="${1#*=}"; PORT_SET=1; shift ;;
     --prod) MODE="prod"; shift ;;
     --build) MODE="prod"; START=0; shift ;;
@@ -907,7 +909,7 @@ const TERM: [string, string][][] = [
   PROMPT,
 ];
 
-export function TerminalApp() {
+function TerminalApp() {
   return (
     <div className="flex h-full w-full flex-col bg-[#0F1115] text-[#D9DEE9]">
       <div className="flex h-[34px] shrink-0 select-none items-stretch justify-between bg-[#101216] text-[12px] text-[#8E97AA]">
@@ -1639,13 +1641,13 @@ import { Icon } from '@/components/ui';
 import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
-export const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
+const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
   <div className={`desk ${tall ? 'desk-tall' : ''} ${className}`}>
     <div className="desk-in">{children}</div>
   </div>
 );
 
-export const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: number }) => (
+const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: number }) => (
   <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" className="shrink-0">
     <rect x="1" y="1" width="8" height="8" rx="1.6" fill={colors[0]} />
     <rect x="10.5" y="1" width="4.5" height="4.5" rx="1.2" fill={colors[1]} />
@@ -2295,10 +2297,10 @@ export const WORKSPACES: Workspace[] = [
 ];
 
 /* Every desktop is drawn on a fixed canvas and scaled to fit, so all sizes are plain pixels. */
-export const DESK_W = 1280;
+const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
-export const TAG = 28; // room above a window for its zone tag
+const TAG = 28; // room above a window for its zone tag
 const TASKBAR = 40; // the Windows taskbar, along the bottom
 const [TOP, BOTTOM, SIDE, PAD] = [22, TASKBAR + 14, 26, 12];
 
@@ -2314,7 +2316,7 @@ export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
 }
 
 /** Where a maximised window sits: everything above the taskbar. */
-export const fullRect = (deskH: number): Rect => ({ left: 0, top: 0, width: DESK_W, height: deskH - TASKBAR });
+const fullRect = (deskH: number): Rect => ({ left: 0, top: 0, width: DESK_W, height: deskH - TASKBAR });
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;

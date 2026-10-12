@@ -6,13 +6,13 @@ import { Icon } from '@/components/ui';
 import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
-export const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
+const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
   <div className={`desk ${tall ? 'desk-tall' : ''} ${className}`}>
     <div className="desk-in">{children}</div>
   </div>
 );
 
-export const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: number }) => (
+const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: number }) => (
   <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" className="shrink-0">
     <rect x="1" y="1" width="8" height="8" rx="1.6" fill={colors[0]} />
     <rect x="10.5" y="1" width="4.5" height="4.5" rx="1.2" fill={colors[1]} />

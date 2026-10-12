@@ -76,10 +76,10 @@ export const WORKSPACES: Workspace[] = [
 ];
 
 /* Every desktop is drawn on a fixed canvas and scaled to fit, so all sizes are plain pixels. */
-export const DESK_W = 1280;
+const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
-export const TAG = 28; // room above a window for its zone tag
+const TAG = 28; // room above a window for its zone tag
 const TASKBAR = 40; // the Windows taskbar, along the bottom
 const [TOP, BOTTOM, SIDE, PAD] = [22, TASKBAR + 14, 26, 12];
 
@@ -95,7 +95,7 @@ export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
 }
 
 /** Where a maximised window sits: everything above the taskbar. */
-export const fullRect = (deskH: number): Rect => ({ left: 0, top: 0, width: DESK_W, height: deskH - TASKBAR });
+const fullRect = (deskH: number): Rect => ({ left: 0, top: 0, width: DESK_W, height: deskH - TASKBAR });
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;

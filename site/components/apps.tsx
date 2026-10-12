@@ -149,7 +149,7 @@ const TERM: [string, string][][] = [
   PROMPT,
 ];
 
-export function TerminalApp() {
+function TerminalApp() {
   return (
     <div className="flex h-full w-full flex-col bg-[#0F1115] text-[#D9DEE9]">
       <div className="flex h-[34px] shrink-0 select-none items-stretch justify-between bg-[#101216] text-[12px] text-[#8E97AA]">
