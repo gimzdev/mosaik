@@ -71,7 +71,7 @@ stretches of its title bar.
   is filled with the app's paper colour (#EDEFEA, or #11141B in dark mode) and the zone's ring
   goes around the band and the window together, so the two read as one window with a taller
   title bar, and nothing behind shows through between them. A press on the band is a press on
-  the window's title bar: Windows moves the window (ADR 0012). One row stays the rule; the band
+  the window's title bar: the window comes to the front and can be dragged by it (ADR 0012). One row stays the rule; the band
   is only for windows whose title bar has no room. A window of a fixed size gets its band right
   above it, wherever it sits in its zone (ADR 0012).
 - **The setting** "Tags and tabs: in each window's title bar / above each window" keeps the band

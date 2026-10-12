@@ -84,8 +84,8 @@ the engine gathers windows and applies the result.
   settled), when its title changes or it comes to the front. A window whose title bar has no
   room wears its tag above it, below a band at the top of its zone, once two readings a quarter
   of a second apart agree; the band is solid and inside the window's ring, so the two read as
-  one, and a press on it moves the window as its title bar would (Windows' own move loop,
-  started with `SC_MOVE`). A setting puts every tag above its window.
+  one, and the window can be dragged by it as by its title bar (Mosaïk moves it with the
+  pointer). A setting puts every tag above its window.
 - **Drag to snap**: while a window is dragged by its title bar, the open workspace's zones show
   under it; the zone under the pointer (or within 48 px) is tinted, and the window is pulled into
   it on release. Shift moves freely; a setting swaps that. A window that was not part of the

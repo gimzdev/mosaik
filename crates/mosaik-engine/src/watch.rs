@@ -25,7 +25,7 @@ use mosaik_overlay::frame::{Frame, FrameLook, Preview, TagPlace, ZoneView};
 use mosaik_overlay::layered::Stack;
 use mosaik_overlay::tabbar::{self, BarLook, BarPlace, TabBar, TabView};
 use mosaik_win::events::{self, Hooks, WinEvent};
-use mosaik_win::{input, window};
+use mosaik_win::{arrange, input, window};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CHILDID_SELF, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_LOCATIONCHANGE,
@@ -82,6 +82,21 @@ pub(crate) struct Pressed {
     start: Rect,
 }
 
+/// A press on the band Mosaïk draws above a window (or on its group's strip, off the chips):
+/// the band works as the window's title bar, so the window follows the pointer, moved by Mosaïk.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BandPress {
+    pub window: WindowHandle,
+    /// Where the button went down, and where the window's rectangle (invisible borders
+    /// included) started then.
+    pub start: Point,
+    pub origin: Point,
+    /// Where its visible frame was then.
+    pub frame: Rect,
+    /// Past a few pixels, the window follows the pointer.
+    pub moving: bool,
+}
+
 /// How long a drag the app makes itself waits, once the button is up, for the app to let the
 /// mouse go before Mosaïk ends it anyway.
 const SELF_MOVE_RELEASE_MS: u128 = 400;
@@ -119,6 +134,8 @@ pub(crate) struct Watch {
     pub(crate) strip_broken: HashSet<TabGroupId>,
     /// A press on a tab chip.
     pub(crate) bar_drag: Option<BarDrag>,
+    /// A press on a window's band.
+    pub(crate) band_press: Option<BandPress>,
     /// The strip shown over a single window's tag while another window is dragged onto it.
     drop_bar: Option<TabBar>,
     pub(crate) drag: Option<Drag>,
@@ -732,9 +749,113 @@ impl Engine {
         }
         if self.watch.drag.is_some() {
             self.drag_update();
-        } else if self.watch.bar_drag.is_none() {
+        } else if self.watch.bar_drag.is_none() && self.watch.band_press.is_none() {
             self.kill_timer(timer::DRAG);
         }
+    }
+
+    /// The window whose band is the overlay window `bar`, if it is a band.
+    pub(crate) fn band_owner(&self, bar: isize) -> Option<WindowHandle> {
+        self.watch
+            .frames
+            .iter()
+            .find(|(_, f)| f.frame.band_is(bar))
+            .map(|(h, _)| *h)
+    }
+
+    /// The button went down on the band above `h`: the window comes to the front, as from its
+    /// title bar, and follows the pointer once it moves.
+    pub(crate) fn band_down(&mut self, h: WindowHandle, at: Point) {
+        let hwnd = window::hwnd(h);
+        let (Some(rect), Some(frame)) = (window::window_rect(hwnd), window::frame_rect(hwnd)) else {
+            return;
+        };
+        arrange::focus(hwnd);
+        self.watch.band_press = Some(BandPress {
+            window: h,
+            start: at,
+            origin: Point::new(rect.left, rect.top),
+            frame,
+            moving: false,
+        });
+        self.set_timer(timer::DRAG, DRAG_TICK_MS);
+    }
+
+    /// The pointer moved with the button down on a band: past a few pixels, the window is
+    /// dragged as by its title bar (zones show, tags and strips take it as for any drag).
+    pub(crate) fn band_move(&mut self, at: Point) {
+        let Some(mut p) = self.watch.band_press else {
+            return;
+        };
+        let (dx, dy) = (at.x - p.start.x, at.y - p.start.y);
+        if !p.moving {
+            let dpi = self.topology.as_ref().map_or(96, |t| t.nearest_monitor(at).dpi);
+            if dx.abs().max(dy.abs()) <= scale_for_dpi(4, dpi) {
+                return;
+            }
+            p.moving = true;
+            self.watch.band_press = Some(p);
+            self.drag_start(p.window);
+            let followed = self
+                .watch
+                .drag
+                .as_mut()
+                .filter(|d| d.window == p.window)
+                .map(|d| {
+                    d.start = p.frame;
+                    d.kind = DragKind::Moving;
+                    // Ended by the button going up, as a drag an app makes itself.
+                    d.self_moved = true;
+                });
+            if followed.is_some() {
+                self.show_zone_preview(Stack::Below(p.window.0.cast_signed_isize()));
+            }
+        }
+        arrange::move_to(window::hwnd(p.window), p.origin.x + dx, p.origin.y + dy);
+        self.drag_update();
+    }
+
+    /// The button went up on a band: a dragged window drops where it is, into a zone or onto a
+    /// tag as from any drag.
+    pub(crate) fn band_up(&mut self, at: Point) {
+        let Some(p) = self.watch.band_press.take() else {
+            return;
+        };
+        if p.moving {
+            arrange::move_to(
+                window::hwnd(p.window),
+                p.origin.x + at.x - p.start.x,
+                p.origin.y + at.y - p.start.y,
+            );
+            self.drag_end(p.window);
+        }
+        if self.watch.drag.is_none() && self.watch.bar_drag.is_none() {
+            self.kill_timer(timer::DRAG);
+        }
+    }
+
+    /// A press on a band ended without a drop (Esc, or the mouse taken away): a dragged window
+    /// goes back where it was.
+    pub(crate) fn band_cancel(&mut self) {
+        let Some(p) = self.watch.band_press.take() else {
+            return;
+        };
+        if !p.moving {
+            return;
+        }
+        arrange::move_to(window::hwnd(p.window), p.origin.x, p.origin.y);
+        self.watch.drag = None;
+        self.watch.preview.hide();
+        self.watch.preview_visible = false;
+        self.hide_drop_bar();
+        if self.watch.moving == Some(p.window) {
+            self.watch.moving = None;
+        }
+        if self.watch.bar_drag.is_none() {
+            self.kill_timer(timer::DRAG);
+        }
+        self.sync_location_hooks();
+        self.refresh_frame(p.window);
     }
 
     /// Follows the dragged window: decides whether it is a move or a resize, shows the zones
@@ -952,6 +1073,10 @@ impl Engine {
     fn drag_end(&mut self, h: WindowHandle) {
         if self.watch.moving == Some(h) {
             self.watch.moving = None;
+        }
+        // A drag from a band ended another way (its button seen up by the drag timer).
+        if self.watch.band_press.is_some_and(|p| p.window == h) {
+            self.watch.band_press = None;
         }
         if let Some((_, why)) = self.watch.refused.take_if(|(w, _)| *w == h) {
             self.tell_once("refused-drag", "Mosaïk cannot move this window", why.explain());

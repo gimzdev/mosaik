@@ -403,8 +403,7 @@ game in full screen                    left alone ("pending: full screen"); the 
   moved now); a window placed over a monitor without a taskbar was taken for one in full
   screen (a window with Windows' title bar and resize frame never is); with zones that overlap,
   a window filling the larger was counted in the smaller (the nearest middle wins); the solid
-  band let presses through to whatever was behind it (a press on it moves its window, in
-  Windows' own move loop).
+  band let presses through to whatever was behind it (the window can be dragged by it now).
 
 ### Tags and tabs in title bars (jobs 0062 to 0070) — ADR 0011
 

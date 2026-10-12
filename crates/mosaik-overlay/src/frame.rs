@@ -124,7 +124,6 @@ impl Frame {
                     self.band = Some(Tint::band()?);
                 }
                 if let Some(t) = &mut self.band {
-                    t.set_owner(window);
                     t.show(b, band_color(look.dark), 255, (px(corner), Corners::Top), stack)?;
                 }
             }
@@ -208,6 +207,11 @@ impl Frame {
         if let Some(t) = &mut self.band {
             t.hide();
         }
+    }
+
+    /// Whether `hwnd` is this frame's band (the mouse on it is named by its window).
+    pub fn band_is(&self, hwnd: isize) -> bool {
+        self.band.as_ref().is_some_and(|t| t.is(hwnd))
     }
 
     pub fn is_shown(&self) -> bool {

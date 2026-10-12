@@ -51,10 +51,12 @@ Vampire Survivors, idle clickers". Three kinds of windows were left out or misha
   needs a band, the band sits right above the window, not at the top of the zone
   (`zone::band_above`).
 - **A band works as its window's title bar.** Solid, it looks like part of the window, so a
-  press on it is a press on the window's title bar: the window comes to the front and Windows
-  moves it with the pointer, in its own move loop (`WM_SYSCOMMAND` with `SC_MOVE` from the title
-  bar, posted to the window), so zones, tags and Windows' snapping follow as for any drag. The
-  same goes for a strip's band between its chips, and for the zone's tag at a strip's start.
+  press on it is a press on the window's title bar: the window comes to the front, and dragged,
+  it follows the pointer, moved by Mosaïk, with the zones showing and tags and strips taking it
+  as for any drag (Esc puts it back). The same goes for a strip's band between its chips, and
+  for the zone's tag at a strip's start. Windows' own move loop cannot be started from another
+  app's window: it reads the button from its own thread's input, which never saw the press
+  (job 0080: posted `SC_MOVE`, nothing moved).
 - **When zones overlap**, a window belongs to the one whose middle is nearest its own, then the
   smallest (`workspace::holding`).
 

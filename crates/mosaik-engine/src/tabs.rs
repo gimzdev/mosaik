@@ -1065,6 +1065,11 @@ impl Engine {
                 BarInput::Down { bar, at } => {
                     // A press whose release never came ends now.
                     self.end_bar_drag();
+                    self.watch.band_press = None;
+                    if let Some(h) = self.band_owner(bar) {
+                        self.band_down(h, at);
+                        continue;
+                    }
                     let Some((group, hit)) = self
                         .watch
                         .bars
@@ -1098,30 +1103,35 @@ impl Engine {
                         // The strip's band, or the zone's tag at its start: the title bar of the
                         // tab that shows, as a window's band is.
                         None => {
-                            tabbar::cancel_press();
                             let visible = self
                                 .groups_now()
                                 .into_iter()
                                 .find(|n| n.id == group)
                                 .and_then(|g| g.visible().map(|(_, w)| *w));
                             if let Some(w) = visible {
-                                arrange::start_move(window::hwnd(w));
+                                self.band_down(w, at);
                             }
                         }
                     }
                 }
+                BarInput::Move { at, .. } if self.watch.band_press.is_some() => self.band_move(at),
                 BarInput::Move { at, .. } => self.bar_drag_to(at),
+                BarInput::Up { at, .. } if self.watch.band_press.is_some() => self.band_up(at),
                 BarInput::Up { at, .. } => self.bar_drop(at),
-                BarInput::Cancel { .. } => self.end_bar_drag(),
+                BarInput::Cancel { .. } => {
+                    self.end_bar_drag();
+                    self.band_cancel();
+                }
             }
         }
     }
 
-    /// On the drag timer: Esc ends a press on a strip.
+    /// On the drag timer: Esc ends a press on a strip, or on a band (its window goes back).
     pub(crate) fn bar_tick(&mut self) {
-        if self.watch.bar_drag.is_some() && esc_down() {
+        if (self.watch.bar_drag.is_some() || self.watch.band_press.is_some()) && esc_down() {
             tabbar::cancel_press();
             self.end_bar_drag();
+            self.band_cancel();
         }
     }
 

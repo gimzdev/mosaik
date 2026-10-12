@@ -315,14 +315,14 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     Ok(out)
 }
 
-/// Presses on the band above `w` (beside its tag, which lets presses through to the band) and
-/// drags it into the tag owner's zone: Windows' own move loop runs for `w`, and it lands in that
-/// zone, below a band again.
+/// Presses on the band above `w` (right above its top edge, beside its tag, which lets presses
+/// through to the band) and drags it into the tag owner's zone: the window follows the pointer
+/// as by its title bar, and lands in that zone, below a band again.
 fn by_band(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     let f = frame_rect(w).ok_or("the window vanished")?;
     let dpi = geometry(w).map_or(96, |g| g.dpi.max(96));
     let px = |v: i32| v * i32::try_from(dpi).unwrap_or(96) / 96;
-    let on_band = Point::new(f.left + f.width() * 2 / 3, f.top - px(12));
+    let on_band = Point::new(f.left + f.width() * 2 / 3, f.top - px(3));
     let into = Point::new(
         t.group_zone.center().x,
         t.group_zone.top + t.group_zone.height() * 2 / 3,

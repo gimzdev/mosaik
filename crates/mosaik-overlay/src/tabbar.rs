@@ -22,7 +22,8 @@ use mosaik_core::strip;
 use crate::canvas::{Align, Area, Canvas, Rgba, Weight};
 use crate::layered::{LayeredWindow, Stack, restack};
 
-/// What the mouse did on a tab strip, in screen coordinates.
+/// What the mouse did on a tab strip, or on the band above a window (`bar` is the window that
+/// took it), in screen coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarInput {
     Down {
@@ -94,7 +95,10 @@ fn screen_point(hwnd: HWND, lparam: LPARAM) -> Point {
     Point::new(p.x, p.y)
 }
 
-unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+/// The mouse on an overlay that takes it (a tab strip, a window's band): pressed, it keeps the
+/// mouse until the button goes up, and the engine reads what happened ([`take_inputs`]). `None`
+/// for messages that are not the mouse's.
+pub(crate) fn mouse(hwnd: HWND, msg: u32, lparam: LPARAM) -> Option<LRESULT> {
     let bar = hwnd.0 as isize;
     match msg {
         WM_LBUTTONDOWN => {
@@ -105,7 +109,6 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 bar,
                 at: screen_point(hwnd, lparam),
             });
-            LRESULT(0)
         }
         WM_MOUSEMOVE => {
             if CAPTURED.with(Cell::get) == Some(bar) {
@@ -114,7 +117,6 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     at: screen_point(hwnd, lparam),
                 });
             }
-            LRESULT(0)
         }
         WM_LBUTTONUP => {
             if CAPTURED.with(Cell::take) == Some(bar) {
@@ -125,13 +127,11 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
             // SAFETY: gives the mouse back.
             let _ = unsafe { ReleaseCapture() };
-            LRESULT(0)
         }
         WM_CAPTURECHANGED => {
             if CAPTURED.with(Cell::take) == Some(bar) {
                 push(BarInput::Cancel { bar });
             }
-            LRESULT(0)
         }
         // Windows asks every window to end what it is doing (a dialog, Ctrl+Alt+Del): the press
         // ends, and the mouse goes back.
@@ -141,17 +141,26 @@ unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
             // SAFETY: gives the mouse back.
             let _ = unsafe { ReleaseCapture() };
-            LRESULT(0)
         }
-        WM_CLOSE => LRESULT(0),
-        WM_MOUSEACTIVATE => LRESULT(isize::try_from(MA_NOACTIVATE).unwrap_or(3)),
-        // SAFETY: default handling for everything else.
-        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+        WM_MOUSEACTIVATE => return Some(LRESULT(isize::try_from(MA_NOACTIVATE).unwrap_or(3))),
+        _ => return None,
     }
+    Some(LRESULT(0))
 }
 
-/// Ends a press on any tab strip (Esc during a drag): the mouse goes back and no `Cancel` is
-/// queued, since the caller is the one cancelling.
+unsafe extern "system" fn bar_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if let Some(r) = mouse(hwnd, msg, lparam) {
+        return r;
+    }
+    if msg == WM_CLOSE {
+        return LRESULT(0);
+    }
+    // SAFETY: default handling for everything else.
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+/// Ends a press on any tab strip or band (Esc during a drag): the mouse goes back and no
+/// `Cancel` is queued, since the caller is the one cancelling.
 pub fn cancel_press() {
     if CAPTURED.with(Cell::take).is_some() {
         // SAFETY: gives the mouse back; the strip's WM_CAPTURECHANGED then finds no press.

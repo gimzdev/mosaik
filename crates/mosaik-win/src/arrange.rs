@@ -1,11 +1,11 @@
 //! Bringing windows forward, focusing and minimising them. Calls on other apps' windows are
 //! asynchronous where Windows allows it, so an app that is not responding never holds up Mosaïk.
 
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetForegroundWindow, HTCAPTION, HWND_TOP, IsHungAppWindow, IsIconic, PostMessageW, SC_MOVE,
-    SW_SHOWMINNOACTIVE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-    SetForegroundWindow, SetWindowPos, ShowWindowAsync, WM_SYSCOMMAND,
+    GetForegroundWindow, HWND_TOP, IsHungAppWindow, IsIconic, SW_SHOWMINNOACTIVE, SWP_ASYNCWINDOWPOS,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
+    SetWindowPos, ShowWindowAsync,
 };
 
 use crate::error::{Context, Result};
@@ -60,31 +60,25 @@ pub fn focus(hwnd: HWND) -> bool {
     unsafe { SetForegroundWindow(hwnd) }.as_bool() && foreground() == Some(hwnd)
 }
 
-/// A press on the band Mosaïk draws above `hwnd` is a press on its title bar: the window comes
-/// to the front and Windows moves it with the pointer, in its own move loop, as from the title
-/// bar (zones, tags and Windows' snapping follow as for any drag). Called on the button going
-/// down; the request is posted, so an app that is not responding holds nothing up, and a press
-/// already let go when the app gets to it moves nothing.
-pub fn start_move(hwnd: HWND) {
-    let mut p = POINT::default();
-    // SAFETY: a valid out pointer.
-    let _ = unsafe { GetCursorPos(&raw mut p) };
-    // Screen coordinates packed as for any mouse message: the low 16 bits of each (negative
-    // ones too, as Windows packs them).
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-    let packed = ((p.y as u16 as usize) << 16) | (p.x as u16 as usize);
-    // The low four bits of SC_MOVE say how the move was asked for: from the title bar, with the
-    // mouse.
-    let command = SC_MOVE as usize | HTCAPTION as usize;
-    // SAFETY: Windows allows the app that just received the click to bring a window forward;
-    // the command is posted to the window's own thread.
-    unsafe {
-        let _ = SetForegroundWindow(hwnd);
-        let _ = PostMessageW(
-            Some(hwnd),
-            WM_SYSCOMMAND,
-            WPARAM(command),
-            LPARAM(packed.cast_signed()),
-        );
+/// Moves a window so its window rectangle starts at (`x`, `y`), keeping its size, without
+/// activating it: the window following the pointer while the user drags it by the band Mosaïk
+/// draws above it. Synchronous, so moves land in order and before the drop that follows; an app
+/// that is not responding is not waited for (it does not move, as from its own title bar).
+pub fn move_to(hwnd: HWND, x: i32, y: i32) {
+    if is_hung(hwnd) {
+        return;
     }
+    // SAFETY: a move of another app's window; it fails cleanly if the window is gone or
+    // protected.
+    let _ = unsafe {
+        SetWindowPos(
+            hwnd,
+            None,
+            x,
+            y,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+        )
+    };
 }
