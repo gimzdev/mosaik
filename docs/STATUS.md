@@ -15,7 +15,7 @@ re-run before each release.
 | 3. Zones | done: capture, frames and tags in title bars, drag to snap, zone editor | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces), [Step 6](#step-6-product-ui) |
 | 4. Workspaces | done: save, switch, start missing apps, switcher, tray, workspace shortcuts | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
 | 5. Tabs | done, with 12 real apps and browser tabs dragged out of Edge; multi-monitor left for step 7 | [Step 5](#step-5-tabs), [Step 7](#step-7-hardening) |
-| 6. Product UI | in progress: every page done, reviewed and tested in a browser; embedded and run on Windows; the on-screen check of every page on Windows is next | [Step 6](#step-6-product-ui) |
+| 6. Product UI | done: every page reviewed, tested in a browser and toured on Windows (names, Tab key, light and dark, smallest size); a Windows contrast theme and Narrator by ear are in the release checks | [Step 6](#step-6-product-ui) |
 | 7. Hardening | in progress: real apps, tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
 
@@ -262,11 +262,12 @@ build; releases are signed by the Microsoft Store.
   the lines between zones, split, rename, recolour, remove, presets; nothing changes until
   saved), settings (shortcut recorder that refuses AltGr, start with Windows, theme, snapping,
   frames, tags, switching, tabs), about (privacy, Patreon, website, source, rescue, logs).
-- Interface checks (Linux and Windows): typecheck, ESLint (strict, type-checked), Prettier, 39
-  component tests, and 9 browser smoke tests on the development server's stand-in engine, each
+- Interface checks (Linux and Windows): typecheck, ESLint (strict, type-checked), Prettier, 44
+  component tests, and 10 browser smoke tests on the development server's stand-in engine, each
   with axe-core's WCAG 2.1 A and AA rules: no serious or critical violation in the light, dark
   or high-contrast theme, nor at the smallest window size; the keyboard reaches every page; a
-  zone line moves with the arrow keys; the welcome fits the window; when the engine does not
+  zone line moves with the arrow keys; the Tab key goes round the window and never leaves it;
+  the welcome fits the window; when the engine does not
   answer, the window says so and offers to try again. The first axe run found shortcut keys
   labelled in a way screen readers ignore, fixed.
 - Adversarial review (2026-10-12) of the engine commands (18 findings) and the interface (24),
@@ -279,6 +280,18 @@ build; releases are signed by the Microsoft Store.
   `engine ready ... hotkey=Win+Alt+Space registered=true`; the welcome opens. With the settings
   window open: 8 processes, 165.7 MB private, nearly all of it WebView2 (the window is destroyed
   when closed; the idle budget is measured with no window open).
+- Mosaïk's own window on Windows, page by page (`mosaik-probe ui-tour`, jobs 0070 and 0071,
+  release build, a profile made for the tour: one workspace with three zones, no windows, first
+  run): welcome, workspaces, zone editor, settings, about and the switcher, in the theme Windows
+  uses, in light and in dark, and at the smallest size the window can be dragged to (762 x 592
+  with its title bar). Every control UI Automation exposes has a name (what Narrator reads): 0
+  unnamed on every page. The Tab key reaches every control of every page and comes back round:
+  welcome 2 stops, workspaces 7, zone editor 12 (the lines between zones included, by name),
+  settings 14 (a radio group is one stop), about 11. The switcher shows the workspace with a
+  preview of its zones and closes with Esc, in both themes.
+- Found and fixed by the tour: after a page's last control, Tab left the page for an unnamed
+  stop with nothing to see (job 0070), now it goes round (`focusLoop.ts`, with a component test
+  and a browser test); a chosen radio showed two focus rings, now one.
 - The editing commands, through the engine (`mosaik-probe workspace`, job 0036): splitting the
   code zone moved its window to the new half, 0 px off, in 47 ms; the editor opened before was
   refused; removing the terminal's zone left the terminal where it was (0 px) and in no zone;
