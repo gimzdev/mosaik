@@ -47,7 +47,8 @@ Options:
   and removes it on uninstall. Mosaïk reads and writes its usual paths; only where it shows a
   folder to the user (the logs) does it point File Explorer at the package's copy
   (`mosaik_win::package::visible_path`). "Start with Windows" uses the package's startup task
-  (the user can turn it off in Task Manager too), and `mosaikctl` is an app execution alias.
+  (the user can turn it off in Task Manager too), and `mosaikctl` is an app execution alias of Mosaïk's own app entry (Partner Center refuses a
+  package with a second app that has no Start menu entry: "headless app", 2026-10-12).
 - The package carries `THIRD-PARTY-NOTICES.txt` (`installer/notices.mjs`), which About opens.
 - The watchdog, the named pipe, global hotkeys, window hooks and moving other apps' windows all
   work in a full-trust desktop package.

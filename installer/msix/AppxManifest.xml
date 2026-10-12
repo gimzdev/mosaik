@@ -48,24 +48,8 @@
         <desktop:Extension Category="windows.startupTask" Executable="mosaik.exe" EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="MosaikStartup" Enabled="false" DisplayName="{{displayName}}" />
         </desktop:Extension>
-      </Extensions>
-    </Application>
-
-    <!-- mosaikctl, as a command in any terminal; no Start menu entry of its own. -->
-    <Application
-      Id="Mosaikctl"
-      Executable="mosaikctl.exe"
-      EntryPoint="Windows.FullTrustApplication"
-      desktop4:Subsystem="console"
-      desktop4:SupportsMultipleInstances="true">
-      <uap:VisualElements
-        DisplayName="mosaikctl"
-        Description="Talk to Mosaïk from a terminal."
-        BackgroundColor="transparent"
-        Square150x150Logo="Assets\Square150x150Logo.png"
-        Square44x44Logo="Assets\Square44x44Logo.png"
-        AppListEntry="none" />
-      <Extensions>
+        <!-- mosaikctl, as a command in any terminal. An alias of this app, not an app of its
+             own: the Store refuses a package with an app that has no Start menu entry. -->
         <uap5:Extension Category="windows.appExecutionAlias" Executable="mosaikctl.exe" EntryPoint="Windows.FullTrustApplication">
           <uap5:AppExecutionAlias desktop4:Subsystem="console">
             <uap5:ExecutionAlias Alias="mosaikctl.exe" />
