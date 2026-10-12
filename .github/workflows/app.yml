@@ -58,34 +58,32 @@ jobs:
       - run: cargo test -p mosaik-core -p mosaik-ipc --all-features
 
   windows:
-    name: Windows (engine, Win32, overlays, app)
+    name: Windows (engine, Win32, overlays, app, package)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - name: Interface build (the app embeds it)
-        working-directory: apps/desktop
-        run: |
-          npm ci --no-audit --no-fund
-          npm run build
       - run: rustup show
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --no-fail-fast -p mosaik-core -p mosaik-ipc -p mosaik-win -p mosaik-overlay -p mosaik-engine --all-features
-      - run: cargo build --release -p mosaik-desktop -p mosaik-watchdog -p mosaik-ipc
-      # The one-file app, made and checked with Windows PowerShell 5.1 as people will run it.
-      - name: Pack mosaik.ps1, unpack it and check it matches the repository
+      # The steps the owner runs, with Windows PowerShell 5.1 as people will. Each stops the job
+      # when it fails (a script's last exit code is what counts otherwise).
+      - name: mosaik.ps1 build
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File mosaik.ps1 build; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: mosaik.ps1 test (engine tests, clippy, interface checks and tests)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File mosaik.ps1 test; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: mosaik.ps1 package (the Store package)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File mosaik.ps1 package; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: mosaik.ps1 pack, then unpack the copy and check it matches the repository
         shell: powershell
         run: |
-          # Each step stops the job when it fails (only the last exit code counts otherwise).
           powershell -NoProfile -ExecutionPolicy Bypass -File mosaik.ps1 pack; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File target\mosaik.ps1 verify .; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File target\mosaik.ps1 unpack "$env:RUNNER_TEMP\unpacked"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           powershell -NoProfile -ExecutionPolicy Bypass -File target\mosaik.ps1 verify "$env:RUNNER_TEMP\unpacked"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: The Store package
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File installer\msix\package.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: mosaik

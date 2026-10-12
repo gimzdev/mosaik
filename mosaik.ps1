@@ -290,15 +290,31 @@ function Invoke-Check {
 
 # --- Building, testing, running, packaging -------------------------------------------------------
 
-# Runs a program in a folder; stops with its name when it fails.
+# Runs a program in a folder; stops with its name when it fails. The program runs as a program
+# (npm.cmd rather than npm.ps1, which would run inside this script's strict settings), and what it
+# writes to stderr is output, not an error: Windows PowerShell 5.1 turns those lines into
+# errors when the output is redirected, though only the exit code says whether it failed.
 function Invoke-Tool([string]$In, [string]$Program, [string[]]$Arguments) {
+  $exe = Get-Command $Program -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $exe) { Fail "$Program was not found. Run: .\mosaik.ps1 check" }
   Say ("  > {0} {1}" -f $Program, ($Arguments -join ' ')) DarkGray
   Push-Location $In
+  $stop = $ErrorActionPreference
   try {
-    & $Program @Arguments
-    if ($LASTEXITCODE -ne 0) { Fail ("{0} {1} failed (exit code {2}); the lines above say why." -f $Program, ($Arguments -join ' '), $LASTEXITCODE) }
+    $ErrorActionPreference = 'Continue'
+    if ([Console]::IsOutputRedirected -or [Console]::IsErrorRedirected) {
+      & $exe.Source @Arguments 2>&1 | ForEach-Object { "$_" }
+    }
+    else {
+      & $exe.Source @Arguments
+    }
+    $code = $LASTEXITCODE
   }
-  finally { Pop-Location }
+  finally {
+    $ErrorActionPreference = $stop
+    Pop-Location
+  }
+  if ($code -ne 0) { Fail ("{0} {1} failed (exit code {2}); the lines above say why." -f $Program, ($Arguments -join ' '), $code) }
 }
 
 function Use-Cargo {
@@ -327,7 +343,7 @@ function Invoke-Test {
   Use-Cargo
   $ui = Under $source 'apps' 'desktop'
   Step 'Engine tests'
-  Invoke-Tool $source 'cargo' @('test', '--no-fail-fast', '-p', 'mosaik-core', '-p', 'mosaik-ipc', '-p', 'mosaik-win', '-p', 'mosaik-overlay', '-p', 'mosaik-engine')
+  Invoke-Tool $source 'cargo' @('test', '--no-fail-fast', '--all-features', '-p', 'mosaik-core', '-p', 'mosaik-ipc', '-p', 'mosaik-win', '-p', 'mosaik-overlay', '-p', 'mosaik-engine')
   Step 'Lints (clippy)'
   Invoke-Tool $source 'cargo' @('clippy', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings')
   Step 'Interface checks and tests'

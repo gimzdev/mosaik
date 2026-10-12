@@ -47,10 +47,17 @@ function Find-SdkTool([string]$Name) {
     Select-Object -First 1
 }
 
-# Runs an SDK tool; its own lines say what went wrong, if anything.
+# Runs an SDK tool; its own lines say what went wrong, if anything. (Its stderr is output, not
+# an error: Windows PowerShell 5.1 would stop at the first such line when output is redirected.)
 function Invoke-SdkTool([string]$Tool, [string]$What, [string[]]$Arguments) {
-  & $Tool @Arguments | Out-Host
-  if ($LASTEXITCODE -ne 0) { Fail "$What failed (exit code $LASTEXITCODE); the lines above say why." }
+  $stop = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $Tool @Arguments 2>&1 | ForEach-Object { "$_" } | Out-Host
+    $code = $LASTEXITCODE
+  }
+  finally { $ErrorActionPreference = $stop }
+  if ($code -ne 0) { Fail "$What failed (exit code $code); the lines above say why." }
 }
 
 # The workspace version ("1.0.0") as a package version ("1.0.0.0": the Store wants the fourth
