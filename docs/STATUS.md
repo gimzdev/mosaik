@@ -12,11 +12,11 @@ re-run before each release.
 | --- | --- | --- |
 | 1. Verify assumptions | in progress: two monitors (virtual displays) and Windows 10 left | [Step 1](#step-1-verify-assumptions) |
 | 2. Core, topologies, persistence, IPC, mosaikctl | done | [Step 2](#step-2-core-persistence-ipc) |
-| 3. Zones | done: capture, frames and tags, drag to snap, zone editor | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces), [Step 6](#step-6-product-ui) |
+| 3. Zones | done: capture, frames and tags in title bars, drag to snap, zone editor | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces), [Step 6](#step-6-product-ui) |
 | 4. Workspaces | done: save, switch, start missing apps, switcher, tray, workspace shortcuts | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
 | 5. Tabs | done, with 12 real apps and browser tabs dragged out of Edge; multi-monitor left for step 7 | [Step 5](#step-5-tabs), [Step 7](#step-7-hardening) |
 | 6. Product UI | in progress: every page done, reviewed and tested in a browser; embedded and run on Windows; the on-screen check of every page on Windows is next | [Step 6](#step-6-product-ui) |
-| 7. Hardening | in progress: real apps, Windows' snapping and other arrangers done; sleep, hotplug, RDP, soak and Windows 10 left | [Step 7](#step-7-hardening) |
+| 7. Hardening | in progress: real apps, tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
 
 ## Step 1: verify assumptions
@@ -338,6 +338,47 @@ probe's own window with `--self-move`, as some custom title bars do): dragged by
 into the zone, 0 px from the zone, in the workspace; onto the code window's tag, a strip of two
 tabs, 0 px; its tab pulled out into the zone, 0 px. Windows reported mouse capture and no move
 loop for each drag (the engine's log: "the app drags its window itself").
+
+### Tags and tabs in title bars (jobs 0062 to 0064) — ADR 0011
+
+Tags and tab strips now go in each window's own title bar, in a stretch the window answers
+"caption" for, and windows fill their zones (28 px more each at 100%). The probe windows (classic
+title bars, 1048 and 856 px wide):
+
+```
+after saving:   each tag in its title bar, 6 px left of the minimise button; 0 px from the zone
+a tab join:     the strip (zone tag, "Probe Code", "Probe Terminal") in the visible tab's title bar
+everything else of --drag as before: tabs, pull-out, snapping back, Windows' snapping, editing
+--tags-above:   the band as before, 0 px everywhere (job 0062)
+```
+
+How title bars answer, along the row Mosaïk reads, asked as real input is (the window
+`WindowFromPoint` finds, passing on "transparent") and as Mosaïk asks (`mosaik-probe titlebar`,
+job 0064, 960 px wide windows): the two agree at every point of every app.
+
+```
+Notepad, Notepad++, Paint   caption 22 to 854, then Windows' buttons; Windows draws them from 814
+Edge                        tabs, then caption 326 to 806; buttons from 814
+Explorer                    tabs, then caption 294 to 806 (TITLE_BAR_SCAFFOLDING_WINDOW_CLASS)
+Word                        caption 294 to 582 left of the search box, and 774 to 806
+VS Code                     caption 86 to 198 only (menu, command centre and layout buttons take the rest)
+Calculator                  the app's own content to 758, caption 774 to 806 only
+```
+
+Found and fixed on the way:
+
+- **Classic title bars answer "caption" over most of the minimise button** (job 0062: the tag
+  covered it): Windows 11 draws its buttons wider than a classic window's own hit test assumes.
+  The buttons are now taken from Windows (`DWMWA_CAPTION_BUTTON_BOUNDS`).
+- **A tab's chip cut its title short** ("Probe Termi…", job 0063): a text box exactly as wide as
+  the measured text can still get an ellipsis; boxes now have a pixel to spare.
+
+Where apps' tags went (`--apps`, jobs 0062 and 0063): Notepad, Notepad++, Paint, Edge, Chrome,
+Windows Terminal, Explorer, Word, Excel and Git Bash in their title bars, 0 px from the zone, and
+their strips there too. VS Code's tag fits its one free stretch, left of the command centre; its
+strip does not, so as a group's visible tab it goes below a band, with the strip above it.
+Calculator keeps only 40 px of caption, so it wears its tag above it, below a band. The window
+that moves itself with no caption to grab (`--self-move --no-title-room`) does the same.
 
 ### Windows' own snapping (`mosaik-probe workspace --drag`, jobs 0048 and 0051)
 
