@@ -15,7 +15,7 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    ./mosaik1.sh --no-start  install, don't start anything
 #    ./mosaik1.sh --fresh     reinstall dependencies, rebuild from scratch
 #    ./mosaik1.sh --port 4000 another port (default 3000, or the next free one)
-#    ./mosaik1.sh --dir ~/m   install somewhere else (default ./site)
+#    ./mosaik1.sh --dir ~/m   install somewhere else (default ./mosaik)
 #
 #  Updating
 #    This file is the source of truth. Change the settings below and run it
@@ -102,21 +102,28 @@ MARKER=".mosaik-site"
 MANIFEST=".mosaik-files"
 if [ -z "$APP_DIR" ]; then
   if [ -f "$MARKER" ]; then APP_DIR="."
-  else APP_DIR="./site"; fi
+  else APP_DIR="./mosaik"; fi
 fi
 mkdir -p "$(dirname "$APP_DIR")"
 APP_DIR="$(cd "$(dirname "$APP_DIR")" && pwd -P)/$(basename "$APP_DIR")"
 case "$APP_DIR" in */.) APP_DIR="${APP_DIR%/.}" ;; esac
 case "$APP_DIR" in ""|/|"$HOME") die "Refusing to install into '$APP_DIR'." ;; esac
 
+# An existing install is removed and the site written fresh; public/ and the Vercel link are kept.
 INSTALL="fresh"
-if [ -d "$APP_DIR" ]; then
-  if [ -f "$APP_DIR/$MARKER" ]; then
-    INSTALL="update"
-  elif [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then
-    # Never move or touch a folder the script did not make.
-    die "$APP_DIR already holds something else. Pick another folder with --dir (nothing was changed)."
+if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then
+  # The one thing never removed: the app's own source code (it is not a site, and not on GitHub).
+  if [ -f "$APP_DIR/Cargo.toml" ] || [ -d "$APP_DIR/crates" ]; then
+    die "$APP_DIR is the Mosaïk app's source code, not a site. Nothing was removed. Use --dir to pick the site's folder."
   fi
+  [ "$APP_DIR" != "$(pwd -P)" ] || cd ..
+  KEEP="$(mktemp -d "${TMPDIR:-/tmp}/mosaik-keep.XXXXXX")"
+  for kept in public .vercel; do [ ! -e "$APP_DIR/$kept" ] || cp -R "$APP_DIR/$kept" "$KEEP/"; done
+  rm -rf "$APP_DIR" || die "Could not remove $APP_DIR (a program has files open in it: close it and run again)."
+  mkdir -p "$APP_DIR"
+  for kept in public .vercel; do [ ! -e "$KEEP/$kept" ] || cp -R "$KEEP/$kept" "$APP_DIR/"; done
+  rm -rf "$KEEP"
+  INSTALL="replaced the old one"
 fi
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
