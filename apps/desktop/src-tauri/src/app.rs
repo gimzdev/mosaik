@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use mosaik_core::store::Store;
 use mosaik_engine::{Config, Engine, UiEvent, UiSink};
 use mosaik_ipc::pipe::{Client, PipeError, Program, Server, Stopper, pipe_name};
-use mosaik_ipc::protocol::{Command, ErrorCode, Reply};
+use mosaik_ipc::protocol::{Command, Reply};
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -171,7 +171,14 @@ pub fn run(args: Vec<String>) -> i32 {
         manage_only: None,
     };
     let built = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![engine_request, take_notices, open_link, open_logs])
+        .invoke_handler(tauri::generate_handler![
+            engine_request,
+            take_notices,
+            open_link,
+            open_logs,
+            rescue_windows,
+            style_title_bar
+        ])
         .setup(move |app| {
             // Tauri turns an error returned here into a panic; report it instead.
             if let Err(e) = setup(app.handle(), config, server, startup_notices, data_dir) {
@@ -343,6 +350,9 @@ fn on_ui_event(handle: &AppHandle, event: UiEvent) {
     let ran = handle.run_on_main_thread(move || match event {
         UiEvent::ShowSettings => show_settings(&h),
         UiEvent::Notice { title, body } => show_notice(&h, Notice { title, body }),
+        UiEvent::WorkspacesChanged => {
+            let _ = h.emit("workspaces:changed", ());
+        }
         UiEvent::Exit => h.exit(0),
     });
     if let Err(e) = ran {
@@ -439,8 +449,37 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Sends a command from the tray without blocking the interface. A rescue that the engine
-/// cannot do (busy) is done here instead; problems become notices.
+/// Brings back every window Mosaïk hid: the engine does it, or when it cannot answer, this
+/// thread does it from the journal, so a rescue never depends on the engine. Returns what
+/// happened, and whether everything came back.
+fn rescue(engine: &Engine, data_dir: &Path) -> (String, bool) {
+    match engine.request(Command::Rescue, ENGINE_TIMEOUT) {
+        Reply::Done { message } => (message, true),
+        reply => {
+            if let Reply::Error { message, .. } = &reply {
+                tracing::warn!(%message, "rescue done without the engine");
+            }
+            // SAFETY: COM for the shell-cloak calls, on this short-lived thread.
+            let _ = unsafe {
+                windows::Win32::System::Com::CoInitializeEx(
+                    None,
+                    windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
+                )
+            };
+            let outcome = mosaik_win::rescue::restore_hidden(&Store::new(data_dir));
+            let ok = outcome.report.failed.is_empty() && outcome.problem.is_none();
+            let summary = outcome.report.summary();
+            (
+                outcome
+                    .problem
+                    .map_or(summary.clone(), |p| format!("{summary}. {p}")),
+                ok,
+            )
+        }
+    }
+}
+
+/// Sends a command from the tray without blocking the interface; problems become notices.
 fn ask_engine(app: &AppHandle, command: Command) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
@@ -448,48 +487,20 @@ fn ask_engine(app: &AppHandle, command: Command) {
     let engine = Arc::clone(&state.engine);
     let data_dir = state.data_dir.clone();
     let handle = app.clone();
-    let rescue = matches!(command, Command::Rescue);
     std::thread::spawn(move || {
-        let reply = engine.request(command, ENGINE_TIMEOUT);
-        let notice = match reply {
-            Reply::Error {
-                code: ErrorCode::Busy,
-                ..
-            } if rescue => {
-                // SAFETY: COM for the shell-cloak calls, on this short-lived thread.
-                let _ = unsafe {
-                    windows::Win32::System::Com::CoInitializeEx(
-                        None,
-                        windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
-                    )
-                };
-                let outcome = mosaik_win::rescue::restore_hidden(&Store::new(&data_dir));
-                Some(Notice {
-                    title: "Rescue windows".into(),
-                    body: outcome.problem.map_or_else(
-                        || outcome.report.summary(),
-                        |p| format!("{}. {p}", outcome.report.summary()),
-                    ),
-                })
+        let notice = if matches!(command, Command::Rescue) {
+            Some(("Rescue windows".to_owned(), rescue(&engine, &data_dir).0))
+        } else {
+            match engine.request(command, ENGINE_TIMEOUT) {
+                Reply::Error { message, hint, .. } => Some((
+                    "Mosaïk".to_owned(),
+                    hint.map_or(message.clone(), |h| format!("{message} {h}")),
+                )),
+                _ => None,
             }
-            Reply::Done { message } if rescue => Some(Notice {
-                title: "Rescue windows".into(),
-                body: message,
-            }),
-            Reply::Error { message, hint, .. } => Some(Notice {
-                title: "Mosaïk".into(),
-                body: hint.map_or(message.clone(), |h| format!("{message} {h}")),
-            }),
-            _ => None,
         };
-        if let Some(n) = notice {
-            on_ui_event(
-                &handle,
-                UiEvent::Notice {
-                    title: n.title,
-                    body: n.body,
-                },
-            );
+        if let Some((title, body)) = notice {
+            on_ui_event(&handle, UiEvent::Notice { title, body });
         }
     });
 }
@@ -524,6 +535,46 @@ fn take_notices(state: tauri::State<'_, AppState>) -> Vec<Notice> {
         .lock()
         .map(|mut n| std::mem::take(&mut *n))
         .unwrap_or_default()
+}
+
+/// "Rescue windows" in About: the same as in the tray, with the answer for the page.
+#[tauri::command]
+async fn rescue_windows(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let engine = Arc::clone(&state.engine);
+    let data_dir = state.data_dir.clone();
+    let (message, ok) = tauri::async_runtime::spawn_blocking(move || rescue(&engine, &data_dir))
+        .await
+        .map_err(|e| e.to_string())?;
+    if ok { Ok(message) } else { Err(message) }
+}
+
+/// Matches a window's title bar to its page: light or dark, in the page's colours (`#rrggbb`).
+/// Without colours (high contrast), Windows' own theme and colours stay.
+#[tauri::command]
+fn style_title_bar(
+    window: tauri::WebviewWindow,
+    dark: Option<bool>,
+    caption: Option<String>,
+    text: Option<String>,
+) -> Result<(), String> {
+    let theme = dark.map(|d| {
+        if d {
+            tauri::Theme::Dark
+        } else {
+            tauri::Theme::Light
+        }
+    });
+    window.set_theme(theme).map_err(|e| e.to_string())?;
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    let rgb = |hex: Option<String>| {
+        let hex = hex?;
+        let digits = hex.trim().strip_prefix('#')?;
+        (digits.len() == 6)
+            .then(|| u32::from_str_radix(digits, 16).ok())
+            .flatten()
+    };
+    mosaik_win::window::set_caption_colors(hwnd, rgb(caption), rgb(text));
+    Ok(())
 }
 
 /// Opens one of Mosaïk's pages in the default browser. Only these can be opened.

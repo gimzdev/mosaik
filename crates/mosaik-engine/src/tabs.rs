@@ -958,7 +958,7 @@ impl Engine {
             let place = match &live {
                 Some(z) => Place::Zone { zone: z.id.clone() },
                 None => Place::Free {
-                    monitor: l.monitor_index(&monitor),
+                    monitor: l.monitor_index(&monitor, &topology),
                     area: RatioRect::from_rect(target, monitor.work_area).unwrap_or(RatioRect::FULL),
                 },
             };

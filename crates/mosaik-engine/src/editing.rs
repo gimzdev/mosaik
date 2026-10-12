@@ -1,16 +1,16 @@
 //! What the interface changes: settings, a workspace's zones, name and shortcut, deleting a
-//! workspace. Each change is checked (with the reason when refused), saved, then applied at
-//! once.
+//! workspace. Each change is checked (with the reason when refused) and saved, then applied at
+//! once; when it cannot be saved, nothing changes and the reply says why.
 
-use mosaik_core::editing::{ZoneEdit, apply_zones, rename, zones_for_editor};
-use mosaik_core::hotkey::{Hotkey, check};
+use mosaik_core::editing::{ZoneEdit, apply_zones, rename, revision, zones_for_editor};
+use mosaik_core::hotkey::{Hotkey, LayoutTyping, check};
 use mosaik_core::layout::WorkspaceId;
 use mosaik_core::settings::{SETTINGS_VERSION, Settings};
-use mosaik_ipc::protocol::{ErrorCode, MonitorState, Reply};
+use mosaik_ipc::protocol::{ErrorCode, Reply};
 use mosaik_win::hotkey::{Registration, register};
 use mosaik_win::startup::{self, Startup};
 
-use crate::hotkeys::{SWITCHER, WORKSPACE_KEYS};
+use crate::hotkeys::WORKSPACE_KEYS;
 use crate::switcher;
 use crate::thread::Engine;
 
@@ -37,8 +37,12 @@ fn not_found(which: &str) -> Reply {
     Reply::Error {
         code: ErrorCode::NotFound,
         message: format!("There is no workspace called \u{201c}{}\u{201d}.", which.trim()),
-        hint: Some("It may have been deleted meanwhile.".into()),
+        hint: Some("It may have been renamed or deleted meanwhile.".into()),
     }
+}
+
+fn no_monitors() -> Reply {
+    failed("Mosaïk could not read the monitor layout.")
 }
 
 /// A registered shortcut of one workspace.
@@ -58,8 +62,13 @@ impl Engine {
     /// Why a shortcut cannot be used for the switcher (`mine` is `None`) or for the workspace
     /// `mine`, if it cannot: against the rules (AltGr, Windows' own), already Mosaïk's for
     /// something else, or taken by another app.
-    fn hotkey_problem(&self, h: Hotkey, mine: Option<&WorkspaceId>) -> Option<String> {
-        if let Err(problem) = check(h, &mosaik_win::keyboard::layouts()) {
+    fn hotkey_problem(
+        &self,
+        h: Hotkey,
+        mine: Option<&WorkspaceId>,
+        layouts: &[LayoutTyping],
+    ) -> Option<String> {
+        if let Err(problem) = check(h, layouts) {
             return Some(problem.to_string());
         }
         let switcher = self.hotkey_state().shortcut;
@@ -74,10 +83,11 @@ impl Engine {
         {
             return Some(format!("{h} already switches to \u{201c}{}\u{201d}.", other.name));
         }
-        // Mosaïk's own shortcut for the same thing is registered already; any other must be free.
+        // Mosaïk's own registration of this shortcut for the same thing is no conflict; any
+        // other must be free.
         let ours = match mine {
             None => switcher == h.to_string(),
-            Some(m) => self.workspace_has(m, h),
+            Some(m) => self.key_of(m).is_some_and(|k| k.1 == h),
         };
         if !ours && let Err(e) = register(Some(self.window), PROBE_KEY, h) {
             return Some(e.to_string());
@@ -85,15 +95,22 @@ impl Engine {
         None
     }
 
-    fn workspace_has(&self, id: &WorkspaceId, h: Hotkey) -> bool {
-        self.file
-            .workspaces
-            .iter()
-            .any(|w| &w.id == id && w.hotkey == Some(h))
+    /// The registered shortcut of a workspace, as (its `WM_HOTKEY` id, the shortcut).
+    fn key_of(&self, workspace: &WorkspaceId) -> Option<(i32, Hotkey)> {
+        let key = self.workspace_keys.iter().find(|k| &k.workspace == workspace)?;
+        let ws = self.file.workspaces.iter().find(|w| &w.id == workspace)?;
+        Some((key.id, ws.hotkey?))
     }
 
     /// Whether a shortcut can be used for the switcher, or for the workspace `workspace`.
     pub(crate) fn check_hotkey_reply(&self, text: &str, workspace: Option<&str>) -> Reply {
+        let mine = match workspace {
+            None => None,
+            Some(w) => match self.find_workspace(w) {
+                Some(i) => Some(self.file.workspaces[i].id.clone()),
+                None => return not_found(w),
+            },
+        };
         let h: Hotkey = match text.parse() {
             Ok(h) => h,
             Err(e) => {
@@ -104,15 +121,13 @@ impl Engine {
                 };
             }
         };
-        let warnings = check(h, &mosaik_win::keyboard::layouts())
+        let layouts = mosaik_win::keyboard::layouts();
+        let warnings = check(h, &layouts)
             .map(|w| w.iter().map(ToString::to_string).collect())
             .unwrap_or_default();
-        let mine = workspace
-            .and_then(|w| self.find_workspace(w))
-            .map(|i| self.file.workspaces[i].id.clone());
         Reply::Hotkey {
             hotkey: h.to_string(),
-            problem: self.hotkey_problem(h, mine.as_ref()),
+            problem: self.hotkey_problem(h, mine.as_ref(), &layouts),
             warnings,
         }
     }
@@ -121,21 +136,26 @@ impl Engine {
     /// refused with the reason; nothing is saved then.
     pub(crate) fn set_settings(&mut self, mut new: Settings) -> Reply {
         new.version = SETTINGS_VERSION;
+        if let Some(problem) = new.problem() {
+            return refused(problem, None);
+        }
         let hotkey_changed = new.switcher_hotkey != self.settings.switcher_hotkey;
         if hotkey_changed
             && new.switcher_hotkey.to_string() != self.hotkey_state().shortcut
-            && let Some(problem) = self.hotkey_problem(new.switcher_hotkey, None)
+            && let Some(problem) =
+                self.hotkey_problem(new.switcher_hotkey, None, &mosaik_win::keyboard::layouts())
         {
             return refused(problem, Some("Pick another shortcut."));
         }
         let mut notes = Vec::new();
-        if new.start_with_windows != self.settings.start_with_windows {
+        let startup_changed = new.start_with_windows != self.settings.start_with_windows;
+        if startup_changed {
             match startup::set(new.start_with_windows) {
                 Ok(Startup::On | Startup::Off) => {}
-                Ok(Startup::OffByUser) => {
+                Ok(Startup::Refused) => {
                     new.start_with_windows = false;
                     notes.push(
-                        "Starting with Windows was turned off in Task Manager; turn Mosaïk on again there, under Startup apps.",
+                        "Windows did not let Mosaïk start with it: it is turned off under Startup apps (in Task Manager or Settings), where only you can turn it on.",
                     );
                 }
                 Err(e) => return failed(format!("Starting with Windows could not be changed: {e}")),
@@ -143,10 +163,14 @@ impl Engine {
         }
         let old = std::mem::replace(&mut self.settings, new);
         if let Err(e) = self.store.save(&self.settings) {
+            // Put everything back as it was, starting with Windows included.
+            if startup_changed && old.start_with_windows != self.settings.start_with_windows {
+                let _ = startup::set(old.start_with_windows);
+            }
             self.settings = old;
             return failed(format!("Your settings could not be saved: {e}"));
         }
-        if hotkey_changed {
+        if hotkey_changed && !self.config.safe_mode {
             // The old shortcut goes first, so a swap between the two works.
             self.hotkey = None;
             self.register_hotkey();
@@ -169,105 +193,100 @@ impl Engine {
         }
     }
 
-    pub(crate) fn zones_reply(&mut self, which: &str) -> Reply {
+    pub(crate) fn zones_reply(&self, which: &str) -> Reply {
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
-        let Some(topology) = self.refresh_topology() else {
-            return failed("Mosaïk could not read the monitor layout.");
+        let Some(topology) = self.read_topology() else {
+            return no_monitors();
         };
         let ws = &self.file.workspaces[index];
         Reply::Zones {
             workspace: ws.id.clone(),
             name: ws.name.clone(),
-            monitors: topology
-                .monitors()
-                .iter()
-                .map(|m| MonitorState {
-                    id: m.id.0.clone(),
-                    name: m.name.clone(),
-                    primary: m.primary,
-                    bounds: m.bounds,
-                    work_area: m.work_area,
-                    dpi: m.dpi,
-                    scale_percent: m.scale_percent(),
-                })
-                .collect(),
+            monitors: topology.monitors().iter().map(Into::into).collect(),
             zones: zones_for_editor(ws, &topology),
+            revision: revision(ws, &topology),
         }
     }
 
-    pub(crate) fn set_zones(&mut self, which: &str, zones: &[ZoneEdit]) -> Reply {
-        if let Some(problem) = &self.file_problem {
-            return failed(format!("Workspaces cannot be saved: {problem}"));
-        }
+    /// Saves the zone editor's zones. Windows of the open workspace move to their zones at
+    /// once; the reply is the zones as saved (new zones have their ids).
+    pub(crate) fn set_zones(&mut self, which: &str, zones: &[ZoneEdit], seen: &str) -> Reply {
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
-        let Some(topology) = self.refresh_topology() else {
-            return failed("Mosaïk could not read the monitor layout.");
+        let Some(topology) = self.read_topology() else {
+            return no_monitors();
         };
-        let updated = match apply_zones(&self.file.workspaces[index], zones, &topology) {
+        let current = &self.file.workspaces[index];
+        if revision(current, &topology) != seen {
+            return refused(
+                "The monitors or these zones changed since the editor opened, so nothing was saved.",
+                Some("Open the editor again to see them as they are now."),
+            );
+        }
+        let updated = match apply_zones(current, zones, &topology, self.style()) {
             Ok(w) => w,
             Err(e) => return refused(e.to_string(), None),
         };
-        let name = updated.name.clone();
         let id = updated.id.clone();
-        self.file.workspaces[index] = updated;
-        self.persist();
+        let before = std::mem::replace(&mut self.file.workspaces[index], updated);
+        if let Err(e) = self.save_file() {
+            self.file.workspaces[index] = before;
+            return failed(e);
+        }
         if self.active.as_ref().is_some_and(|a| a.id == id) {
-            self.refresh_live_zones();
-            self.refresh_frames();
+            self.refit_open_workspace(&topology);
         }
-        Reply::Done {
-            message: format!("Zones of \u{201c}{name}\u{201d} saved."),
-        }
+        self.zones_reply(&id.0)
     }
 
     pub(crate) fn rename_workspace(&mut self, which: &str, name: &str) -> Reply {
-        if let Some(problem) = &self.file_problem {
-            return failed(format!("Workspaces cannot be saved: {problem}"));
-        }
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
-        match rename(&self.file.workspaces[index], name, &self.file.workspaces) {
-            Ok(w) => {
-                let message = format!("Renamed to \u{201c}{}\u{201d}.", w.name);
-                self.file.workspaces[index] = w;
-                self.persist();
-                Reply::Done { message }
-            }
-            Err(e) => refused(e.to_string(), None),
+        let renamed = match rename(&self.file.workspaces[index], name, &self.file.workspaces) {
+            Ok(w) => w,
+            Err(e) => return refused(e.to_string(), None),
+        };
+        let message = format!("Renamed to \u{201c}{}\u{201d}.", renamed.name);
+        let before = std::mem::replace(&mut self.file.workspaces[index], renamed);
+        if let Err(e) = self.save_file() {
+            self.file.workspaces[index] = before;
+            return failed(e);
         }
+        Reply::Done { message }
     }
 
     /// Deletes a workspace. Its windows stay where they are; if it was open, none is open now
     /// and its hidden tabs come back.
     pub(crate) fn delete_workspace(&mut self, which: &str) -> Reply {
-        if let Some(problem) = &self.file_problem {
-            return failed(format!("Workspaces cannot be saved: {problem}"));
-        }
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
         let ws = self.file.workspaces.remove(index);
+        let active_before = self.file.active.clone();
+        if active_before.as_ref() == Some(&ws.id) {
+            self.file.active = None;
+        }
+        if let Err(e) = self.save_file() {
+            self.file.workspaces.insert(index, ws);
+            self.file.active = active_before;
+            return failed(e);
+        }
+        self.workspace_keys.retain(|k| k.workspace != ws.id);
         if self.active.as_ref().is_some_and(|a| a.id == ws.id) {
             self.active = None;
-            self.file.active = None;
+            self.show_all_hidden();
             self.refresh_frames();
         }
-        self.persist();
-        self.register_workspace_hotkeys();
         Reply::Done {
             message: format!("Deleted \u{201c}{}\u{201d}.", ws.name),
         }
     }
 
     pub(crate) fn set_workspace_hotkey(&mut self, which: &str, hotkey: Option<&str>) -> Reply {
-        if let Some(problem) = &self.file_problem {
-            return failed(format!("Workspaces cannot be saved: {problem}"));
-        }
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
@@ -275,19 +294,27 @@ impl Engine {
         let wanted = match hotkey.map(str::parse::<Hotkey>) {
             None => None,
             Some(Ok(h)) => {
-                if let Some(problem) = self.hotkey_problem(h, Some(&id)) {
+                if let Some(problem) = self.hotkey_problem(h, Some(&id), &mosaik_win::keyboard::layouts()) {
                     return refused(problem, Some("Pick another shortcut."));
                 }
                 Some(h)
             }
             Some(Err(e)) => return refused(e.to_string(), None),
         };
-        self.file.workspaces[index].hotkey = wanted;
-        self.persist();
-        let problems = self.register_workspace_hotkeys();
+        let before = std::mem::replace(&mut self.file.workspaces[index].hotkey, wanted);
+        if let Err(e) = self.save_file() {
+            self.file.workspaces[index].hotkey = before;
+            return failed(e);
+        }
         let name = self.file.workspaces[index].name.clone();
-        if let Some(p) = problems.first() {
-            return failed(p.clone());
+        self.workspace_keys.retain(|k| k.workspace != id);
+        if let Some(h) = wanted
+            && !self.config.safe_mode
+            && let Err(problem) = self.register_workspace_key(&id, h)
+        {
+            return failed(format!(
+                "{h} is saved for \u{201c}{name}\u{201d} but does not work yet: {problem}"
+            ));
         }
         Reply::Done {
             message: match wanted {
@@ -297,31 +324,42 @@ impl Engine {
         }
     }
 
-    /// Registers every workspace's own shortcut (again). Returns what could not be registered.
+    /// Registers one workspace's shortcut under the first free `WM_HOTKEY` id.
+    fn register_workspace_key(&mut self, workspace: &WorkspaceId, h: Hotkey) -> Result<(), String> {
+        let id = (WORKSPACE_KEYS..)
+            .find(|n| self.workspace_keys.iter().all(|k| k.id != *n))
+            .unwrap_or(WORKSPACE_KEYS);
+        let registration = register(Some(self.window), id, h).map_err(|e| e.to_string())?;
+        self.workspace_keys.push(WorkspaceKey {
+            id,
+            workspace: workspace.clone(),
+            _registration: registration,
+        });
+        Ok(())
+    }
+
+    /// Registers every workspace's own shortcut, at start. A shortcut from a file edited by
+    /// hand that the recorder would refuse (a bare F-key, Ctrl+Alt with a letter) is refused
+    /// here too. Returns what could not be registered, one sentence each.
     pub(crate) fn register_workspace_hotkeys(&mut self) -> Vec<String> {
         self.workspace_keys.clear();
-        if self.config.safe_mode {
-            return Vec::new();
-        }
-        let mut problems = Vec::new();
+        let layouts = mosaik_win::keyboard::layouts();
         let with_keys: Vec<(WorkspaceId, String, Hotkey)> = self
             .file
             .workspaces
             .iter()
             .filter_map(|w| w.hotkey.map(|h| (w.id.clone(), w.name.clone(), h)))
             .collect();
-        for (n, (workspace, name, h)) in with_keys.into_iter().enumerate() {
-            let id = WORKSPACE_KEYS + i32::try_from(n).unwrap_or(0);
-            if id == SWITCHER {
-                continue;
-            }
-            match register(Some(self.window), id, h) {
-                Ok(registration) => self.workspace_keys.push(WorkspaceKey {
-                    id,
-                    workspace,
-                    _registration: registration,
-                }),
-                Err(e) => problems.push(format!("\u{201c}{name}\u{201d} has no shortcut: {e}")),
+        let mut problems = Vec::new();
+        for (workspace, name, h) in with_keys {
+            let result = match check(h, &layouts) {
+                Ok(_) => self.register_workspace_key(&workspace, h),
+                Err(problem) => Err(problem.to_string()),
+            };
+            if let Err(problem) = result {
+                problems.push(format!(
+                    "{h} does not switch to \u{201c}{name}\u{201d}: {problem}"
+                ));
             }
         }
         problems

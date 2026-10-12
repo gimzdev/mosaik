@@ -60,6 +60,9 @@ pub enum UiEvent {
         title: String,
         body: String,
     },
+    /// The saved workspaces, or which one is open, changed (from the switcher, a shortcut,
+    /// `mosaikctl` or the interface itself): lists showing them should read them again.
+    WorkspacesChanged,
     /// The engine stopped on request (`mosaikctl` or the tray): the app should exit.
     Exit,
 }

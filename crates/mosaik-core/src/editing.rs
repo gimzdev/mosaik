@@ -6,15 +6,17 @@
 //! one standing in for it (as it does on screen) and, unless the editor moves it to another
 //! monitor, keeps belonging to its own monitor when saved.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::geometry::RatioRect;
 use crate::layout::{Place, Workspace};
-use crate::topology::{MonitorId, Topology, map_monitors};
-use crate::zone::{Zone, ZoneColor, ZoneId};
+use crate::place::Resolver;
+use crate::topology::{MonitorId, Topology, fnv1a64, map_monitors};
+use crate::workspace::next_id;
+use crate::zone::{FrameStyle, Zone, ZoneColor, ZoneId};
 
 /// The longest workspace or zone name, in characters.
 pub const MAX_NAME: usize = 60;
@@ -43,12 +45,18 @@ pub enum EditError {
     EmptyName,
     #[error("Names are {MAX_NAME} characters at most.")]
     LongName,
+    #[error("Every zone needs a name.")]
+    UnnamedZone,
+    #[error("Zone names are {MAX_NAME} characters at most: \u{201c}{0}\u{2026}\u{201d} is longer.")]
+    LongZoneName(String),
     #[error("Another workspace is called \u{201c}{0}\u{201d}.")]
     NameTaken(String),
     #[error("A zone is on a monitor that is not connected any more. Open the editor again.")]
     UnknownMonitor,
     #[error("A zone this workspace does not have was edited. Open the editor again.")]
     UnknownZone,
+    #[error("The same zone was sent twice. Open the editor again.")]
+    DuplicateZone,
     #[error("Zone \u{201c}{0}\u{201d} is too small: zones are at least a twentieth of the screen each way.")]
     TooSmall(String),
     #[error("A monitor has more than {MAX_ZONES_PER_MONITOR} zones.")]
@@ -65,6 +73,14 @@ pub fn checked_name(name: &str) -> Result<String, EditError> {
         return Err(EditError::LongName);
     }
     Ok(name.to_owned())
+}
+
+/// Checks a zone's name; the problem says which zone.
+fn zone_name(name: &str) -> Result<String, EditError> {
+    checked_name(name).map_err(|e| match e {
+        EditError::EmptyName => EditError::UnnamedZone,
+        _ => EditError::LongZoneName(name.trim().chars().take(20).collect()),
+    })
 }
 
 /// A workspace's zones on the monitors connected now.
@@ -86,104 +102,116 @@ pub fn zones_for_editor(ws: &Workspace, topology: &Topology) -> Vec<ZoneEdit> {
         .collect()
 }
 
-/// The workspace with the editor's zones. A window or tab group in a zone that was removed
-/// keeps its place on screen, as a place of its own.
-pub fn apply_zones(ws: &Workspace, edits: &[ZoneEdit], topology: &Topology) -> Result<Workspace, EditError> {
-    let before = zones_for_editor(ws, topology);
-    let shown: HashSet<ZoneId> = before.iter().filter_map(|z| z.id.clone()).collect();
-    for e in edits {
-        if e.id.as_ref().is_some_and(|id| !shown.contains(id)) {
-            return Err(EditError::UnknownZone);
-        }
-        if topology.get(&e.monitor).is_none() {
-            return Err(EditError::UnknownMonitor);
-        }
-        let name = checked_name(&e.name)?;
-        if e.area.width() < MIN_ZONE - 1e-9 || e.area.height() < MIN_ZONE - 1e-9 {
-            return Err(EditError::TooSmall(name));
-        }
-    }
-    for m in topology.monitors() {
-        if edits.iter().filter(|e| e.monitor == m.id).count() > MAX_ZONES_PER_MONITOR {
-            return Err(EditError::TooManyZones);
-        }
-    }
+/// A short token for the zones an editor shows: the editor sends it back with its changes,
+/// which are refused when it no longer matches (the monitors changed, or another window saved
+/// other zones meanwhile) rather than overwriting what changed. Windows moving between zones
+/// do not change it.
+pub fn revision(ws: &Workspace, topology: &Topology) -> String {
+    let monitors: Vec<&str> = ws.layout.monitors.iter().map(|m| m.id.0.as_str()).collect();
+    // Serialising plain data cannot fail; an empty string would only make the token coarser.
+    let zones = serde_json::to_string(&(&ws.layout.zones, monitors)).unwrap_or_default();
+    format!(
+        "{:016x}",
+        fnv1a64(format!("{}|{zones}", topology.fingerprint()).as_bytes())
+    )
+}
 
+/// The workspace with the editor's zones. A window or tab group in a zone that was removed
+/// keeps the place it had on screen, as a place of its own.
+pub fn apply_zones(
+    ws: &Workspace,
+    edits: &[ZoneEdit],
+    topology: &Topology,
+    style: FrameStyle,
+) -> Result<Workspace, EditError> {
+    let shown_on: HashMap<ZoneId, MonitorId> = zones_for_editor(ws, topology)
+        .into_iter()
+        .filter_map(|z| Some((z.id?, z.monitor)))
+        .collect();
     let mut out = ws.clone();
     let layout = &mut out.layout;
-    // Zones the editor did not show stay; the others are replaced by the edit.
+    let mut taken: HashSet<String> = layout.zones.iter().map(|z| z.id.0.clone()).collect();
+    let mut sent: HashSet<&ZoneId> = HashSet::new();
+    // Zones the editor did not show stay as they are.
     let mut zones: Vec<Zone> = layout
         .zones
         .iter()
-        .filter(|z| !shown.contains(&z.id))
+        .filter(|z| !shown_on.contains_key(&z.id))
         .cloned()
         .collect();
-    let mut taken: HashSet<String> = layout.zones.iter().map(|z| z.id.0.clone()).collect();
     for e in edits {
-        let Some(monitor) = topology.get(&e.monitor) else {
-            return Err(EditError::UnknownMonitor);
-        };
-        // A zone still on the monitor it showed on keeps its own monitor (which may be one not
-        // connected now); one moved to another monitor belongs to that one.
-        let original = e.id.as_ref().and_then(|id| {
-            let shown_on = &before.iter().find(|b| b.id.as_ref() == Some(id))?.monitor;
-            let zone = layout.zones.iter().find(|z| &z.id == id)?;
-            (shown_on == &e.monitor).then_some(zone.monitor)
-        });
-        let index = match original {
-            Some(i) => i,
-            None => layout.monitor_index(monitor),
-        };
-        let id = match &e.id {
-            Some(id) => id.clone(),
+        let monitor = topology.get(&e.monitor).ok_or(EditError::UnknownMonitor)?;
+        let name = zone_name(&e.name)?;
+        if e.area.width() < MIN_ZONE - 1e-9 || e.area.height() < MIN_ZONE - 1e-9 {
+            return Err(EditError::TooSmall(name));
+        }
+        let (id, kept_monitor) = match &e.id {
+            Some(id) => {
+                let shown = shown_on.get(id).ok_or(EditError::UnknownZone)?;
+                if !sent.insert(id) {
+                    return Err(EditError::DuplicateZone);
+                }
+                // A zone still on the monitor it showed on keeps its own monitor (which may be
+                // one not connected now); one moved to another monitor belongs to that one.
+                let own = layout.zones.iter().find(|z| &z.id == id).map(|z| z.monitor);
+                (id.clone(), own.filter(|_| shown == &e.monitor))
+            }
             None => {
-                let id = ZoneId(
-                    (1..)
-                        .map(|n| format!("z{n}"))
-                        .find(|c| !taken.contains(c))
-                        .unwrap_or_else(|| "z0".into()),
-                );
+                let id = ZoneId(next_id("z", &taken));
                 taken.insert(id.0.clone());
-                id
+                (id, None)
             }
         };
+        let monitor = kept_monitor.unwrap_or_else(|| layout.monitor_index(monitor, topology));
         zones.push(Zone {
             id,
-            name: checked_name(&e.name)?,
+            name,
             color: e.color,
-            monitor: index,
+            monitor,
             area: e.area,
         });
     }
-    // A window (or tab group) whose zone is gone keeps the place the zone had.
+    // The limit is per monitor the zones belong to: zones of an unplugged monitor shown on
+    // another one do not count against it.
+    let mut per_monitor: HashMap<usize, usize> = HashMap::new();
+    for z in &zones {
+        *per_monitor.entry(z.monitor).or_default() += 1;
+    }
+    if per_monitor.values().any(|n| *n > MAX_ZONES_PER_MONITOR) {
+        return Err(EditError::TooManyZones);
+    }
+
+    // A window or tab group whose zone is gone keeps the place it had on screen: inside the
+    // zone's gaps, and for tabs below the band their strip needs.
     let kept: HashSet<&ZoneId> = zones.iter().map(|z| &z.id).collect();
-    let removed: Vec<(ZoneId, Place)> = layout
-        .zones
-        .iter()
-        .filter(|z| !kept.contains(&z.id))
-        .map(|z| {
-            (
-                z.id.clone(),
-                Place::Free {
-                    monitor: z.monitor,
-                    area: z.area,
-                },
-            )
-        })
-        .collect();
-    let place_of = |p: &Place| -> Option<Place> {
-        match p {
-            Place::Zone { zone } => removed.iter().find(|(id, _)| id == zone).map(|(_, p)| p.clone()),
-            _ => None,
+    let resolver = Resolver::new(&ws.layout, topology, style);
+    let place_without = |place: &Place, style: FrameStyle| -> Option<Place> {
+        let Place::Zone { zone } = place else {
+            return None;
+        };
+        if kept.contains(zone) {
+            return None;
         }
+        let z = ws.layout.zone(zone)?;
+        let area = resolver
+            .zone_rect(zone)
+            .and_then(|(rect, dpi)| {
+                let work_area = resolver.monitor(z.monitor)?.work_area;
+                RatioRect::from_rect(style.window_area(rect, dpi), work_area).ok()
+            })
+            .unwrap_or(z.area);
+        Some(Place::Free {
+            monitor: z.monitor,
+            area,
+        })
     };
     for s in &mut layout.slots {
-        if let Some(p) = place_of(&s.place) {
+        if let Some(p) = place_without(&s.place, style) {
             s.place = p;
         }
     }
     for g in &mut layout.tab_groups {
-        if let Some(p) = place_of(&g.place) {
+        if let Some(p) = place_without(&g.place, style.for_tabs()) {
             g.place = p;
         }
     }
@@ -285,7 +313,7 @@ mod tests {
         let mut zones = zones_for_editor(&ws, &t);
         assert_eq!(zones.len(), 3);
         assert_eq!(
-            apply_zones(&ws, &zones, &t).unwrap(),
+            apply_zones(&ws, &zones, &t, FrameStyle::default()).unwrap(),
             ws,
             "saving unchanged changes nothing"
         );
@@ -299,19 +327,16 @@ mod tests {
             monitor: zones[1].monitor.clone(),
             area: ratio(0.0, 0.0, 0.3, 1.0),
         });
-        let out = apply_zones(&ws, &zones, &t).unwrap();
+        let out = apply_zones(&ws, &zones, &t, FrameStyle::default()).unwrap();
         assert_eq!(out.layout.problems(), vec![]);
         assert_eq!(out.layout.zones.len(), 3);
         let new = out.layout.zones.iter().find(|z| z.name == "Notes").unwrap();
         assert_eq!(new.id, ZoneId::new("z4"), "a new id, not one just removed");
-        // The tab group that sat in z2 keeps z2's place.
-        assert_eq!(
+        // The tab group that sat in z2 keeps its place there.
+        assert!(matches!(
             out.layout.tab_groups[0].place,
-            Place::Free {
-                monitor: 0,
-                area: ratio(0.5, 0.0, 1.0, 1.0)
-            }
-        );
+            Place::Free { monitor: 0, .. }
+        ));
         assert_eq!(
             out.layout.slots[0].place,
             Place::Zone {
@@ -332,7 +357,7 @@ mod tests {
             "every zone shows, on the monitor standing in for its own"
         );
         shown[0].name = "Code".into();
-        let out = apply_zones(&ws, &shown, &one).unwrap();
+        let out = apply_zones(&ws, &shown, &one, FrameStyle::default()).unwrap();
         assert_eq!(out.layout.problems(), vec![]);
         let z3 = out
             .layout
@@ -358,19 +383,28 @@ mod tests {
         let ws = workspace(&fixtures::uhd_200_plus_1080p_100());
         let mut zones = zones_for_editor(&ws, &t);
         zones[0].name = "   ".into();
-        assert_eq!(apply_zones(&ws, &zones, &t), Err(EditError::EmptyName));
+        assert_eq!(
+            apply_zones(&ws, &zones, &t, FrameStyle::default()),
+            Err(EditError::UnnamedZone)
+        );
         let mut zones = zones_for_editor(&ws, &t);
         zones[0].area = ratio(0.0, 0.0, 0.01, 1.0);
         assert!(matches!(
-            apply_zones(&ws, &zones, &t),
+            apply_zones(&ws, &zones, &t, FrameStyle::default()),
             Err(EditError::TooSmall(_))
         ));
         let mut zones = zones_for_editor(&ws, &t);
         zones[0].id = Some(ZoneId::new("nope"));
-        assert_eq!(apply_zones(&ws, &zones, &t), Err(EditError::UnknownZone));
+        assert_eq!(
+            apply_zones(&ws, &zones, &t, FrameStyle::default()),
+            Err(EditError::UnknownZone)
+        );
         let mut zones = zones_for_editor(&ws, &t);
         zones[0].monitor = MonitorId::new("gone");
-        assert_eq!(apply_zones(&ws, &zones, &t), Err(EditError::UnknownMonitor));
+        assert_eq!(
+            apply_zones(&ws, &zones, &t, FrameStyle::default()),
+            Err(EditError::UnknownMonitor)
+        );
         let many: Vec<ZoneEdit> = (0..17)
             .map(|i| ZoneEdit {
                 id: None,
@@ -380,7 +414,151 @@ mod tests {
                 area: RatioRect::FULL,
             })
             .collect();
-        assert_eq!(apply_zones(&ws, &many, &t), Err(EditError::TooManyZones));
+        assert_eq!(
+            apply_zones(&ws, &many, &t, FrameStyle::default()),
+            Err(EditError::TooManyZones)
+        );
+    }
+
+    /// Two zones side by side on the one monitor of `t`, a window in each.
+    fn halves(t: &Topology) -> Workspace {
+        let mut ws = workspace(t);
+        ws.layout.monitors.truncate(1);
+        ws.layout.zones.truncate(2);
+        ws.layout.slots.truncate(1);
+        ws.layout.tab_groups.clear();
+        ws
+    }
+
+    #[test]
+    fn a_zone_added_on_a_stand_in_monitor_leaves_the_others_on_it() {
+        // Saved on the 1080p monitor; now the 4K primary stands in for it, with another monitor
+        // beside it.
+        let ws = halves(&fixtures::single_1080p_100());
+        let now = fixtures::uhd_200_plus_1080p_100();
+        let stand_in = now.primary().id.clone();
+        let mut zones = zones_for_editor(&ws, &now);
+        assert!(zones.iter().all(|z| z.monitor == stand_in));
+        zones.push(ZoneEdit {
+            id: None,
+            name: "Notes".into(),
+            color: ZoneColor::Saffron,
+            monitor: stand_in.clone(),
+            area: ratio(0.0, 0.0, 0.25, 1.0),
+        });
+        let out = apply_zones(&ws, &zones, &now, FrameStyle::default()).unwrap();
+        assert_eq!(out.layout.problems(), vec![]);
+        assert!(
+            zones_for_editor(&out, &now).iter().all(|z| z.monitor == stand_in),
+            "every zone still shows where it was edited"
+        );
+        assert_eq!(out.layout.monitors.len(), 1, "no second monitor for the stand-in");
+    }
+
+    #[test]
+    fn windows_of_a_removed_zone_keep_the_place_they_had_on_screen() {
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let ws = workspace(&t);
+        let style = FrameStyle::default();
+        let resolver = crate::place::Resolver::new(&ws.layout, &t, style);
+        let before_window = resolver.target(&ws.layout.slots[0].place);
+        let before_tabs = resolver.target(&ws.layout.slots[1].place);
+        let zones: Vec<ZoneEdit> = zones_for_editor(&ws, &t)
+            .into_iter()
+            .filter(|z| z.monitor != t.primary().id)
+            .collect();
+        let out = apply_zones(&ws, &zones, &t, style).unwrap();
+        assert!(matches!(out.layout.slots[0].place, Place::Free { .. }));
+        assert!(matches!(out.layout.tab_groups[0].place, Place::Free { .. }));
+        let after = crate::place::Resolver::new(&out.layout, &t, style);
+        assert_eq!(
+            after.target(&out.layout.slots[0].place),
+            before_window,
+            "same window place"
+        );
+        assert_eq!(
+            after.target(&out.layout.slots[1].place),
+            before_tabs,
+            "tabs keep room for their strip above them"
+        );
+    }
+
+    #[test]
+    fn zones_of_two_monitors_shown_on_one_count_per_monitor() {
+        // Ten zones on each of two monitors; with one unplugged, all twenty show on the other,
+        // and saving them unchanged is fine.
+        let two = fixtures::uhd_200_plus_1080p_100();
+        let mut ws = workspace(&two);
+        ws.layout.zones = (0..20u32)
+            .map(|i| Zone {
+                id: ZoneId::new(format!("z{}", i + 1)),
+                name: format!("Z{i}"),
+                color: ZoneColor::Slate,
+                monitor: usize::from(i >= 10),
+                area: ratio(f64::from(i % 10) / 10.0, 0.0, f64::from(i % 10 + 1) / 10.0, 1.0),
+            })
+            .collect();
+        ws.layout.slots.truncate(1);
+        ws.layout.slots[0].place = Place::Zone {
+            zone: ZoneId::new("z1"),
+        };
+        ws.layout.tab_groups.clear();
+        let one = fixtures::single_1080p_100();
+        let shown = zones_for_editor(&ws, &one);
+        assert_eq!(shown.len(), 20);
+        assert_eq!(apply_zones(&ws, &shown, &one, FrameStyle::default()).unwrap(), ws);
+    }
+
+    #[test]
+    fn a_zone_sent_twice_is_refused() {
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let ws = workspace(&t);
+        let mut zones = zones_for_editor(&ws, &t);
+        zones.push(zones[0].clone());
+        assert_eq!(
+            apply_zones(&ws, &zones, &t, FrameStyle::default()),
+            Err(EditError::DuplicateZone)
+        );
+    }
+
+    #[test]
+    fn zone_name_problems_say_which_zone() {
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let ws = workspace(&t);
+        let mut zones = zones_for_editor(&ws, &t);
+        zones[1].name = "x".repeat(61);
+        assert_eq!(
+            apply_zones(&ws, &zones, &t, FrameStyle::default())
+                .unwrap_err()
+                .to_string(),
+            format!(
+                "Zone names are {MAX_NAME} characters at most: \u{201c}{}\u{2026}\u{201d} is longer.",
+                "x".repeat(20)
+            )
+        );
+        zones[1].name = " ".into();
+        assert_eq!(
+            apply_zones(&ws, &zones, &t, FrameStyle::default()),
+            Err(EditError::UnnamedZone)
+        );
+    }
+
+    #[test]
+    fn the_revision_changes_with_the_zones_and_the_monitors() {
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let ws = workspace(&t);
+        let r = revision(&ws, &t);
+        assert_eq!(revision(&ws.clone(), &t), r);
+        let mut renamed = ws.clone();
+        renamed.layout.zones[0].name = "Other".into();
+        assert_ne!(revision(&renamed, &t), r);
+        assert_ne!(revision(&ws, &fixtures::single_1080p_100()), r);
+        // Windows moving between zones does not make an open editor stale.
+        let mut moved = ws.clone();
+        moved.layout.slots[0].place = Place::Zone {
+            zone: ZoneId::new("z2"),
+        };
+        assert_eq!(revision(&moved, &t), r);
     }
 
     #[test]

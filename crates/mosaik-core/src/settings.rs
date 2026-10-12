@@ -48,6 +48,45 @@ impl Default for Settings {
     }
 }
 
+/// The ranges of the settings that are numbers, as (what, lowest, highest), in the order of
+/// `Settings::numbers_mut`.
+const RANGES: [(&str, i32, i32); 4] = [
+    ("The space between zones", 0, 64),
+    ("The tag band", 0, 64),
+    ("The frame width", 0, 16),
+    ("The distance zones pull windows from", 0, 400),
+];
+
+impl Settings {
+    fn numbers_mut(&mut self) -> [&mut i32; 4] {
+        [
+            &mut self.frames.style.gap,
+            &mut self.frames.style.tag_band,
+            &mut self.frames.style.border,
+            &mut self.snap.near,
+        ]
+    }
+
+    /// Why these settings cannot be used, if they cannot: a number out of its range (a
+    /// settings file edited by hand, or a client's mistake).
+    pub fn problem(&self) -> Option<String> {
+        let mut copy = self.clone();
+        RANGES
+            .iter()
+            .zip(copy.numbers_mut())
+            .find(|((_, lo, hi), v)| !(*lo..=*hi).contains(&**v))
+            .map(|((what, lo, hi), v)| format!("{what} must be from {lo} to {hi}; it is {v}."))
+    }
+
+    /// The same settings with every number brought into its range.
+    pub fn clamped(mut self) -> Self {
+        for ((_, lo, hi), v) in RANGES.iter().zip(self.numbers_mut()) {
+            *v = (*v).clamp(*lo, *hi);
+        }
+        self
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FrameSettings {
@@ -122,6 +161,21 @@ mod tests {
         // Older builds saved an update choice; updates now come from the Store.
         let s: Settings = serde_json::from_str(r#"{"version":1,"updates":"on","theme":"dark"}"#).unwrap();
         assert_eq!(s.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn numbers_out_of_range_are_refused_or_clamped() {
+        assert_eq!(Settings::default().problem(), None);
+        let mut s = Settings::default();
+        s.frames.style.gap = 500;
+        s.snap.near = -3;
+        assert_eq!(
+            s.problem().as_deref(),
+            Some("The space between zones must be from 0 to 64; it is 500.")
+        );
+        let c = s.clamped();
+        assert_eq!((c.frames.style.gap, c.snap.near), (64, 0));
+        assert_eq!(c.problem(), None);
     }
 
     #[test]

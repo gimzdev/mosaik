@@ -192,7 +192,7 @@ impl Topology {
 
 /// FNV-1a: tiny, stable across Rust versions (unlike `DefaultHasher`), good enough for a
 /// fingerprint that is compared, never trusted.
-fn fnv1a64(bytes: &[u8]) -> u64 {
+pub(crate) fn fnv1a64(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
         (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
     })
@@ -220,6 +220,53 @@ pub struct MonitorRef {
 /// 3. Otherwise (fewer monitors than before) the monitor closest to where it used to be,
 ///    which may hold several remembered monitors.
 pub fn map_monitors(saved: &[MonitorRef], now: &Topology) -> Vec<usize> {
+    let saved_primary = saved
+        .iter()
+        .find(|m| m.primary)
+        .map_or(Point::default(), |m| m.bounds.center());
+    let now_primary = now.primary().bounds.center();
+    // More remembered monitors than connected ones: the rest share the closest monitor.
+    saved
+        .iter()
+        .zip(claims(saved, now))
+        .map(|(s, r)| {
+            r.unwrap_or_else(|| {
+                let target = Point::new(
+                    s.bounds.center().x - saved_primary.x + now_primary.x,
+                    s.bounds.center().y - saved_primary.y + now_primary.y,
+                );
+                let m = now.nearest_monitor(target);
+                now.monitors().iter().position(|x| x.id == m.id).unwrap_or(0)
+            })
+        })
+        .collect()
+}
+
+/// The index in `saved` of the remembered monitor that `monitor` (connected now) stands for,
+/// for a zone or window being placed on it: its own entry, refreshed with the latest
+/// arrangement; else the remembered monitor it stands in for now, so what is placed there stays
+/// with the zones shown there (and goes back with them when their monitor returns); else a new
+/// entry.
+pub fn remembered_index(saved: &mut Vec<MonitorRef>, monitor: &Monitor, now: &Topology) -> usize {
+    if let Some(i) = saved.iter().position(|r| r.id == monitor.id) {
+        saved[i] = monitor.to_ref();
+        return i;
+    }
+    let stands_in_for = claims(saved, now).iter().position(|c| {
+        c.and_then(|i| now.monitors().get(i))
+            .is_some_and(|m| m.id == monitor.id)
+    });
+    if let Some(i) = stands_in_for {
+        return i;
+    }
+    saved.push(monitor.to_ref());
+    saved.len() - 1
+}
+
+/// Steps 1 and 2 of [`map_monitors`]: remembered monitors paired one to one with connected
+/// ones. A connected monitor is claimed by at most one remembered monitor, and when some
+/// remembered monitor is left without one, every connected monitor is claimed.
+fn claims(saved: &[MonitorRef], now: &Topology) -> Vec<Option<usize>> {
     let mut result: Vec<Option<usize>> = vec![None; saved.len()];
     let mut claimed = vec![false; now.monitors().len()];
 
@@ -268,20 +315,7 @@ pub fn map_monitors(saved: &[MonitorRef], now: &Topology) -> Vec<usize> {
             claimed[ni] = true;
         }
     }
-
-    // More remembered monitors than connected ones: share the closest monitor.
-    saved
-        .iter()
-        .zip(result)
-        .map(|(s, r)| {
-            r.unwrap_or_else(|| {
-                let target = relative(s.bounds.center(), saved_primary);
-                let target = Point::new(target.x + now_primary.x, target.y + now_primary.y);
-                let m = now.nearest_monitor(target);
-                now.monitors().iter().position(|x| x.id == m.id).unwrap_or(0)
-            })
-        })
-        .collect()
+    result
 }
 
 #[cfg(test)]

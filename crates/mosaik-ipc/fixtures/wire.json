@@ -69,7 +69,7 @@
     },
     {
       "cmd": "check_hotkey",
-      "hotkey": "Win+Alt+1",
+      "hotkey": "Win+Alt+J",
       "workspace": "ship"
     },
     {
@@ -78,6 +78,7 @@
     },
     {
       "cmd": "set_zones",
+      "revision": "5e2b9c0f41d3a877",
       "workspace": "ship",
       "zones": [
         {
@@ -105,14 +106,14 @@
     },
     {
       "cmd": "set_workspace_hotkey",
-      "hotkey": "Win+Alt+1",
+      "hotkey": "Win+Alt+J",
       "workspace": "ship"
     }
   ],
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 1,
+      "protocol": 2,
       "reply": "hello"
     },
     {
@@ -204,6 +205,7 @@
       ],
       "name": "Ship the release",
       "reply": "zones",
+      "revision": "5e2b9c0f41d3a877",
       "workspace": "ship",
       "zones": [
         {

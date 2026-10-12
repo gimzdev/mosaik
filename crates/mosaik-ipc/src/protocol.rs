@@ -11,7 +11,8 @@ use mosaik_core::zone::ZoneId;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Raised when commands or replies change; a client may be older than Mosaïk, never newer.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -25,6 +26,8 @@ pub struct Request {
     pub command: Command,
 }
 
+/// What a client asks. A `workspace` field takes a workspace's id or, when no id matches, its
+/// name (case and surrounding spaces do not count).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
@@ -35,11 +38,11 @@ pub enum Command {
     /// Monitors, DPI, windows and rectangles: what `mosaikctl state --json` prints.
     State,
     Workspaces,
-    /// Switch to a workspace, by id or by name.
     Switch {
         workspace: String,
     },
-    /// Save the current arrangement into a workspace (the active one when `None`).
+    /// Save the windows on screen as the workspace with this name (a new one when no
+    /// workspace has it; the open one when `None`).
     Save {
         workspace: Option<String>,
     },
@@ -51,8 +54,9 @@ pub enum Command {
     Quit,
     /// The user's settings.
     Settings,
-    /// Saves the user's settings. A shortcut that cannot be used is refused with the reason;
-    /// everything else takes effect at once.
+    /// Saves the user's settings: all of them, as `settings` returned them with the changes
+    /// made (a field left out takes its default). A shortcut that cannot be used is refused
+    /// with the reason; everything else takes effect at once.
     SetSettings {
         settings: Box<Settings>,
     },
@@ -67,10 +71,12 @@ pub enum Command {
     Zones {
         workspace: String,
     },
-    /// Replaces one workspace's zones (from the zone editor).
+    /// Replaces one workspace's zones (from the zone editor). `revision` is the one `zones`
+    /// gave: when the monitors or the zones changed since, nothing is saved.
     SetZones {
         workspace: String,
         zones: Vec<ZoneEdit>,
+        revision: String,
     },
     RenameWorkspace {
         workspace: String,
@@ -124,11 +130,15 @@ pub enum Reply {
         problem: Option<String>,
         warnings: Vec<String>,
     },
+    /// A workspace's zones on the monitors connected now (also the answer to `set_zones`, with
+    /// the ids of new zones).
     Zones {
         workspace: WorkspaceId,
         name: String,
         monitors: Vec<MonitorState>,
         zones: Vec<ZoneEdit>,
+        /// Sent back with `set_zones`.
+        revision: String,
     },
 }
 
@@ -189,6 +199,20 @@ pub struct MonitorState {
     pub work_area: Rect,
     pub dpi: u32,
     pub scale_percent: u32,
+}
+
+impl From<&mosaik_core::topology::Monitor> for MonitorState {
+    fn from(m: &mosaik_core::topology::Monitor) -> Self {
+        Self {
+            id: m.id.0.clone(),
+            name: m.name.clone(),
+            primary: m.primary,
+            bounds: m.bounds,
+            work_area: m.work_area,
+            dpi: m.dpi,
+            scale_percent: m.scale_percent(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -383,6 +407,7 @@ mod tests {
                     monitor: mosaik_core::topology::MonitorId::new("m1"),
                     area: mosaik_core::geometry::RatioRect::FULL,
                 }],
+                revision: "0".into(),
             },
             Command::RenameWorkspace {
                 workspace: "Brand".into(),
@@ -393,7 +418,7 @@ mod tests {
             },
             Command::SetWorkspaceHotkey {
                 workspace: "Brand".into(),
-                hotkey: Some("Win+Alt+1".into()),
+                hotkey: Some("Win+Alt+J".into()),
             },
             Command::SetWorkspaceHotkey {
                 workspace: "Brand".into(),
@@ -422,7 +447,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":1,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":2,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -431,13 +456,15 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":1,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":2,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
     }
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":2,"id":1,"cmd":"state"}"#).unwrap_err();
-        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 2, server: 1 });
+        let err = decode_request(br#"{"v":3,"id":1,"cmd":"state"}"#).unwrap_err();
+        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 3, server: 2 });
+        // Older clients are understood.
+        assert!(decode_request(br#"{"v":1,"id":1,"cmd":"state"}"#).is_ok());
         assert!(err.to_string().contains("update Mosaïk"));
         assert!(matches!(
             decode_request(br#"{"v":1,"id":1,"cmd":"format_disk"}"#),
@@ -604,7 +631,7 @@ mod wire {
                 settings: Box::default(),
             },
             Command::CheckHotkey {
-                hotkey: "Win+Alt+1".into(),
+                hotkey: "Win+Alt+J".into(),
                 workspace: Some("ship".into()),
             },
             Command::Zones {
@@ -613,6 +640,7 @@ mod wire {
             Command::SetZones {
                 workspace: "ship".into(),
                 zones: vec![zone()],
+                revision: "5e2b9c0f41d3a877".into(),
             },
             Command::RenameWorkspace {
                 workspace: "ship".into(),
@@ -623,7 +651,7 @@ mod wire {
             },
             Command::SetWorkspaceHotkey {
                 workspace: "ship".into(),
-                hotkey: Some("Win+Alt+1".into()),
+                hotkey: Some("Win+Alt+J".into()),
             },
         ];
         let replies = vec![
@@ -670,6 +698,7 @@ mod wire {
                     scale_percent: 200,
                 }],
                 zones: vec![zone()],
+                revision: "5e2b9c0f41d3a877".into(),
             },
         ];
         serde_json::json!({ "commands": commands, "replies": replies })

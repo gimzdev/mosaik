@@ -559,7 +559,26 @@ impl Engine {
         }
     }
 
+    /// Answers a command; when it changed the workspaces (or which one is open), the
+    /// interface is told so its lists stay current.
     fn handle(&mut self, command: Command) -> Reply {
+        let changes_workspaces = matches!(
+            command,
+            Command::Save { .. }
+                | Command::Switch { .. }
+                | Command::SetZones { .. }
+                | Command::RenameWorkspace { .. }
+                | Command::DeleteWorkspace { .. }
+                | Command::SetWorkspaceHotkey { .. }
+        );
+        let reply = self.dispatch(command);
+        if changes_workspaces && !matches!(reply, Reply::Error { .. }) {
+            (self.ui)(UiEvent::WorkspacesChanged);
+        }
+        reply
+    }
+
+    fn dispatch(&mut self, command: Command) -> Reply {
         match command {
             Command::Hello { client } => {
                 tracing::debug!(%client, "hello");
@@ -591,7 +610,11 @@ impl Engine {
                 self.check_hotkey_reply(&hotkey, workspace.as_deref())
             }
             Command::Zones { workspace } => self.zones_reply(&workspace),
-            Command::SetZones { workspace, zones } => self.set_zones(&workspace, &zones),
+            Command::SetZones {
+                workspace,
+                zones,
+                revision,
+            } => self.set_zones(&workspace, &zones, &revision),
             Command::RenameWorkspace { workspace, name } => self.rename_workspace(&workspace, &name),
             Command::DeleteWorkspace { workspace } => self.delete_workspace(&workspace),
             Command::SetWorkspaceHotkey { workspace, hotkey } => {

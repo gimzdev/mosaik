@@ -214,7 +214,28 @@ impl Engine {
         }
     }
 
-    /// Writes `workspaces.json`.
+    /// The monitors as they are now, without taking them as the last known arrangement:
+    /// only `displays_changed` does that, so it never misses a change.
+    pub(crate) fn read_topology(&self) -> Option<Topology> {
+        mosaik_win::monitors::topology()
+            .map_err(|e| tracing::warn!(error = %e, "monitors not read"))
+            .ok()
+            .or_else(|| self.topology.clone())
+    }
+
+    /// Writes `workspaces.json` for a change the user asked for; the error says why it could
+    /// not be saved (the caller puts things back as they were).
+    pub(crate) fn save_file(&mut self) -> Result<(), String> {
+        if let Some(problem) = &self.file_problem {
+            return Err(format!("Workspaces cannot be saved: {problem}"));
+        }
+        self.store
+            .save(&self.file)
+            .map_err(|e| format!("Your workspaces could not be saved: {e}"))
+    }
+
+    /// Writes `workspaces.json` after a change Mosaïk made itself (a window moved by hand);
+    /// a failure is told once and logged.
     pub(crate) fn persist(&mut self) {
         if self.file_problem.is_some() {
             return;
@@ -228,31 +249,23 @@ impl Engine {
         }
     }
 
-    /// A workspace by id, then by name (the same comparison the switcher uses).
+    /// A workspace by id (what the interface sends), then by name (`mosaikctl` turns names
+    /// into ids first, so a name never reaches a workspace whose id it happens to be).
     pub(crate) fn find_workspace(&self, which: &str) -> Option<usize> {
         let w = which.trim();
         self.file
             .workspaces
             .iter()
             .position(|ws| ws.id.0 == w)
-            .or_else(|| self.file.workspaces.iter().position(|ws| same_name(&ws.name, w)))
+            .or_else(|| self.find_by_name(w))
     }
 
-    /// The open workspace's zones on screen again (its zones were edited).
-    pub(crate) fn refresh_live_zones(&mut self) {
-        let zones = match (&self.topology, &self.active) {
-            (Some(t), Some(a)) => self
-                .file
-                .workspaces
-                .iter()
-                .find(|w| w.id == a.id)
-                .map(|ws| live_zones(ws, t, self.style()))
-                .unwrap_or_default(),
-            _ => return,
-        };
-        if let Some(a) = &mut self.active {
-            a.zones = zones;
-        }
+    /// A workspace by name only (the same comparison the switcher uses).
+    pub(crate) fn find_by_name(&self, name: &str) -> Option<usize> {
+        self.file
+            .workspaces
+            .iter()
+            .position(|ws| same_name(&ws.name, name))
     }
 
     /// Makes `id` the open workspace with these windows in its slots, and shows its frames.
@@ -338,7 +351,7 @@ impl Engine {
                     .map(|w| w.name.clone())
             })
             .unwrap_or_else(|| mosaik_core::workspace::suggested_name(&self.file.workspaces));
-        let name: String = name.chars().take(mosaik_core::switcher::MAX_NAME).collect();
+        let name: String = name.chars().take(mosaik_core::editing::MAX_NAME).collect();
 
         // The windows on screen; background tabs Mosaïk hid are saved with their group below.
         let windows: Vec<WindowFacts> = self
@@ -362,8 +375,9 @@ impl Engine {
                 launch: apps::launch_for(w, path.as_deref()),
             });
         }
-        // Saving under an existing name (or id) updates that workspace.
-        let previous_index = self.find_workspace(&name);
+        // Saving under an existing name updates that workspace. Only names count: a name typed
+        // in the switcher is never taken for the id of a workspace renamed since.
+        let previous_index = self.find_by_name(&name);
         let previous = previous_index.map(|i| self.file.workspaces[i].clone());
         let id = previous.as_ref().map_or_else(
             || {
@@ -693,6 +707,13 @@ impl Engine {
             return;
         }
         tracing::info!(monitors = topology.monitors().len(), "displays changed");
+        self.refit_open_workspace(&topology);
+    }
+
+    /// Puts the open workspace's windows that are on screen where its layout says on
+    /// `topology` (after a display change, or when its zones were edited), and shows its zones
+    /// there. Hidden, minimised and other-desktop windows are left alone.
+    pub(crate) fn refit_open_workspace(&mut self, topology: &Topology) {
         let Some(active) = &self.active else {
             return;
         };
@@ -707,13 +728,13 @@ impl Engine {
             .filter(|f| self.manageable(f))
             .filter_map(|f| assigned.get(&f.handle).map(|s| (s.clone(), f)))
             .collect();
-        let moves = plan_refit(&ws, &on_screen, &topology, self.style());
+        let moves = plan_refit(&ws, &on_screen, topology, self.style());
         self.hide_frames();
-        let placed: Vec<(WindowHandle, Rect)> = mover::move_all(&to_moves(&moves, &topology), mover::WAIT)
+        let placed: Vec<(WindowHandle, Rect)> = mover::move_all(&to_moves(&moves, topology), mover::WAIT)
             .into_iter()
             .filter_map(|o| o.result.ok().map(|r| (o.window, r)))
             .collect();
-        let zones = live_zones(&ws, &topology, self.style());
+        let zones = live_zones(&ws, topology, self.style());
         if let Some(a) = &mut self.active {
             a.zones = zones;
             a.placed = placed;

@@ -1,16 +1,20 @@
 //! `mosaikctl`: talk to the running Mosaïk from a terminal or a script.
 //!
 //! ```text
-//! mosaikctl state [--json]        monitors, DPI, windows and their rectangles
-//! mosaikctl workspaces            the saved workspaces
-//! mosaikctl switch <workspace>    switch to a workspace (by name or id)
-//! mosaikctl save [<workspace>]    save the current arrangement
-//! mosaikctl rescue                bring back every window Mosaïk hid (works even if it is not running)
-//! mosaikctl switcher              open the switcher
-//! mosaikctl settings              open the settings window
-//! mosaikctl quit                  close Mosaïk (every window it hid comes back first)
-//! mosaikctl version
+//! mosaikctl state [--json]                   monitors, DPI, windows and their rectangles
+//! mosaikctl workspaces [--json]              the saved workspaces
+//! mosaikctl switch <workspace>               open a workspace
+//! mosaikctl save [<name>]                    save the windows on screen (the open workspace by default)
+//! mosaikctl rename <workspace> <name>        rename a workspace
+//! mosaikctl delete <workspace>               delete a workspace (its windows stay where they are)
+//! mosaikctl hotkey <workspace> <shortcut>    give a workspace its own shortcut (`none` removes it)
+//! mosaikctl check-hotkey <shortcut> [<workspace>]  whether a shortcut can be used
+//! mosaikctl zones <workspace>                a workspace's zones, as JSON
+//! mosaikctl rescue                           bring back every window Mosaïk hid (works even if it is not running)
+//! mosaikctl switcher | settings | quit | version
 //! ```
+//!
+//! A `<workspace>` is a workspace's name (case does not count) or its id, names first.
 //!
 //! Exit codes: 0 done, 1 something went wrong (the message says what to do), 2 wrong usage,
 //! 3 Mosaïk is not running.
@@ -51,10 +55,11 @@ mod windows_main {
   rename <workspace> <name>      rename a workspace
   delete <workspace>             delete a workspace (its windows stay)
   hotkey <workspace> <shortcut>  give a workspace its own shortcut (`none` removes it)
-  check-hotkey <shortcut>        whether a shortcut can be used
+  check-hotkey <shortcut> [<workspace>]  whether a shortcut can be used
   zones <workspace>              a workspace's zones, as JSON
   rescue                         bring back every window Mosaïk hid
-  switcher | settings | quit | version";
+  switcher | settings | quit | version
+A <workspace> is its name or its id.";
 
     pub fn run(args: Vec<String>) -> i32 {
         let Some(command) = args.first().map(String::as_str) else {
@@ -93,6 +98,10 @@ mod windows_main {
                 hotkey: (*key).to_owned(),
                 workspace: None,
             },
+            ("check-hotkey", [key, w]) => Command::CheckHotkey {
+                hotkey: (*key).to_owned(),
+                workspace: Some((*w).to_owned()),
+            },
             ("zones", [w]) => Command::Zones {
                 workspace: (*w).to_owned(),
             },
@@ -110,6 +119,7 @@ mod windows_main {
             }
         };
         let rescue = matches!(cmd, Command::Rescue);
+        let mut cmd = cmd;
         let reply = pipe_name().and_then(|name| {
             let mut client = Client::connect(&name, &Program::mosaik(), CONNECT_TIMEOUT)?;
             client.request(
@@ -118,6 +128,9 @@ mod windows_main {
                 },
                 REQUEST_TIMEOUT,
             )?;
+            if let Some(typed) = workspace_of(&mut cmd) {
+                *typed = resolve(&mut client, typed.as_str())?;
+            }
             client.request(cmd, REQUEST_TIMEOUT)
         });
         match reply {
@@ -149,6 +162,38 @@ mod windows_main {
                 if matches!(e, PipeError::NotRunning) { 3 } else { 1 }
             }
         }
+    }
+
+    /// The workspace a command is about, as typed.
+    fn workspace_of(cmd: &mut Command) -> Option<&mut String> {
+        match cmd {
+            Command::Switch { workspace }
+            | Command::Zones { workspace }
+            | Command::RenameWorkspace { workspace, .. }
+            | Command::DeleteWorkspace { workspace }
+            | Command::SetWorkspaceHotkey { workspace, .. }
+            | Command::CheckHotkey {
+                workspace: Some(workspace),
+                ..
+            } => Some(workspace),
+            _ => None,
+        }
+    }
+
+    /// The id of the workspace with the name the user typed; what they typed when no
+    /// workspace has that name (it may be an id). Mosaïk itself looks for ids first, which is
+    /// right for programs but not for people: a workspace renamed from "Code" keeps the id
+    /// "code", and "code" typed here means the workspace now called that.
+    fn resolve(client: &mut Client, typed: &str) -> Result<String, PipeError> {
+        let reply = client.request(Command::Workspaces, REQUEST_TIMEOUT)?;
+        let named = match reply.reply {
+            Reply::Workspaces { workspaces, .. } => workspaces
+                .into_iter()
+                .find(|w| mosaik_core::workspace::same_name(&w.name, typed))
+                .map(|w| w.id.0),
+            _ => None,
+        };
+        Ok(named.unwrap_or_else(|| typed.to_owned()))
     }
 
     /// What happened and what to do about it.

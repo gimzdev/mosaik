@@ -2,17 +2,22 @@
 //! startup task (which the user can also turn off in Task Manager), or for a build run from a
 //! folder, an entry in the user's own "Run" key. Nothing needs administrator rights.
 
+use std::sync::mpsc;
+use std::time::Duration;
+
 use windows::ApplicationModel::{StartupTask, StartupTaskState};
 use windows::Win32::Foundation::{APPMODEL_ERROR_NO_PACKAGE, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
 use windows::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW};
 use windows::core::{HSTRING, PCWSTR};
 
-use crate::error::{Context, Error, Result};
+use crate::error::{Error, Result};
 use crate::text::wide;
 
-/// The startup task declared in the package manifest.
+/// The startup task declared in the package manifest (installer/msix).
 const TASK_ID: &str = "MosaikStartup";
+/// How long Windows may take to answer about the startup task.
+const TASK_TIMEOUT: Duration = Duration::from_secs(5);
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const RUN_VALUE: &str = "Mosaik";
 
@@ -29,9 +34,10 @@ pub fn is_packaged() -> bool {
 pub enum Startup {
     On,
     Off,
-    /// The user turned it off in Task Manager (or a policy did): only they can turn it back on
+    /// Windows did not let it be turned on: the user turned it off under Startup apps (Task
+    /// Manager or Settings), or declined, or a policy forbids it. Only the user can change that,
     /// there.
-    OffByUser,
+    Refused,
 }
 
 /// Turns starting with Windows on or off.
@@ -43,22 +49,40 @@ pub fn set(enabled: bool) -> Result<Startup> {
     }
 }
 
+/// The package's startup task, asked on a thread of its own: the WinRT calls wait for Windows,
+/// and the engine's thread (hooks, overlays, shortcuts) must never wait with them.
 fn startup_task(enabled: bool) -> Result<Startup> {
+    let (send, answer) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("mosaik-startup-task".into())
+        .spawn(move || {
+            let _ = send.send(ask_startup_task(enabled));
+        })
+        .map_err(|e| Error::Other(format!("could not ask Windows ({e})")))?;
+    answer
+        .recv_timeout(TASK_TIMEOUT)
+        .map_err(|_| Error::Other("Windows did not answer in time; try again".into()))?
+}
+
+fn ask_startup_task(enabled: bool) -> Result<Startup> {
+    fn plain(what: &'static str) -> impl Fn(windows::core::Error) -> Error {
+        move |e| Error::Other(format!("{what} ({})", e.message()))
+    }
     let task = StartupTask::GetAsync(&HSTRING::from(TASK_ID))
         .and_then(|op| op.join())
-        .ctx("StartupTask.GetAsync")?;
+        .map_err(plain("the package's startup task was not found"))?;
     if !enabled {
-        task.Disable().ctx("StartupTask.Disable")?;
+        task.Disable()
+            .map_err(plain("the startup task could not be turned off"))?;
         return Ok(Startup::Off);
     }
     let state = task
         .RequestEnableAsync()
         .and_then(|op| op.join())
-        .ctx("StartupTask.RequestEnableAsync")?;
+        .map_err(plain("the startup task could not be turned on"))?;
     Ok(match state {
         StartupTaskState::Enabled | StartupTaskState::EnabledByPolicy => Startup::On,
-        StartupTaskState::DisabledByUser | StartupTaskState::DisabledByPolicy => Startup::OffByUser,
-        _ => Startup::Off,
+        _ => Startup::Refused,
     })
 }
 

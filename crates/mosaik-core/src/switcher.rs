@@ -8,6 +8,7 @@
 //! updates it) or "Workspace N" for a new one, selected so typing replaces it. Enter saves, Esc
 //! goes back to the list.
 
+use crate::editing::MAX_NAME;
 use crate::geometry::RatioRect;
 use crate::layout::{Workspace, WorkspaceId};
 use crate::zone::ZoneColor;
@@ -105,9 +106,6 @@ pub struct Model {
     selected: usize,
     naming: Option<Naming>,
 }
-
-/// Longest name accepted, in characters.
-pub const MAX_NAME: usize = 60;
 
 /// The position a key picks: 1 to 9, then F1 (10th) and up.
 pub fn index_for_key(key: Key) -> Option<usize> {

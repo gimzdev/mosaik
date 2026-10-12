@@ -252,15 +252,14 @@ impl Layout {
 }
 
 impl Layout {
-    /// The index of `monitor` among the layout's monitors, adding it when it is new; the entry
-    /// of a monitor already there is refreshed, so the layout remembers the latest arrangement.
-    pub fn monitor_index(&mut self, monitor: &crate::topology::Monitor) -> usize {
-        if let Some(i) = self.monitors.iter().position(|r| r.id == monitor.id) {
-            self.monitors[i] = monitor.to_ref();
-            return i;
-        }
-        self.monitors.push(monitor.to_ref());
-        self.monitors.len() - 1
+    /// The index of the layout's monitor that `monitor` (connected now) is or stands in for,
+    /// adding it when it is new (see [`crate::topology::remembered_index`]).
+    pub fn monitor_index(
+        &mut self,
+        monitor: &crate::topology::Monitor,
+        now: &crate::topology::Topology,
+    ) -> usize {
+        crate::topology::remembered_index(&mut self.monitors, monitor, now)
     }
 }
 

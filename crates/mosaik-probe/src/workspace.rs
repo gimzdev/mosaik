@@ -9,7 +9,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use mosaik_core::geometry::{Point, Rect};
+use mosaik_core::editing::ZoneEdit;
+use mosaik_core::geometry::{Point, RatioRect, Rect};
 use mosaik_core::store::{Store, WorkspacesFile};
 use mosaik_core::zone::{FrameStyle, Rgb, ZoneColor};
 use mosaik_engine::{Config, Engine, UiEvent, UiSink};
@@ -310,6 +311,9 @@ fn scenario(
         None => json!({ "reply": restarted_reply, "started": false }),
     };
 
+    // 6. Editing from the interface: zones, name, shortcut, deleting.
+    let edited = editing(engine, probes, dpi)?;
+
     println!("saved: {saved} ({save_ms:.0} ms)");
     for v in &after_save {
         println!("  after save   {v}");
@@ -326,6 +330,7 @@ fn scenario(
         println!("drag: {d}");
     }
     println!("closed window started again: {restarted}");
+    println!("editing: {edited}");
     if let Some((private, ws)) = memory {
         println!(
             "probe process memory with frames: private {:.1} MB, working set {:.1} MB",
@@ -341,7 +346,200 @@ fn scenario(
         "windows_in_zones": in_zones,
         "drag": dragged,
         "restarted": restarted,
+        "editing": edited,
         "private_mb": memory.map(|m| mb(m.0)),
+    }))
+}
+
+fn zones(engine: &Engine, workspace: &str) -> Result<(Vec<ZoneEdit>, String), String> {
+    match engine.request(
+        Command::Zones {
+            workspace: workspace.into(),
+        },
+        TIMEOUT,
+    ) {
+        Reply::Zones { zones, revision, .. } => Ok((zones, revision)),
+        other => Err(format!("zones: {other:?}")),
+    }
+}
+
+/// What the interface does to a workspace, through the engine: split a zone (the window in it
+/// moves at once), a stale editor refused, a zone removed (its window stays put), renamed (the
+/// old name then saves a new workspace), a shortcut given and taken back, deleted while open.
+fn editing(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String> {
+    let style = FrameStyle::default();
+    let (terminal, review) = (&probes[1], &probes[2]);
+    let (before, revision) = zones(engine, "Probe workspace")?;
+    let review_area =
+        RatioRect::from_rect(review.tiled, review.tiled_monitor_work()).map_err(|e| e.to_string())?;
+    let at = |area: RatioRect| {
+        before.iter().position(|z| {
+            (z.area.left() - area.left()).abs() < 1e-3 && (z.area.top() - area.top()).abs() < 1e-3
+        })
+    };
+    let review_zone = at(review_area).ok_or("the review zone was not found")?;
+
+    // Split the review zone side by side: the review window keeps the left half.
+    let mut split = before.clone();
+    let middle = (review_area.left() + review_area.right()) / 2.0;
+    let mut left = split[review_zone].clone();
+    left.area = RatioRect::new(
+        review_area.left(),
+        review_area.top(),
+        middle,
+        review_area.bottom(),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut right = left.clone();
+    right.id = None;
+    right.name = "Probe notes".into();
+    right.area = RatioRect::new(
+        middle,
+        review_area.top(),
+        review_area.right(),
+        review_area.bottom(),
+    )
+    .map_err(|e| e.to_string())?;
+    split[review_zone] = left.clone();
+    split.push(right);
+    let (reply, split_ms) = ask(
+        engine,
+        Command::SetZones {
+            workspace: "Probe workspace".into(),
+            zones: split,
+            revision: revision.clone(),
+        },
+    );
+    let (after_split, new_revision) = match reply {
+        Reply::Zones { zones, revision, .. } => (zones, revision),
+        other => return Err(format!("set_zones: {other:?}")),
+    };
+    pump_until(700, || false);
+    let work = review.tiled_monitor_work();
+    let review_frame = frame_rect(review.hwnd).ok_or("the review window vanished")?;
+    let split_result = json!({
+        "ms": split_ms,
+        "zones": after_split.len(),
+        "new_zone_has_an_id": after_split.iter().all(|z| z.id.is_some()),
+        "review_error_px": edge_error(review_frame, style.window_area(left.area.to_rect(work), dpi)),
+    });
+
+    // The editor that was open before the split is now stale: its save is refused.
+    let (reply, _) = ask(
+        engine,
+        Command::SetZones {
+            workspace: "Probe workspace".into(),
+            zones: before.clone(),
+            revision,
+        },
+    );
+    let stale_refused = matches!(reply, Reply::Error { .. });
+
+    // Remove the terminal's zone: the terminal stays exactly where it is.
+    let terminal_before = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
+    let terminal_area = RatioRect::from_rect(terminal.tiled, work).map_err(|e| e.to_string())?;
+    let kept: Vec<ZoneEdit> = after_split
+        .into_iter()
+        .filter(|z| {
+            (z.area.left() - terminal_area.left()).abs() > 1e-3
+                || (z.area.top() - terminal_area.top()).abs() > 1e-3
+        })
+        .collect();
+    let (reply, _) = ask(
+        engine,
+        Command::SetZones {
+            workspace: "Probe workspace".into(),
+            zones: kept,
+            revision: new_revision,
+        },
+    );
+    let removed_ok = matches!(reply, Reply::Zones { .. });
+    pump_until(700, || false);
+    let terminal_after = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
+    let st = state(engine)?;
+    let terminal_zone = st
+        .windows
+        .iter()
+        .find(|w| w.handle == handle(terminal.hwnd))
+        .and_then(|w| w.zone.clone());
+
+    // Rename; the old name then saves a new workspace instead of overwriting the renamed one.
+    let renamed = done(
+        &ask(
+            engine,
+            Command::RenameWorkspace {
+                workspace: "Probe workspace".into(),
+                name: "Probe renamed".into(),
+            },
+        )
+        .0,
+    )?;
+    let saved_again = done(
+        &ask(
+            engine,
+            Command::Save {
+                workspace: Some("probe-workspace".into()),
+            },
+        )
+        .0,
+    )?;
+    let count = match engine.request(Command::Workspaces, TIMEOUT) {
+        Reply::Workspaces { workspaces, .. } => workspaces.len(),
+        other => return Err(format!("workspaces: {other:?}")),
+    };
+    let _ = done(
+        &ask(
+            engine,
+            Command::DeleteWorkspace {
+                workspace: "probe-workspace".into(),
+            },
+        )
+        .0,
+    );
+
+    // A shortcut of its own, then none.
+    let shortcut = "Win+Ctrl+Alt+F9";
+    let given = ask(
+        engine,
+        Command::SetWorkspaceHotkey {
+            workspace: "Probe renamed".into(),
+            hotkey: Some(shortcut.into()),
+        },
+    )
+    .0;
+    let taken_back = ask(
+        engine,
+        Command::SetWorkspaceHotkey {
+            workspace: "Probe renamed".into(),
+            hotkey: None,
+        },
+    )
+    .0;
+
+    // Delete it while it is open: nothing stays hidden, nothing is open.
+    let deleted = done(
+        &ask(
+            engine,
+            Command::DeleteWorkspace {
+                workspace: "Probe renamed".into(),
+            },
+        )
+        .0,
+    )?;
+    pump_until(500, || false);
+    let st = state(engine)?;
+    Ok(json!({
+        "split": split_result,
+        "stale_editor_refused": stale_refused,
+        "zone_removed": {
+            "ok": removed_ok,
+            "terminal_moved_px": edge_error(terminal_after, terminal_before),
+            "terminal_zone": terminal_zone,
+        },
+        "renamed": renamed,
+        "old_name_saved_a_new_workspace": { "reply": saved_again, "workspaces": count },
+        "shortcut": { "given": done(&given), "taken_back": done(&taken_back) },
+        "deleted": { "reply": deleted, "open": st.active_workspace, "hidden": st.hidden.len() },
     }))
 }
 

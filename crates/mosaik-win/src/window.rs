@@ -7,7 +7,10 @@ use std::ffi::c_void;
 use mosaik_core::geometry::Rect;
 use mosaik_core::window::{Cloak, Elevation, WindowFacts, WindowHandle};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT, WAIT_OBJECT_0};
-use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
+use windows::Win32::Graphics::Dwm::{
+    DWMWA_CAPTION_COLOR, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TEXT_COLOR, DwmGetWindowAttribute,
+    DwmSetWindowAttribute,
+};
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
     TokenIntegrityLevel,
@@ -49,6 +52,23 @@ pub fn exists(hwnd: HWND) -> bool {
 }
 
 /// `IsWindowVisible`: shown by its app (true for minimised and cloaked windows too).
+/// Colours the title bar of one of Mosaïk's own windows like the page under it, as 0xRRGGBB
+/// (Windows 11; Windows 10 keeps its own colours). `None` gives Windows' colours back, as in
+/// high contrast.
+pub fn set_caption_colors(hwnd: HWND, caption: Option<u32>, text: Option<u32>) {
+    /// `DWMWA_COLOR_DEFAULT`.
+    const DEFAULT: u32 = 0xFFFF_FFFF;
+    for (attribute, color) in [(DWMWA_CAPTION_COLOR, caption), (DWMWA_TEXT_COLOR, text)] {
+        // COLORREF is 0x00BBGGRR.
+        let value = color.map_or(DEFAULT, |c| {
+            ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF)
+        });
+        // SAFETY: a 4-byte COLORREF for one of this process's windows; Windows 10 refuses the
+        // attribute and keeps its own colours, which is fine.
+        let _ = unsafe { DwmSetWindowAttribute(hwnd, attribute, (&raw const value).cast::<c_void>(), 4) };
+    }
+}
+
 pub fn is_visible(hwnd: HWND) -> bool {
     // SAFETY: read-only query; any value is accepted.
     unsafe { IsWindowVisible(hwnd) }.as_bool()

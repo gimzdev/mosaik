@@ -16,7 +16,7 @@ use crate::layout::{Launch, Layout, Place, Slot, SlotId, Workspace, WorkspaceId}
 use crate::matching::{AppMatch, TitleMatch, assign};
 use crate::place::{Resolver, Target};
 use crate::settings::SwitchSettings;
-use crate::topology::{Monitor, MonitorRef, Topology, map_monitors};
+use crate::topology::{MonitorRef, Topology, map_monitors, remembered_index};
 use crate::window::{WindowFacts, WindowHandle};
 use crate::zone::{FrameStyle, Zone, ZoneColor, ZoneId};
 
@@ -123,18 +123,8 @@ fn live_zones(layout: &Layout, topology: &Topology, style: FrameStyle) -> Vec<(Z
         .collect()
 }
 
-/// The index of `monitor` in `refs`, adding it at the end when it is new. Refs of monitors that
-/// are connected are refreshed, so a layout remembers the latest arrangement.
-fn monitor_index(refs: &mut Vec<MonitorRef>, monitor: &Monitor) -> usize {
-    if let Some(i) = refs.iter().position(|r| r.id == monitor.id) {
-        refs[i] = monitor.to_ref();
-        return i;
-    }
-    refs.push(monitor.to_ref());
-    refs.len() - 1
-}
-
-fn next_id(prefix: &str, taken: &HashSet<String>) -> String {
+/// The first of `prefix1`, `prefix2`... not in `taken`.
+pub(crate) fn next_id(prefix: &str, taken: &HashSet<String>) -> String {
     (1..)
         .map(|n| format!("{prefix}{n}"))
         .find(|id| !taken.contains(id))
@@ -154,7 +144,7 @@ pub fn app_match(w: &WindowFacts) -> AppMatch {
 /// A free place for `frame` on its monitor.
 fn free_place(refs: &mut Vec<MonitorRef>, topology: &Topology, frame: Rect) -> Place {
     let monitor = topology.monitor_for_rect(frame);
-    let index = monitor_index(refs, monitor);
+    let index = remembered_index(refs, monitor, topology);
     match RatioRect::from_rect(frame, monitor.work_area) {
         Ok(area) => Place::Free { monitor: index, area },
         // Entirely off its monitor's work area: remember it as filling it.
@@ -182,7 +172,7 @@ pub fn capture(
     };
     // The monitors connected now first, in order, so indices are easy to read in the file.
     for m in topology.monitors() {
-        monitor_index(&mut layout.monitors, m);
+        remembered_index(&mut layout.monitors, m, topology);
     }
 
     // Zones kept from the previous save, re-indexed onto this layout's monitors.
@@ -195,7 +185,7 @@ pub fn capture(
                 continue;
             };
             let mut z = z.clone();
-            z.monitor = monitor_index(&mut layout.monitors, now);
+            z.monitor = remembered_index(&mut layout.monitors, now, topology);
             kept.push(z);
         }
     }
@@ -302,7 +292,7 @@ pub fn capture(
             .find(|candidate| !names.contains(candidate))
             .unwrap_or(base);
         names.insert(name.clone());
-        let monitor_index = monitor_index(&mut layout.monitors, monitor);
+        let monitor_index = remembered_index(&mut layout.monitors, monitor, topology);
         layout.zones.push(Zone {
             id: id.clone(),
             name,
@@ -327,7 +317,7 @@ pub fn capture(
                 None => free_place(&mut layout.monitors, topology, w.frame_rect),
             },
             Pick::Maximized(m) => Place::Maximized {
-                monitor: monitor_index(&mut layout.monitors, &topology.monitors()[m]),
+                monitor: remembered_index(&mut layout.monitors, &topology.monitors()[m], topology),
             },
             Pick::Free => free_place(&mut layout.monitors, topology, w.frame_rect),
         };
@@ -377,7 +367,7 @@ pub fn remember(
         }
         let place = if w.maximized {
             Place::Maximized {
-                monitor: monitor_index(&mut refs, topology.monitor_for_rect(w.frame_rect)),
+                monitor: remembered_index(&mut refs, topology.monitor_for_rect(w.frame_rect), topology),
             }
         } else if let Some(zone) = zone_holding(w.frame_rect, &zones, style) {
             Place::Zone { zone }
@@ -1004,6 +994,62 @@ mod tests {
             unreachable!("{:?}", after.layout.slots[0].place)
         };
         assert_eq!(area.to_rect(t.primary().work_area), Rect::new(100, 100, 700, 500));
+    }
+
+    #[test]
+    fn a_window_moved_on_a_stand_in_monitor_keeps_the_zones_there() {
+        let saved_on = fixtures::single_1080p_100();
+        let ws = snapped();
+        let seen: Vec<Seen> = ws.iter().map(|w| seen(w, "App")).collect();
+        let w = capture(
+            WorkspaceId("w".into()),
+            "W".into(),
+            &seen,
+            &saved_on,
+            style(),
+            None,
+        );
+        // Another desk: the 1080p monitor is not there; the 4K primary stands in for it.
+        let now = fixtures::uhd_200_plus_1080p_100();
+        let stand_in = now.primary().bounds;
+        let zones_on_stand_in = |layout: &Layout| {
+            let r = Resolver::new(layout, &now, style());
+            layout.zones.iter().all(|z| {
+                r.zone_rect(&z.id)
+                    .is_some_and(|(rect, _)| stand_in.contains_rect(rect))
+            })
+        };
+        assert!(zones_on_stand_in(&w.layout));
+        let floating = WindowFacts {
+            frame_rect: Rect::new(200, 200, 1400, 1000),
+            ..ws[2].clone()
+        };
+        let after = remember(
+            &w,
+            &[Present {
+                slot: w.layout.slots[2].id.clone(),
+                window: &floating,
+            }],
+            &now,
+            style(),
+        );
+        assert_eq!(after.layout.problems(), vec![]);
+        assert!(
+            zones_on_stand_in(&after.layout),
+            "the zones stay on the monitor they show on"
+        );
+        assert_eq!(
+            after.layout.monitors.len(),
+            1,
+            "the stand-in is not remembered as a monitor of its own"
+        );
+        let Place::Free { monitor: 0, area } = after.layout.slots[0].place else {
+            unreachable!("{:?}", after.layout.slots[0].place)
+        };
+        assert_eq!(
+            area.to_rect(now.primary().work_area),
+            Rect::new(200, 200, 1400, 1000)
+        );
     }
 
     #[test]

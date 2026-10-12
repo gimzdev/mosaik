@@ -89,7 +89,8 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn monitor(&self, index: usize) -> Option<&'a crate::topology::Monitor> {
+    /// The monitor connected now that the layout's monitor `index` lands on.
+    pub fn monitor(&self, index: usize) -> Option<&'a crate::topology::Monitor> {
         self.mapping
             .get(index)
             .and_then(|i| self.topology.monitors().get(*i))
