@@ -35,7 +35,8 @@ and ready in one click. Free, open source (CC0), no account, no telemetry, no ne
   to the middle of its zone.
 - A game or a video in full screen is left alone until it leaves full screen.
 - Where a window's title bar has no room for its tag or tabs, they sit on a solid band right
-  above it, inside its ring, so the two read as one window.
+  above it, inside its ring, so the two read as one window; the band works as its title bar:
+  click it to bring the window forward, drag it to move the window.
 
 ### Switching
 
