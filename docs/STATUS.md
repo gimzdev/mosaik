@@ -392,6 +392,26 @@ private memory              11.5 MB      15.7 MB    +4.2 MB, flat from switch 18
 switch time (mean)           32.5 ms      33.1 ms
 ```
 
+### Budgets, measured on the release build
+
+- **At rest** (job 0056; `mosaik.exe` built by `mosaik.ps1 build`, started with its data in a
+  scratch folder, no window open, 20 s to settle, then 60 s):
+
+  ```
+  mosaik.exe        CPU 0.026% of one core (0.0009% of the machine), private 4.1 MB, working set 20.4 MB, 243 handles
+  mosaik-watchdog   CPU 0.000%,                                      private 1.0 MB, working set  6.6 MB,  87 handles
+  ```
+
+  Budget: under 1% CPU, and under 15 MB private for the two together with no web window open.
+- **Switching eight windows** (job 0057, `mosaik-probe workspace --eight`): eight windows
+  between a 4 by 2 grid and the same grid mirrored, so every window moves on every switch, 20
+  switches: mean 80.7 ms, median 79.2 ms, slowest 107.5 ms, none failed (budget: 400 ms). The
+  engine's own log agrees (`workspace opened ms=60.2` to `103.8`, `moved=8`).
+- **Zone preview**: in the next frame after the window moves (step 1).
+- **The owner's steps on Windows** (job 0056, Windows PowerShell 5.1): `mosaik.ps1 build` in
+  173 s, `mosaik.ps1 test` in 108 s, every test passing (Rust tests, clippy, the interface's type
+  check, lint and 39 component tests).
+
 ## Step 8: release
 
 - **Store package** (`installer/msix/package.ps1`; `mosaik.ps1 package`): makepri indexes the
