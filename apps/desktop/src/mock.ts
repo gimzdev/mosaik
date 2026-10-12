@@ -1,18 +1,39 @@
 // A stand-in engine for the development server and the browser smoke tests: the same commands
 // and replies as Mosaïk's engine, on sample data kept in memory. Never part of a release build
 // (engine.ts only loads it when `import.meta.env.DEV`).
+//
+// URL switches for trying states: `?welcome=1` (first run), `?taken=1` (the switcher shortcut is
+// taken by another app), `?empty=1` (no workspaces), `?second=1` (a second, portrait monitor),
+// `?broken=1` (the engine does not answer).
 
-import type { Command, MonitorState, Reply, Settings, WorkspaceSummary, ZoneEdit } from './protocol';
+import type { Command, HotkeyState, MonitorState, Reply, Settings, WorkspaceSummary, ZoneEdit } from './protocol';
 
-const monitor: MonitorState = {
-  id: 'm1',
-  name: 'DELL U2720Q',
-  primary: true,
-  bounds: { left: 0, top: 0, right: 2560, bottom: 1440 },
-  work_area: { left: 0, top: 0, right: 2560, bottom: 1392 },
-  dpi: 120,
-  scale_percent: 125,
-};
+const params = new URLSearchParams(window.location.search);
+
+const monitors: MonitorState[] = [
+  {
+    id: 'm1',
+    name: 'DELL U2720Q',
+    primary: true,
+    bounds: { left: 0, top: 0, right: 2560, bottom: 1440 },
+    work_area: { left: 0, top: 0, right: 2560, bottom: 1392 },
+    dpi: 120,
+    scale_percent: 125,
+  },
+  ...(params.get('second') === '1'
+    ? [
+        {
+          id: 'm2',
+          name: 'Portrait',
+          primary: false,
+          bounds: { left: 2560, top: -240, right: 3640, bottom: 1680 },
+          work_area: { left: 2560, top: -240, right: 3640, bottom: 1680 },
+          dpi: 96,
+          scale_percent: 100,
+        },
+      ]
+    : []),
+];
 
 const settings: Settings = {
   version: 1,
@@ -23,61 +44,113 @@ const settings: Settings = {
   switching: { minimize_others: true, launch_missing: true },
   theme: 'system',
   start_with_windows: false,
-  onboarding_done: new URLSearchParams(window.location.search).get('welcome') !== '1',
+  onboarding_done: params.get('welcome') !== '1',
   rules: { user: [], learned: [] },
   notices_shown: [],
 };
+
+function hotkey(): HotkeyState {
+  return params.get('taken') === '1'
+    ? { shortcut: 'Win+Alt+S', registered: true, problem: `${settings.switcher_hotkey} is taken; using Win+Alt+S.` }
+    : { shortcut: settings.switcher_hotkey, registered: true, problem: null };
+}
 
 interface Workspace extends WorkspaceSummary {
   zoneList: ZoneEdit[];
 }
 
-const workspaces: Workspace[] = [
-  {
-    id: 'ship',
-    name: 'Ship the release',
-    windows: 4,
-    zones: 3,
-    hotkey: 'Win+Alt+1',
-    zoneList: [
-      { id: 'z1', name: 'Code', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.6, bottom: 1 } },
-      { id: 'z2', name: 'Browser', color: 'verdigris', monitor: 'm1', area: { left: 0.6, top: 0, right: 1, bottom: 0.5 } },
-      { id: 'z3', name: 'Terminal', color: 'saffron', monitor: 'm1', area: { left: 0.6, top: 0.5, right: 1, bottom: 1 } },
-    ],
-  },
-  {
-    id: 'brand',
-    name: 'Brand refresh',
-    windows: 2,
-    zones: 2,
-    hotkey: null,
-    zoneList: [
-      { id: 'z1', name: 'Figma', color: 'madder', monitor: 'm1', area: { left: 0, top: 0, right: 0.5, bottom: 1 } },
-      { id: 'z2', name: 'Notes', color: 'slate', monitor: 'm1', area: { left: 0.5, top: 0, right: 1, bottom: 1 } },
-    ],
-  },
-];
-let active: string | null = 'ship';
+const workspaces: Workspace[] =
+  params.get('empty') === '1'
+    ? []
+    : [
+        {
+          id: 'ship',
+          name: 'Ship the release',
+          windows: 4,
+          zones: 3,
+          hotkey: 'Win+Alt+J',
+          zoneList: [
+            { id: 'z1', name: 'Code', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.6, bottom: 1 } },
+            {
+              id: 'z2',
+              name: 'Browser',
+              color: 'verdigris',
+              monitor: 'm1',
+              area: { left: 0.6, top: 0, right: 1, bottom: 0.5 },
+            },
+            {
+              id: 'z3',
+              name: 'Terminal',
+              color: 'saffron',
+              monitor: 'm1',
+              area: { left: 0.6, top: 0.5, right: 1, bottom: 1 },
+            },
+          ],
+        },
+        {
+          id: 'brand',
+          name: 'Brand refresh',
+          windows: 2,
+          zones: 2,
+          hotkey: null,
+          zoneList: [
+            {
+              id: 'z1',
+              name: 'Figma',
+              color: 'madder',
+              monitor: 'm1',
+              area: { left: 0, top: 0, right: 0.5, bottom: 1 },
+            },
+            {
+              id: 'z2',
+              name: 'Notes',
+              color: 'slate',
+              monitor: 'm1',
+              area: { left: 0.5, top: 0, right: 1, bottom: 1 },
+            },
+          ],
+        },
+      ];
+let active: string | null = workspaces[0]?.id ?? null;
+let revision = 1;
 
-const find = (which: string) => workspaces.find((w) => w.id === which || w.name.toLowerCase() === which.trim().toLowerCase());
+const find = (which: string) =>
+  workspaces.find((w) => w.id === which || w.name.toLowerCase() === which.trim().toLowerCase());
 const done = (message: string): Reply => ({ reply: 'done', message });
 const missing = (which: string): Reply => ({
   reply: 'error',
   code: 'not_found',
   message: `There is no workspace called “${which}”.`,
-  hint: null,
+  hint: 'It may have been renamed or deleted meanwhile.',
 });
 
 function summary(): Reply {
   return {
     reply: 'workspaces',
-    workspaces: workspaces.map(({ id, name, windows, zones, hotkey }) => ({ id, name, windows, zones, hotkey })),
+    workspaces: workspaces.map(({ id, name, windows, zones, hotkey: key }) => ({
+      id,
+      name,
+      windows,
+      zones,
+      hotkey: key,
+    })),
     active,
   };
 }
 
-function checkHotkey(hotkey: string): Reply {
-  const h = hotkey.trim();
+function zones(w: Workspace): Reply {
+  return {
+    reply: 'zones',
+    workspace: w.id,
+    name: w.name,
+    monitors,
+    zones: structuredClone(w.zoneList),
+    revision: String(revision),
+  };
+}
+
+function checkHotkey(text: string): Reply {
+  const h = text.trim();
   const problem = /^Ctrl\+Alt\+[A-Z0-9]$/i.test(h)
     ? 'Ctrl+Alt is AltGr on many keyboards (French, German, Canadian). With a letter, digit or Space it would stop people typing characters. Add the Win key or choose another key.'
     : !/(Win|Ctrl|Alt)\+/.test(h)
@@ -88,6 +161,14 @@ function checkHotkey(hotkey: string): Reply {
 
 export const mock = {
   request(command: Command): Promise<Reply> {
+    if (params.get('broken') === '1') {
+      return Promise.resolve({
+        reply: 'error',
+        code: 'busy',
+        message: 'Mosaïk did not answer in time.',
+        hint: 'Try again in a moment.',
+      });
+    }
     return Promise.resolve(answer(command));
   },
 };
@@ -95,16 +176,18 @@ export const mock = {
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.0.0-dev', protocol: 1 };
+      return { reply: 'hello', app_version: '1.0.0-dev', protocol: 2 };
     case 'workspaces':
       return summary();
     case 'settings':
-      return { reply: 'settings', settings: structuredClone(settings) };
+      return { reply: 'settings', settings: structuredClone(settings), hotkey: hotkey() };
     case 'set_settings':
       Object.assign(settings, structuredClone(command.settings));
       return done('Settings saved.');
     case 'check_hotkey':
       return checkHotkey(command.hotkey);
+    case 'hold_hotkeys':
+      return done(command.hold ? 'Mosaïk’s shortcuts are off while you record one.' : 'Mosaïk’s shortcuts are back.');
     case 'switch': {
       const w = find(command.workspace);
       if (!w) return missing(command.workspace);
@@ -113,19 +196,32 @@ function answer(command: Command): Reply {
     }
     case 'zones': {
       const w = find(command.workspace);
-      if (!w) return missing(command.workspace);
-      return { reply: 'zones', workspace: w.id, name: w.name, monitors: [monitor], zones: structuredClone(w.zoneList) };
+      return w ? zones(w) : missing(command.workspace);
     }
     case 'set_zones': {
       const w = find(command.workspace);
       if (!w) return missing(command.workspace);
+      if (command.revision !== String(revision)) {
+        return {
+          reply: 'error',
+          code: 'bad_request',
+          message: 'The monitors or these zones changed since the editor opened, so nothing was saved.',
+          hint: 'Open the editor again to see them as they are now.',
+        };
+      }
+      const taken = new Set(w.zoneList.map((z) => z.id));
       let n = 0;
       w.zoneList = command.zones.map((z) => {
-        n += 1;
-        return { ...z, id: z.id ?? `z${String(10 + n)}` };
+        if (z.id) return z;
+        do {
+          n += 1;
+        } while (taken.has(`z${String(n)}`));
+        taken.add(`z${String(n)}`);
+        return { ...z, id: `z${String(n)}` };
       });
       w.zones = w.zoneList.length;
-      return done(`Zones of “${w.name}” saved.`);
+      revision += 1;
+      return zones(w);
     }
     case 'rename_workspace': {
       const w = find(command.workspace);
@@ -152,19 +248,21 @@ function answer(command: Command): Reply {
         }
       }
       w.hotkey = command.hotkey;
-      return done(command.hotkey ? `${command.hotkey} now switches to “${w.name}”.` : `“${w.name}” has no shortcut now.`);
+      return done(
+        command.hotkey ? `${command.hotkey} now switches to “${w.name}”.` : `“${w.name}” has no shortcut now.`,
+      );
     }
     case 'rescue':
-      return done('0 window(s) restored');
+      return done('Nothing was hidden: every window is already on screen.');
     case 'state':
       return {
         reply: 'state',
         app_version: '1.0.0-dev',
-        protocol: 1,
+        protocol: 2,
         safe_mode: false,
         watchdog: true,
-        monitors: [monitor],
-        hotkey: { shortcut: settings.switcher_hotkey, registered: true, problem: null },
+        monitors,
+        hotkey: hotkey(),
       };
     case 'save':
     case 'show_switcher':

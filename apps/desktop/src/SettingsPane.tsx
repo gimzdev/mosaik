@@ -1,12 +1,10 @@
-// Settings: the switcher's shortcut, starting with Windows, how zones and switching behave, and
-// the theme. Each change is saved at once.
-
-import { useState } from 'react';
+// Settings: the switcher's shortcut, starting with Windows, the theme, how zones, switching and
+// tabs behave. Each change is saved at once.
 
 import type { SaveSettings } from './App';
-import type { HideMethod, Settings, Theme } from './protocol';
+import type { HideMethod, HotkeyState, Settings, Theme } from './protocol';
 import { ShortcutRecorder } from './shortcut';
-import { Choice, Section, Status, Toggle } from './ui';
+import { Choice, PageTitle, Section, Toggle, useSay } from './ui';
 
 const THEMES: readonly { value: Theme; label: string }[] = [
   { value: 'system', label: 'Like Windows' },
@@ -24,31 +22,50 @@ const HIDING: readonly { value: 'auto' | 'minimize'; label: string }[] = [
   { value: 'minimize', label: 'Minimise them' },
 ];
 
-export function SettingsPane({ settings, saveSettings }: { settings: Settings; saveSettings: SaveSettings }) {
-  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
+export function SettingsPane({
+  settings,
+  hotkey,
+  saveSettings,
+}: {
+  settings: Settings;
+  /** The switcher shortcut as registered. */
+  hotkey: HotkeyState;
+  saveSettings: SaveSettings;
+}) {
+  const say = useSay();
 
   const save = (next: Settings) => {
-    void saveSettings(next).then((error) => {
-      setStatus(error ? { text: error, error: true } : { text: 'Saved.', error: false });
+    void saveSettings(next).then((saved) => {
+      // Windows can keep Mosaïk from starting with it: the setting goes back and the message
+      // says where to change it, and stays until dismissed.
+      const adjusted = saved.settings.start_with_windows !== next.start_with_windows;
+      say(saved.message, !saved.ok || adjusted);
     });
   };
 
   return (
     <article aria-labelledby="settings-title">
-      <h1 id="settings-title" className="font-display text-3xl font-bold tracking-tight">
-        Settings
-      </h1>
-      <div className="mt-2">
-        <Status text={status?.text ?? null} error={status?.error ?? false} />
-      </div>
+      <PageTitle id="settings-title">Settings</PageTitle>
 
-      <Section title="Shortcut" intro="One shortcut opens the switcher; everything else is in there.">
-        <ShortcutRecorder
-          label="Open the switcher"
-          value={settings.switcher_hotkey}
-          onSave={(hotkey) => saveSettings({ ...settings, switcher_hotkey: hotkey })}
-        />
-      </Section>
+      <div className="mt-6">
+        <Section title="Switcher" intro="One shortcut opens the switcher, where you open, save and manage workspaces.">
+          <ShortcutRecorder
+            label="Open the switcher"
+            value={hotkey.registered ? hotkey.shortcut : null}
+            onSave={async (shortcut) => {
+              const saved = await saveSettings({ ...settings, switcher_hotkey: shortcut });
+              if (!saved.ok) return saved.message;
+              say(saved.message);
+              return null;
+            }}
+          />
+          {hotkey.problem ? (
+            <p role="status" className="py-3 text-small text-[var(--danger)]">
+              {hotkey.problem}
+            </p>
+          ) : null}
+        </Section>
+      </div>
 
       <Section title="General">
         <Toggle
@@ -88,7 +105,7 @@ export function SettingsPane({ settings, saveSettings }: { settings: Settings; s
         />
         <Toggle
           label="Coloured frames"
-          description="Each window in a zone wears the zone's colour around it."
+          description="Each window in a zone wears the zone’s colour around it."
           checked={settings.frames.show_frames}
           onChange={(on) => {
             save({ ...settings, frames: { ...settings.frames, show_frames: on } });
@@ -96,7 +113,7 @@ export function SettingsPane({ settings, saveSettings }: { settings: Settings; s
         />
         <Toggle
           label="Zone tags"
-          description="The zone's name above its windows. Dropping a window on a tag makes them tabs."
+          description="The zone’s name above its windows. Drop a window on a tag to make them tabs."
           checked={settings.frames.show_tags}
           onChange={(on) => {
             save({ ...settings, frames: { ...settings.frames, show_tags: on } });
@@ -123,9 +140,9 @@ export function SettingsPane({ settings, saveSettings }: { settings: Settings; s
         />
       </Section>
 
-      <Section title="Tabs" intro="How background tabs are kept out of sight.">
+      <Section title="Tabs">
         <Choice
-          label="Background tabs"
+          label="Tabs not shown"
           value={settings.tab_hiding === 'minimize' ? 'minimize' : 'auto'}
           options={HIDING}
           onChange={(v) => {

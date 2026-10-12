@@ -56,6 +56,8 @@ pub(crate) mod timer {
     pub const TOPOLOGY: usize = 4;
     /// Apps started for a workspace: give up on the ones that never showed a window.
     pub const LAUNCH: usize = 5;
+    /// Mosaïk's shortcuts come back after being held for a recorder that never let go.
+    pub const HOTKEYS: usize = 6;
 }
 
 /// Shift a timer id into the `Pending::timers` bit set.
@@ -134,6 +136,8 @@ pub(crate) struct Engine {
     pub(crate) hotkey: Option<Registered>,
     /// Workspaces' own shortcuts.
     pub(crate) workspace_keys: Vec<crate::editing::WorkspaceKey>,
+    /// Every shortcut is let go while the interface records one.
+    pub(crate) hotkeys_held: bool,
     pub(crate) scanner: Scanner,
     pub(crate) apps: Apps,
     /// `Stop` arrived (or Windows is ending): windows are back, requests get "stopped".
@@ -225,6 +229,7 @@ pub(crate) fn run(
         messages,
         hotkey: None,
         workspace_keys: Vec::new(),
+        hotkeys_held: false,
         scanner,
         apps: Apps::new(),
         stopped: false,
@@ -428,6 +433,9 @@ impl Engine {
         if todo.timers & timer_bit(timer::LAUNCH) != 0 {
             self.launch_tick();
         }
+        if todo.timers & timer_bit(timer::HOTKEYS) != 0 {
+            self.release_hotkeys();
+        }
         if todo.displays {
             // Windows sends several of these for one change; act once it is done.
             self.set_timer(timer::TOPOLOGY, 400);
@@ -620,6 +628,7 @@ impl Engine {
             Command::SetWorkspaceHotkey { workspace, hotkey } => {
                 self.set_workspace_hotkey(&workspace, hotkey.as_deref())
             }
+            Command::HoldHotkeys { hold } => self.hold_hotkeys(hold),
             Command::Quit => {
                 // SAFETY: a one-shot timer on our own window; the exit happens when it fires.
                 let timer = unsafe { SetTimer(Some(self.window), timer::EXIT, 250, None) };

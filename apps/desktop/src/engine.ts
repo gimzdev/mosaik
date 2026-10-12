@@ -1,3 +1,7 @@
+// The interface's way to Mosaïk: engine commands, notices, events, and the few things only the
+// app itself does (links, the logs folder, a rescue that works without the engine, the title
+// bar). In a plain browser during development a stand-in engine answers instead.
+
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
@@ -48,10 +52,9 @@ export async function takeNotices(): Promise<Notice[]> {
   return invoke<Notice[]>('take_notices');
 }
 
-/** Calls `onChange` whenever new notices arrive; returns a function that stops listening. */
-export function onNotices(onChange: () => void): () => void {
+function on(event: string, callback: () => void): () => void {
   if (!inMosaik) return () => undefined;
-  const stop = listen('notices:changed', onChange);
+  const stop = listen(event, callback);
   return () => {
     void stop.then((f) => {
       f();
@@ -59,14 +62,87 @@ export function onNotices(onChange: () => void): () => void {
   };
 }
 
+/** Calls `callback` whenever new notices arrive; returns a function that stops listening. */
+export function onNotices(callback: () => void): () => void {
+  return on('notices:changed', callback);
+}
+
+/** Calls `callback` whenever the saved workspaces, or the one open, change. */
+export function onWorkspacesChanged(callback: () => void): () => void {
+  return on('workspaces:changed', callback);
+}
+
+/** Runs `action`, turning a failure of the app itself into a message. */
+async function attempt(action: () => Promise<unknown>, failed: string): Promise<string | null> {
+  try {
+    await action();
+    return null;
+  } catch (e) {
+    return typeof e === 'string' ? e : `${failed} ${String(e)}`;
+  }
+}
+
 /** The pages Mosaïk links to. Only these open, in the default browser. */
 export type Link = 'patreon' | 'site' | 'source' | 'privacy';
 
-export async function openLink(link: Link): Promise<void> {
-  if (inMosaik) await invoke('open_link', { link });
+/** Opens a page in the default browser; resolves to an error message, or null. */
+export function openLink(link: Link): Promise<string | null> {
+  if (!inMosaik) return Promise.resolve(null);
+  return attempt(() => invoke('open_link', { link }), 'The browser did not open.');
 }
 
-/** Opens the folder with Mosaïk's logs in File Explorer. */
-export async function openLogs(): Promise<void> {
-  if (inMosaik) await invoke('open_logs');
+/** Opens the folder with Mosaïk's logs in File Explorer; resolves to an error message, or null. */
+export function openLogs(): Promise<string | null> {
+  if (!inMosaik) return Promise.resolve(null);
+  return attempt(() => invoke('open_logs'), 'The logs folder did not open.');
+}
+
+/** Brings back every window Mosaïk hid, even when its engine does not answer. */
+export async function rescueWindows(): Promise<{ text: string; error: boolean }> {
+  if (!inMosaik) {
+    const reply = await request({ cmd: 'rescue' });
+    return reply.reply === 'done'
+      ? { text: reply.message, error: false }
+      : { text: 'Rescue did not finish.', error: true };
+  }
+  try {
+    return { text: await invoke<string>('rescue_windows'), error: false };
+  } catch (e) {
+    return { text: String(e), error: true };
+  }
+}
+
+/** Matches the window's title bar to the page: dark or light, in the page's colours. Without
+ * colours (high contrast), Windows' own stay. A title bar left in Windows' colours is not worth
+ * a message, so a failure here is ignored. */
+export function styleTitleBar(look: { dark: boolean; caption: string; text: string } | null): void {
+  if (!inMosaik) return;
+  void invoke('style_title_bar', {
+    dark: look?.dark ?? null,
+    caption: look?.caption ?? null,
+    text: look?.text ?? null,
+  }).catch(() => undefined);
+}
+
+/** Until the returned function is called, closing the window first runs `ask` (unsaved zone
+ * edits), which shows the question and resolves to whether to close anyway. */
+export function guardClose(ask: () => Promise<boolean>): () => void {
+  if (!inMosaik) return () => undefined;
+  let stop: (() => void) | null = null;
+  let stopped = false;
+  void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+    getCurrentWindow()
+      .onCloseRequested(async (event) => {
+        event.preventDefault();
+        if (await ask()) await getCurrentWindow().destroy();
+      })
+      .then((f) => {
+        if (stopped) f();
+        else stop = f;
+      }),
+  );
+  return () => {
+    stopped = true;
+    stop?.();
+  };
 }

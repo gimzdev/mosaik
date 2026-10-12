@@ -7,7 +7,12 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
-  server: { port: 1420, strictPort: true, host: '127.0.0.1', fs: { allow: ['..', '../../crates/mosaik-ipc/fixtures'] } },
+  server: {
+    port: 1420,
+    strictPort: true,
+    host: '127.0.0.1',
+    fs: { allow: ['..', '../../crates/mosaik-ipc/fixtures'] },
+  },
   build: {
     target: 'es2023',
     outDir: 'dist',

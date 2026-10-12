@@ -90,6 +90,12 @@ pub enum Command {
         workspace: String,
         hotkey: Option<String>,
     },
+    /// While the interface records a shortcut, Mosaïk's own shortcuts let go, so pressing one
+    /// reaches the recorder instead of opening the switcher. They come back with `hold: false`,
+    /// or after a minute in any case.
+    HoldHotkeys {
+        hold: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -120,8 +126,11 @@ pub enum Reply {
         message: String,
         hint: Option<String>,
     },
+    /// The user's settings, and the switcher shortcut as registered (it can differ from the
+    /// one in the settings: taken by another app, Mosaïk falls back to another).
     Settings {
         settings: Box<Settings>,
+        hotkey: HotkeyState,
     },
     /// What `check_hotkey` found: the shortcut as Mosaïk writes it, why it cannot be used (if
     /// so), and what is worth knowing about it otherwise.
@@ -653,6 +662,7 @@ mod wire {
                 workspace: "ship".into(),
                 hotkey: Some("Win+Alt+J".into()),
             },
+            Command::HoldHotkeys { hold: true },
         ];
         let replies = vec![
             Reply::Hello {
@@ -679,6 +689,11 @@ mod wire {
             },
             Reply::Settings {
                 settings: Box::default(),
+                hotkey: HotkeyState {
+                    shortcut: "Win+Alt+Space".into(),
+                    registered: true,
+                    problem: None,
+                },
             },
             Reply::Hotkey {
                 hotkey: "Ctrl+Alt+K".into(),

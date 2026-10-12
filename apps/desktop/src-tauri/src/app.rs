@@ -249,7 +249,7 @@ fn setup(
     let first_run = app
         .try_state::<AppState>()
         .map(|s| s.engine.request(Command::Settings, ENGINE_TIMEOUT))
-        .is_some_and(|r| matches!(r, Reply::Settings { settings } if !settings.onboarding_done));
+        .is_some_and(|r| matches!(r, Reply::Settings { settings, .. } if !settings.onboarding_done));
     for n in startup_notices {
         show_notice(app, n);
     }
@@ -399,7 +399,7 @@ fn show_settings(app: &AppHandle) {
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let switcher = MenuItem::with_id(app, "switcher", "Open switcher", true, None::<&str>)?;
+    let switcher = MenuItem::with_id(app, "switcher", "Open the switcher", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let rescue = MenuItem::with_id(app, "rescue", "Rescue windows", true, None::<&str>)?;
     let patreon = MenuItem::with_id(app, "patreon", "Support on Patreon", true, None::<&str>)?;

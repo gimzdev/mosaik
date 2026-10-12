@@ -108,6 +108,10 @@
       "cmd": "set_workspace_hotkey",
       "hotkey": "Win+Alt+J",
       "workspace": "ship"
+    },
+    {
+      "cmd": "hold_hotkeys",
+      "hold": true
     }
   ],
   "replies": [
@@ -140,6 +144,11 @@
       "reply": "error"
     },
     {
+      "hotkey": {
+        "problem": null,
+        "registered": true,
+        "shortcut": "Win+Alt+Space"
+      },
       "reply": "settings",
       "settings": {
         "frames": {

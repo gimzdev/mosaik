@@ -9,6 +9,9 @@ export interface Rect {
   bottom: number;
 }
 
+/** The longest workspace or zone name, in characters (`MAX_NAME` in crates/mosaik-core). */
+export const MAX_NAME = 60;
+
 export type ZoneColor = 'lapis' | 'verdigris' | 'saffron' | 'madder' | 'slate';
 
 /** A rectangle as fractions (0 to 1) of a monitor's work area. */
@@ -63,10 +66,11 @@ export type Command =
   | { cmd: 'set_settings'; settings: Settings }
   | { cmd: 'check_hotkey'; hotkey: string; workspace: string | null }
   | { cmd: 'zones'; workspace: string }
-  | { cmd: 'set_zones'; workspace: string; zones: ZoneEdit[] }
+  | { cmd: 'set_zones'; workspace: string; zones: ZoneEdit[]; revision: string }
   | { cmd: 'rename_workspace'; workspace: string; name: string }
   | { cmd: 'delete_workspace'; workspace: string }
-  | { cmd: 'set_workspace_hotkey'; workspace: string; hotkey: string | null };
+  | { cmd: 'set_workspace_hotkey'; workspace: string; hotkey: string | null }
+  | { cmd: 'hold_hotkeys'; hold: boolean };
 
 export type ErrorCode = 'unsupported_version' | 'bad_request' | 'not_found' | 'busy' | 'failed' | 'unknown';
 
@@ -108,9 +112,19 @@ export type Reply =
       monitors: MonitorState[];
       hotkey: HotkeyState;
     }
-  | { reply: 'settings'; settings: Settings }
+  /** The settings, and the switcher shortcut as registered (another one when the chosen one
+   * is taken by another app). */
+  | { reply: 'settings'; settings: Settings; hotkey: HotkeyState }
   | { reply: 'hotkey'; hotkey: string; problem: string | null; warnings: string[] }
-  | { reply: 'zones'; workspace: string; name: string; monitors: MonitorState[]; zones: ZoneEdit[] };
+  | {
+      reply: 'zones';
+      workspace: string;
+      name: string;
+      monitors: MonitorState[];
+      zones: ZoneEdit[];
+      /** Sent back with `set_zones`, which is refused if the zones or monitors changed since. */
+      revision: string;
+    };
 
 /** Something the user should be told once. */
 export interface Notice {
@@ -190,6 +204,10 @@ export function isSettings(x: unknown): x is Settings {
   );
 }
 
+function isHotkeyState(x: unknown): x is HotkeyState {
+  return isObject(x) && isString(x.shortcut) && isBoolean(x.registered) && isNullableString(x.problem);
+}
+
 function isWorkspace(x: unknown): x is WorkspaceSummary {
   return (
     isObject(x) &&
@@ -214,9 +232,9 @@ export function isReply(x: unknown): x is Reply {
     case 'error':
       return isString(x.code) && isString(x.message) && isNullableString(x.hint);
     case 'state':
-      return isString(x.app_version) && typeof x.safe_mode === 'boolean' && Array.isArray(x.monitors);
+      return isString(x.app_version) && isBoolean(x.safe_mode) && Array.isArray(x.monitors) && isHotkeyState(x.hotkey);
     case 'settings':
-      return isSettings(x.settings);
+      return isSettings(x.settings) && isHotkeyState(x.hotkey);
     case 'hotkey':
       return (
         isString(x.hotkey) && isNullableString(x.problem) && Array.isArray(x.warnings) && x.warnings.every(isString)
@@ -228,33 +246,10 @@ export function isReply(x: unknown): x is Reply {
         Array.isArray(x.monitors) &&
         x.monitors.every(isMonitor) &&
         Array.isArray(x.zones) &&
-        x.zones.every(isZone)
+        x.zones.every(isZone) &&
+        isString(x.revision)
       );
     default:
       return false;
   }
-}
-
-const COMMANDS = new Set<Command['cmd']>([
-  'hello',
-  'state',
-  'workspaces',
-  'switch',
-  'save',
-  'rescue',
-  'show_switcher',
-  'show_settings',
-  'quit',
-  'settings',
-  'set_settings',
-  'check_hotkey',
-  'zones',
-  'set_zones',
-  'rename_workspace',
-  'delete_workspace',
-  'set_workspace_hotkey',
-]);
-
-export function isCommand(x: unknown): x is Command {
-  return isObject(x) && isString(x.cmd) && COMMANDS.has(x.cmd as Command['cmd']);
 }

@@ -56,6 +56,7 @@ impl Engine {
     pub(crate) fn settings_reply(&self) -> Reply {
         Reply::Settings {
             settings: Box::new(self.settings.clone()),
+            hotkey: self.hotkey_state(),
         }
     }
 
@@ -170,7 +171,8 @@ impl Engine {
             self.settings = old;
             return failed(format!("Your settings could not be saved: {e}"));
         }
-        if hotkey_changed && !self.config.safe_mode {
+        // While shortcuts are held for the recorder, the new one is registered on release.
+        if hotkey_changed && !self.config.safe_mode && !self.hotkeys_held {
             // The old shortcut goes first, so a swap between the two works.
             self.hotkey = None;
             self.register_hotkey();
@@ -310,6 +312,7 @@ impl Engine {
         self.workspace_keys.retain(|k| k.workspace != id);
         if let Some(h) = wanted
             && !self.config.safe_mode
+            && !self.hotkeys_held
             && let Err(problem) = self.register_workspace_key(&id, h)
         {
             return failed(format!(
@@ -363,6 +366,42 @@ impl Engine {
             }
         }
         problems
+    }
+
+    /// Lets go of every shortcut while the interface records one, or takes them back.
+    pub(crate) fn hold_hotkeys(&mut self, hold: bool) -> Reply {
+        if self.config.safe_mode {
+            return Reply::Done {
+                message: "Safe mode: no shortcut is registered.".into(),
+            };
+        }
+        if !hold {
+            self.release_hotkeys();
+            return Reply::Done {
+                message: "Mosaïk's shortcuts are back.".into(),
+            };
+        }
+        self.hotkey = None;
+        self.workspace_keys.clear();
+        self.hotkeys_held = true;
+        self.set_timer(crate::thread::timer::HOTKEYS, 60_000);
+        Reply::Done {
+            message: "Mosaïk's shortcuts are off while you record one.".into(),
+        }
+    }
+
+    /// Registers every shortcut again after `hold_hotkeys`.
+    pub(crate) fn release_hotkeys(&mut self) {
+        self.kill_timer(crate::thread::timer::HOTKEYS);
+        if !std::mem::take(&mut self.hotkeys_held) {
+            return;
+        }
+        self.hotkey = None;
+        self.register_hotkey();
+        let problems = self.register_workspace_hotkeys();
+        if !problems.is_empty() {
+            self.notice("Some workspace shortcuts are not set", problems.join(" "));
+        }
     }
 
     /// A workspace's own shortcut was pressed.

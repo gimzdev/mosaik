@@ -277,7 +277,7 @@ A <workspace> is its name or its id.";
                 }
                 1
             }
-            Reply::Settings { settings } => print_json(settings),
+            Reply::Settings { settings, .. } => print_json(settings),
             Reply::Zones { .. } => print_json(reply),
             Reply::Hotkey {
                 hotkey,

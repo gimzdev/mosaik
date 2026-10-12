@@ -3,35 +3,56 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Command, Reply } from './protocol';
+import { Feedback } from './ui';
 import { Workspaces } from './Workspaces';
 
-const engine = vi.hoisted(() => ({ request: vi.fn<(c: Command) => Promise<Reply>>() }));
+const engine = vi.hoisted(() => ({
+  request: vi.fn<(c: Command) => Promise<Reply>>(),
+  onWorkspacesChanged: vi.fn<(f: () => void) => () => void>(() => () => undefined),
+}));
 vi.mock('./engine', () => engine);
 
 afterEach(cleanup);
 
 const list = (names: string[]): Reply => ({
   reply: 'workspaces',
-  workspaces: names.map((name, i) => ({ id: `w${String(i)}`, name, windows: 3, zones: 1, hotkey: i === 0 ? 'Win+Alt+1' : null })),
+  workspaces: names.map((name, i) => ({
+    id: `w${String(i)}`,
+    name,
+    windows: 3,
+    zones: 1,
+    hotkey: i === 0 ? 'Win+Alt+J' : null,
+  })),
   active: 'w0',
 });
+
+function page() {
+  return render(
+    <Feedback>
+      <Workspaces shortcut="Win+Alt+Space" onEditZones={vi.fn()} />
+    </Feedback>,
+  );
+}
 
 describe('the workspaces page', () => {
   beforeEach(() => {
     engine.request.mockReset();
+    engine.onWorkspacesChanged.mockClear();
   });
 
   it('explains how to save one when there is none', async () => {
     engine.request.mockResolvedValue(list([]));
-    render(<Workspaces switcherShortcut="Win+Alt+Space" onEditZones={vi.fn()} />);
+    page();
     expect(await screen.findByRole('heading', { name: 'No workspaces yet' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Open the switcher' }));
+    expect(engine.request).toHaveBeenCalledWith({ cmd: 'show_switcher' });
   });
 
   it('lists workspaces with what they hold and opens one', async () => {
     engine.request.mockImplementation((c) =>
       Promise.resolve(c.cmd === 'switch' ? { reply: 'done', message: 'Opened “Brand”.' } : list(['Ship', 'Brand'])),
     );
-    render(<Workspaces switcherShortcut="Win+Alt+Space" onEditZones={vi.fn()} />);
+    page();
     const rows = await screen.findAllByRole('listitem');
     expect(rows).toHaveLength(2);
     const first = rows[0];
@@ -42,12 +63,24 @@ describe('the workspaces page', () => {
     expect(await screen.findByText('Opened “Brand”.')).toBeTruthy();
   });
 
+  it('reads them again when they change elsewhere', async () => {
+    engine.request.mockResolvedValue(list(['Ship']));
+    page();
+    await screen.findAllByRole('listitem');
+    const changed = engine.onWorkspacesChanged.mock.calls[0]?.[0];
+    if (!changed) throw new Error('the page does not listen for changes');
+    engine.request.mockResolvedValue(list(['Ship', 'Saved from the switcher']));
+    changed();
+    expect(await screen.findByText('Saved from the switcher')).toBeTruthy();
+  });
+
   it('asks before deleting', async () => {
     engine.request.mockImplementation((c) =>
       Promise.resolve(c.cmd === 'delete_workspace' ? { reply: 'done', message: 'Deleted “Ship”.' } : list(['Ship'])),
     );
-    render(<Workspaces switcherShortcut="Win+Alt+Space" onEditZones={vi.fn()} />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Delete “Ship”' }));
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Delete…' }));
     expect(engine.request).not.toHaveBeenCalledWith({ cmd: 'delete_workspace', workspace: 'w0' });
     await userEvent.click(screen.getByRole('button', { name: 'Delete workspace', hidden: true }));
     expect(engine.request).toHaveBeenCalledWith({ cmd: 'delete_workspace', workspace: 'w0' });
@@ -61,12 +94,30 @@ describe('the workspaces page', () => {
           : list(['Ship', 'Brand']),
       ),
     );
-    render(<Workspaces switcherShortcut="Win+Alt+Space" onEditZones={vi.fn()} />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Rename “Ship”' }));
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rename…' }));
     const field = screen.getByRole('textbox', { name: 'New name' });
+    expect(document.activeElement).toBe(field);
     await userEvent.clear(field);
     await userEvent.type(field, 'brand');
     await userEvent.click(screen.getByRole('button', { name: 'Save name' }));
-    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Another workspace is called “Brand”.');
+    expect((await screen.findAllByRole('alert')).map((a) => a.textContent)).toContain(
+      'Another workspace is called “Brand”.',
+    );
+  });
+
+  it('records a shortcut for a workspace with Mosaïk’s own shortcuts held', async () => {
+    engine.request.mockImplementation((c) =>
+      Promise.resolve(c.cmd === 'workspaces' ? list(['Ship']) : { reply: 'done', message: 'ok' }),
+    );
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Change shortcut…' }));
+    expect(await screen.findByRole('button', { name: 'Press the new shortcut' })).toBeTruthy();
+    expect(engine.request).toHaveBeenCalledWith({ cmd: 'hold_hotkeys', hold: true });
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: 'Press the new shortcut' })).toBeNull();
+    expect(engine.request).toHaveBeenCalledWith({ cmd: 'hold_hotkeys', hold: false });
   });
 });

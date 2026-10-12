@@ -2,39 +2,50 @@
 
 import { useEffect, useState } from 'react';
 
-import { type Link, openLink, openLogs, request } from './engine';
-import { errorMessage } from './protocol';
-import { Button, Section, Status } from './ui';
+import { type Link, openLink, openLogs, request, rescueWindows } from './engine';
+import { Button, PageTitle, Section, useSay } from './ui';
 
 export function About({ onWelcome }: { onWelcome: () => void }) {
   const [version, setVersion] = useState<string | null>(null);
-  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
+  const [rescuing, setRescuing] = useState(false);
+  const say = useSay();
 
   useEffect(() => {
+    let live = true;
     void request({ cmd: 'hello', client: 'about' }).then((reply) => {
-      if (reply.reply === 'hello') setVersion(reply.app_version);
+      if (live && reply.reply === 'hello') setVersion(reply.app_version);
     });
+    return () => {
+      live = false;
+    };
   }, []);
 
   const link = (l: Link) => () => {
-    void openLink(l);
+    void openLink(l).then((error) => {
+      if (error) say(error, true);
+    });
   };
 
   return (
     <article aria-labelledby="about-title">
-      <h1 id="about-title" className="font-display text-3xl font-bold tracking-tight">
-        Mosaïk
-      </h1>
+      <PageTitle id="about-title">Mosaïk</PageTitle>
       <p className="mt-2 text-[var(--muted)]">
         {version ? `Version ${version}. ` : ''}Free forever, and in the public domain (CC0): no rights reserved.
       </p>
 
-      <Section title="Your windows, your computer">
-        <p className="py-3 text-[var(--muted)]">
-          Mosaïk makes no network requests: no accounts, no tracking, no cloud. Your workspaces and settings are saved on
-          this PC only; updates come through the Microsoft Store.
-        </p>
-      </Section>
+      <div className="mt-6">
+        <Section title="Your windows, your computer">
+          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <p className="max-w-lg text-small text-[var(--muted)]">
+              Mosaïk makes no network requests: no account, no tracking, no cloud. Your workspaces and settings stay on
+              this PC; updates come through the Microsoft Store.
+            </p>
+            <Button tone="quiet" onClick={link('privacy')}>
+              Privacy
+            </Button>
+          </div>
+        </Section>
+      </div>
 
       <Section
         title="Support Mosaïk"
@@ -50,19 +61,18 @@ export function About({ onWelcome }: { onWelcome: () => void }) {
       </Section>
 
       <Section title="If something goes wrong">
-        <div className="flex flex-col gap-1 py-3">
-          <p className="text-[var(--muted)]">
-            Every window Mosaïk hides (background tabs) can be brought back at once, even if Mosaïk stopped.
+        <div className="py-3">
+          <p className="text-small text-[var(--muted)]">
+            Every window Mosaïk hides (tabs not shown) comes back at once, even if Mosaïk stopped answering.
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             <Button
+              pending={rescuing}
               onClick={() => {
-                void request({ cmd: 'rescue' }).then((reply) => {
-                  setStatus(
-                    reply.reply === 'done'
-                      ? { text: reply.message, error: false }
-                      : { text: errorMessage(reply) ?? 'Rescue did not finish.', error: true },
-                  );
+                setRescuing(true);
+                void rescueWindows().then(({ text, error }) => {
+                  setRescuing(false);
+                  say(text, error);
                 });
               }}
             >
@@ -71,7 +81,9 @@ export function About({ onWelcome }: { onWelcome: () => void }) {
             <Button
               tone="quiet"
               onClick={() => {
-                void openLogs();
+                void openLogs().then((error) => {
+                  if (error) say(error, true);
+                });
               }}
             >
               Open the logs folder
@@ -80,7 +92,6 @@ export function About({ onWelcome }: { onWelcome: () => void }) {
               Show the welcome again
             </Button>
           </div>
-          <Status text={status?.text ?? null} error={status?.error ?? false} />
         </div>
       </Section>
     </article>

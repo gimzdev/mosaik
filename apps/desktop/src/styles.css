@@ -3,7 +3,7 @@
 @import '@fontsource-variable/instrument-sans';
 @import '@fontsource-variable/jetbrains-mono';
 
-/* Mosaïk's palette, shared with the site. */
+/* Mosaïk's palette, shared with the site, and its type scale. */
 @theme {
   --color-plaster: #edefea;
   --color-paper: #f7f8f4;
@@ -17,30 +17,53 @@
   --font-display: 'Bricolage Grotesque Variable', system-ui, sans-serif;
   --font-sans: 'Instrument Sans Variable', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+  /* Page title, section title, body, small print, captions. */
+  --text-title: 1.75rem;
+  --text-title--line-height: 1.2;
+  --text-heading: 1.0625rem;
+  --text-heading--line-height: 1.35;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.5;
+  --text-small: 0.8125rem;
+  --text-small--line-height: 1.45;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.4;
 }
 
-/* Surfaces and text by theme. Light is the default; dark follows Windows unless the user picks one;
-   high contrast uses the system's own colours. */
+/* Surfaces and text by theme. Light is the default; dark follows Windows unless the user picks a
+   theme; high contrast uses the system's own colours. Every pair used for text is AA, and every
+   control outline is at least 3:1 against what is around it. */
 :root {
   color-scheme: light;
   --bg: var(--color-plaster);
   --surface: var(--color-paper);
   --line: var(--color-grout);
+  /* Outlines of controls (fields, switches): 3.3:1 or more on bg and surface. */
+  --control: #7a8492;
   --hover: #e3e7df;
   --text: var(--color-ink);
   --muted: var(--color-slate);
   --accent: var(--color-lapis);
   --on-accent: #ffffff;
-  --danger: var(--color-madder);
+  /* Madder darkened for small text (5.1:1 on plaster). */
+  --danger: #b82e48;
   --ok: var(--color-verdigris);
   --focus: var(--color-lapis);
-  /* Zone colours: fill, and the label drawn on it (both AA, as on the overlays). */
-  --zone-lapis: #2b44d9;
-  --zone-verdigris: #12786a;
-  --zone-saffron: #f4b13a;
-  --zone-madder: #c93450;
-  --zone-slate: #556070;
-  --zone-label-saffron: #161b25;
+  /* Zone colours: outline, and the text drawn on a fill of it (both AA, as on the overlays). */
+  --zone-lapis: var(--color-lapis);
+  --zone-verdigris: var(--color-verdigris);
+  --zone-saffron: var(--color-saffron);
+  --zone-madder: var(--color-madder);
+  --zone-slate: var(--color-slate);
+  --on-zone: #ffffff;
+  --on-zone-saffron: var(--color-ink);
+  /* Colour swatches show the zone colours of the theme. */
+  --swatch-lapis: var(--zone-lapis);
+  --swatch-verdigris: var(--zone-verdigris);
+  --swatch-saffron: var(--zone-saffron);
+  --swatch-madder: var(--zone-madder);
+  --swatch-slate: var(--zone-slate);
+  --on-swatch: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
@@ -48,6 +71,7 @@
     --bg: #0f1218;
     --surface: #161b25;
     --line: #2a3140;
+    --control: #77819a;
     --hover: #1e2532;
     --text: #edefea;
     --muted: #a3acba;
@@ -56,6 +80,13 @@
     --danger: #f07892;
     --ok: #4fd1bd;
     --focus: #f4b13a;
+    /* The palette's light tints: the deep colours read too dark on a dark page. */
+    --zone-lapis: #7c8fff;
+    --zone-verdigris: #4fd1bd;
+    --zone-madder: #f07892;
+    --zone-slate: #a3acba;
+    --on-zone: #0f1218;
+    --on-swatch: #0f1218;
   }
 }
 :root[data-theme='dark'] {
@@ -63,6 +94,7 @@
   --bg: #0f1218;
   --surface: #161b25;
   --line: #2a3140;
+  --control: #77819a;
   --hover: #1e2532;
   --text: #edefea;
   --muted: #a3acba;
@@ -71,13 +103,22 @@
   --danger: #f07892;
   --ok: #4fd1bd;
   --focus: #f4b13a;
+  --zone-lapis: #7c8fff;
+  --zone-verdigris: #4fd1bd;
+  --zone-madder: #f07892;
+  --zone-slate: #a3acba;
+  --on-zone: #0f1218;
+  --on-swatch: #0f1218;
 }
-/* High contrast: the system's own colours, and borders where colour alone would carry meaning. */
+/* High contrast: the system's own colours everywhere, and outlines or marks wherever colour alone
+   would carry meaning. `:root:root` is as specific as the theme rules above and comes after them,
+   so it wins over a theme the user picked too. */
 @media (forced-colors: active) {
-  :root {
+  :root:root {
     --bg: Canvas;
     --surface: Canvas;
     --line: CanvasText;
+    --control: CanvasText;
     --hover: Canvas;
     --text: CanvasText;
     --muted: CanvasText;
@@ -86,6 +127,26 @@
     --danger: CanvasText;
     --ok: CanvasText;
     --focus: Highlight;
+    --zone-lapis: CanvasText;
+    --zone-verdigris: CanvasText;
+    --zone-saffron: CanvasText;
+    --zone-madder: CanvasText;
+    --zone-slate: CanvasText;
+    --on-zone: CanvasText;
+    --on-zone-saffron: CanvasText;
+    /* Swatches keep the palette's own colours (they opt out of forced colours). */
+    --swatch-lapis: #2b44d9;
+    --swatch-verdigris: #12786a;
+    --swatch-saffron: #f4b13a;
+    --swatch-madder: #c93450;
+    --swatch-slate: #556070;
+    --on-swatch: #ffffff;
+  }
+  /* A zone's label: plain text in a frame, in the system's colours. */
+  .zone-chip {
+    background: Canvas;
+    color: CanvasText;
+    border: 1px solid CanvasText;
   }
 }
 
@@ -97,18 +158,43 @@
   }
   body {
     margin: 0;
+    /* The page scrolls inside its main area; the window itself never scrolls. */
+    overflow: hidden;
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: var(--text-body);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     user-select: none;
   }
+  input,
+  textarea {
+    user-select: text;
+  }
   :focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
-    border-radius: 6px;
+  }
+}
+
+@layer components {
+  /* A text field: its outline is a control's, so it reads as one. */
+  .field {
+    border: 1px solid var(--control);
+    border-radius: 0.5rem;
+    background: var(--surface);
+    color: var(--text);
+    padding: 0.375rem 0.75rem;
+    min-height: 2rem;
+  }
+  .field[aria-invalid='true'] {
+    border-color: var(--danger);
+  }
+  /* A zone's label, on its colour (`--chip`, `--on-chip` set where it is drawn). */
+  .zone-chip {
+    background: var(--chip);
+    color: var(--on-chip);
   }
 }
 

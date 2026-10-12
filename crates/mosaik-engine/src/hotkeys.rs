@@ -50,7 +50,7 @@ pub(crate) fn register_switcher(window: HWND, wanted: Hotkey) -> Registered {
                     (
                         format!("The switcher opens with {h}"),
                         format!(
-                            "{wanted} could not be used: {}{} You can pick another shortcut in Settings, Shortcuts.",
+                            "{wanted} could not be used: {}{} You can pick another shortcut in Settings, under Switcher.",
                             failures.first().cloned().unwrap_or_default(),
                             conflict_hint(wanted).unwrap_or_default()
                         ),
@@ -70,7 +70,7 @@ pub(crate) fn register_switcher(window: HWND, wanted: Hotkey) -> Registered {
         }
     }
     let problem = format!(
-        "No shortcut could be registered ({}). Open the switcher from the tray icon, or pick another shortcut in Settings, Shortcuts.",
+        "No shortcut could be registered ({}). Open the switcher from the tray icon, or pick another shortcut in Settings, under Switcher.",
         failures.join("; ")
     );
     Registered {
