@@ -13,6 +13,7 @@ mod editing;
 mod hider;
 mod hotkeys;
 mod mover;
+mod others;
 pub mod server;
 mod state;
 mod switcher;

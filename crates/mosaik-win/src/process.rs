@@ -141,6 +141,35 @@ pub fn spawn(program: &str, args: &str) -> Result<Process> {
     })
 }
 
+/// The program file names of the processes running now (lower case, each once): one snapshot
+/// of the process list, without opening any process.
+pub fn running_programs() -> Result<Vec<String>> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+    };
+    // SAFETY: a snapshot of the process list; the handle is closed below.
+    let snapshot =
+        unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }.ctx("CreateToolhelp32Snapshot")?;
+    let mut entry = PROCESSENTRY32W {
+        dwSize: u32::try_from(std::mem::size_of::<PROCESSENTRY32W>()).unwrap_or(0),
+        ..Default::default()
+    };
+    let mut names: Vec<String> = Vec::new();
+    // SAFETY: `entry` is sized as the API requires and outlives each call.
+    let mut more = unsafe { Process32FirstW(snapshot, &raw mut entry) }.is_ok();
+    while more {
+        let name = crate::text::from_wide(&entry.szExeFile).to_lowercase();
+        if !names.contains(&name) {
+            names.push(name);
+        }
+        // SAFETY: as above.
+        more = unsafe { Process32NextW(snapshot, &raw mut entry) }.is_ok();
+    }
+    // SAFETY: the snapshot handle was opened above.
+    let _ = unsafe { CloseHandle(snapshot) };
+    Ok(names)
+}
+
 /// Opens a file, program or URI the way Explorer would (packaged apps, `ms-settings:`...).
 pub fn shell_open(target: &str, args: &str) -> Result<()> {
     let (t, a, verb) = (wide(target), wide(args), wide("open"));

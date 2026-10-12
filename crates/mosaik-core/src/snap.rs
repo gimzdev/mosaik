@@ -35,6 +35,62 @@ impl SnapSettings {
     }
 }
 
+/// What a drag of a window turns out to be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragKind {
+    /// Not known yet: the window has not changed since the drag began.
+    Undecided,
+    Moving,
+    /// By an edge or a corner, or from the keyboard: never snaps.
+    Resizing,
+}
+
+/// The pointer during a drag, as far as it tells a move from a resize.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pointer {
+    /// One of Windows' resize arrows: Windows is resizing the window, whatever the window is.
+    ResizeArrow,
+    /// Any other pointer.
+    Other,
+    /// No pointer on screen (touch, pen): it tells nothing.
+    Hidden,
+}
+
+impl DragKind {
+    /// When a drag begins. `inside`: the pointer is inside the window's frame, away from its
+    /// edges. By the time the start is noticed a quick drag can have carried the pointer out of
+    /// the window (Windows only starts a move once the pointer moves), so the position counts
+    /// only when the pointer's shape tells nothing.
+    pub fn at_start(pointer: Pointer, inside: bool) -> Self {
+        match pointer {
+            Pointer::ResizeArrow => Self::Resizing,
+            Pointer::Other => Self::Undecided,
+            Pointer::Hidden if inside => Self::Undecided,
+            Pointer::Hidden => Self::Resizing,
+        }
+    }
+
+    /// For a drag still undecided: the window's frame was `start` when it began and is `now`.
+    pub fn once_changed(start: Rect, now: Rect, pointer: Pointer) -> Self {
+        if now == start {
+            return Self::Undecided;
+        }
+        if pointer == Pointer::ResizeArrow {
+            return Self::Resizing;
+        }
+        if now.size() == start.size() {
+            return Self::Moving;
+        }
+        // The size changed. From the keyboard the window does not travel; a maximised or snapped
+        // window dragged by its title bar takes back its own size and travels with the pointer.
+        if now.origin() == start.origin() {
+            Self::Resizing
+        } else {
+            Self::Moving
+        }
+    }
+}
+
 /// A zone as it is on screen right now.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiveZone {
@@ -71,6 +127,69 @@ pub fn target(cursor: Point, zones: &[LiveZone], settings: SnapSettings) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_resize_arrow_means_a_resize_from_the_start() {
+        assert_eq!(DragKind::at_start(Pointer::ResizeArrow, true), DragKind::Resizing);
+        assert_eq!(
+            DragKind::at_start(Pointer::ResizeArrow, false),
+            DragKind::Resizing
+        );
+    }
+
+    #[test]
+    fn a_quick_drag_out_of_the_window_is_still_a_move() {
+        // The pointer already left the window when the start was noticed (dragged up from the
+        // title bar onto a tag): the arrow pointer says it is no resize.
+        let start = Rect::new(964, 552, 1916, 1028);
+        assert_eq!(DragKind::at_start(Pointer::Other, false), DragKind::Undecided);
+        let moved = Rect::new(900, 520, 1852, 996);
+        assert_eq!(
+            DragKind::once_changed(start, moved, Pointer::Other),
+            DragKind::Moving
+        );
+    }
+
+    #[test]
+    fn without_a_pointer_the_position_decides() {
+        assert_eq!(DragKind::at_start(Pointer::Hidden, true), DragKind::Undecided);
+        assert_eq!(DragKind::at_start(Pointer::Hidden, false), DragKind::Resizing);
+    }
+
+    #[test]
+    fn what_the_frame_does_decides_the_rest() {
+        let start = Rect::new(100, 100, 900, 700);
+        // Nothing yet.
+        assert_eq!(
+            DragKind::once_changed(start, start, Pointer::Other),
+            DragKind::Undecided
+        );
+        // A resize by the left edge moves the origin too: the arrow tells.
+        let left_edge = Rect::new(60, 100, 900, 700);
+        assert_eq!(
+            DragKind::once_changed(start, left_edge, Pointer::ResizeArrow),
+            DragKind::Resizing
+        );
+        // From the keyboard: the size changes, the window stays.
+        let keyboard = Rect::new(100, 100, 940, 700);
+        assert_eq!(
+            DragKind::once_changed(start, keyboard, Pointer::Other),
+            DragKind::Resizing
+        );
+        // A maximised window dragged by its title bar takes back its size and travels.
+        let maximised = Rect::new(0, 0, 1920, 1032);
+        let restored = Rect::new(500, 10, 1300, 610);
+        assert_eq!(
+            DragKind::once_changed(maximised, restored, Pointer::Other),
+            DragKind::Moving
+        );
+        // Touch: no pointer, the frame alone.
+        let moved = Rect::new(140, 120, 940, 720);
+        assert_eq!(
+            DragKind::once_changed(start, moved, Pointer::Hidden),
+            DragKind::Moving
+        );
+    }
 
     fn zones() -> Vec<LiveZone> {
         vec![

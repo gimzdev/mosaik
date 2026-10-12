@@ -630,6 +630,9 @@ impl Engine {
             ));
         }
         message.push('.');
+        // Now that Mosaïk has moved windows, another program that also arranges them would
+        // fight it: said once, after the switch, so it costs the switch nothing.
+        self.check_others();
         if trouble.is_empty() {
             Reply::Done { message }
         } else {

@@ -14,7 +14,8 @@ use mosaik_win::window::{Scanner, exists, frame_rect, geometry, handle};
 use serde_json::{Value, json};
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GetAncestor, GetParent, HTCAPTION, HTTRANSPARENT, HWND_TOPMOST, SMTO_ABORTIFHUNG, SW_MINIMIZE,
+    EVENT_SYSTEM_CAPTURESTART, EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART, GA_ROOT, GetAncestor,
+    GetForegroundWindow, GetParent, HTCAPTION, HTTRANSPARENT, HWND_TOPMOST, SMTO_ABORTIFHUNG, SW_MINIMIZE,
     SWP_NOMOVE, SWP_NOSIZE, SendMessageTimeoutW, SetWindowPos, ShowWindow, WM_NCHITTEST, WindowFromPoint,
 };
 
@@ -99,6 +100,66 @@ fn error_to(w: HWND, area: Rect) -> Option<i32> {
     frame_rect(w).map(|f| edge_error(f, area))
 }
 
+/// What Windows reported for `w`'s process during `drag`: the mouse captured or let go (an app
+/// that handles a press itself captures the mouse) and its move-size loop, by window class.
+fn watched(w: HWND, drag: impl FnOnce() -> Result<(), String>) -> Result<Value, String> {
+    let before = frame_rect(w);
+    // SAFETY: read-only.
+    let active = unsafe { GetForegroundWindow() } == w;
+    let hooks = mosaik_win::events::hook(
+        &[(EVENT_SYSTEM_CAPTURESTART, EVENT_SYSTEM_MOVESIZEEND)],
+        mosaik_win::window::pid(w),
+    );
+    let _ = mosaik_win::events::drain();
+    let dragged = drag();
+    pump_until(100, || false);
+    let events = mosaik_win::events::drain();
+    drop(hooks);
+    dragged?;
+    let names: Vec<String> = events
+        .iter()
+        .map(|e| {
+            let what = match e.event {
+                EVENT_SYSTEM_CAPTURESTART => "capture",
+                EVENT_SYSTEM_MOVESIZESTART => "move-size start",
+                EVENT_SYSTEM_MOVESIZEEND => "move-size end",
+                _ => "capture end",
+            };
+            format!(
+                "{what} {}",
+                mosaik_win::window::class_name(mosaik_win::window::hwnd(e.window))
+            )
+        })
+        .collect();
+    Ok(json!({
+        "was_active": active,
+        "move_loop": events.iter().any(|e| e.event == EVENT_SYSTEM_MOVESIZESTART),
+        "moved": before != frame_rect(w),
+        "events": names,
+    }))
+}
+
+/// Drags `w` by its title bar to `to`. When the press does not start Windows' move loop, once
+/// more from a point lower in the title bar; both tries are recorded.
+fn drag_by_title(w: HWND, to: Point) -> Result<Value, String> {
+    let mut tries = Vec::new();
+    for rows in [[6, 12, 20], [14, 22, 30]] {
+        let frame = frame_rect(w).ok_or("the window vanished")?;
+        let Some(grab) = grab_point(w, rows) else {
+            tries.push(json!({ "grab": null }));
+            continue;
+        };
+        let mut t = watched(w, || drag_path(&[grab, to], w))?;
+        t["grab"] = json!([grab.x - frame.left, grab.y - frame.top]);
+        let started = t["move_loop"] == json!(true);
+        tries.push(t);
+        if started {
+            break;
+        }
+    }
+    Ok(json!(tries))
+}
+
 fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     // In the middle of the screen, above the probe's own top-most windows.
     let place = Rect::from_origin_size(
@@ -114,22 +175,20 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     let mut out = json!({});
 
     // 1. By its title bar into the zone.
-    let frame = frame_rect(w).ok_or("the window vanished")?;
-    let grab = grab_point(w).ok_or("no point of its title bar starts a move")?;
-    out["grab"] = json!([grab.x - frame.left, grab.y - frame.top]);
-    drag_path(&[grab, t.zone_point], w)?;
+    let drag = drag_by_title(w, t.zone_point)?;
     let st = state(engine)?;
     out["into_zone"] = json!({
+        "drag": drag,
         "error_px": error_to(w, t.zone_area),
         "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
     });
 
     // 2. Onto the other window's tag: it becomes a tab of that window.
-    let grab = grab_point(w).ok_or("no point of its title bar starts a move, in the zone")?;
-    drag_path(&[grab, t.tag_point], w)?;
+    let drag = drag_by_title(w, t.tag_point)?;
     let st = state(engine)?;
     let strip = strip_with(&st, w);
     out["onto_tag"] = json!({
+        "drag": drag,
         "tabs": strip.as_ref().map_or(0, |s| s.tabs.len()),
         "with_the_tag_owner": strip.as_ref().is_some_and(|s| s.tabs.iter().any(|x| x.window == handle(t.code))),
         "error_px": error_to(w, t.group_area),
@@ -164,9 +223,10 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     let mine = strip_with(&st, w)
         .and_then(|s| chip_of(&s, w))
         .ok_or("the app's tab is gone")?;
-    drag_path(&[mine, t.zone_point], w)?;
+    let drag = watched(w, || drag_path(&[mine, t.zone_point], w))?;
     let st = state(engine)?;
     out["pulled_out"] = json!({
+        "drag": drag,
         "in_a_strip": strip_with(&st, w).is_some(),
         "error_px": error_to(w, t.zone_area),
         "tag_owner_hidden": hidden(&st, t.code),
@@ -177,12 +237,13 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
 /// A point of `w`'s title bar where pressing the mouse moves the window, as the window itself
 /// decides (it answers `WM_NCHITTEST` with `HTCAPTION` there): in the rightmost free stretch of
 /// the title bar at least 24 px wide, left of the window's buttons, where a person grabs it.
-pub fn grab_point(w: HWND) -> Option<Point> {
+/// `rows`: how far below the window's top edge to look, in device-independent pixels.
+pub fn grab_point(w: HWND, rows: [i32; 3]) -> Option<Point> {
     let f = frame_rect(w)?;
     let dpi = geometry(w).map_or(96, |g| g.dpi.max(96));
     let px = |v: i32| v * i32::try_from(dpi).unwrap_or(96) / 96;
     let step = px(4);
-    for dy in [px(6), px(12), px(20)] {
+    for dy in rows.map(px) {
         let y = f.top + dy;
         // Runs of caption points, from the right: (right end, left end).
         let mut run: Option<(i32, i32)> = None;

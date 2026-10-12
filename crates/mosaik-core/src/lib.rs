@@ -9,6 +9,7 @@ pub mod hotkey;
 pub mod journal;
 pub mod layout;
 pub mod matching;
+pub mod others;
 pub mod place;
 pub mod settings;
 pub mod snap;

@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use mosaik_core::geometry::{Insets, Point, Rect, scale_for_dpi};
 use mosaik_core::layout::{Place, TabGroupId};
-use mosaik_core::snap::{self, LiveZone as SnapZone};
+use mosaik_core::snap::{self, DragKind, LiveZone as SnapZone};
 use mosaik_core::window::WindowHandle;
 use mosaik_overlay::canvas::Canvas;
 use mosaik_overlay::frame::{Frame, FrameLook, Preview, ZoneView};
@@ -44,15 +44,6 @@ const GLOBAL: [(u32, u32); 6] = [
 /// is not moving (held at a screen edge, Shift pressed without moving), and Esc is checked
 /// during a drag on a tab strip.
 pub(crate) const DRAG_TICK_MS: u32 = 30;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DragKind {
-    /// Grabbed away from the edges (a move), not moved yet.
-    Undecided,
-    Moving,
-    /// Grabbed by an edge or a corner, or only resized: never snaps.
-    Resizing,
-}
 
 pub(crate) struct Drag {
     pub window: WindowHandle,
@@ -473,17 +464,13 @@ impl Engine {
                 dpi: z.dpi,
             })
             .collect();
-        // Grabbed by an edge or a corner (Windows' resize borders reach a few pixels into the
-        // frame), it is a resize; anywhere else (a title bar, a tab strip, a keyboard move), a
-        // move. A snapped or maximised window changes size as it is dragged, so the size alone
-        // cannot tell.
+        // A resize shows Windows' resize arrows from the start (mouse or keyboard); anything else
+        // is decided by what the window does (DragKind). Without a pointer on screen (touch), a
+        // grab away from the edges (Windows' resize borders reach a few pixels into the frame)
+        // is taken for a move.
         let margin = scale_for_dpi(4, facts.dpi.max(96));
         let inner = facts.frame_rect.inset(Insets::uniform(margin));
-        let kind = if inner.contains(input::cursor()) {
-            DragKind::Undecided
-        } else {
-            DragKind::Resizing
-        };
+        let kind = DragKind::at_start(input::pointer(), inner.contains(input::cursor()));
         self.watch.drag = Some(Drag {
             window: h,
             pid: facts.pid,
@@ -515,18 +502,12 @@ impl Engine {
             return;
         };
         if kind == DragKind::Undecided {
-            if g.frame == start {
-                return;
-            }
-            // Sized from the keyboard: the size changes, the window does not travel.
-            if g.frame.origin() == start.origin() {
-                if let Some(d) = &mut self.watch.drag {
-                    d.kind = DragKind::Resizing;
-                }
-                return;
-            }
+            let decided = DragKind::once_changed(start, g.frame, input::pointer());
             if let Some(d) = &mut self.watch.drag {
-                d.kind = DragKind::Moving;
+                d.kind = decided;
+            }
+            if decided != DragKind::Moving {
+                return;
             }
             self.show_zone_preview(Stack::Below(h.0.cast_signed_isize()));
         }

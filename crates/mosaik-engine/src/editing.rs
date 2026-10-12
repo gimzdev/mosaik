@@ -162,6 +162,12 @@ impl Engine {
                 Err(e) => return failed(format!("Starting with Windows could not be changed: {e}")),
             }
         }
+        // Notices shown since the interface read the settings stay shown.
+        for key in &self.settings.notices_shown {
+            if !new.notices_shown.contains(key) {
+                new.notices_shown.push(key.clone());
+            }
+        }
         let old = std::mem::replace(&mut self.settings, new);
         if let Err(e) = self.store.save(&self.settings) {
             // Put everything back as it was, starting with Windows included.

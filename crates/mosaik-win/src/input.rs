@@ -95,6 +95,35 @@ pub fn cursor() -> Point {
     Point::new(p.x, p.y)
 }
 
+/// The pointer's shape, as far as it tells a move from a resize: Windows shows one of its
+/// resize arrows for the whole of a resize, whichever app the window belongs to.
+pub fn pointer() -> mosaik_core::snap::Pointer {
+    use mosaik_core::snap::Pointer;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CURSOR_SHOWING, CURSORINFO, GetCursorInfo, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE,
+        LoadCursorW,
+    };
+    let mut info = CURSORINFO {
+        cbSize: u32::try_from(std::mem::size_of::<CURSORINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+    // SAFETY: fills a sized CURSORINFO.
+    if unsafe { GetCursorInfo(&raw mut info) }.is_err() || info.flags.0 & CURSOR_SHOWING.0 == 0 {
+        return Pointer::Hidden;
+    }
+    let arrow = [IDC_SIZEWE, IDC_SIZENS, IDC_SIZENWSE, IDC_SIZENESW]
+        .into_iter()
+        .any(|id| {
+            // SAFETY: returns Windows' shared cursor for `id`, which is never destroyed.
+            unsafe { LoadCursorW(None, id) }.is_ok_and(|c| c == info.hCursor)
+        });
+    if arrow {
+        Pointer::ResizeArrow
+    } else {
+        Pointer::Other
+    }
+}
+
 fn mouse(flags: MOUSE_EVENT_FLAGS, dx: i32, dy: i32) -> bool {
     send(&[INPUT {
         r#type: INPUT_MOUSE,

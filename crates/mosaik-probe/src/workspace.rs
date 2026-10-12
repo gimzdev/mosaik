@@ -916,6 +916,8 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, S
         terminal.hwnd,
     )?;
     let back = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
+    // Its ring and tag, read now: the next step moves it again.
+    let back_colours = frame_colours(back, ZoneColor::Verdigris, dpi);
 
     // 5. Drop it on the code window's tag again, at the tag's left end: in the screen's top-left
     // corner, where Windows' own snapping also watches the pointer.
@@ -943,7 +945,7 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, S
         "pulled_out": pulled,
         "snapped_back": {
             "error_px": edge_error(back, style.window_area(terminal.tiled, dpi)),
-            "frame": frame_colours(back, ZoneColor::Verdigris, dpi),
+            "frame": back_colours,
         },
         "joined_at_tag_start": at_tag_start,
     }))

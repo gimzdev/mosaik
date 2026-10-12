@@ -266,6 +266,7 @@ pub(crate) fn run(
             engine.notice("Some workspace shortcuts are not set", problems.join(" "));
         }
         engine.start_watching();
+        engine.check_others();
     }
     let hotkey = engine.hotkey_state();
     tracing::info!(
