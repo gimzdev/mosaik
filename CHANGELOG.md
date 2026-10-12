@@ -9,7 +9,9 @@ and ready in one click. Free, open source (CC0), no account, no telemetry, no ne
 
 - Save the windows on screen as a workspace (S in the switcher): windows side by side become
   named, coloured zones; windows stacked exactly on top of each other share one.
-- Every window in a zone wears a ring in its colour and a tag with its name.
+- Every window in a zone wears a ring in its colour and a tag with its name, in its own title
+  bar next to its buttons, so windows fill their zones. A window whose title bar has no room
+  wears its tag above it; a setting puts every tag above its window.
 - Drag a window by its title bar and the open workspace's zones show; let go and it is pulled
   into the zone under the pointer. Shift moves freely (a setting swaps that).
 - The zone editor: drag or arrow-key the lines between zones, split, rename, recolour, remove.
@@ -17,7 +19,8 @@ and ready in one click. Free, open source (CC0), no account, no telemetry, no ne
 ### Tabs for any app
 
 - Drop a window on another window's tag, or on a group's strip, and the two become tabs of one
-  place: one shows, the others wait, out of sight.
+  place: one shows, the others wait, out of sight. The strip sits in the visible window's title
+  bar, as browsers' tabs do, maximised windows included.
 - Click a tab to show it, drag it along the strip to reorder, drag it away to make it a window
   again. Tab order is kept with the workspace.
 - Tabs dragged out of Chrome or Edge join in like any window.
@@ -57,6 +60,9 @@ and ready in one click. Free, open source (CC0), no account, no telemetry, no ne
   into a zone or onto a tag afterwards.
 - A window that Windows' snapping also arranged keeps Windows' mark: dragged again, Windows
   first gives it back its earlier size.
+- Mosaïk reads where a title bar is free from what the app says about it. An app that changes
+  its title bar without a new title while it stays in front (a browser opening a tab in the
+  background) gets its tag moved when it next comes to the front or changes size.
 - Measured on Windows 11 with one 1920x1080 monitor at 100% scale. Two monitors with different
   scales, sleep and resume, monitors plugged in and out, Remote Desktop and Windows 10 are
   covered by tests of the logic, not yet by runs on such machines.

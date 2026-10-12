@@ -56,6 +56,8 @@ mod soak;
 #[cfg(windows)]
 mod state;
 #[cfg(windows)]
+mod titlebar;
+#[cfg(windows)]
 mod uia;
 #[cfg(windows)]
 mod watchdog;
@@ -88,7 +90,7 @@ fn main() {
     }
     let Some(command) = args.first().cloned() else {
         eprintln!(
-            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace> [--out file.json]"
+            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace|titlebar> [--out file.json]"
         );
         std::process::exit(2);
     };
@@ -116,6 +118,7 @@ fn main() {
         "idle" => idle::run(&args),
         "dummy" => dummy::run(&args),
         "workspace" => workspace::run(&args),
+        "titlebar" => titlebar::run(&args),
         _ => Err(format!("unknown command {command}")),
     };
     match result {

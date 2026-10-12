@@ -52,9 +52,9 @@ the engine gathers windows and applies the result.
 - **Saving** (S in the switcher, then a name) turns the windows on screen into a workspace.
   Windows that tile, side by side without overlapping, become zones named after their app;
   windows stacked exactly on top of each other share a zone; maximised windows and windows
-  floating over others keep their own place. Windows in zones then move inside them, below the
-  band that carries the zone's tag. Saving under an existing name updates that workspace and
-  keeps the zones its windows sit in.
+  floating over others keep their own place. Windows in zones then fill them, but for a small
+  gap between zones. Saving under an existing name updates that workspace and keeps the zones
+  its windows sit in.
 - **Being in a zone** has one rule everywhere (`holds`): the window's centre is in the zone and
   the window and the zone's window area cover at least 70% of each other. A browser that will
   not shrink to a narrow zone still counts; a small window floating over a zone does not.
@@ -68,6 +68,11 @@ the engine gathers windows and applies the result.
 - **Frames**: every window in a zone of the open workspace wears a ring in the zone's colour and
   a tag with its name, drawn right above the window in the stacking order, so windows that
   cover it cover its frame too. Frames follow moves through window events, hooked per process.
+- **Tags in title bars** (ADR 0011): the tag goes in a free stretch of the window's own title
+  bar, against its buttons. Mosaïk finds the free stretches by asking the window what is under a
+  row of points, as Windows does wherever the pointer goes (`WM_NCHITTEST`), on a thread of its
+  own (`titles`). A window whose title bar has no room wears its tag above it, below a band at
+  the top of its zone; a setting puts every tag above its window.
 - **Drag to snap**: while a window is dragged by its title bar, the open workspace's zones show
   under it; the zone under the pointer (or within 48 px) is tinted, and the window is pulled into
   it on release. Shift moves freely; a setting swaps that. A window that was not part of the
@@ -87,8 +92,9 @@ the engine gathers windows and applies the result.
 ## How tabs behave
 
 A tab group is several windows of any apps sharing one place, one visible at a time, with a
-strip in the band above them: the zone's tag, then one chip per tab. Mosaïk never reparents
-another app's window; background tabs are hidden with the shell's cloak (ADR 0003).
+strip in the visible tab's title bar (or in a band above it, ADR 0011): the zone's tag, then one
+chip per tab. Mosaïk never reparents another app's window; background tabs are hidden with the
+shell's cloak (ADR 0003).
 
 - **Making a group**: drag a window by its title bar onto another window's tag, or onto a
   group's strip; a "Drop to add" slot shows where it will go. It takes the group's place and
@@ -111,9 +117,9 @@ another app's window; background tabs are hidden with the shell's cloak (ADR 000
   its place to the tab on its right, else on its left. A background tab an app brings forward
   (a notification, a link) shows for now; the layout keeps the user's choice.
 - **Layouts**: groups, their tab order and the tab that shows are part of the workspace, saved
-  where the visible tab is; a group's windows sit below a band with room for the strip even
-  when tags are hidden. Opening a workspace moves only the tabs that show; a tab goes to its
-  group's place when it is shown.
+  where the visible tab is. With tags above windows, a group's windows sit below a band with
+  room for the strip even when tags are hidden. Opening a workspace moves only the tabs that
+  show; a tab goes to its group's place when it is shown.
 
 ## Crates
 

@@ -64,7 +64,7 @@ pub fn read(hwnd: HWND) -> Option<Reading> {
 
 /// Where the buttons Windows draws in `hwnd`'s title bar are, on screen; `None` when Windows
 /// draws none there (apps that draw their own title bar).
-fn caption_buttons(hwnd: HWND) -> Option<Rect> {
+pub fn caption_buttons(hwnd: HWND) -> Option<Rect> {
     let mut r = RECT::default();
     // SAFETY: the attribute is a RECT and the buffer is exactly one RECT.
     unsafe {
@@ -113,8 +113,8 @@ pub fn hit_code(root: HWND, p: Point) -> Option<i32> {
 }
 
 /// The deepest visible, enabled child of `root` under `p` (`root` itself outside its client
-/// area, where its title bar may be).
-fn deepest_child(root: HWND, p: Point) -> HWND {
+/// area, where its title bar may be): the window a point is asked of first.
+pub fn deepest_child(root: HWND, p: Point) -> HWND {
     let mut h = root;
     for _ in 0..DEPTH {
         let mut pt = POINT { x: p.x, y: p.y };

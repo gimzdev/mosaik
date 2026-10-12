@@ -222,8 +222,19 @@ impl Canvas {
         Ok(f)
     }
 
-    /// Width of `text` in pixels at `size` (pixels) and `weight`.
+    /// The width a box needs to show all of `text` at `size` (pixels) and `weight`, in whole
+    /// pixels with one to spare: a box exactly as wide as the text's measured width can still
+    /// get the text cut short with an ellipsis (job 0063: a tab's chip read "Probe Termi…").
     pub fn text_width(&mut self, text: &str, size: f32, weight: Weight) -> f32 {
+        let measured = self.measured_width(text, size, weight);
+        if measured > 0.0 {
+            measured.ceil() + 1.0
+        } else {
+            0.0
+        }
+    }
+
+    fn measured_width(&mut self, text: &str, size: f32, weight: Weight) -> f32 {
         let Ok(format) = self.format(size, weight) else {
             return 0.0;
         };

@@ -16,3 +16,4 @@ what it costs. Measurements behind a decision are summarised in the record and i
 | [0008](0008-store-distribution.md) | Distribution through the Microsoft Store, downloaded from mosaïk.com |
 | [0009](0009-tabs-one-rule.md) | One rule for what tabs show, applied on a hiding thread |
 | [0010](0010-drags-and-other-arrangers.md) | Move or resize from the pointer Windows shows; Windows' snapping and other arrangers named once, never fought |
+| [0011](0011-tags-in-title-bars.md) | Tags and tab strips in each window's own title bar, read from what the app answers; a band only where there is no room |
