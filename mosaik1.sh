@@ -15,8 +15,7 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    ./mosaik1.sh --no-start  install, don't start anything
 #    ./mosaik1.sh --fresh     reinstall dependencies, rebuild from scratch
 #    ./mosaik1.sh --port 4000 another port (default 3000, or the next free one)
-#    ./mosaik1.sh --dir ~/m   install somewhere else (default ./site in the
-#                             Mosaïk repo, otherwise ./mosaik)
+#    ./mosaik1.sh --dir ~/m   install somewhere else (default ./site)
 #
 #  Updating
 #    This file is the source of truth. Change the settings below and run it
@@ -101,37 +100,27 @@ ok "Node.js $NODE_VERSION, npm $(npm -v)"
 # ── Where to install ─────────────────────────────────────────────────────
 MARKER=".mosaik-site"
 MANIFEST=".mosaik-files"
-ORIG_PWD="$(pwd -P)"
 if [ -z "$APP_DIR" ]; then
   if [ -f "$MARKER" ]; then APP_DIR="."
-  elif [ -f "site/$MARKER" ]; then APP_DIR="./site" # the Mosaïk repo: the site lives in site/
-  else APP_DIR="./mosaik"; fi
+  else APP_DIR="./site"; fi
 fi
 mkdir -p "$(dirname "$APP_DIR")"
 APP_DIR="$(cd "$(dirname "$APP_DIR")" && pwd -P)/$(basename "$APP_DIR")"
 case "$APP_DIR" in */.) APP_DIR="${APP_DIR%/.}" ;; esac
 case "$APP_DIR" in ""|/|"$HOME") die "Refusing to install into '$APP_DIR'." ;; esac
 
-INSTALL="fresh"; BACKUP=""
+INSTALL="fresh"
 if [ -d "$APP_DIR" ]; then
   if [ -f "$APP_DIR/$MARKER" ]; then
     INSTALL="update"
   elif [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then
-    [ "$APP_DIR" != "$ORIG_PWD" ] || die "$APP_DIR is not empty and is not a Mosaïk site. Pick another folder with --dir."
-    BACKUP="${APP_DIR}.backup-$(date +%Y%m%d-%H%M%S)"
-    mv "$APP_DIR" "$BACKUP"
-    INSTALL="fresh, old folder moved aside"
-    warn "Found something else in $APP_DIR. Moved it to $BACKUP (nothing was deleted)."
+    # Never move or touch a folder the script did not make.
+    die "$APP_DIR already holds something else. Pick another folder with --dir (nothing was changed)."
   fi
 fi
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 step "Writing the site into $APP_DIR ($INSTALL)"
-
-if [ -n "$BACKUP" ]; then
-  [ ! -d "$BACKUP/public" ] || { cp -R "$BACKUP/public" public && note "Kept public/ from the old folder"; }
-  [ ! -d "$BACKUP/.vercel" ] || { cp -R "$BACKUP/.vercel" .vercel && note "Kept the Vercel link"; }
-fi
 
 rmdir public 2>/dev/null || true
 
