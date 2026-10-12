@@ -10,6 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 use mosaik_core::classify::{Rules, Verdict, classify};
 use mosaik_core::geometry::Rect;
 use mosaik_core::journal::HideMethod;
+use mosaik_core::place::fit_size;
 use mosaik_core::titlebar::Fit;
 use mosaik_win::events::pump_until;
 use mosaik_win::hide::{Hider, ShellViews};
@@ -18,8 +19,9 @@ use mosaik_win::place::{edge_error, move_frame};
 use mosaik_win::{monitors, titlebar, window};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, HTCAPTION, SW_MAXIMIZE, SW_SHOWNOACTIVATE, ShowWindow, WINDOW_EX_STYLE,
-    WS_OVERLAPPEDWINDOW,
+    DefWindowProcW, HTCAPTION, SW_MAXIMIZE, SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE, ShowWindow,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_OVERLAPPEDWINDOW,
+    WS_SYSMENU,
 };
 
 /// One test at a time on the desktop: windows moved at the same time would cover each other.
@@ -40,11 +42,15 @@ struct TestWindow(HWND);
 
 impl TestWindow {
     fn new(title: &str) -> Self {
+        Self::with_style(title, WS_OVERLAPPEDWINDOW)
+    }
+
+    fn with_style(title: &str, style: WINDOW_STYLE) -> Self {
         let class = WindowClass::register("MosaikTestWindow", Some(plain)).expect("window class");
         let work = monitors::topology().expect("monitors").primary().work_area;
         let start = Rect::from_origin_size(work.left + 120, work.top + 120, 640, 480);
         let hwnd = class
-            .create(title, WS_OVERLAPPEDWINDOW, WINDOW_EX_STYLE(0), start, None)
+            .create(title, style, WINDOW_EX_STYLE(0), start, None)
             .expect("window");
         // SAFETY: shows the test's own window.
         let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
@@ -106,6 +112,53 @@ fn a_maximised_window_comes_back_into_its_place() {
     let g = window::geometry(w.0).expect("geometry");
     assert!(!g.maximized);
     assert_eq!(edge_error(g.frame, target), 0, "{:?}", g.frame);
+}
+
+#[test]
+fn a_window_without_a_frame_to_resize_it_by_keeps_its_size() {
+    let _desktop = desktop();
+    // As a game in a window, or a dialog: a title bar, no frame to resize it by.
+    let w = TestWindow::with_style(
+        "Mosaïk test: fixed size",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+    );
+    let size = window::frame_rect(w.0).expect("frame").size();
+    let work = work_area();
+    // A place larger than the window and one smaller: it goes to the middle, at its own size.
+    for target in [
+        Rect::new(
+            work.left,
+            work.top,
+            work.left + work.width() / 2 + 100,
+            work.bottom,
+        ),
+        Rect::from_origin_size(work.left + 300, work.top + 200, 400, 300),
+    ] {
+        let moved = move_frame(w.0, target).expect("moved");
+        let frame = window::frame_rect(w.0).expect("frame");
+        assert_eq!(frame.size(), size, "{target:?}: {frame:?}");
+        assert_eq!(
+            edge_error(frame, fit_size(target, size, work)),
+            0,
+            "{target:?}: {frame:?}"
+        );
+        assert!(moved.constrained && moved.error == 0, "{moved:?}");
+    }
+    // Minimised, it comes back at its own size too.
+    // SAFETY: minimises the test's own window.
+    let _ = unsafe { ShowWindow(w.0, SW_SHOWMINNOACTIVE) };
+    pump_until(300, || false);
+    let target = Rect::new(work.left, work.top, work.left + work.width() / 2, work.bottom);
+    let moved = move_frame(w.0, target).expect("moved");
+    let g = window::geometry(w.0).expect("geometry");
+    assert!(moved.restored && !g.minimized, "{moved:?}");
+    assert_eq!(g.frame.size(), size, "{:?}", g.frame);
+    assert_eq!(
+        edge_error(g.frame, fit_size(target, size, work)),
+        0,
+        "{:?}",
+        g.frame
+    );
 }
 
 #[test]

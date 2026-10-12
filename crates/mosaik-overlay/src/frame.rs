@@ -164,8 +164,9 @@ impl Frame {
                 TagPlace::Band(band) => {
                     // Right above the window, as when it sits below the band; never higher than
                     // the band, so a window whose app keeps a height that runs into the band has
-                    // its tag in the band, over its top edge.
-                    let left = frame.left.max(band.left);
+                    // its tag in the band, over its top edge. A little in from the band's left
+                    // end, as a strip's tag is.
+                    let left = frame.left.max(band.left) + px(4.0 * s);
                     let at = Point::new(left, frame.top.max(band.bottom) - above);
                     let room = (band.right - left).min(frame.width());
                     self.tag.show(canvas, at, &tag, room, stack)?;

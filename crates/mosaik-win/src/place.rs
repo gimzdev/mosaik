@@ -6,9 +6,11 @@
 //!
 //! Measured on real apps (docs/STATUS.md, step 1): Chrome and Edge will not go below about
 //! 500 px wide and Windows Terminal below about 466 px, so a window may keep a size other than
-//! the target's; it is then fitted on screen with [`fit_size`]. Some apps also move themselves
-//! after a restore (VS Code went back to its previous position 300 ms after being restored into
-//! a zone), so callers check the result again once the app has settled ([`settle`]).
+//! the target's; it is then fitted on screen with [`fit_size`]. A window without a frame to
+//! resize it by (a game, a dialog) is never resized: it keeps its size in the middle of the
+//! target. Some apps also move themselves after a restore (VS Code went back to its previous
+//! position 300 ms after being restored into a zone), so callers check the result again once
+//! the app has settled ([`settle`]).
 
 use mosaik_core::geometry::{Insets, Rect, Size};
 use mosaik_core::place::{fit_size, window_rect_for};
@@ -19,8 +21,8 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, GetWindowLongPtrW, GetWindowPlacement, IsIconic, IsZoomed, SM_CXPADDEDBORDER, SM_CXSIZEFRAME,
-    SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-    SWP_NOZORDER, SetWindowPlacement, SetWindowPos, WINDOWPLACEMENT, WPF_ASYNCWINDOWPLACEMENT, WS_THICKFRAME,
+    SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
+    SetWindowPlacement, SetWindowPos, WINDOWPLACEMENT, WPF_ASYNCWINDOWPLACEMENT, WS_THICKFRAME,
 };
 
 use crate::error::{Context, Error, Result};
@@ -95,14 +97,21 @@ fn to_workspace(r: Rect) -> Rect {
     r.offset(-dx, -dy)
 }
 
+/// Whether the user can resize `hwnd` by its frame (`WS_THICKFRAME`). A window without one (a
+/// game, a dialog) was not made to change size.
+fn has_resize_frame(hwnd: HWND) -> bool {
+    // SAFETY: read-only query; 0 for a window that is gone.
+    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) };
+    style & isize::try_from(WS_THICKFRAME.0).unwrap_or(0) != 0
+}
+
 /// The invisible borders a resizable window will most likely have once restored, for its DPI
 /// (7 px at 100% on the left, right and bottom). Only a first guess: the move is measured and
 /// corrected right after.
 fn likely_insets(hwnd: HWND) -> Insets {
-    // SAFETY: read-only queries on a valid window.
-    let (style, dpi) = unsafe { (GetWindowLongPtrW(hwnd, GWL_STYLE), GetDpiForWindow(hwnd)) };
-    let resizable = style & isize::try_from(WS_THICKFRAME.0).unwrap_or(0) != 0;
-    if !resizable || dpi == 0 {
+    // SAFETY: read-only query on a valid window.
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    if !has_resize_frame(hwnd) || dpi == 0 {
         return Insets::default();
     }
     // SAFETY: GetSystemMetricsForDpi has no preconditions.
@@ -114,59 +123,55 @@ fn likely_insets(hwnd: HWND) -> Insets {
     Insets::new(b, 0, b, b)
 }
 
-fn set_pos(hwnd: HWND, r: Rect, asynchronous: bool) -> Result<()> {
-    let mut flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
-    if asynchronous {
-        // Never block on an app that is not answering.
-        flags |= SWP_ASYNCWINDOWPOS;
-    }
-    // SAFETY: plain SetWindowPos on a top-level window; fails cleanly if it is gone or protected.
-    unsafe { SetWindowPos(hwnd, None, r.left, r.top, r.width(), r.height(), flags) }.ctx("SetWindowPos")
-}
-
-/// Restores a maximised or minimised window straight to a normal rectangle, without activating
-/// it and without a restore animation to its old place first.
-///
-/// Synchronous unless `asynchronous`: an asynchronous restore can land after the corrective
-/// move that follows it (measured with Chrome: the frame ended 7 px inside its zone).
-fn restore_to(hwnd: HWND, window: Rect, asynchronous: bool) -> Result<()> {
+fn placement(hwnd: HWND) -> Result<WINDOWPLACEMENT> {
     let mut wp = WINDOWPLACEMENT {
         length: u32::try_from(std::mem::size_of::<WINDOWPLACEMENT>()).unwrap_or(0),
         ..Default::default()
     };
     // SAFETY: sized struct and a valid window.
     unsafe { GetWindowPlacement(hwnd, &mut wp) }.ctx("GetWindowPlacement")?;
-    let ws = to_workspace(window);
-    wp.rcNormalPosition = win_rect(ws);
+    Ok(wp)
+}
+
+/// Where a window of `size` goes for `target`: in its middle, kept on screen.
+fn fitted(target: Rect, size: Size) -> Rect {
+    monitor_of(target).map_or_else(
+        || Rect::from_origin_size(target.left, target.top, size.width, size.height),
+        |(_, work)| fit_size(target, size, work),
+    )
+}
+
+fn set_pos(hwnd: HWND, r: Rect) -> Result<()> {
+    let flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+    // SAFETY: plain SetWindowPos on a top-level window; fails cleanly if it is gone or protected.
+    unsafe { SetWindowPos(hwnd, None, r.left, r.top, r.width(), r.height(), flags) }.ctx("SetWindowPos")
+}
+
+/// Restores a maximised or minimised window straight to a normal rectangle, without activating
+/// it and without a restore animation to its old place first. Synchronous: a restore that
+/// landed after the corrective move that follows it left Chrome's frame 7 px inside its zone.
+fn restore_to(hwnd: HWND, window: Rect) -> Result<()> {
+    let mut wp = placement(hwnd)?;
+    wp.rcNormalPosition = win_rect(to_workspace(window));
     wp.showCmd = u32::try_from(SW_SHOWNOACTIVATE.0).unwrap_or(4);
-    if asynchronous {
-        wp.flags |= WPF_ASYNCWINDOWPLACEMENT;
-    } else {
-        wp.flags &= !WPF_ASYNCWINDOWPLACEMENT;
-    }
+    wp.flags &= !WPF_ASYNCWINDOWPLACEMENT;
     // SAFETY: sized struct filled by GetWindowPlacement and edited above.
     unsafe { SetWindowPlacement(hwnd, &wp) }.ctx("SetWindowPlacement")
 }
 
 /// Moves a window without resizing it.
-fn set_origin(hwnd: HWND, x: i32, y: i32, asynchronous: bool) -> Result<()> {
-    let mut flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
-    if asynchronous {
-        flags |= SWP_ASYNCWINDOWPOS;
-    }
+fn set_origin(hwnd: HWND, x: i32, y: i32) -> Result<()> {
+    let flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
     // SAFETY: plain SetWindowPos on a top-level window; fails cleanly if it is gone or protected.
     unsafe { SetWindowPos(hwnd, None, x, y, 0, 0, flags) }.ctx("SetWindowPos")
 }
 
 /// Moves `hwnd` so its visible frame covers `target`. Synchronous: when it returns, the window
-/// is where it will stay (used by tests and probes, and for single moves).
+/// is where it will stay (the engine moves each window on a thread of its own, `mover.rs`).
+///
+/// A window without a frame to resize it by keeps its own size, in the middle of `target`: a
+/// game or a dialog stretched by someone else draws blurred, cut off or not at all.
 pub fn move_frame(hwnd: HWND, target: Rect) -> Result<Moved> {
-    move_frame_with(hwnd, target, false)
-}
-
-/// Like [`move_frame`], optionally without waiting for the app (for switching many windows: a
-/// hung app must not hold up the others). The result is then measured right away and may lag.
-pub fn move_frame_with(hwnd: HWND, target: Rect, asynchronous: bool) -> Result<Moved> {
     if !exists(hwnd) {
         return Err(Error::WindowGone);
     }
@@ -174,39 +179,55 @@ pub fn move_frame_with(hwnd: HWND, target: Rect, asynchronous: bool) -> Result<M
     // SAFETY: read-only state queries.
     let (zoomed, iconic) = unsafe { (IsZoomed(hwnd).as_bool(), IsIconic(hwnd).as_bool()) };
     let restored = zoomed || iconic;
+    let fixed = !has_resize_frame(hwnd);
     let mut passes = 0;
     if restored {
         // A maximised window's insets are not those of its normal state: restore it into a
-        // first guess, then measure and correct below.
-        restore_to(hwnd, window_rect_for(target, likely_insets(hwnd)), asynchronous)?;
+        // first guess, then measure and correct below. One of a fixed size keeps that size.
+        let guess = if fixed {
+            let r = placement(hwnd)?.rcNormalPosition;
+            fitted(target, Size::new(r.right - r.left, r.bottom - r.top))
+        } else {
+            window_rect_for(target, likely_insets(hwnd))
+        };
+        restore_to(hwnd, guess)?;
         passes += 1;
     }
+    let goal = if fixed {
+        fitted(target, frame_rect(hwnd).ok_or(Error::WindowGone)?.size())
+    } else {
+        target
+    };
     // SAFETY: read-only.
     let dpi_before = unsafe { GetDpiForWindow(hwnd) };
-    let insets = insets_now().ok_or(Error::WindowGone)?;
-    set_pos(hwnd, window_rect_for(target, insets), asynchronous)?;
+    let place = |goal: Rect| -> Result<()> {
+        let w = window_rect_for(goal, insets_now().ok_or(Error::WindowGone)?);
+        if fixed {
+            set_origin(hwnd, w.left, w.top)
+        } else {
+            set_pos(hwnd, w)
+        }
+    };
+    place(goal)?;
     passes += 1;
     // SAFETY: read-only.
     let dpi_after = unsafe { GetDpiForWindow(hwnd) };
     let mut frame = frame_rect(hwnd).ok_or(Error::WindowGone)?;
     // The window changed DPI (crossed monitors) or its borders changed: its insets are different
     // now, so place it again with the new ones.
-    if dpi_after != dpi_before || edge_error(frame, target) > 0 {
-        let insets = insets_now().ok_or(Error::WindowGone)?;
-        set_pos(hwnd, window_rect_for(target, insets), asynchronous)?;
+    if dpi_after != dpi_before || edge_error(frame, goal) > 0 {
+        place(goal)?;
         passes += 1;
         frame = frame_rect(hwnd).ok_or(Error::WindowGone)?;
     }
-    // The app kept a size of its own: fit that size on screen instead of letting it hang off
-    // the edge.
-    let mut wanted = target;
-    let constrained = frame.width() != target.width() || frame.height() != target.height();
-    if constrained && let Some((_, work)) = monitor_of(target) {
-        wanted = fit_size(target, Size::new(frame.width(), frame.height()), work);
+    // The app kept a size of its own (a minimum, or a new one for the monitor's DPI): fit that
+    // size in the target instead of letting it hang off the edge.
+    let mut wanted = goal;
+    if frame.size() != goal.size() {
+        wanted = fitted(target, frame.size());
         if wanted != frame {
-            let insets = insets_now().ok_or(Error::WindowGone)?;
-            let w = window_rect_for(wanted, insets);
-            set_origin(hwnd, w.left, w.top, asynchronous)?;
+            let w = window_rect_for(wanted, insets_now().ok_or(Error::WindowGone)?);
+            set_origin(hwnd, w.left, w.top)?;
             passes += 1;
             frame = frame_rect(hwnd).ok_or(Error::WindowGone)?;
         }
@@ -218,7 +239,7 @@ pub fn move_frame_with(hwnd: HWND, target: Rect, asynchronous: bool) -> Result<M
         error: edge_error(frame, wanted),
         passes,
         restored,
-        constrained,
+        constrained: frame.size() != target.size(),
     })
 }
 
@@ -282,12 +303,7 @@ pub fn settle(hwnd: HWND, target: Rect, budget_ms: u32) -> Result<Settled> {
 /// Maximises a window on the monitor containing `on` (a point or small rectangle on it),
 /// without activating it.
 pub fn maximize_on(hwnd: HWND, on: Rect) -> Result<()> {
-    let mut wp = WINDOWPLACEMENT {
-        length: u32::try_from(std::mem::size_of::<WINDOWPLACEMENT>()).unwrap_or(0),
-        ..Default::default()
-    };
-    // SAFETY: sized struct and a valid window.
-    unsafe { GetWindowPlacement(hwnd, &mut wp) }.ctx("GetWindowPlacement")?;
+    let mut wp = placement(hwnd)?;
     // Moving the normal rectangle onto the target monitor makes Windows maximise it there.
     let normal = mosaik_core::geometry::Rect::new(
         wp.rcNormalPosition.left,
