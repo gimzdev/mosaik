@@ -17,7 +17,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use mosaik_core::geometry::{Rect, Size};
-use mosaik_core::titlebar::{self, Fit, TitleRoom};
+use mosaik_core::titlebar::{self, BandStep, Fit, TitleRoom};
 use mosaik_core::window::WindowHandle;
 use mosaik_core::zone::FrameStyle;
 use mosaik_win::titlebar::Reading;
@@ -71,22 +71,26 @@ struct Known {
     stale: bool,
 }
 
-/// The thread that reads title bars, one window at a time, in the order asked.
+/// The thread that reads title bars, one window at a time, in the order asked, each after the
+/// wait it was asked with (a reading that is to confirm another).
 struct Reader {
-    jobs: mpsc::Sender<WindowHandle>,
+    jobs: mpsc::Sender<(WindowHandle, Duration)>,
     answers: mpsc::Receiver<(WindowHandle, Option<Reading>)>,
 }
 
 impl Reader {
     /// Starts the thread; it posts `WM_EVENTS` to the engine's window (`wake`) with each reading.
     fn start(wake: isize) -> Result<Self, String> {
-        let (jobs, job_rx) = mpsc::channel::<WindowHandle>();
+        let (jobs, job_rx) = mpsc::channel::<(WindowHandle, Duration)>();
         let (answer_tx, answers) = mpsc::channel();
         std::thread::Builder::new()
             .name("mosaik-titles".into())
             .spawn(move || {
                 // Ends when the engine drops its end of the channel.
-                while let Ok(w) = job_rx.recv() {
+                while let Ok((w, wait)) = job_rx.recv() {
+                    if !wait.is_zero() {
+                        std::thread::sleep(wait);
+                    }
                     let reading = mosaik_win::titlebar::read(window::hwnd(w));
                     if answer_tx.send((w, reading)).is_err() {
                         return;
@@ -112,6 +116,9 @@ pub(crate) struct Titles {
     asked: HashSet<WindowHandle>,
     /// Windows wearing their tag above them for want of room in their title bar.
     pub(crate) banded: HashSet<WindowHandle>,
+    /// Windows a reading would move into (`true`) or out of their band, and since when: they
+    /// move once a reading taken late enough agrees (`titlebar::band_step`).
+    proposed: HashMap<WindowHandle, (bool, Instant)>,
     /// Tag widths by zone name and DPI (measuring text lays it out).
     tag_widths: HashMap<(String, u32), i32>,
 }
@@ -131,11 +138,13 @@ impl Titles {
     pub(crate) fn forget(&mut self, h: WindowHandle) {
         self.known.remove(&h);
         self.banded.remove(&h);
+        self.proposed.remove(&h);
     }
 
     /// Forgets which windows are banded (tags moved between title bars and bands).
     pub(crate) fn unband_all(&mut self) {
         self.banded.clear();
+        self.proposed.clear();
     }
 
     /// How many windows' title bars are being read.
@@ -173,6 +182,11 @@ impl Engine {
 
     /// Asks the reader for `h`'s title bar, unless it is being read already.
     fn ask_title(&mut self, h: WindowHandle) {
+        self.ask_title_after(h, Duration::ZERO);
+    }
+
+    /// Asks the reader for `h`'s title bar `wait` from now, unless it is being read already.
+    fn ask_title_after(&mut self, h: WindowHandle, wait: Duration) {
         if self.titles.asked.contains(&h) {
             return;
         }
@@ -192,7 +206,7 @@ impl Engine {
             }
         }
         if let Some(r) = &self.titles.reader
-            && r.jobs.send(h).is_ok()
+            && r.jobs.send((h, wait)).is_ok()
         {
             self.titles.asked.insert(h);
         }
@@ -231,7 +245,7 @@ impl Engine {
                     size: reading.frame.size(),
                     title: reading.title,
                     room,
-                    at: Instant::now(),
+                    at: reading.at,
                     failed,
                     stale: false,
                 },
@@ -249,7 +263,8 @@ impl Engine {
             if outdated {
                 self.ask_title(w);
             }
-            if changed {
+            // A change of band waiting for this reading is decided now, also when nothing changed.
+            if changed || self.titles.proposed.contains_key(&w) {
                 read.push(w);
             }
         }
@@ -383,8 +398,31 @@ impl Engine {
                 continue;
             }
             let want = self.wants_band(h);
-            if want == self.titles.banded.contains(&h) {
-                continue;
+            let read_at = self.titles.known.get(&h).map(|k| k.at);
+            let proposed = self.titles.proposed.get(&h).copied();
+            match titlebar::band_step(
+                self.titles.banded.contains(&h),
+                want,
+                read_at,
+                proposed,
+                Instant::now(),
+            ) {
+                BandStep::Keep => {
+                    self.titles.proposed.remove(&h);
+                    continue;
+                }
+                BandStep::Propose => {
+                    self.titles.proposed.insert(h, (want, Instant::now()));
+                    self.ask_title_after(h, titlebar::CONFIRM);
+                    continue;
+                }
+                BandStep::Wait(wait) => {
+                    self.ask_title_after(h, wait);
+                    continue;
+                }
+                BandStep::Change => {
+                    self.titles.proposed.remove(&h);
+                }
             }
             // The zone it is in, found before it moves.
             let zone = window::geometry(window::hwnd(h)).and_then(|g| {

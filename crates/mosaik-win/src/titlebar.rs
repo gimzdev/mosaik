@@ -42,7 +42,8 @@ pub struct Reading {
     pub title: String,
     /// `None`: the app did not answer in time.
     pub room: Option<TitleRoom>,
-    /// How long reading it took.
+    /// When reading it began, and how long it took.
+    pub at: std::time::Instant,
     pub took: std::time::Duration,
 }
 
@@ -64,6 +65,7 @@ pub fn read(hwnd: HWND) -> Option<Reading> {
         frame: g.frame,
         title,
         room,
+        at: start,
         took: start.elapsed(),
     })
 }

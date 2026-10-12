@@ -8,6 +8,8 @@
 //! whole zone. A window with no stretch wide enough wears its tag above it, in a band, as it does
 //! when tags are set to go above windows.
 
+use std::time::{Duration, Instant};
+
 use crate::geometry::{Point, Rect, Size, scale_for_dpi};
 use crate::zone::CHIP_HEIGHT;
 
@@ -207,6 +209,53 @@ impl TitleRoom {
     }
 }
 
+/// How long after a change of band is proposed a reading must be taken to confirm it. Apps
+/// answer for their title bars differently for a moment while they show again (job 0070:
+/// Calculator, shown again as a tab, had room for a strip in one reading and not in the next,
+/// 40 ms later): a change on one reading moved windows twice.
+pub const CONFIRM: Duration = Duration::from_millis(250);
+
+/// What to do about a window's band after its title bar is read ([`band_step`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BandStep {
+    /// It wears what it needs; a change proposed before is dropped.
+    Keep,
+    /// The reading asks for a change: propose it, and read again [`CONFIRM`] later.
+    Propose,
+    /// A change is proposed and no reading taken late enough confirms it yet: read again after
+    /// this long.
+    Wait(Duration),
+    /// A reading taken late enough still asks for it: move the window.
+    Change,
+}
+
+/// Whether a window goes into or out of its band now. `banded`: whether it wears its tag above
+/// it now; `want`: whether its title bar, last read at `read_at` (`None`: never), says it must;
+/// `proposed`: the change proposed before, and when. A window moves only when a reading taken at
+/// least [`CONFIRM`] after the change was proposed still asks for it.
+pub fn band_step(
+    banded: bool,
+    want: bool,
+    read_at: Option<Instant>,
+    proposed: Option<(bool, Instant)>,
+    now: Instant,
+) -> BandStep {
+    if want == banded {
+        return BandStep::Keep;
+    }
+    match proposed {
+        Some((change, since)) if change == want => {
+            let due = since + CONFIRM;
+            if read_at.is_some_and(|at| at >= due) {
+                BandStep::Change
+            } else {
+                BandStep::Wait(due.saturating_duration_since(now))
+            }
+        }
+        _ => BandStep::Propose,
+    }
+}
+
 /// Whether a window must wear its tag, or its group's strip, above it, below a band in its
 /// zone: its title bar, read while its frame was `read` in size and now `frame`, has no stretch
 /// with room for `fit`. Read at another size, its stretches are only a guess (each keeps to the
@@ -338,6 +387,43 @@ mod tests {
         })
         .unwrap();
         assert!(needs_band(&again, joined.size(), joined, strip, false));
+    }
+
+    #[test]
+    fn a_band_changes_only_when_a_later_reading_agrees() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        // Calculator, banded, shown again as a tab (job 0070): one reading, taken as it showed,
+        // found room for its strip; the next, 40 ms later, did not.
+        assert_eq!(
+            band_step(true, false, Some(ms(0)), None, ms(0)),
+            BandStep::Propose
+        );
+        let proposed = Some((false, ms(0)));
+        assert_eq!(
+            band_step(true, true, Some(ms(40)), proposed, ms(40)),
+            BandStep::Keep
+        );
+        // Had it still found room in a reading taken late enough, it would leave its band then,
+        // and not before.
+        assert_eq!(
+            band_step(true, false, Some(ms(40)), proposed, ms(40)),
+            BandStep::Wait(Duration::from_millis(210))
+        );
+        assert_eq!(
+            band_step(true, false, Some(ms(260)), proposed, ms(270)),
+            BandStep::Change
+        );
+        // A reading asking for the other change starts over.
+        assert_eq!(
+            band_step(false, true, Some(ms(300)), proposed, ms(300)),
+            BandStep::Propose
+        );
+        // Never read: it waits for a reading.
+        assert_eq!(
+            band_step(false, true, None, Some((true, ms(0))), ms(500)),
+            BandStep::Wait(Duration::ZERO)
+        );
     }
 
     #[test]

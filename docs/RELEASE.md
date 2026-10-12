@@ -23,6 +23,11 @@ on Windows 11 and, if one is at hand, Windows 10 22H2:
 - 125%, 150% and 200% on the main monitor: frames, tags and strips sharp and in place.
 - Sleep and wake; sign out and in; a Remote Desktop session into the PC (needs Windows Pro).
 - Windows' "Snap windows" off and on.
+- A contrast theme (Settings, Accessibility, Contrast themes): Mosaïk's window, the switcher,
+  tags and tab strips readable; then back to none. (Light and dark are checked by
+  `mosaik-probe ui-tour`; contrast themes are a Windows setting the probes do not change.)
+- Narrator on Mosaïk's window: each page's controls are read with their names (the probe lists
+  what UI Automation gives Narrator; this is the check by ear).
 
 ## 3. Submit to the Microsoft Store (Partner Center)
 

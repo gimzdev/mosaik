@@ -339,7 +339,7 @@ into the zone, 0 px from the zone, in the workspace; onto the code window's tag,
 tabs, 0 px; its tab pulled out into the zone, 0 px. Windows reported mouse capture and no move
 loop for each drag (the engine's log: "the app drags its window itself").
 
-### Tags and tabs in title bars (jobs 0062 to 0064) — ADR 0011
+### Tags and tabs in title bars (jobs 0062 to 0070) — ADR 0011
 
 Tags and tab strips now go in each window's own title bar, in a stretch the window answers
 "caption" for, and windows fill their zones (28 px more each at 100%). The probe windows (classic
@@ -372,13 +372,31 @@ Found and fixed on the way:
   The buttons are now taken from Windows (`DWMWA_CAPTION_BUTTON_BOUNDS`).
 - **A tab's chip cut its title short** ("Probe Termi…", job 0063): a text box exactly as wide as
   the measured text can still get an ellipsis; boxes now have a pixel to spare.
+- **A reading taken while a window moved was kept** (job 0066: VS Code, pulled out of a group,
+  stayed below a band, read at its tab's size): a reading taken at a size the window no longer
+  has is taken again at once.
+- **A guess moved a window twice** (job 0067: Calculator, made the visible tab of a wider group,
+  left its band on a stretch guessed from its narrower size, 224 px instead of 32, and went back
+  24 ms later): only a reading at a window's own size moves it into or out of a band
+  (`titlebar::needs_band`, with a test).
+- **A tag above a window hung over the zone above it** (job 0067: Calculator is at least 502 px
+  high; in a 508 px zone, below the 28 px band, it keeps that height and runs 22 px into the
+  band, and its tag, drawn above the window, covered the bottom of the next zone): tags above
+  windows stay in their zone's band (job 0068: 3 px above the window's top edge, inside the zone).
+- **The probe pressed a chip while its strip was still moving** (job 0066, Git Bash): it now
+  measures and presses only once no title bar is being read (`title_bars_reading` in
+  `mosaikctl state --json`) and two reads 300 ms apart agree.
 
-Where apps' tags went (`--apps`, jobs 0062 and 0063): Notepad, Notepad++, Paint, Edge, Chrome,
-Windows Terminal, Explorer, Word, Excel and Git Bash in their title bars, 0 px from the zone, and
-their strips there too. VS Code's tag fits its one free stretch, left of the command centre; its
-strip does not, so as a group's visible tab it goes below a band, with the strip above it.
-Calculator keeps only 40 px of caption, so it wears its tag above it, below a band. The window
-that moves itself with no caption to grab (`--self-move --no-title-room`) does the same.
+Where apps' tags went (`--apps`, jobs 0062, 0063 and 0067, each app once per run): Notepad,
+Notepad++, Paint, Edge, Chrome, Windows Terminal, Explorer, Word, Excel and Git Bash in their
+title bars, 0 px from the zone at every step (into the zone, made a tab, hidden and shown by its
+chip, pulled out), and their strips there too. VS Code's tag fits its one free stretch, left of
+the command centre; its strip does not, so as a group's visible tab it goes below a band, with
+the strip above it, and pulled out again it wears its tag in its title bar. Calculator keeps only
+40 px of caption, so it wears its tag above it, below a band; in the probe's half-height zone it
+keeps its minimum height (856 x 502 where 856 x 480 was given), 0 px from where that size fits
+best. The window that moves itself with no caption to grab (`--self-move --no-title-room`) wears
+its tag above it too, 0 px from its place.
 
 ### Windows' own snapping (`mosaik-probe workspace --drag`, jobs 0048 and 0051)
 
