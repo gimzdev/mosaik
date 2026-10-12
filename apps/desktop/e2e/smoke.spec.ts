@@ -83,6 +83,29 @@ test('zones can be resized from the keyboard and saved', async ({ page }) => {
   await windowDoesNotScroll(page);
 });
 
+test('Arrange puts the windows in zones and can be undone', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Arrange windows' }).click();
+  await expect(page.getByText('Arranged 5 windows in 3 zones; 2 windows as tabs.')).toBeVisible();
+  await page.getByRole('button', { name: 'Undo arrange' }).click();
+  await expect(page.getByText('Windows are back where they were.')).toBeVisible();
+  await accessible(page);
+});
+
+test('the vertical presets: two stacked zones beside a half, and rows', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
+  await page.getByRole('button', { name: 'Start from a preset' }).click();
+  await page.getByRole('button', { name: 'Two stacked beside half' }).click();
+  await expect(page.getByRole('separator')).toHaveCount(2);
+  await expect(page.getByRole('separator', { name: /^Line right of .+ and .+, left of / })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Start from a preset' }).click();
+  await page.getByRole('button', { name: 'Three rows' }).click();
+  await expect(page.getByRole('separator')).toHaveCount(2);
+  await expect(page.getByRole('separator', { name: /^Line between / })).toHaveCount(2);
+  await accessible(page);
+});
+
 test('a zone can be picked and edited, and the page stays accessible', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
