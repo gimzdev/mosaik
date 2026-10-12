@@ -539,6 +539,12 @@ switch time (mean)           32.5 ms      33.1 ms
   `THIRD-PARTY-NOTICES.txt`, `LICENSE.txt` (CC0 1.0 legal code), 21 logos. The first attempt
   failed makeappx's manifest validation (logos named in one size only), fixed. Not yet installed
   from the package: that needs the Store, or Developer Mode on this PC (off).
+- **Release candidate** (job 0075, the owner's steps with Windows PowerShell 5.1 at commit
+  2979949): `mosaik.ps1 test` in 54 s, every test passing (Rust: core 140, IPC 20, Win32 12
+  with the real-window tests, overlays 2, engine 2 with the budget test; clippy clean; the
+  interface's type check, lint, format and 46 component tests); `build` in 115 s; `package`:
+  `Mosaik_1.0.0.0_x64.msix`, 2.6 MB, 28 files; `pack`: the one-file `mosaik.ps1`, 0.9 MB, 223
+  files, checked file by file against the repository.
 - **Licences**: `THIRD-PARTY-NOTICES.txt`, made by `installer/notices.mjs` from what ships: 134
   crates (as `cargo tree` resolves them for Windows x64, without build-only, test-only and
   procedural-macro crates) and 10 packages and fonts of the settings window. The same file is
