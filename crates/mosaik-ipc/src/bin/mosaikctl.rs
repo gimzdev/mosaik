@@ -43,7 +43,18 @@ mod windows_main {
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
     const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-    const USAGE: &str = "usage: mosaikctl <state [--json] | workspaces | switch <workspace> | save [<workspace>] | rescue | switcher | settings | quit | version>";
+    const USAGE: &str = "usage: mosaikctl <command>
+  state [--json]                 monitors, windows and rectangles
+  workspaces [--json]            the saved workspaces
+  switch <workspace>             open a workspace
+  save [<workspace>]             save the windows on screen
+  rename <workspace> <name>      rename a workspace
+  delete <workspace>             delete a workspace (its windows stay)
+  hotkey <workspace> <shortcut>  give a workspace its own shortcut (`none` removes it)
+  check-hotkey <shortcut>        whether a shortcut can be used
+  zones <workspace>              a workspace's zones, as JSON
+  rescue                         bring back every window Mosaïk hid
+  switcher | settings | quit | version";
 
     pub fn run(args: Vec<String>) -> i32 {
         let Some(command) = args.first().map(String::as_str) else {
@@ -66,6 +77,24 @@ mod windows_main {
             ("save", []) => Command::Save { workspace: None },
             ("save", [w]) => Command::Save {
                 workspace: Some((*w).to_owned()),
+            },
+            ("rename", [w, name]) => Command::RenameWorkspace {
+                workspace: (*w).to_owned(),
+                name: (*name).to_owned(),
+            },
+            ("delete", [w]) => Command::DeleteWorkspace {
+                workspace: (*w).to_owned(),
+            },
+            ("hotkey", [w, key]) => Command::SetWorkspaceHotkey {
+                workspace: (*w).to_owned(),
+                hotkey: (!key.eq_ignore_ascii_case("none")).then(|| (*key).to_owned()),
+            },
+            ("check-hotkey", [key]) => Command::CheckHotkey {
+                hotkey: (*key).to_owned(),
+                workspace: None,
+            },
+            ("zones", [w]) => Command::Zones {
+                workspace: (*w).to_owned(),
             },
             ("rescue", []) => Command::Rescue,
             ("switcher", []) => Command::ShowSwitcher,
@@ -202,6 +231,28 @@ mod windows_main {
                     eprintln!("{}", printable(h));
                 }
                 1
+            }
+            Reply::Settings { settings } => print_json(settings),
+            Reply::Zones { .. } => print_json(reply),
+            Reply::Hotkey {
+                hotkey,
+                problem,
+                warnings,
+            } => {
+                if json {
+                    return print_json(reply);
+                }
+                match problem {
+                    Some(p) => {
+                        eprintln!("{hotkey} cannot be used: {}", printable(p));
+                        return 1;
+                    }
+                    None => println!("{hotkey} can be used."),
+                }
+                for w in warnings {
+                    println!("  note: {}", printable(w));
+                }
+                0
             }
         }
     }

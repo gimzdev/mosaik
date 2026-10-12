@@ -253,6 +253,17 @@ pub(crate) fn open(entries: Vec<Entry>, active: Option<WorkspaceId>, shortcut: S
     );
 }
 
+/// The theme the switcher follows from now on (the user changed it in Settings).
+pub(crate) fn set_theme(setting: ThemeSetting) {
+    SWITCHER.with(|cell| {
+        if let Ok(mut slot) = cell.try_borrow_mut()
+            && let Some(s) = slot.as_mut()
+        {
+            s.theme_setting = setting;
+        }
+    });
+}
+
 pub(crate) fn close() {
     let window = SWITCHER.with(|c| c.try_borrow().ok().and_then(|s| s.as_ref().map(|s| s.window)));
     if let Some(w) = window {

@@ -14,3 +14,4 @@ what it costs. Measurements behind a decision are summarised in the record and i
 | [0006](0006-watchdog-and-journal.md) | A separate watchdog, a journal and a marker on every hidden window |
 | [0007](0007-ipc.md) | A per-user named pipe, checked from both ends |
 | [0008](0008-store-distribution.md) | Distribution through the Microsoft Store, downloaded from mosaïk.com |
+| [0009](0009-tabs-one-rule.md) | One rule for what tabs show, applied on a hiding thread |

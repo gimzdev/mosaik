@@ -21,8 +21,6 @@ pub struct Settings {
     /// How background tabs are hidden. `None` lets Mosaïk pick per window (ADR 0003).
     pub tab_hiding: Option<HideMethod>,
     pub switching: SwitchSettings,
-    /// Checking for updates is off until the user chooses, on first run.
-    pub updates: UpdateChoice,
     pub theme: Theme,
     pub start_with_windows: bool,
     pub onboarding_done: bool,
@@ -41,7 +39,6 @@ impl Default for Settings {
             frames: FrameSettings::default(),
             tab_hiding: None,
             switching: SwitchSettings::default(),
-            updates: UpdateChoice::NotAsked,
             theme: Theme::System,
             start_with_windows: false,
             onboarding_done: false,
@@ -102,14 +99,6 @@ impl Default for SwitchSettings {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum UpdateChoice {
-    NotAsked,
-    On,
-    Off,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum Theme {
     /// Follow Windows (light, dark and high contrast).
     System,
@@ -124,13 +113,15 @@ mod tests {
     #[test]
     fn defaults_are_safe() {
         let s = Settings::default();
-        assert_eq!(
-            s.updates,
-            UpdateChoice::NotAsked,
-            "no network until the user chooses"
-        );
         assert!(!s.start_with_windows);
         assert_eq!(s.switcher_hotkey.to_string(), "Win+Alt+Space");
+    }
+
+    #[test]
+    fn settings_of_older_builds_still_load() {
+        // Older builds saved an update choice; updates now come from the Store.
+        let s: Settings = serde_json::from_str(r#"{"version":1,"updates":"on","theme":"dark"}"#).unwrap();
+        assert_eq!(s.theme, Theme::Dark);
     }
 
     #[test]

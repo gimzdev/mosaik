@@ -23,6 +23,7 @@ The owner's first rule, above every other trade-off: **minimal, efficient, elega
 mosaik.exe            engine thread: windows, zones, workspaces, tabs, hotkey, the switcher and
   │                   the overlays (native, ADR 0002)
   ├─ mover threads    one per window being moved, so a hung app never holds up the engine
+  ├─ hiding thread    hides and shows background tabs (the shell cloak is a call into Explorer)
   ├─ pipe threads     mosaikctl and second launches (ADR 0007)
   ├─ main thread      Tauri: the tray icon, and web windows (settings, editor, welcome) created
   │                   when opened and destroyed when closed
@@ -68,6 +69,37 @@ the engine gathers windows and applies the result.
 - **Displays changing** (a monitor plugged in or out, a scale or taskbar change, waking up) fits
   the open workspace's windows to the new arrangement: zones are fractions of a monitor's work
   area, and each remembered monitor is matched to one connected now.
+
+## How tabs behave
+
+A tab group is several windows of any apps sharing one place, one visible at a time, with a
+strip in the band above them: the zone's tag, then one chip per tab. Mosaïk never reparents
+another app's window; background tabs are hidden with the shell's cloak (ADR 0003).
+
+- **Making a group**: drag a window by its title bar onto another window's tag, or onto a
+  group's strip; a "Drop to add" slot shows where it will go. It takes the group's place and
+  shows.
+- **Using it**: click a chip to show that tab; drag a chip along the strip to reorder; drag it
+  away from the strip to pull it out (zones show, as when dragging a window; Shift moves
+  freely; Esc cancels). A crowded strip shrinks its chips, then gathers the rest in a "+N" chip.
+- **One rule decides what shows** (`mosaik_core::tabs::plan_tabs`, applied by `sync_tabs` after
+  anything that changes groups): a window stays hidden only while it is a background tab of a
+  group of the open workspace whose other tabs can be reached, through its strip, or through
+  its visible tab's taskbar button while that one is minimised or maximised. Every other window
+  Mosaïk hid comes back: in its place when the open workspace uses it, minimised otherwise.
+  When no strip can be drawn (no room, drawing failed) or a window will not hide, the group shows
+  all its tabs, stacked, and the user is told once.
+- **Safety**: every window is written to the journal, in one write per batch, and marked before
+  it hides, and only while the watchdog runs (it is started again if it stops). Hiding and
+  showing run on their own thread with a deadline (ADR 0009); a window that does not come back
+  stays in the journal and is retried, and "Rescue windows" brings back everything.
+- **Apps and tabs**: a tab whose app hides its window (closes to the tray) or closes it gives
+  its place to the tab on its right, else on its left. A background tab an app brings forward
+  (a notification, a link) shows for now; the layout keeps the user's choice.
+- **Layouts**: groups, their tab order and the tab that shows are part of the workspace, saved
+  where the visible tab is; a group's windows sit below a band with room for the strip even
+  when tags are hidden. Opening a workspace moves only the tabs that show; a tab goes to its
+  group's place when it is shown.
 
 ## Crates
 

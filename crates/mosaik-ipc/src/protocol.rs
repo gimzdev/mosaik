@@ -1,9 +1,11 @@
 //! Messages, their framing, and version checks.
 
 use mosaik_core::classify::Verdict;
+use mosaik_core::editing::ZoneEdit;
 use mosaik_core::geometry::Rect;
 use mosaik_core::journal::{HiddenWindow, HideMethod};
 use mosaik_core::layout::{SlotId, TabGroupId, WorkspaceId};
+use mosaik_core::settings::Settings;
 use mosaik_core::window::{Elevation, WindowHandle};
 use mosaik_core::zone::ZoneId;
 use serde::{Deserialize, Serialize};
@@ -47,6 +49,41 @@ pub enum Command {
     /// Open the settings window (what a second launch of Mosaïk asks the running one).
     ShowSettings,
     Quit,
+    /// The user's settings.
+    Settings,
+    /// Saves the user's settings. A shortcut that cannot be used is refused with the reason;
+    /// everything else takes effect at once.
+    SetSettings {
+        settings: Box<Settings>,
+    },
+    /// Whether a shortcut can be used for the switcher, or for `workspace`, with the reason
+    /// when it cannot (the recorder asks before saving).
+    CheckHotkey {
+        hotkey: String,
+        #[serde(default)]
+        workspace: Option<String>,
+    },
+    /// One workspace's zones on the monitors connected now, for the zone editor.
+    Zones {
+        workspace: String,
+    },
+    /// Replaces one workspace's zones (from the zone editor).
+    SetZones {
+        workspace: String,
+        zones: Vec<ZoneEdit>,
+    },
+    RenameWorkspace {
+        workspace: String,
+        name: String,
+    },
+    DeleteWorkspace {
+        workspace: String,
+    },
+    /// Gives a workspace a global shortcut of its own, or takes it away (`None`).
+    SetWorkspaceHotkey {
+        workspace: String,
+        hotkey: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -76,6 +113,22 @@ pub enum Reply {
         code: ErrorCode,
         message: String,
         hint: Option<String>,
+    },
+    Settings {
+        settings: Box<Settings>,
+    },
+    /// What `check_hotkey` found: the shortcut as Mosaïk writes it, why it cannot be used (if
+    /// so), and what is worth knowing about it otherwise.
+    Hotkey {
+        hotkey: String,
+        problem: Option<String>,
+        warnings: Vec<String>,
+    },
+    Zones {
+        workspace: WorkspaceId,
+        name: String,
+        monitors: Vec<MonitorState>,
+        zones: Vec<ZoneEdit>,
     },
 }
 
@@ -310,6 +363,42 @@ mod tests {
             },
             Command::Save { workspace: None },
             Command::Rescue,
+            Command::Settings,
+            Command::SetSettings {
+                settings: Box::default(),
+            },
+            Command::CheckHotkey {
+                hotkey: "Win+Alt+Space".into(),
+                workspace: None,
+            },
+            Command::Zones {
+                workspace: "Brand".into(),
+            },
+            Command::SetZones {
+                workspace: "Brand".into(),
+                zones: vec![ZoneEdit {
+                    id: None,
+                    name: "Notes".into(),
+                    color: mosaik_core::zone::ZoneColor::Saffron,
+                    monitor: mosaik_core::topology::MonitorId::new("m1"),
+                    area: mosaik_core::geometry::RatioRect::FULL,
+                }],
+            },
+            Command::RenameWorkspace {
+                workspace: "Brand".into(),
+                name: "Brand 2027".into(),
+            },
+            Command::DeleteWorkspace {
+                workspace: "Brand".into(),
+            },
+            Command::SetWorkspaceHotkey {
+                workspace: "Brand".into(),
+                hotkey: Some("Win+Alt+1".into()),
+            },
+            Command::SetWorkspaceHotkey {
+                workspace: "Brand".into(),
+                hotkey: None,
+            },
         ] {
             let bytes = encode(&Request::new(7, c.clone())).unwrap();
             assert_eq!(bytes.iter().filter(|&&b| b == b'\n').count(), 1);

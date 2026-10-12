@@ -72,6 +72,8 @@ struct Pending {
     wake: bool,
     events: bool,
     switcher: bool,
+    /// A workspace's own hotkey (its `WM_HOTKEY` id), or 0.
+    workspace_key: i32,
     /// Bit n: timer n fired.
     timers: u32,
     /// Monitors or work areas changed (debounced by `timer::TOPOLOGY`).
@@ -87,6 +89,7 @@ impl Pending {
         self.wake
             || self.events
             || self.switcher
+            || self.workspace_key != 0
             || self.timers != 0
             || self.displays
             || self.ending
@@ -97,6 +100,9 @@ impl Pending {
         self.wake |= o.wake;
         self.events |= o.events;
         self.switcher |= o.switcher;
+        if o.workspace_key != 0 {
+            self.workspace_key = o.workspace_key;
+        }
         self.timers |= o.timers;
         self.displays |= o.displays;
         self.ending |= o.ending;
@@ -110,6 +116,7 @@ thread_local! {
         wake: false,
         events: false,
         switcher: false,
+        workspace_key: 0,
         timers: 0,
         displays: false,
         ending: false,
@@ -124,7 +131,9 @@ pub(crate) struct Engine {
     pub(crate) ui: UiSink,
     pub(crate) window: HWND,
     messages: Receiver<Message>,
-    hotkey: Option<Registered>,
+    pub(crate) hotkey: Option<Registered>,
+    /// Workspaces' own shortcuts.
+    pub(crate) workspace_keys: Vec<crate::editing::WorkspaceKey>,
     pub(crate) scanner: Scanner,
     pub(crate) apps: Apps,
     /// `Stop` arrived (or Windows is ending): windows are back, requests get "stopped".
@@ -215,6 +224,7 @@ pub(crate) fn run(
         window,
         messages,
         hotkey: None,
+        workspace_keys: Vec::new(),
         scanner,
         apps: Apps::new(),
         stopped: false,
@@ -246,6 +256,10 @@ pub(crate) fn run(
     }
     if !engine.config.safe_mode {
         engine.register_hotkey();
+        let problems = engine.register_workspace_hotkeys();
+        if !problems.is_empty() {
+            engine.notice("Some workspace shortcuts are not set", problems.join(" "));
+        }
         engine.start_watching();
     }
     let hotkey = engine.hotkey_state();
@@ -321,6 +335,10 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         },
         WM_HOTKEY if i32::try_from(wparam.0) == Ok(hotkeys::SWITCHER) => Pending {
             switcher: true,
+            ..Pending::default()
+        },
+        WM_HOTKEY if i32::try_from(wparam.0).is_ok_and(|id| id >= hotkeys::WORKSPACE_KEYS) => Pending {
+            workspace_key: i32::try_from(wparam.0).unwrap_or(0),
             ..Pending::default()
         },
         WM_TIMER => Pending {
@@ -421,6 +439,9 @@ impl Engine {
         if todo.switcher {
             self.show_switcher(Instant::now());
         }
+        if todo.workspace_key != 0 {
+            self.workspace_key(todo.workspace_key);
+        }
         if todo.wake {
             for choice in switcher::take_choices() {
                 self.on_choice(choice);
@@ -479,7 +500,7 @@ impl Engine {
         });
     }
 
-    fn register_hotkey(&mut self) {
+    pub(crate) fn register_hotkey(&mut self) {
         let wanted = self.settings.switcher_hotkey;
         // Settings files can be edited by hand: a shortcut Mosaïk would refuse in the recorder
         // (a bare F-key, Ctrl+Alt with a letter) is refused here too.
@@ -502,7 +523,7 @@ impl Engine {
         self.hotkey = Some(registered);
     }
 
-    fn hotkey_state(&self) -> HotkeyState {
+    pub(crate) fn hotkey_state(&self) -> HotkeyState {
         self.hotkey.as_ref().map_or_else(
             || HotkeyState {
                 shortcut: self.settings.switcher_hotkey.to_string(),
@@ -563,6 +584,18 @@ impl Engine {
                 Reply::Done {
                     message: "Settings are open.".into(),
                 }
+            }
+            Command::Settings => self.settings_reply(),
+            Command::SetSettings { settings } => self.set_settings(*settings),
+            Command::CheckHotkey { hotkey, workspace } => {
+                self.check_hotkey_reply(&hotkey, workspace.as_deref())
+            }
+            Command::Zones { workspace } => self.zones_reply(&workspace),
+            Command::SetZones { workspace, zones } => self.set_zones(&workspace, &zones),
+            Command::RenameWorkspace { workspace, name } => self.rename_workspace(&workspace, &name),
+            Command::DeleteWorkspace { workspace } => self.delete_workspace(&workspace),
+            Command::SetWorkspaceHotkey { workspace, hotkey } => {
+                self.set_workspace_hotkey(&workspace, hotkey.as_deref())
             }
             Command::Quit => {
                 // SAFETY: a one-shot timer on our own window; the exit happens when it fires.
@@ -696,6 +729,7 @@ impl Engine {
             tracing::error!(%problem, "journal at exit");
         }
         self.hotkey = None;
+        self.workspace_keys.clear();
     }
 }
 

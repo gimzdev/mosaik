@@ -3,6 +3,7 @@
 //! classification, the saved-file schema) lives here so it can be tested by numbers anywhere.
 
 pub mod classify;
+pub mod editing;
 pub mod geometry;
 pub mod hotkey;
 pub mod journal;

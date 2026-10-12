@@ -8,6 +8,8 @@ use windows::Win32::Foundation::HWND;
 
 /// The id of the switcher's hotkey in `WM_HOTKEY`.
 pub(crate) const SWITCHER: i32 = 1;
+/// Workspaces' own hotkeys are numbered from here.
+pub(crate) const WORKSPACE_KEYS: i32 = 100;
 
 pub(crate) struct Registered {
     /// Held, never read: the shortcut stays registered until this is dropped.

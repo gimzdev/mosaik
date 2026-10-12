@@ -229,13 +229,30 @@ impl Engine {
     }
 
     /// A workspace by id, then by name (the same comparison the switcher uses).
-    fn find_workspace(&self, which: &str) -> Option<usize> {
+    pub(crate) fn find_workspace(&self, which: &str) -> Option<usize> {
         let w = which.trim();
         self.file
             .workspaces
             .iter()
             .position(|ws| ws.id.0 == w)
             .or_else(|| self.file.workspaces.iter().position(|ws| same_name(&ws.name, w)))
+    }
+
+    /// The open workspace's zones on screen again (its zones were edited).
+    pub(crate) fn refresh_live_zones(&mut self) {
+        let zones = match (&self.topology, &self.active) {
+            (Some(t), Some(a)) => self
+                .file
+                .workspaces
+                .iter()
+                .find(|w| w.id == a.id)
+                .map(|ws| live_zones(ws, t, self.style()))
+                .unwrap_or_default(),
+            _ => return,
+        };
+        if let Some(a) = &mut self.active {
+            a.zones = zones;
+        }
     }
 
     /// Makes `id` the open workspace with these windows in its slots, and shows its frames.

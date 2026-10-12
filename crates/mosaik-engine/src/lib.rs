@@ -9,6 +9,7 @@
 //! Windows only; an empty library elsewhere so the workspace builds everywhere.
 #![cfg(windows)]
 
+mod editing;
 mod hider;
 mod hotkeys;
 mod mover;
