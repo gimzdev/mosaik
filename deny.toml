@@ -1,0 +1,37 @@
+# cargo-deny: what Mosaïk's Rust dependencies may be. Run in CI: `cargo deny check`.
+[graph]
+# Mosaïk ships for Windows x64 only. (The pure core is also tested on Linux, but its few
+# dependencies are all part of the Windows graph; adding Linux would pull in Tauri's GTK stack,
+# which never ships.)
+targets = ["x86_64-pc-windows-msvc"]
+all-features = true
+
+[advisories]
+# Security advisories fail the build; unmaintained crates are reported for a decision.
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Permissive licences only: Mosaïk is CC0 and must not absorb GPL or non-commercial code.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
