@@ -83,14 +83,14 @@ $values = @{
   version              = $version
 }
 
-# A fresh layout: the programs, the logos, the licence and the manifest.
+# A fresh layout: the programs, the logos, the licences and the manifest.
 if (Test-Path $Layout) { Remove-Item $Layout -Recurse -Force }
 New-Item -ItemType Directory -Force -Path (Join-Path $Layout 'Assets') | Out-Null
 foreach ($exe in $executables) { Copy-Item (Join-Path $Release $exe) $Layout }
 Copy-Item (Join-Path $Here 'Assets\*.png') (Join-Path $Layout 'Assets')
 Copy-Item (Join-Path $Root 'LICENSE') (Join-Path $Layout 'LICENSE.txt')
-$notices = Join-Path $Root 'target\THIRD-PARTY-NOTICES.txt'
-if (Test-Path $notices) { Copy-Item $notices $Layout }
+# The licences of what Mosaik is built with (About, Open-source licences, opens it).
+Copy-Item (Join-Path $Root 'THIRD-PARTY-NOTICES.txt') $Layout
 
 $manifest = Get-Content -Raw -Encoding UTF8 (Join-Path $Here 'AppxManifest.xml')
 foreach ($key in $values.Keys) {

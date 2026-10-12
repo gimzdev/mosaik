@@ -222,12 +222,13 @@ function Test-CppTools {
   [bool]$path
 }
 
-function Find-MakeAppx {
+# The Windows SDK tools the Store package is made with.
+function Test-PackagingTools {
   $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
-  if (-not (Test-Path $kits)) { return $null }
-  Get-ChildItem $kits -Directory | Where-Object { $_.Name -match '^10\.\d+\.\d+\.\d+$' } |
-    Sort-Object { [version]$_.Name } -Descending |
-    ForEach-Object { Join-Path $_.FullName 'x64\makeappx.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not (Test-Path $kits)) { return $false }
+  [bool](Get-ChildItem $kits -Directory | Where-Object { $_.Name -match '^10\.\d+\.\d+\.\d+$' } |
+      Where-Object { (Test-Path (Join-Path $_.FullName 'x64\makeappx.exe')) -and (Test-Path (Join-Path $_.FullName 'x64\makepri.exe')) } |
+      Select-Object -First 1)
 }
 
 function Test-WebView2 {
@@ -255,7 +256,7 @@ function Get-Needs {
     [pscustomobject]@{ Name = 'Visual Studio C++ build tools'; Ok = (Test-CppTools); Id = 'Microsoft.VisualStudio.2022.BuildTools'; Args = @('--override', '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'); Why = 'Rust links Windows programs with them' }
     [pscustomobject]@{ Name = 'Node.js 22.13 or later'; Ok = ($node -and $node -ge [version]'22.13'); Id = 'OpenJS.NodeJS.LTS'; Args = @(); Why = 'builds the interface' }
     [pscustomobject]@{ Name = 'WebView2 runtime'; Ok = (Test-WebView2); Id = 'Microsoft.EdgeWebView2Runtime'; Args = @(); Why = 'shows the interface (Windows 11 has it)' }
-    [pscustomobject]@{ Name = 'Windows SDK (makeappx)'; Ok = [bool](Find-MakeAppx); Id = 'Microsoft.WindowsSDK.10.0.26100'; Args = @(); Why = 'only to make the Store package' }
+    [pscustomobject]@{ Name = 'Windows SDK (makepri, makeappx)'; Ok = (Test-PackagingTools); Id = 'Microsoft.WindowsSDK.10.0.26100'; Args = @(); Why = 'only to make the Store package' }
   )
 }
 
@@ -316,6 +317,8 @@ function Invoke-Build {
   Invoke-Tool $ui 'npm' @('run', 'build')
   Step 'Building Mosaik, its watchdog and mosaikctl (release)'
   Invoke-Tool $source 'cargo' @('build', '--release', '-p', 'mosaik-desktop', '-p', 'mosaik-watchdog', '-p', 'mosaik-ipc')
+  # The licences of what Mosaik is built with, where About finds them: beside mosaik.exe.
+  Copy-Item (Under $source 'THIRD-PARTY-NOTICES.txt') (Under $source 'target' 'release')
   Say ("Done: {0}" -f (Under $source 'target' 'release' 'mosaik.exe')) Green
 }
 

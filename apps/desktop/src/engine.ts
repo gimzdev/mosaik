@@ -4,6 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import { type Command, type Notice, type Reply, isReply } from './protocol';
 
@@ -91,6 +92,13 @@ export function openLink(link: Link): Promise<string | null> {
   return attempt(() => invoke('open_link', { link }), 'The browser did not open.');
 }
 
+/** Opens the licences of the open-source software Mosaïk is built with (a text file beside
+ * mosaik.exe); resolves to an error message, or null. */
+export function openLicences(): Promise<string | null> {
+  if (!inMosaik) return Promise.resolve(null);
+  return attempt(() => invoke('open_licences'), 'The list of licences did not open.');
+}
+
 /** Opens the folder with Mosaïk's logs in File Explorer; resolves to an error message, or null. */
 export function openLogs(): Promise<string | null> {
   if (!inMosaik) return Promise.resolve(null);
@@ -130,17 +138,16 @@ export function guardClose(ask: () => Promise<boolean>): () => void {
   if (!inMosaik) return () => undefined;
   let stop: (() => void) | null = null;
   let stopped = false;
-  void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
-    getCurrentWindow()
-      .onCloseRequested(async (event) => {
-        event.preventDefault();
-        if (await ask()) await getCurrentWindow().destroy();
-      })
-      .then((f) => {
-        if (stopped) f();
-        else stop = f;
-      }),
-  );
+  const window = getCurrentWindow();
+  void window
+    .onCloseRequested(async (event) => {
+      event.preventDefault();
+      if (await ask()) await window.destroy();
+    })
+    .then((f) => {
+      if (stopped) f();
+      else stop = f;
+    });
   return () => {
     stopped = true;
     stop?.();

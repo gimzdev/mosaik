@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { type Link, openLink, openLogs, request, rescueWindows } from './engine';
+import { type Link, openLicences, openLink, openLogs, request, rescueWindows } from './engine';
 import { Button, PageTitle, Section, useSay } from './ui';
 
 export function About({ onWelcome }: { onWelcome: () => void }) {
@@ -57,6 +57,16 @@ export function About({ onWelcome }: { onWelcome: () => void }) {
           </Button>
           <Button onClick={link('site')}>Website</Button>
           <Button onClick={link('source')}>Source code</Button>
+          <Button
+            tone="quiet"
+            onClick={() => {
+              void openLicences().then((error) => {
+                if (error) say(error, true);
+              });
+            }}
+          >
+            Open-source licences
+          </Button>
         </div>
       </Section>
 

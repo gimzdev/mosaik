@@ -14,6 +14,10 @@ on:
       - "clippy.toml"
       - "deny.toml"
       - ".cargo/**"
+      - "installer/**"
+      - "mosaik.ps1"
+      - "LICENSE"
+      - "THIRD-PARTY-NOTICES.txt"
       - ".github/workflows/app.yml"
   pull_request:
     paths:
@@ -26,6 +30,10 @@ on:
       - "clippy.toml"
       - "deny.toml"
       - ".cargo/**"
+      - "installer/**"
+      - "mosaik.ps1"
+      - "LICENSE"
+      - "THIRD-PARTY-NOTICES.txt"
       - ".github/workflows/app.yml"
 
 permissions:
@@ -109,10 +117,18 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
 
   dependencies:
-    name: Dependency policy
+    name: Dependency policy and licences
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - run: rustup show
       - run: cargo install cargo-deny --locked --version 0.20.2
       - run: cargo deny check
+      # THIRD-PARTY-NOTICES.txt lists the licences of exactly what ships.
+      - run: cargo fetch --locked --target x86_64-pc-windows-msvc
+      - run: npm ci --no-audit --no-fund
+        working-directory: apps/desktop
+      - run: node installer/notices.mjs --check

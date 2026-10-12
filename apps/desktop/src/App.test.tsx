@@ -13,6 +13,7 @@ const engine = vi.hoisted(() => ({
   onWorkspacesChanged: vi.fn(() => () => undefined),
   openLink: vi.fn(() => Promise.resolve(null)),
   openLogs: vi.fn(() => Promise.resolve(null)),
+  openLicences: vi.fn(() => Promise.resolve(null)),
   rescueWindows: vi.fn(() => Promise.resolve({ text: 'ok', error: false })),
   styleTitleBar: vi.fn(),
   guardClose: vi.fn(() => () => undefined),

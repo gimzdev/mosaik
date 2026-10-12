@@ -176,6 +176,7 @@ pub fn run(args: Vec<String>) -> i32 {
             take_notices,
             open_link,
             open_logs,
+            open_licences,
             rescue_windows,
             style_title_bar
         ])
@@ -588,6 +589,22 @@ fn open_link(link: String) -> Result<(), String> {
         _ => return Err(format!("unknown link: {link}")),
     };
     mosaik_win::process::shell_open(url, "").map_err(|e| format!("The browser did not open: {e}"))
+}
+
+/// Opens the licences of the open-source software Mosaïk is built with: THIRD-PARTY-NOTICES.txt,
+/// beside mosaik.exe (the Store package and `mosaik.ps1 build` put it there).
+#[tauri::command]
+fn open_licences() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("Mosaïk could not find its own folder: {e}"))?;
+    let file = exe.with_file_name("THIRD-PARTY-NOTICES.txt");
+    if !file.is_file() {
+        return Err(format!(
+            "The list of licences is not in Mosaïk's folder ({}). Reinstall Mosaïk to get it back; it is also in Mosaïk's source code.",
+            file.parent().map(|p| p.display().to_string()).unwrap_or_default()
+        ));
+    }
+    mosaik_win::process::shell_open(&file.to_string_lossy(), "")
+        .map_err(|e| format!("The list of licences did not open: {e}"))
 }
 
 /// Opens the folder with Mosaïk's logs in File Explorer.

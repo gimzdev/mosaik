@@ -36,10 +36,10 @@ export default function ConditionsPage() {
         <h2>This website</h2>
         <p>It sets no cookies and runs no analytics or advertising trackers.</p>
         <p>If you email {mail}, we receive your address and your message, and use them only to reply. We don’t sell or share them.</p>
-        <h2>License</h2>
+        <h2>Licence</h2>
         <p>
           Mosaïk is released under CC0 1.0, a public-domain dedication. You can use, copy, change and distribute it for any purpose, with no
-          attribution required. The open-source components it is built with keep their own licenses, listed in the app’s About page.
+          attribution required. The open-source components it is built with keep their own licences, listed in the app’s About page.
         </p>
         <h2>Warranty</h2>
         <p>Mosaïk is provided as is, without warranty of any kind. Use it at your own risk.</p>

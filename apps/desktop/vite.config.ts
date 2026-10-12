@@ -20,6 +20,8 @@ export default defineConfig({
     sourcemap: false,
     // Fonts as files, never inlined as data: URLs (the content security policy allows 'self').
     assetsInlineLimit: 0,
+    // WebView2 preloads modules natively: no polyfill in the bundle.
+    modulePreload: { polyfill: false },
   },
   test: {
     environment: 'jsdom',
