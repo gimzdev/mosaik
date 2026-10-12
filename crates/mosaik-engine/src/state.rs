@@ -80,5 +80,6 @@ pub(crate) fn snapshot(i: Inputs<'_>) -> StateSnapshot {
         hotkey: i.hotkey.clone(),
         hidden: i.journal.hidden.clone(),
         tab_strips: Vec::new(),
+        title_bars_reading: 0,
     }
 }

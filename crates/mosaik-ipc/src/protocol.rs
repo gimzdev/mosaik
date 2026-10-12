@@ -181,6 +181,10 @@ pub struct StateSnapshot {
     /// The tab strips on screen, so tests can click a tab by its numbers.
     #[serde(default)]
     pub tab_strips: Vec<TabStripState>,
+    /// Windows whose title bars are being read (where their tags and strips go may still
+    /// change), so tests can wait for them.
+    #[serde(default)]
+    pub title_bars_reading: u32,
 }
 
 /// A tab group's strip as drawn: where it is, each tab's chip and window, the one that shows.
@@ -615,6 +619,7 @@ mod tests {
                     visible: true,
                 }],
             }],
+            title_bars_reading: 1,
         };
         let r = Response::new(9, Reply::State(Box::new(state)));
         let bytes = encode(&r).unwrap();

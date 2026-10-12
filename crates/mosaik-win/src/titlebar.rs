@@ -42,10 +42,13 @@ pub struct Reading {
     pub title: String,
     /// `None`: the app did not answer in time.
     pub room: Option<TitleRoom>,
+    /// How long reading it took.
+    pub took: std::time::Duration,
 }
 
 /// Reads the title bar of `hwnd`. `None` when the window is gone.
 pub fn read(hwnd: HWND) -> Option<Reading> {
+    let start = std::time::Instant::now();
     let g = window::geometry(hwnd)?;
     let title = window::title(hwnd);
     let buttons = caption_buttons(hwnd);
@@ -61,6 +64,7 @@ pub fn read(hwnd: HWND) -> Option<Reading> {
         frame: g.frame,
         title,
         room,
+        took: start.elapsed(),
     })
 }
 

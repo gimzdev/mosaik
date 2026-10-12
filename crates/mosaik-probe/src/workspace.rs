@@ -942,15 +942,16 @@ pub(crate) fn state(engine: &Engine) -> Result<Box<mosaik_ipc::protocol::StateSn
     }
 }
 
-/// How long `settled` waits between two reads, and at most in all.
+/// How long `settled` waits between two reads, and at most in all (an app busy after a resize
+/// can take a second or two to answer for its title bar).
 const SETTLE_STEP_MS: u32 = 300;
-const SETTLE_MAX: Duration = Duration::from_secs(2);
+const SETTLE_MAX: Duration = Duration::from_secs(5);
 
 /// The engine's state once its windows stay put: where each window in a zone or group is, its tag
 /// and drop target, which windows are hidden, the tab strips and their chips. A window's title bar
-/// is read after it moves, and once read its tag or strip may move, or the window below a band
-/// (ADR 0011): what is measured or pressed is read only when two reads in a row agree, or at most
-/// 2 s after the first.
+/// is read after it moves, and once read its tag or strip may move, or the window into or out of
+/// a band (ADR 0011): what is measured or pressed is read only when no title bar is being read
+/// and two reads in a row agree, or at most 5 s after the first.
 pub(crate) fn settled(engine: &Engine) -> Result<Box<StateSnapshot>, String> {
     type Mark = (u64, Rect, Option<Rect>, Option<Rect>, bool);
     let marks = |st: &StateSnapshot| {
@@ -970,7 +971,7 @@ pub(crate) fn settled(engine: &Engine) -> Result<Box<StateSnapshot>, String> {
     loop {
         pump_until(SETTLE_STEP_MS, || false);
         let now = state(engine)?;
-        if marks(&now) == marks(&last) || start.elapsed() >= SETTLE_MAX {
+        if (now.title_bars_reading == 0 && marks(&now) == marks(&last)) || start.elapsed() >= SETTLE_MAX {
             return Ok(now);
         }
         last = now;

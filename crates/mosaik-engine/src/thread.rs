@@ -715,6 +715,7 @@ impl Engine {
                     .collect(),
             });
         }
+        snapshot.title_bars_reading = self.titles.reading();
         Reply::State(Box::new(snapshot))
     }
 

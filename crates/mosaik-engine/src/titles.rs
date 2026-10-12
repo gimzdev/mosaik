@@ -137,6 +137,11 @@ impl Titles {
     pub(crate) fn unband_all(&mut self) {
         self.banded.clear();
     }
+
+    /// How many windows' title bars are being read.
+    pub(crate) fn reading(&self) -> u32 {
+        u32::try_from(self.asked.len()).unwrap_or(u32::MAX)
+    }
 }
 
 impl Engine {
@@ -213,6 +218,7 @@ impl Engine {
             let resized = previous.is_none_or(|k| k.size != reading.frame.size());
             // An app busy for a moment keeps the room it was last read with.
             let failed = reading.room.is_none();
+            let (took, room_runs) = (reading.took, reading.room.as_ref().map(|r| r.runs.len()));
             let room = reading.room.or_else(|| before.clone());
             let changed = resized || room != before;
             // Read at a size it no longer has (it moved into a zone or a group meanwhile): read
@@ -229,6 +235,16 @@ impl Engine {
                     failed,
                     stale: false,
                 },
+            );
+            tracing::debug!(
+                window = w.0,
+                size = ?(reading.frame.width(), reading.frame.height()),
+                ms = took.as_millis(),
+                stretches = room_runs,
+                failed,
+                outdated,
+                changed,
+                "title bar read"
             );
             if outdated {
                 self.ask_title(w);
