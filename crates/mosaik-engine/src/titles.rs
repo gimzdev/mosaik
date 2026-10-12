@@ -35,6 +35,11 @@ const RETRY: Duration = Duration::from_secs(3);
 /// progress can change many times a second).
 const TITLE_EVERY: Duration = Duration::from_secs(1);
 
+/// After a window is read at a new size, it is read once more this much later: apps lay their
+/// title bars out again after a resize, some a moment later (job 0071: VS Code, read 3 ms after
+/// it was made narrower, had one free stretch, and two once it had settled).
+const SETTLED: Duration = Duration::from_millis(300);
+
 /// What Mosaïk knows of a window's title bar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Bar {
@@ -71,8 +76,9 @@ struct Known {
     stale: bool,
 }
 
-/// The thread that reads title bars, one window at a time, in the order asked, each after the
-/// wait it was asked with (a reading that is to confirm another).
+/// The thread that reads title bars, one window at a time, each when it is due: at once, or
+/// after the wait it was asked with (a reading once an app has settled, or one to confirm
+/// another), earliest first, so waiting readings hold up no other.
 struct Reader {
     jobs: mpsc::Sender<(WindowHandle, Duration)>,
     answers: mpsc::Receiver<(WindowHandle, Option<Reading>)>,
@@ -86,11 +92,38 @@ impl Reader {
         std::thread::Builder::new()
             .name("mosaik-titles".into())
             .spawn(move || {
-                // Ends when the engine drops its end of the channel.
-                while let Ok((w, wait)) = job_rx.recv() {
-                    if !wait.is_zero() {
-                        std::thread::sleep(wait);
+                let mut due: Vec<(Instant, WindowHandle)> = Vec::new();
+                loop {
+                    // Every job asked meanwhile, waiting for one when nothing is due yet. Ends
+                    // when the engine drops its end of the channel.
+                    let next = due.iter().map(|(at, _)| *at).min();
+                    let job = match next {
+                        None => job_rx.recv().ok(),
+                        Some(at) => match job_rx.recv_timeout(at.saturating_duration_since(Instant::now())) {
+                            Ok(job) => Some(job),
+                            Err(mpsc::RecvTimeoutError::Timeout) => None,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                        },
+                    };
+                    match (job, next) {
+                        (Some((w, wait)), _) => {
+                            due.push((Instant::now() + wait, w));
+                            continue;
+                        }
+                        (None, None) => return,
+                        (None, Some(_)) => {}
                     }
+                    let now = Instant::now();
+                    let Some(i) = due
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (at, _))| *at <= now)
+                        .min_by_key(|(_, (at, _))| *at)
+                        .map(|(i, _)| i)
+                    else {
+                        continue;
+                    };
+                    let (_, w) = due.swap_remove(i);
                     let reading = mosaik_win::titlebar::read(window::hwnd(w));
                     if answer_tx.send((w, reading)).is_err() {
                         return;
@@ -262,6 +295,8 @@ impl Engine {
             );
             if outdated {
                 self.ask_title(w);
+            } else if resized {
+                self.ask_title_after(w, SETTLED);
             }
             // A change of band waiting for this reading is decided now, also when nothing changed.
             if changed || self.titles.proposed.contains_key(&w) {
