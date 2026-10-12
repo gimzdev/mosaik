@@ -14,9 +14,9 @@ re-run before each release.
 | 2. Core, topologies, persistence, IPC, mosaikctl | done | [Step 2](#step-2-core-persistence-ipc) |
 | 3. Zones | done: capture, frames and tags, drag to snap, zone editor | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces), [Step 6](#step-6-product-ui) |
 | 4. Workspaces | done: save, switch, start missing apps, switcher, tray, workspace shortcuts | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
-| 5. Tabs | done; multi-monitor and app matrix runs left for step 7 | [Step 5](#step-5-tabs) |
+| 5. Tabs | done, with 12 real apps and browser tabs dragged out of Edge; multi-monitor left for step 7 | [Step 5](#step-5-tabs), [Step 7](#step-7-hardening) |
 | 6. Product UI | in progress: every page done, reviewed and tested in a browser; embedded and run on Windows; the on-screen check of every page on Windows is next | [Step 6](#step-6-product-ui) |
-| 7. Hardening | started: idle budget, other window managers and Windows snapping next | |
+| 7. Hardening | in progress: real apps, Windows' snapping and other arrangers done; sleep, hotplug, RDP, soak and Windows 10 left | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
 
 ## Step 1: verify assumptions
@@ -284,6 +284,82 @@ build; releases are signed by the Microsoft Store.
   refused; removing the terminal's zone left the terminal where it was (0 px) and in no zone;
   after a rename the old name saved a new workspace; Win+Ctrl+Alt+F9 given and taken back;
   deleting the open workspace left no workspace open and no window hidden.
+
+## Step 7: hardening
+
+### Real apps with the real mouse (`mosaik-probe workspace --apps`, jobs 0047 to 0051)
+
+Each app opens a new window of its own (browsers in private mode); the engine's scope lists the
+probe's windows one by one, so the user's own windows of the same apps are never managed. The
+window is grabbed where it answers `HTCAPTION` in the middle of its title bar, dragged into a
+zone, then onto another window's tag; the other tab is clicked, then its own; then its tab is
+pulled back out into the zone. Windows' move loop and mouse capture are recorded for each drag.
+
+```
+                     into the zone   onto a tag   other tab clicked   own tab clicked   pulled out
+Notepad                  0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+Edge                     0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+Chrome                   0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+VS Code                  0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+Windows Terminal         0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+Explorer                 0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+Word                     0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+Calculator (UWP)        22 px*        2 tabs, 0    hidden (cloaked)    shown, 0 px      22 px*
+Notepad++                0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+Paint                   13 px*        2 tabs, 0    hidden (cloaked)    shown, 0 px      13 px*
+Excel                    0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+Git Bash (mintty)        0 px         2 tabs, 0    hidden (cloaked)    shown, 0 px       0 px
+Firefox                  not installed on this PC
+```
+
+\* Calculator and Paint do not shrink below their minimum height (the zone leaves 480 px); they
+stay inside the zone as far as they can, as ADR 0005 places every window.
+
+Found and fixed on the way:
+
+- **A quick drag up out of a title bar was taken for a resize** (job 0047: no tab for 8 of 12
+  apps; dropped at the screen's top edge, Windows maximised the window instead). Windows starts
+  its move only once the pointer moves, and Mosaïk read where the pointer was when it noticed
+  the start, by then above the window. The pointer's shape now decides: Windows shows its resize
+  arrows for the whole of any resize (`snap::DragKind`, ADR 0010). Job 0048: every drag a move,
+  and the tags take the windows.
+- **Chromium-based apps** (Edge, Chrome, VS Code) start Windows' move themselves once they see
+  the pointer move inside their window, and treat a drag that starts along their top few pixels
+  as a resize (job 0049: the engine saw Windows' resize arrows from the start). The probe now
+  grabs title bars in their middle and speeds up from rest, as a hand does (job 0050: all three
+  end to end).
+- **A browser window closed at the end of its drag** (a tab dragged back into its window) no
+  longer brings a "did not move into its zone" notice.
+
+### Windows' own snapping (`mosaik-probe workspace --drag`, jobs 0048 and 0051)
+
+Windows 11 25H2, "Snap windows" on:
+
+```
+onto a tab strip at the screen's top edge (576,0):   became a tab, not maximised, 0 px from the group's place
+onto a tab strip at the top centre (960,0):          became a tab, not maximised, 0 px
+into a zone at the left edge (0,516):                in the zone, 0 px; Windows marks the window arranged
+notice (once, at the first of these drops):          "Windows snaps windows too: ..."
+```
+
+Mosaïk acts after Windows at the end of the drag, so the place the user dropped on wins;
+Windows' own preview still shows during the drag, hence the notice (ADR 0010). Mosaïk never
+changes Windows' setting.
+
+### Other arrangers
+
+komorebi, GlazeWM, workspacer, FancyWM, PowerToys FancyZones, AquaSnap and WindowTabs are found
+by their program in one process-list snapshot (when Mosaïk starts and after each switch) and
+named once, ever, with what to do (`mosaik_core::others`, unit tests for finding, wording and
+keys). None of them is installed on this PC, so the notice itself is checked by the unit tests
+and the probe's notice for Windows' snapping, which goes through the same path.
+
+### Browser tabs dragged out (`mosaik-probe workspace --browser`, jobs 0046 and 0051)
+
+Edge, a private window with three tabs (job 0046): a tab dragged out onto the review zone became a
+window of the workspace, 0 px from the zone; a tab dragged onto the code window's tag became a
+Mosaïk tab of it (a strip of two). Chromium drags a torn-off tab through Windows' move loop, so
+everything that works for a window works for a tab being torn off.
 
 ## Step 8: release
 

@@ -108,9 +108,9 @@ fn tabs(hwnd: HWND, at_least: usize) -> Vec<Rect> {
 }
 
 /// Puts the probe's browser window above every other window, the probe's top-most ones too.
-fn on_top(window: HWND) {
+fn on_top(window: HWND) -> Result<(), String> {
     // SAFETY: changes the stacking of a window this probe opened.
-    let _ = unsafe {
+    let set = unsafe {
         SetWindowPos(
             window,
             Some(HWND_TOPMOST),
@@ -122,6 +122,25 @@ fn on_top(window: HWND) {
         )
     };
     pump_until(300, || false);
+    set.map_err(|e| e.to_string())
+}
+
+/// How the probe's browser window stands: what Windows says of it, and its place in the stacking
+/// (0 is the top), with the number of windows showing the probe's first page.
+fn standing(window: HWND) -> Value {
+    use windows::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GetWindowLongPtrW, WS_EX_TOPMOST};
+    // SAFETY: reads a style of a window this probe opened.
+    let ex = unsafe { GetWindowLongPtrW(window, GWL_EXSTYLE) };
+    let all = top_level();
+    json!({
+        "class": mosaik_win::window::class_name(window),
+        "geometry": mosaik_win::window::geometry(window).map(|g| json!({
+            "visible": g.visible, "minimized": g.minimized, "cloaked": g.cloaked,
+        })),
+        "topmost": u32::try_from(ex).unwrap_or_default() & WS_EX_TOPMOST.0 != 0,
+        "stacking": all.iter().position(|&h| h == window),
+        "windows_with_its_title": all.iter().filter(|&&h| title(h).starts_with(&page_title(1))).count(),
+    })
 }
 
 /// Drags one browser tab from `tab` to `to`, out of its strip. The first steps go straight down,
@@ -129,7 +148,7 @@ fn on_top(window: HWND) {
 fn tear_off(tab: Rect, to: Point, owner: HWND) -> Result<(), String> {
     // Above the probe's own top-most windows: a browser that has just started can set its
     // window back to the normal stacking once it is ready.
-    on_top(owner);
+    on_top(owner)?;
     let from = tab.center();
     let below = Point::new(from.x, from.y + 160);
     drag_path(&[from, below, to], owner)
@@ -165,11 +184,13 @@ pub fn scenario(
         600,
     );
     let _ = move_frame(window, place);
-    on_top(window);
+    let first_on_top = on_top(window);
     pump_until(1500, || false);
     let before = tabs(window, 3);
     let mut result = json!({
         "browser": b.name,
+        "on_top": format!("{first_on_top:?}"),
+        "standing": standing(window),
         "tabs_found": before.len(),
         "window": frame_rect(window).map(|f| [f.left, f.top, f.right, f.bottom]),
         "tabs": before.iter().map(|t| [t.left, t.top, t.right, t.bottom]).collect::<Vec<_>>(),
