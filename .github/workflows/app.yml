@@ -83,6 +83,9 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Smoke tests in a browser, with accessibility checks
+        run: npm run e2e
       - run: npm audit --omit=dev --audit-level=high
 
   dependencies:
