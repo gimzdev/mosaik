@@ -3,9 +3,9 @@
 //! `mosaik_core::titlebar`.
 //!
 //! Each point is asked of the window real input would reach there: the deepest visible, enabled
-//! child of the window under that point (as `WindowFromPoint` finds it: a child drawn see-through
-//! still takes the mouse, as the title bar of a Store app's frame does), passing on to its parent
-//! when it answers "transparent", as Windows does. Other windows covering the title bar do not
+//! child of the window under that point, passing on to its parent when it answers "transparent",
+//! as Windows does (`mosaik-probe titlebar`, job 0064: the same answers as `WindowFromPoint`'s
+//! window, at every point of eight apps' title bars). Other windows covering the title bar do not
 //! matter. Asking sends a message to
 //! the app, which may be busy: it is given up after a moment, and at once for an app that is not
 //! responding. This runs on a thread of its own, never the engine's.
