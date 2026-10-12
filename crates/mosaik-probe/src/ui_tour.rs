@@ -1,0 +1,484 @@
+//! Mosaïk's own window, page by page, as a person sees it and as the keyboard and a screen reader
+//! reach it (`mosaik-probe ui-tour`): pictures of the window alone (nothing else of the screen),
+//! the role and name UI Automation gives every control (what a screen reader says), controls
+//! with no name, and the order the Tab key goes through them. In light and dark, at the window's
+//! usual and smallest size, and the switcher.
+//!
+//! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Ship",
+//! with three zones and no windows, so nothing of the user's is touched or shown. The welcome
+//! shows because the profile has no settings yet.
+
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use mosaik_core::geometry::{RatioRect, Rect};
+use mosaik_core::layout::{Layout, Workspace, WorkspaceId};
+use mosaik_core::store::{Store, WORKSPACES_VERSION, WorkspacesFile};
+use mosaik_core::zone::{Zone, ZoneColor, ZoneId};
+use mosaik_win::events::pump_until;
+use mosaik_win::input::{self, LeftButton};
+use mosaik_win::window::{self, frame_rect};
+use serde_json::{Value, json};
+use windows::Win32::Foundation::{HWND, POINT};
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+use windows::Win32::UI::Accessibility::{
+    CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants, UIA_ButtonControlTypeId,
+    UIA_CONTROLTYPE_ID, UIA_CheckBoxControlTypeId, UIA_ComboBoxControlTypeId, UIA_EditControlTypeId,
+    UIA_GroupControlTypeId, UIA_HyperlinkControlTypeId, UIA_ListItemControlTypeId, UIA_MenuItemControlTypeId,
+    UIA_RadioButtonControlTypeId, UIA_SliderControlTypeId, UIA_SpinnerControlTypeId,
+    UIA_TabItemControlTypeId, UIA_TextControlTypeId,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{VK_ESCAPE, VK_TAB};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GA_ROOT, GetAncestor, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos, WindowFromPoint,
+};
+
+use crate::capture::save_bmp;
+
+/// The workspace the tour's profile holds.
+const WORKSPACE: &str = "Ship";
+
+/// Tab presses at most per page (the settings page has about thirty controls).
+const TABS: usize = 60;
+
+fn arg<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str)
+}
+
+pub fn run(args: &[String]) -> Result<Value, String> {
+    if let Some(dir) = arg(args, "--prepare") {
+        return prepare(Path::new(dir));
+    }
+    let pid: u32 = arg(args, "--pid")
+        .and_then(|p| p.parse().ok())
+        .ok_or("ui-tour needs --pid with the process id of the Mosaïk to look at, or --prepare <folder>")?;
+    let shots = PathBuf::from(arg(args, "--shots").ok_or("ui-tour needs --shots <folder>")?);
+    let ctl = arg(args, "--ctl").map(PathBuf::from);
+    std::fs::create_dir_all(&shots).map_err(|e| e.to_string())?;
+    let original = input::cursor();
+    let result = Tour::new(pid, shots, ctl).and_then(|mut t| t.run());
+    input::move_to(original);
+    result
+}
+
+/// Writes the tour's profile under `roaming` (what `%APPDATA%` will be for the Mosaïk under
+/// test): the workspace "Ship" with three zones on the main monitor and no windows.
+fn prepare(roaming: &Path) -> Result<Value, String> {
+    let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
+    let zone = |id: &str, name: &str, color: ZoneColor, area: [f64; 4]| -> Result<Zone, String> {
+        Ok(Zone {
+            id: ZoneId::new(id),
+            name: name.into(),
+            color,
+            monitor: 0,
+            area: RatioRect::new(area[0], area[1], area[2], area[3]).map_err(|e| e.to_string())?,
+        })
+    };
+    let file = WorkspacesFile {
+        version: WORKSPACES_VERSION,
+        workspaces: vec![Workspace {
+            id: WorkspaceId("ship".into()),
+            name: WORKSPACE.into(),
+            hotkey: None,
+            layout: Layout {
+                monitors: vec![topology.primary().to_ref()],
+                zones: vec![
+                    zone("z1", "Code", ZoneColor::Lapis, [0.0, 0.0, 0.5, 1.0])?,
+                    zone("z2", "Browser", ZoneColor::Verdigris, [0.5, 0.0, 1.0, 0.5])?,
+                    zone("z3", "Notes", ZoneColor::Saffron, [0.5, 0.5, 1.0, 1.0])?,
+                ],
+                slots: Vec::new(),
+                tab_groups: Vec::new(),
+            },
+        }],
+        active: None,
+    };
+    let dir = roaming.join("Mosaik");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Store::new(&dir).save(&file).map_err(|e| e.to_string())?;
+    Ok(json!({ "prepared": dir.display().to_string() }))
+}
+
+/// A control as UI Automation exposes it.
+#[derive(Clone, Debug, PartialEq)]
+struct Control {
+    role: &'static str,
+    name: String,
+    rect: Rect,
+    pid: u32,
+}
+
+impl Control {
+    fn label(&self) -> String {
+        format!("{} “{}”", self.role, self.name)
+    }
+
+    /// Controls a person acts on (a screen reader must name each).
+    fn acts(&self) -> bool {
+        matches!(
+            self.role,
+            "button"
+                | "check box"
+                | "combo box"
+                | "edit"
+                | "link"
+                | "menu item"
+                | "radio"
+                | "slider"
+                | "spinner"
+                | "tab"
+        )
+    }
+}
+
+fn role_of(t: UIA_CONTROLTYPE_ID) -> &'static str {
+    [
+        (UIA_ButtonControlTypeId, "button"),
+        (UIA_CheckBoxControlTypeId, "check box"),
+        (UIA_ComboBoxControlTypeId, "combo box"),
+        (UIA_EditControlTypeId, "edit"),
+        (UIA_HyperlinkControlTypeId, "link"),
+        (UIA_ListItemControlTypeId, "list item"),
+        (UIA_MenuItemControlTypeId, "menu item"),
+        (UIA_RadioButtonControlTypeId, "radio"),
+        (UIA_SliderControlTypeId, "slider"),
+        (UIA_SpinnerControlTypeId, "spinner"),
+        (UIA_TabItemControlTypeId, "tab"),
+        (UIA_TextControlTypeId, "text"),
+        (UIA_GroupControlTypeId, "group"),
+    ]
+    .into_iter()
+    .find(|(id, _)| *id == t)
+    .map_or("other", |(_, r)| r)
+}
+
+struct Uia(IUIAutomation);
+
+impl Uia {
+    fn new() -> Result<Self, String> {
+        // SAFETY: creates the UI Automation client on this thread, where main() set up COM.
+        unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }
+            .map(Self)
+            .map_err(|e| format!("UI Automation: {e}"))
+    }
+
+    fn control(e: &IUIAutomationElement) -> Option<Control> {
+        // SAFETY: reads cached-free current properties of an element this thread got from UIA.
+        unsafe {
+            let r = e.CurrentBoundingRectangle().ok()?;
+            Some(Control {
+                role: role_of(e.CurrentControlType().ok()?),
+                name: e.CurrentName().map(|b| b.to_string()).unwrap_or_default(),
+                rect: Rect::new(r.left, r.top, r.right, r.bottom),
+                pid: u32::try_from(e.CurrentProcessId().unwrap_or_default()).unwrap_or_default(),
+            })
+        }
+    }
+
+    /// Every control of the window `hwnd` with a size on screen, in tree order.
+    fn controls(&self, hwnd: HWND) -> Vec<Control> {
+        // SAFETY: COM calls on this thread; the results are owned interface pointers.
+        let all = unsafe {
+            self.0
+                .ElementFromHandle(hwnd)
+                .and_then(|root| root.FindAll(TreeScope_Descendants, &self.0.CreateTrueCondition()?))
+        };
+        let Ok(all) = all else { return Vec::new() };
+        // SAFETY: as above.
+        let n = unsafe { all.Length() }.unwrap_or(0);
+        (0..n)
+            // SAFETY: as above; the index is in range.
+            .filter_map(|i| unsafe { all.GetElement(i) }.ok())
+            .filter_map(|e| Self::control(&e))
+            .filter(|c| !c.rect.is_empty())
+            .collect()
+    }
+
+    fn focused(&self) -> Option<Control> {
+        // SAFETY: COM call on this thread.
+        let e = unsafe { self.0.GetFocusedElement() }.ok()?;
+        Self::control(&e)
+    }
+}
+
+struct Tour {
+    pid: u32,
+    hwnd: HWND,
+    shots: PathBuf,
+    ctl: Option<PathBuf>,
+    uia: Uia,
+    pages: Vec<Value>,
+}
+
+impl Tour {
+    fn new(pid: u32, shots: PathBuf, ctl: Option<PathBuf>) -> Result<Self, String> {
+        let hwnd = Self::window(pid, 15_000).ok_or("Mosaïk's window did not open")?;
+        Ok(Self {
+            pid,
+            hwnd,
+            shots,
+            ctl,
+            uia: Uia::new()?,
+            pages: Vec::new(),
+        })
+    }
+
+    /// Mosaïk's window: the visible window of its process titled "Mosaïk".
+    fn window(pid: u32, ms: u64) -> Option<HWND> {
+        let start = Instant::now();
+        loop {
+            let found = window::top_level().into_iter().find(|&h| {
+                window::pid(h) == pid
+                    && window::title(h) == "Mosaïk"
+                    && window::geometry(h).is_some_and(|g| g.visible && !g.cloaked && !g.minimized)
+            });
+            if found.is_some() || start.elapsed() > Duration::from_millis(ms) {
+                return found;
+            }
+            pump_until(200, || false);
+        }
+    }
+
+    /// The control with this role (any, when empty) and name, waiting a little for the page.
+    fn find(&self, role: &str, name: &str) -> Result<Control, String> {
+        let start = Instant::now();
+        loop {
+            if let Some(c) = self
+                .uia
+                .controls(self.hwnd)
+                .into_iter()
+                .find(|c| (role.is_empty() || c.role == role) && c.name == name)
+            {
+                return Ok(c);
+            }
+            if start.elapsed() > Duration::from_secs(5) {
+                return Err(format!("no {role} “{name}” in Mosaïk's window"));
+            }
+            pump_until(250, || false);
+        }
+    }
+
+    /// Clicks `c` in its middle, as a person does, once sure the point is on Mosaïk's window.
+    fn click(&self, c: &Control) -> Result<(), String> {
+        let at = c.rect.center();
+        // SAFETY: read-only hit test.
+        let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: at.x, y: at.y }), GA_ROOT) };
+        if under != self.hwnd {
+            return Err(format!(
+                "another window ({}) covers {} at {},{}; not clicking",
+                window::class_name(under),
+                c.label(),
+                at.x,
+                at.y
+            ));
+        }
+        input::move_to(at);
+        pump_until(120, || false);
+        {
+            let _button = LeftButton::press();
+            pump_until(60, || false);
+        }
+        // Pages change with a short fade.
+        pump_until(700, || false);
+        Ok(())
+    }
+
+    fn press(vk: u16) {
+        input::key(vk, true);
+        input::key(vk, false);
+        pump_until(150, || false);
+    }
+
+    fn shot(&self, name: &str) -> Result<String, String> {
+        let r = frame_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;
+        let file = format!("{name}.bmp");
+        save_bmp(&[r], &self.shots.join(&file))?;
+        Ok(file)
+    }
+
+    /// Tab from where the focus is now until it comes back to a control already reached: each
+    /// control's role and name, and whether the focus stayed in Mosaïk's window.
+    fn tab_walk(&self, shot_at: Option<(usize, &str)>) -> Result<Value, String> {
+        let window = frame_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;
+        let mut path: Vec<Control> = Vec::new();
+        let mut left_window = Vec::new();
+        let mut shots = Vec::new();
+        for i in 1..=TABS {
+            Self::press(VK_TAB.0);
+            let Some(c) = self.uia.focused() else { continue };
+            if c.pid != self.pid || window.overlap_area(c.rect) == 0 {
+                left_window.push(c.label());
+            }
+            if let Some((at, name)) = shot_at
+                && at == i
+            {
+                shots.push(self.shot(name)?);
+            }
+            if path.first().is_some_and(|first| *first == c) {
+                break;
+            }
+            path.push(c);
+        }
+        Ok(json!({
+            "order": path.iter().map(Control::label).collect::<Vec<_>>(),
+            "cycled": path.len() < TABS,
+            "focus_left_the_window": left_window,
+            "shots": shots,
+        }))
+    }
+
+    /// What the page shows now: its picture, its controls, those a screen reader cannot name.
+    fn page(&mut self, name: &str, walk: bool) -> Result<(), String> {
+        let shot = self.shot(name)?;
+        let controls = self.uia.controls(self.hwnd);
+        let acts: Vec<&Control> = controls.iter().filter(|c| c.acts()).collect();
+        let unnamed: Vec<String> = acts
+            .iter()
+            .filter(|c| c.name.trim().is_empty())
+            .map(|c| format!("{} at {},{}", c.role, c.rect.left, c.rect.top))
+            .collect();
+        let mut page = json!({
+            "page": name,
+            "shot": shot,
+            "window": frame_rect(self.hwnd).map(|r| [r.width(), r.height()]),
+            "controls": acts.iter().map(|c| c.label()).collect::<Vec<_>>(),
+            "unnamed": unnamed,
+        });
+        if walk {
+            let focus_shot = format!("{name}-focus");
+            page["tab"] = self.tab_walk(Some((3, &focus_shot)))?;
+        }
+        println!("page {name}: {page}");
+        self.pages.push(page);
+        Ok(())
+    }
+
+    fn nav(&self, to: &str) -> Result<(), String> {
+        let c = self.find("button", to)?;
+        self.click(&c)
+    }
+
+    fn zones(&self) -> Result<(), String> {
+        self.nav("Workspaces")?;
+        let c = self.find("button", &format!("Edit zones of “{WORKSPACE}”"))?;
+        self.click(&c)
+    }
+
+    fn theme(&self, label: &str) -> Result<(), String> {
+        self.nav("Settings")?;
+        let c = self.find("radio", label)?;
+        self.click(&c)
+    }
+
+    /// The switcher, opened as the shortcut opens it, then closed with Escape.
+    fn switcher(&mut self, name: &str) -> Result<(), String> {
+        let Some(ctl) = &self.ctl else { return Ok(()) };
+        let status = std::process::Command::new(ctl)
+            .arg("switcher")
+            .output()
+            .map_err(|e| format!("mosaikctl: {e}"))?;
+        if !status.status.success() {
+            return Err(format!(
+                "mosaikctl switcher: {}",
+                String::from_utf8_lossy(&status.stderr).trim()
+            ));
+        }
+        let start = Instant::now();
+        let found = loop {
+            let found = window::top_level().into_iter().find(|&h| {
+                window::pid(h) == self.pid
+                    && window::class_name(h) == "MosaikSwitcher"
+                    && window::geometry(h).is_some_and(|g| g.visible && !g.cloaked)
+            });
+            if found.is_some() || start.elapsed() > Duration::from_secs(3) {
+                break found;
+            }
+            pump_until(100, || false);
+        };
+        let Some(h) = found else {
+            return Err("the switcher did not show".into());
+        };
+        pump_until(400, || false);
+        let r = window::window_rect(h).ok_or("the switcher vanished")?;
+        let file = format!("{name}.bmp");
+        save_bmp(&[r], &self.shots.join(&file))?;
+        Self::press(VK_ESCAPE.0);
+        let closed = pump_until(1500, || !window::geometry(h).is_some_and(|g| g.visible));
+        let page = json!({ "page": name, "shot": file, "size": [r.width(), r.height()], "escape_closed_it": closed });
+        println!("page {name}: {page}");
+        self.pages.push(page);
+        Ok(())
+    }
+
+    fn resize(&self, width: i32, height: i32) {
+        // SAFETY: resizes the window of the Mosaïk under test; Windows keeps it at least as large
+        // as the minimum it asks for.
+        let _ = unsafe {
+            SetWindowPos(
+                self.hwnd,
+                None,
+                0,
+                0,
+                width,
+                height,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        };
+        pump_until(600, || false);
+    }
+
+    fn run(&mut self) -> Result<Value, String> {
+        // First run: the welcome. The click on its title puts the window in front and starts
+        // the Tab key from there.
+        pump_until(1500, || false);
+        // (Any role: a heading's, as browsers give it to UI Automation, varies.)
+        let title = self.find("", "Welcome to Mosaïk")?;
+        self.click(&title)?;
+        self.page("welcome", true)?;
+        let start = self.find("button", "Get started")?;
+        self.click(&start)?;
+
+        // Each page, in the theme Windows uses, with the keyboard path.
+        self.page("workspaces", true)?;
+        self.zones()?;
+        self.page("zones", true)?;
+        self.nav("Settings")?;
+        self.page("settings", true)?;
+        self.nav("About")?;
+        self.page("about", true)?;
+        self.switcher("switcher")?;
+
+        // Light and dark, chosen in Mosaïk's settings.
+        for (theme, label) in [("dark", "Dark"), ("light", "Light")] {
+            self.theme(label)?;
+            self.page(&format!("settings-{theme}"), false)?;
+            self.nav("Workspaces")?;
+            self.page(&format!("workspaces-{theme}"), false)?;
+            self.zones()?;
+            self.page(&format!("zones-{theme}"), false)?;
+            self.nav("About")?;
+            self.page(&format!("about-{theme}"), false)?;
+            self.switcher(&format!("switcher-{theme}"))?;
+        }
+
+        // The smallest the window goes.
+        let before = window::window_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;
+        self.resize(200, 200);
+        self.nav("Workspaces")?;
+        self.page("workspaces-smallest", false)?;
+        self.zones()?;
+        self.page("zones-smallest", false)?;
+        self.nav("Settings")?;
+        self.page("settings-smallest", false)?;
+        self.nav("About")?;
+        self.page("about-smallest", false)?;
+        self.resize(before.width(), before.height());
+
+        // Back as Windows has it.
+        self.theme("Like Windows")?;
+        Ok(json!({ "pages": self.pages }))
+    }
+}
