@@ -226,7 +226,7 @@ impl Store {
                 // start over.
                 return match fs::read(&backup) {
                     Ok(b) => {
-                        let (value, notes) = decode::<T>(&b, &backup)?;
+                        let (value, notes, _) = decode::<T>(&b, &backup)?;
                         Ok(Loaded {
                             value,
                             source: Source::LastGood {
@@ -246,10 +246,17 @@ impl Store {
             Err(source) => return Err(StoreError::Io { path, source }),
         };
         match decode::<T>(&bytes, &path) {
-            Ok((value, notes)) => {
+            Ok((value, notes, changed)) => {
                 // Keep a copy of the file as it was when it last loaded cleanly.
                 if fs::read(&backup).ok().as_deref() != Some(bytes.as_slice()) {
                     write_atomic(&backup, &bytes)?;
+                }
+                // A file moved forward or mended is written back as it is now, so the move or the
+                // mending happens once and its note is said once (job 0094: the note of a move
+                // came at every start until the user happened to change a setting). Should that
+                // write fail, the file is moved again next time; what was read is still used.
+                if changed {
+                    let _ = self.save(&value);
                 }
                 Ok(Loaded {
                     value,
@@ -266,7 +273,7 @@ impl Store {
                     source,
                 })?;
                 match fs::read(&backup).ok().map(|b| decode::<T>(&b, &backup)) {
-                    Some(Ok((value, notes))) => Ok(Loaded {
+                    Some(Ok((value, notes, _))) => Ok(Loaded {
                         value,
                         source: Source::LastGood {
                             damaged_kept_as: Some(kept),
@@ -292,7 +299,11 @@ impl Store {
     }
 }
 
-fn decode<T: Saved>(bytes: &[u8], path: &Path) -> Result<(T, Vec<String>), StoreError> {
+/// A file's value, what to tell the user about it, and whether it changed on the way: moved
+/// forward from an older version, or mended.
+type Decoded<T> = (T, Vec<String>, bool);
+
+fn decode<T: Saved>(bytes: &[u8], path: &Path) -> Result<Decoded<T>, StoreError> {
     let damaged = |reason: String| StoreError::Damaged {
         path: path.to_owned(),
         reason,
@@ -322,8 +333,10 @@ fn decode<T: Saved>(bytes: &[u8], path: &Path) -> Result<(T, Vec<String>), Store
         *v = serde_json::Value::from(T::VERSION);
     }
     let mut parsed: T = serde_json::from_value(value).map_err(|e| damaged(e.to_string()))?;
-    notes.extend(parsed.repair());
-    Ok((parsed, notes))
+    let mended = parsed.repair();
+    let changed = found < T::VERSION || !mended.is_empty();
+    notes.extend(mended);
+    Ok((parsed, notes, changed))
 }
 
 /// Writes `bytes` to a temporary file next to `path`, flushes it to disk, then renames it over
@@ -555,6 +568,39 @@ mod tests {
         let loaded = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
         assert_eq!(loaded.value.active, None);
         assert_eq!(loaded.notes.len(), 1);
+        // Mended once: the file is written back, so the note is not said at every start.
+        let again = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
+        assert_eq!(again.value, loaded.value);
+        assert!(again.notes.is_empty(), "{:?}", again.notes);
+    }
+
+    #[test]
+    fn a_file_moved_forward_is_written_back_so_its_note_is_said_once() {
+        // Job 0094: the note about the move to format 4 came again at the next start, as every
+        // move's did until the user happened to change a setting (the file stayed as it was).
+        let d = TempDir::new("written-back");
+        let old = br#"{"version":1,"frames":{"tags_in_title_bar":true,"style":{"gap":8,"tag_band":28,"border":2}}}"#;
+        let loaded = load_settings(&d, old);
+        assert_eq!(loaded.notes.len(), 1);
+        let on_disk: serde_json::Value =
+            serde_json::from_slice(&fs::read(d.0.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(on_disk["version"], SETTINGS_VERSION);
+        // The file as it was stays as the last good copy until the next clean load.
+        assert_eq!(fs::read(d.0.join("settings.last-good.json")).unwrap(), old);
+        let again = Store::new(&d.0).load::<Settings>().unwrap();
+        assert!(again.notes.is_empty(), "{:?}", again.notes);
+        assert_eq!(again.value, loaded.value);
+        assert_eq!(again.source, Source::File);
+        // A move with nothing to tell is written back too.
+        let quiet = load_settings(
+            &d,
+            br#"{"version":1,"frames":{"tags_in_title_bar":true,"style":{"gap":16,"tag_band":28,"border":2}}}"#,
+        );
+        assert!(quiet.notes.is_empty(), "{:?}", quiet.notes);
+        let on_disk: serde_json::Value =
+            serde_json::from_slice(&fs::read(d.0.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(on_disk["version"], SETTINGS_VERSION);
+        assert_eq!(on_disk["frames"]["style"]["gap"], 16);
     }
 
     #[test]
