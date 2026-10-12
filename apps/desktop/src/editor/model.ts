@@ -243,7 +243,18 @@ export function update(drafts: Draft[], key: string, change: Partial<Pick<Draft,
   return drafts.map((d) => (d.key === key ? { ...d, ...change } : d));
 }
 
-export type Preset = 'full' | 'halves' | 'thirds' | 'main-side' | 'side-main' | 'quarters';
+/** The same presets as `mosaik_core::presets::Preset`, by the same ids and shapes. */
+export type Preset =
+  | 'full'
+  | 'halves'
+  | 'thirds'
+  | 'main-side'
+  | 'side-main'
+  | 'quarters'
+  | 'half-stack'
+  | 'stack-half'
+  | 'rows'
+  | 'three-rows';
 
 export const PRESETS: readonly { id: Preset; label: string }[] = [
   { id: 'full', label: 'Whole screen' },
@@ -252,6 +263,10 @@ export const PRESETS: readonly { id: Preset; label: string }[] = [
   { id: 'main-side', label: 'Main and side' },
   { id: 'side-main', label: 'Side and main' },
   { id: 'quarters', label: 'Quarters' },
+  { id: 'half-stack', label: 'Half beside two stacked' },
+  { id: 'stack-half', label: 'Two stacked beside half' },
+  { id: 'rows', label: 'Top and bottom' },
+  { id: 'three-rows', label: 'Three rows' },
 ];
 
 const SHAPES: Record<Preset, RatioRect[]> = {
@@ -278,6 +293,25 @@ const SHAPES: Record<Preset, RatioRect[]> = {
     { left: 0.5, top: 0, right: 1, bottom: 0.5 },
     { left: 0, top: 0.5, right: 0.5, bottom: 1 },
     { left: 0.5, top: 0.5, right: 1, bottom: 1 },
+  ],
+  'half-stack': [
+    { left: 0, top: 0, right: 0.5, bottom: 1 },
+    { left: 0.5, top: 0, right: 1, bottom: 0.5 },
+    { left: 0.5, top: 0.5, right: 1, bottom: 1 },
+  ],
+  'stack-half': [
+    { left: 0, top: 0, right: 0.5, bottom: 0.5 },
+    { left: 0.5, top: 0, right: 1, bottom: 1 },
+    { left: 0, top: 0.5, right: 0.5, bottom: 1 },
+  ],
+  rows: [
+    { left: 0, top: 0, right: 1, bottom: 0.5 },
+    { left: 0, top: 0.5, right: 1, bottom: 1 },
+  ],
+  'three-rows': [
+    { left: 0, top: 0, right: 1, bottom: 1 / 3 },
+    { left: 0, top: 1 / 3, right: 1, bottom: 2 / 3 },
+    { left: 0, top: 2 / 3, right: 1, bottom: 1 },
   ],
 };
 

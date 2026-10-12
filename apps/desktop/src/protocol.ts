@@ -35,13 +35,14 @@ export interface ZoneEdit {
 
 export type Theme = 'system' | 'light' | 'dark';
 export type HideMethod = 'shell_cloak' | 'minimize' | 'park';
+export type EdgeSide = 'left' | 'right';
 
 /** The user's settings (crates/mosaik-core/src/settings.rs). Fields the interface does not
  * show are sent back as they came. */
 export interface Settings {
   version: number;
   switcher_hotkey: string;
-  snap: { enabled: boolean; invert_shift: boolean; near: number };
+  snap: { enabled: boolean; invert_shift: boolean; near: number; resize_zones: boolean };
   frames: {
     show_frames: boolean;
     show_tags: boolean;
@@ -50,6 +51,9 @@ export interface Settings {
   };
   tab_hiding: HideMethod | null;
   switching: { minimize_others: boolean; launch_missing: boolean };
+  /** The quick menu's handle: on, which edge of the main monitor, and where along it (percent
+   * of its height from the top). */
+  edge: { enabled: boolean; side: EdgeSide; position: number };
   theme: Theme;
   start_with_windows: boolean;
   onboarding_done: boolean;
@@ -64,6 +68,8 @@ export type Command =
   | { cmd: 'switch'; workspace: string }
   | { cmd: 'save'; workspace: string | null }
   | { cmd: 'rescue' }
+  | { cmd: 'arrange' }
+  | { cmd: 'undo_arrange' }
   | { cmd: 'show_switcher' }
   | { cmd: 'show_settings' }
   | { cmd: 'quit' }
@@ -155,6 +161,7 @@ const isNullableString = (x: unknown): x is string | null => x === null || isStr
 const COLORS = new Set<string>(['lapis', 'verdigris', 'saffron', 'madder', 'slate']);
 const THEMES = new Set<string>(['system', 'light', 'dark']);
 const HIDE_METHODS = new Set<string>(['shell_cloak', 'minimize', 'park']);
+const EDGE_SIDES = new Set<string>(['left', 'right']);
 
 function isRect(x: unknown): x is Rect {
   return isObject(x) && isNumber(x.left) && isNumber(x.top) && isNumber(x.right) && isNumber(x.bottom);
@@ -187,13 +194,19 @@ function isZone(x: unknown): x is ZoneEdit {
 
 export function isSettings(x: unknown): x is Settings {
   if (!isObject(x)) return false;
-  const { snap, frames, switching } = x;
+  const { snap, frames, switching, edge } = x;
   return (
     isNumber(x.version) &&
     isString(x.switcher_hotkey) &&
     isObject(snap) &&
     isBoolean(snap.enabled) &&
     isBoolean(snap.invert_shift) &&
+    isBoolean(snap.resize_zones) &&
+    isObject(edge) &&
+    isBoolean(edge.enabled) &&
+    isString(edge.side) &&
+    EDGE_SIDES.has(edge.side) &&
+    isNumber(edge.position) &&
     isObject(frames) &&
     isBoolean(frames.show_frames) &&
     isBoolean(frames.show_tags) &&

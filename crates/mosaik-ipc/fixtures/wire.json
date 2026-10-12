@@ -22,6 +22,12 @@
       "cmd": "rescue"
     },
     {
+      "cmd": "arrange"
+    },
+    {
+      "cmd": "undo_arrange"
+    },
+    {
       "cmd": "show_switcher"
     },
     {
@@ -36,6 +42,11 @@
     {
       "cmd": "set_settings",
       "settings": {
+        "edge": {
+          "enabled": true,
+          "position": 30,
+          "side": "right"
+        },
         "frames": {
           "show_frames": true,
           "show_tags": true,
@@ -44,7 +55,7 @@
             "gap": 8,
             "tag_band": 28
           },
-          "tags_in_title_bar": true
+          "tags_in_title_bar": false
         },
         "notices_shown": [],
         "onboarding_done": false,
@@ -55,7 +66,8 @@
         "snap": {
           "enabled": true,
           "invert_shift": false,
-          "near": 48
+          "near": 48,
+          "resize_zones": true
         },
         "start_with_windows": false,
         "switcher_hotkey": "Win+Alt+Space",
@@ -65,7 +77,7 @@
         },
         "tab_hiding": null,
         "theme": "system",
-        "version": 1
+        "version": 2
       }
     },
     {
@@ -118,7 +130,7 @@
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 2,
+      "protocol": 3,
       "reply": "hello"
     },
     {
@@ -152,6 +164,11 @@
       },
       "reply": "settings",
       "settings": {
+        "edge": {
+          "enabled": true,
+          "position": 30,
+          "side": "right"
+        },
         "frames": {
           "show_frames": true,
           "show_tags": true,
@@ -160,7 +177,7 @@
             "gap": 8,
             "tag_band": 28
           },
-          "tags_in_title_bar": true
+          "tags_in_title_bar": false
         },
         "notices_shown": [],
         "onboarding_done": false,
@@ -171,7 +188,8 @@
         "snap": {
           "enabled": true,
           "invert_shift": false,
-          "near": 48
+          "near": 48,
+          "resize_zones": true
         },
         "start_with_windows": false,
         "switcher_hotkey": "Win+Alt+Space",
@@ -181,7 +199,7 @@
         },
         "tab_hiding": null,
         "theme": "system",
-        "version": 1
+        "version": 2
       }
     },
     {

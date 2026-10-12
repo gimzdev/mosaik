@@ -8,8 +8,10 @@ import { Canvas } from './editor/Canvas';
 import {
   type Draft,
   PRESETS,
+  type Preset,
   applyPreset,
   fromZones,
+  presetShape,
   problem as draftProblem,
   remove,
   split,
@@ -38,6 +40,26 @@ function sameZone(before: Draft[], next: Draft[], key: string | null): string | 
       (d.monitor === z.monitor && JSON.stringify(d.area) === JSON.stringify(z.area)),
   );
   return same?.key ?? null;
+}
+
+/** A small drawing of a preset's zones, beside its name in the menu. */
+function PresetPicture({ preset }: { preset: Preset }) {
+  return (
+    <svg aria-hidden="true" width="30" height="20" viewBox="0 0 30 20" className="shrink-0">
+      {presetShape(preset).map((a, i) => (
+        <rect
+          key={i}
+          x={1 + a.left * 28 + 0.75}
+          y={1 + a.top * 18 + 0.75}
+          width={Math.max(1, (a.right - a.left) * 28 - 1.5)}
+          height={Math.max(1, (a.bottom - a.top) * 18 - 1.5)}
+          rx="1.5"
+          className="fill-[var(--hover)] stroke-[var(--muted)] forced-colors:fill-[Canvas] forced-colors:stroke-[CanvasText]"
+          strokeWidth="1"
+        />
+      ))}
+    </svg>
+  );
 }
 
 export function ZoneEditor({
@@ -179,6 +201,7 @@ export function ZoneEditor({
             label="Start from a preset"
             items={PRESETS.map((p) => ({
               label: p.label,
+              icon: <PresetPicture preset={p.id} />,
               onSelect: () => {
                 setDrafts(applyPreset(drafts, current.id, p.id));
                 setSelected(null);

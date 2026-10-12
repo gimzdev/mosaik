@@ -36,9 +36,9 @@ const monitors: MonitorState[] = [
 ];
 
 const settings: Settings = {
-  version: 1,
+  version: 2,
   switcher_hotkey: 'Win+Alt+Space',
-  snap: { enabled: true, invert_shift: false, near: 48 },
+  snap: { enabled: true, invert_shift: false, near: 48, resize_zones: true },
   frames: {
     show_frames: true,
     show_tags: true,
@@ -47,6 +47,7 @@ const settings: Settings = {
   },
   tab_hiding: null,
   switching: { minimize_others: true, launch_missing: true },
+  edge: { enabled: true, side: 'right', position: 30 },
   theme: 'system',
   start_with_windows: false,
   onboarding_done: params.get('welcome') !== '1',
@@ -181,7 +182,7 @@ export const mock = {
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.0.0-dev', protocol: 2 };
+      return { reply: 'hello', app_version: '1.1.0-dev', protocol: 3 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -259,11 +260,15 @@ function answer(command: Command): Reply {
     }
     case 'rescue':
       return done('Nothing was hidden: every window is already on screen.');
+    case 'arrange':
+      return done('Arranged 5 windows in 3 zones; 2 windows as tabs.');
+    case 'undo_arrange':
+      return done('Windows are back where they were.');
     case 'state':
       return {
         reply: 'state',
-        app_version: '1.0.0-dev',
-        protocol: 2,
+        app_version: '1.1.0-dev',
+        protocol: 3,
         safe_mode: false,
         watchdog: true,
         monitors,

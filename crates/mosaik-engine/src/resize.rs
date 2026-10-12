@@ -83,8 +83,11 @@ impl Engine {
         if !resizable || !self.settings.snap.resize_zones {
             return None;
         }
-        let zone = self.zone_of(h, start, resizable, self.style())?.id.clone();
+        // Only a window of the workspace moves its lines: one that merely sits over a zone (put
+        // there by Windows or by its app) is not the workspace's to follow.
         let active = self.active.as_ref()?;
+        active.slot_of(h)?;
+        let zone = self.zone_of(h, start, resizable, self.style())?.id.clone();
         let ws = self.file.workspaces.iter().find(|w| w.id == active.id)?;
         let topology = self.topology.as_ref()?;
         let resolver = Resolver::new(&ws.layout, topology, self.style());

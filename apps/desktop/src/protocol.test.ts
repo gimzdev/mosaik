@@ -12,6 +12,8 @@ const COMMANDS = [
   'switch',
   'save',
   'rescue',
+  'arrange',
+  'undo_arrange',
   'show_switcher',
   'show_settings',
   'quit',

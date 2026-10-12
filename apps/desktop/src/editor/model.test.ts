@@ -6,6 +6,7 @@ import {
   GRID,
   MAX_ZONES,
   MIN_ZONE,
+  PRESETS,
   applyPreset,
   fromZones,
   lineLabel,
@@ -13,6 +14,7 @@ import {
   lines,
   moveLine,
   percent,
+  presetShape,
   problem,
   remove,
   split,
@@ -149,6 +151,24 @@ describe('the zone editor', () => {
     expect(quarters).toHaveLength(4);
     expect(quarters.filter((d) => d.id === null)).toHaveLength(1);
     expect(next.find((d) => d.key === 'o1')).toBeDefined();
+  });
+
+  it('has a full-height half beside two stacked zones, and every preset tiles its monitor', () => {
+    // The owner's request: "half left full, right half split".
+    const stacked = applyPreset(fromZones([]), 'm1', 'half-stack');
+    expect(stacked.map((d) => d.area)).toEqual([
+      { left: 0, top: 0, right: 0.5, bottom: 1 },
+      { left: 0.5, top: 0, right: 1, bottom: 0.5 },
+      { left: 0.5, top: 0.5, right: 1, bottom: 1 },
+    ]);
+    // Moving the long line moves all three; the short one only the stacked pair.
+    const all = lines(stacked, 'm1');
+    expect(all).toHaveLength(2);
+    for (const p of PRESETS) {
+      const shape = presetShape(p.id);
+      const total = shape.reduce((sum, a) => sum + (a.right - a.left) * (a.bottom - a.top), 0);
+      expect(total, p.id).toBeCloseTo(1, 9);
+    }
   });
 
   it('says why a draft cannot be saved', () => {

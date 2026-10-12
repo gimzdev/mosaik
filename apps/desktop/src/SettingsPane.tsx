@@ -2,7 +2,7 @@
 // tabs behave. Each change is saved at once.
 
 import type { SaveSettings } from './App';
-import type { HideMethod, HotkeyState, Settings, Theme } from './protocol';
+import type { EdgeSide, HideMethod, HotkeyState, Settings, Theme } from './protocol';
 import { ShortcutRecorder } from './shortcut';
 import { Choice, PageTitle, Section, Toggle, useSay } from './ui';
 
@@ -20,6 +20,11 @@ const SHIFT: readonly { value: 'free' | 'snap'; label: string }[] = [
 const TAG_PLACES: readonly { value: 'title' | 'above'; label: string }[] = [
   { value: 'above', label: 'In a bar above each window' },
   { value: 'title', label: 'In each window’s title bar, where there is room' },
+];
+
+const EDGES: readonly { value: EdgeSide; label: string }[] = [
+  { value: 'right', label: 'Right edge' },
+  { value: 'left', label: 'Left edge' },
 ];
 
 const HIDING: readonly { value: 'auto' | 'minimize'; label: string }[] = [
@@ -100,6 +105,14 @@ export function SettingsPane({
             save({ ...settings, snap: { ...settings.snap, enabled: on } });
           }}
         />
+        <Toggle
+          label="Zones follow a resized window"
+          description="Resize a window in a zone by an edge it shares with other zones, and those zones and their windows follow. Shift resizes the window alone."
+          checked={settings.snap.resize_zones}
+          onChange={(on) => {
+            save({ ...settings, snap: { ...settings.snap, resize_zones: on } });
+          }}
+        />
         <Choice
           label="Shift while dragging"
           value={settings.snap.invert_shift ? 'snap' : 'free'}
@@ -131,6 +144,27 @@ export function SettingsPane({
           options={TAG_PLACES}
           onChange={(v) => {
             save({ ...settings, frames: { ...settings.frames, tags_in_title_bar: v === 'title' } });
+          }}
+        />
+      </Section>
+
+      <Section
+        title="Quick menu"
+        intro="A thin line at the edge of your main screen. Rest the pointer on it for Arrange, the switcher and more; drag it along the edge to move it."
+      >
+        <Toggle
+          label="Show the quick menu"
+          checked={settings.edge.enabled}
+          onChange={(on) => {
+            save({ ...settings, edge: { ...settings.edge, enabled: on } });
+          }}
+        />
+        <Choice
+          label="Where"
+          value={settings.edge.side}
+          options={EDGES}
+          onChange={(side) => {
+            save({ ...settings, edge: { ...settings.edge, side } });
           }}
         />
       </Section>

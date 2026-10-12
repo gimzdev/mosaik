@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { About } from './About';
-import { guardClose, onNotices, request, styleTitleBar, takeNotices } from './engine';
+import { guardClose, onNotices, onZonesToEdit, request, styleTitleBar, takeNotices, takeZonesToEdit } from './engine';
 import { keepTabInside } from './focusLoop';
 import { Notices, type ShownNotice } from './Notices';
 import { errorMessage, type HotkeyState, type Settings } from './protocol';
@@ -72,6 +72,10 @@ export function App() {
   /** The window is closing with unsaved zone edits: resolves the question. */
   const [closing, setClosing] = useState<((close: boolean) => void) | null>(null);
   const noticeCount = useRef(0);
+  const dirty = useRef(false);
+  useEffect(() => {
+    dirty.current = editorDirty;
+  }, [editorDirty]);
 
   const load = useCallback(() => {
     void request({ cmd: 'settings' }).then((reply) => {
@@ -101,6 +105,21 @@ export function App() {
     collect();
     return onNotices(collect);
   }, [load]);
+
+  // The quick menu's "Edit zones" opens the editor for the open workspace (asking first when
+  // the editor has unsaved changes).
+  useEffect(() => {
+    const take = () => {
+      void takeZonesToEdit().then((workspace) => {
+        if (!workspace) return;
+        const next: View = { page: 'zones', workspace };
+        if (dirty.current) setLeavingTo(next);
+        else setView(next);
+      });
+    };
+    take();
+    return onZonesToEdit(take);
+  }, []);
 
   // The theme the user picked; "system" follows Windows (and its high-contrast themes).
   const theme = settings?.theme;

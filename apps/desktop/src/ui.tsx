@@ -303,7 +303,7 @@ export function MenuButton({
   /** The button's full name for screen readers ("More for “Brand”"). */
   label: string;
   children: ReactNode;
-  items: readonly { label: string; onSelect: () => void; danger?: boolean }[];
+  items: readonly { label: string; onSelect: () => void; danger?: boolean; icon?: ReactNode }[];
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -375,10 +375,11 @@ export function MenuButton({
                 setOpen(false);
                 item.onSelect();
               }}
-              className={`rounded-lg px-3 py-1.5 text-left text-small font-semibold hover:bg-[var(--hover)] ${
+              className={`flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-small font-semibold hover:bg-[var(--hover)] ${
                 item.danger ? 'text-[var(--danger)]' : ''
               }`}
             >
+              {item.icon}
               {item.label}
             </button>
           ))}

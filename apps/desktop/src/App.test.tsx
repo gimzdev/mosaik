@@ -17,6 +17,8 @@ const engine = vi.hoisted(() => ({
   rescueWindows: vi.fn(() => Promise.resolve({ text: 'ok', error: false })),
   styleTitleBar: vi.fn(),
   guardClose: vi.fn(() => () => undefined),
+  takeZonesToEdit: vi.fn<() => Promise<string | null>>(() => Promise.resolve(null)),
+  onZonesToEdit: vi.fn(() => () => undefined),
 }));
 vi.mock('./engine', () => engine);
 
@@ -140,6 +142,37 @@ describe('Mosaïk’s window', () => {
       within(place).getByRole('radio', { name: 'In each window’s title bar, where there is room' }),
     );
     expect(saved).toMatchObject({ cmd: 'set_settings', settings: { frames: { tags_in_title_bar: true } } });
+  });
+
+  it('opens the zone editor when the quick menu asks', async () => {
+    engine.takeZonesToEdit.mockResolvedValueOnce('ship');
+    engine.request.mockImplementation((c) => {
+      if (c.cmd === 'zones') {
+        return Promise.resolve({
+          reply: 'zones',
+          workspace: 'ship',
+          name: 'Ship the release',
+          monitors: [
+            {
+              id: 'm1',
+              name: 'Screen',
+              primary: true,
+              bounds: { left: 0, top: 0, right: 1920, bottom: 1080 },
+              work_area: { left: 0, top: 0, right: 1920, bottom: 1032 },
+              dpi: 96,
+              scale_percent: 100,
+            },
+          ],
+          zones: [],
+          revision: 'r1',
+        });
+      }
+      if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      return Promise.resolve(settingsReply({ ...firstRun, onboarding_done: true }));
+    });
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: /Ship the release/ })).toBeTruthy();
+    expect(engine.request).toHaveBeenCalledWith({ cmd: 'zones', workspace: 'ship' });
   });
 
   it('says plainly when the engine cannot be reached, and tries again', async () => {
