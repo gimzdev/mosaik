@@ -58,11 +58,11 @@ stretches of its title bar.
 ## Consequences
 
 - Every window in a zone gets the band's height back: 28 px at 100%, 56 px at 200%.
-- Measured (jobs 0062 and 0064): Notepad, Notepad++, Paint, Edge, Chrome, Explorer, Windows Terminal,
-  Word, Excel and Git Bash have room for the tag and the strip. VS Code keeps one free stretch
-  left of its command centre: room for the tag, not for a strip, so as a group's visible tab it
-  goes below a band. Calculator keeps 40 px of caption beside its buttons (the rest of its title
-  bar is its own content): it wears its tag above it.
+- Measured (jobs 0062 and 0064): Notepad, Notepad++, Paint, Edge, Chrome, Explorer, Windows
+  Terminal, Word, Excel and Git Bash have room for the tag and the strip. VS Code keeps one free
+  stretch left of its command centre: room for the tag, not for a strip, so as a group's visible
+  tab it goes below a band. Calculator keeps 40 px of caption beside its buttons (the rest of its
+  title bar is its own content): it wears its tag above it.
 - A long title can run under the tag in a narrow window: Windows draws classic titles from the
   left and truncates them at the buttons; the tag covers their end, as browsers' tabs do.
 - Reading costs about 200 messages to the app per reading, a few milliseconds for an app that is
