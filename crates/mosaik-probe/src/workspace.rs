@@ -174,17 +174,16 @@ pub(crate) fn wears_above(st: &StateSnapshot, w: HWND) -> bool {
 /// Where the engine draws `w`'s tag and where dropping a window on it makes them tabs, once its
 /// tag shows (the engine reads its title bar first).
 pub(crate) fn tag_of(engine: &Engine, w: HWND) -> Result<(Rect, Rect), String> {
-    let mut found = None;
-    pump_until(2000, || {
-        found = state(engine).ok().and_then(|st| {
-            st.windows
-                .iter()
-                .find(|x| x.handle == handle(w))
-                .and_then(|x| x.tag.zip(x.tab_drop))
-        });
-        found.is_some()
-    });
-    found.ok_or_else(|| "the window shows no tag".to_owned())
+    let tag = |st: &StateSnapshot| {
+        st.windows
+            .iter()
+            .find(|x| x.handle == handle(w))
+            .and_then(|x| x.tag.zip(x.tab_drop))
+    };
+    pump_until(2000, || state(engine).ok().is_some_and(|st| tag(&st).is_some()));
+    // Where it stays: a tag shown before the title bar was read again can still move.
+    let st = settled(engine)?;
+    tag(&st).ok_or_else(|| "the window shows no tag".to_owned())
 }
 
 pub fn run(args: &[String]) -> Result<Value, String> {
@@ -756,7 +755,7 @@ fn editing(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Value, S
     let removed_ok = matches!(reply, Reply::Zones { .. });
     pump_until(700, || false);
     let terminal_after = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
-    let st = state(engine)?;
+    let st = settled(engine)?;
     let terminal_zone = st
         .windows
         .iter()
@@ -942,6 +941,41 @@ pub(crate) fn state(engine: &Engine) -> Result<Box<mosaik_ipc::protocol::StateSn
     }
 }
 
+/// How long `settled` waits between two reads, and at most in all.
+const SETTLE_STEP_MS: u32 = 300;
+const SETTLE_MAX: Duration = Duration::from_secs(2);
+
+/// The engine's state once its windows stay put: where each window in a zone or group is, its tag
+/// and drop target, which windows are hidden, the tab strips and their chips. A window's title bar
+/// is read after it moves, and once read its tag or strip may move, or the window below a band
+/// (ADR 0011): what is measured or pressed is read only when two reads in a row agree, or at most
+/// 2 s after the first.
+pub(crate) fn settled(engine: &Engine) -> Result<Box<StateSnapshot>, String> {
+    type Mark = (u64, Rect, Option<Rect>, Option<Rect>, bool);
+    let marks = |st: &StateSnapshot| {
+        let mut windows: Vec<Mark> = st
+            .windows
+            .iter()
+            .filter(|w| w.zone.is_some() || w.tab_group.is_some())
+            .map(|w| (w.handle.0, w.frame_rect, w.tag, w.tab_drop, w.hidden.is_some()))
+            .collect();
+        windows.sort_by_key(|m| m.0);
+        let mut hidden: Vec<u64> = st.hidden.iter().map(|h| h.handle.0).collect();
+        hidden.sort_unstable();
+        (windows, hidden, st.tab_strips.clone())
+    };
+    let start = Instant::now();
+    let mut last = state(engine)?;
+    loop {
+        pump_until(SETTLE_STEP_MS, || false);
+        let now = state(engine)?;
+        if marks(&now) == marks(&last) || start.elapsed() >= SETTLE_MAX {
+            return Ok(now);
+        }
+        last = now;
+    }
+}
+
 pub(crate) fn hidden(s: &mosaik_ipc::protocol::StateSnapshot, h: HWND) -> bool {
     s.hidden.iter().any(|w| w.handle == handle(h))
 }
@@ -976,7 +1010,7 @@ fn windows_snapping(engine: &Engine, probes: &[Probe], styles: Styles) -> Result
     let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
     let screen = topology.monitor_for_rect(code.tiled).bounds;
     let zone = code.tiled;
-    let strip = state(engine)?
+    let strip = settled(engine)?
         .tab_strips
         .iter()
         .find(|s| s.tabs.iter().any(|t| t.window == handle(code.hwnd)))
@@ -1012,7 +1046,7 @@ fn windows_snapping(engine: &Engine, probes: &[Probe], styles: Styles) -> Result
         drag(Point::new(r.left + r.width() / 3, r.top + 12), to, review.hwnd)?;
         let soon = frame_rect(review.hwnd);
         pump_until(1200, || false);
-        let st = state(engine)?;
+        let st = settled(engine)?;
         let strip = st
             .tab_strips
             .iter()
@@ -1091,7 +1125,7 @@ fn tabs_and_snap(
         tag.center(),
         terminal.hwnd,
     )?;
-    let after_join = state(engine)?;
+    let after_join = settled(engine)?;
     shot(shots, "2-joined", &[terminal.hwnd], styles.dpi);
     let strip = after_join.tab_strips.first().cloned();
     let joined = json!({
@@ -1110,7 +1144,7 @@ fn tabs_and_snap(
         Some(tab) => {
             let at = tab.chip.center();
             drag(at, at, code.hwnd)?;
-            let st = state(engine)?;
+            let st = settled(engine)?;
             json!({
                 "code_hidden": hidden(&st, code.hwnd),
                 "terminal_hidden": hidden(&st, terminal.hwnd),
@@ -1121,7 +1155,7 @@ fn tabs_and_snap(
     };
 
     // 3. Pull the terminal's tab out into the review zone.
-    let st = state(engine)?;
+    let st = settled(engine)?;
     let pulled = match st.tab_strips.first().and_then(|strip| {
         strip
             .tabs
@@ -1131,7 +1165,7 @@ fn tabs_and_snap(
     }) {
         Some(tab) => {
             drag(tab.chip.center(), review.tiled.center(), terminal.hwnd)?;
-            let st = state(engine)?;
+            let st = settled(engine)?;
             json!({
                 "strips": st.tab_strips.len(),
                 "terminal_hidden": hidden(&st, terminal.hwnd),
@@ -1164,7 +1198,7 @@ fn tabs_and_snap(
         corner,
         terminal.hwnd,
     )?;
-    let st = state(engine)?;
+    let st = settled(engine)?;
     let at_tag_start = json!({
         "pointer": [corner.x, corner.y],
         "strips": st.tab_strips.len(),

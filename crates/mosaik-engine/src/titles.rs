@@ -208,11 +208,17 @@ impl Engine {
                 self.titles.forget(w);
                 continue;
             };
-            let before = self.titles.known.get(&w).and_then(|k| k.room.clone());
+            let previous = self.titles.known.get(&w);
+            let before = previous.and_then(|k| k.room.clone());
+            let resized = previous.is_none_or(|k| k.size != reading.frame.size());
             // An app busy for a moment keeps the room it was last read with.
             let failed = reading.room.is_none();
             let room = reading.room.or_else(|| before.clone());
-            let changed = !self.titles.known.contains_key(&w) || room != before;
+            let changed = resized || room != before;
+            // Read at a size it no longer has (it moved into a zone or a group meanwhile): read
+            // again, now.
+            let now = window::geometry(window::hwnd(w)).map(|g| g.frame.size());
+            let outdated = now.is_some_and(|size| size != reading.frame.size());
             self.titles.known.insert(
                 w,
                 Known {
@@ -224,6 +230,9 @@ impl Engine {
                     stale: false,
                 },
             );
+            if outdated {
+                self.ask_title(w);
+            }
             if changed {
                 read.push(w);
             }

@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::apps::{App, catalog, close, open};
-use crate::workspace::{Styles, drag_path, hidden, state, wears_above};
+use crate::workspace::{Styles, drag_path, hidden, settled, state, wears_above};
 
 /// Where the apps go.
 pub struct Targets {
@@ -213,18 +213,18 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
 
     // 1. By its title bar into the zone.
     let drag = drag_by_title(w, t.zone_point)?;
-    let st = state(engine)?;
+    let st = settled(engine)?;
     out["into_zone"] = json!({
         "drag": drag,
         "error_px": error_in(&st, w, t.zone, t),
-            "tag_above": wears_above(&st, w),
-            "tag": tag_place(&st, w),
+        "tag_above": wears_above(&st, w),
+        "tag": tag_place(&st, w),
         "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
     });
 
     // 2. Onto the other window's tag: it becomes a tab of that window.
     let drag = drag_by_title(w, t.tag_point)?;
-    let st = state(engine)?;
+    let st = settled(engine)?;
     let strip = strip_with(&st, w);
     out["onto_tag"] = json!({
         "drag": drag,
@@ -238,7 +238,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
     // 3. The other tab clicked: the app is hidden.
     let other = chip_of(&strip, t.code).ok_or("no tab for the tag's window")?;
     click(other, t.code)?;
-    let st = state(engine)?;
+    let st = settled(engine)?;
     out["other_tab_clicked"] = json!({
         "app_hidden": hidden(&st, w),
         "app_cloaked": geometry(w).is_some_and(|g| g.cloaked),
@@ -250,7 +250,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         .and_then(|s| chip_of(&s, w))
         .ok_or("the app's tab is gone")?;
     click(mine, w)?;
-    let st = state(engine)?;
+    let st = settled(engine)?;
     out["app_tab_clicked"] = json!({
         "app_hidden": hidden(&st, w),
         "app_cloaked": geometry(w).is_some_and(|g| g.cloaked),
@@ -263,13 +263,13 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         .and_then(|s| chip_of(&s, w))
         .ok_or("the app's tab is gone")?;
     let drag = watched(w, || drag_path(&[mine, t.zone_point], w))?;
-    let st = state(engine)?;
+    let st = settled(engine)?;
     out["pulled_out"] = json!({
         "drag": drag,
         "in_a_strip": strip_with(&st, w).is_some(),
         "error_px": error_in(&st, w, t.zone, t),
-            "tag_above": wears_above(&st, w),
-            "tag": tag_place(&st, w),
+        "tag_above": wears_above(&st, w),
+        "tag": tag_place(&st, w),
         "tag_owner_hidden": hidden(&st, t.code),
     });
     Ok(out)
@@ -371,7 +371,7 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
         // 1. By a press in the window, into the zone.
         let at = frame_rect(w).ok_or("the window vanished")?.center();
         let drag = watched(w, || drag_path(&[at, t.zone_point], w))?;
-        let st = state(engine)?;
+        let st = settled(engine)?;
         out["into_zone"] = json!({
             "drag": drag,
             "error_px": error_in(&st, w, t.zone, t),
@@ -382,7 +382,7 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
         // 2. Onto the other window's tag.
         let at = frame_rect(w).ok_or("the window vanished")?.center();
         let drag = watched(w, || drag_path(&[at, t.tag_point], w))?;
-        let st = state(engine)?;
+        let st = settled(engine)?;
         let strip = strip_with(&st, w);
         out["onto_tag"] = json!({
             "drag": drag,
@@ -393,12 +393,12 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
         // 3. Its tab pulled out into the zone.
         if let Some(chip) = strip.as_ref().and_then(|s| chip_of(s, w)) {
             drag_path(&[chip, t.zone_point], w)?;
-            let st = state(engine)?;
+            let st = settled(engine)?;
             out["pulled_out"] = json!({
                 "in_a_strip": strip_with(&st, w).is_some(),
                 "error_px": error_in(&st, w, t.zone, t),
-            "tag_above": wears_above(&st, w),
-            "tag": tag_place(&st, w),
+                "tag_above": wears_above(&st, w),
+                "tag": tag_place(&st, w),
             });
         }
         Ok(out)

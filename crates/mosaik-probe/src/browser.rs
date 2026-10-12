@@ -21,7 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
 };
 
-use crate::workspace::{drag_path, state};
+use crate::workspace::{drag_path, settled};
 
 /// A browser the probe can drive.
 pub struct Browser {
@@ -225,7 +225,7 @@ pub fn scenario(
     }
     pump_until(1200, || false);
     let second = find(b.exe, &page_title(2), 3000);
-    let st = state(engine)?;
+    let st = settled(engine)?;
     result["onto_zone"] = match second {
         Some(h) => {
             let w = st.windows.iter().find(|w| w.handle == handle(h));
@@ -245,7 +245,7 @@ pub fn scenario(
         tear_off(now[1], tag_point, window)?;
         pump_until(1500, || false);
         let third = find(b.exe, &page_title(3), 3000);
-        let st = state(engine)?;
+        let st = settled(engine)?;
         let strip = third.and_then(|h| {
             st.tab_strips
                 .iter()

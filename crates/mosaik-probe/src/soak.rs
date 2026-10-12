@@ -20,7 +20,7 @@ use windows::Win32::System::Threading::{
     GR_GDIOBJECTS, GR_USEROBJECTS, GetGuiResources, GetProcessHandleCount,
 };
 
-use crate::workspace::{drag_path, state, tag_of};
+use crate::workspace::{drag_path, settled, tag_of};
 
 /// What this process holds now.
 fn sample(process: &mosaik_win::process::Process) -> Value {
@@ -81,7 +81,7 @@ pub fn run(engine: &Engine, windows: [(HWND, Rect); 3], work: Rect, cycles: usiz
     let tag = tag_of(engine, code)?.0.center();
     let t = frame_rect(terminal).ok_or("the terminal window vanished")?;
     drag_path(&[Point::new(t.left + t.width() / 3, t.top + 12), tag], terminal)?;
-    let st = state(engine)?;
+    let st = settled(engine)?;
     if st.tab_strips.is_empty() {
         return Err("the terminal did not become a tab of the code window".into());
     }
