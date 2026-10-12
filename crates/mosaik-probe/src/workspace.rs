@@ -23,7 +23,8 @@ use mosaik_win::window::{frame_rect, handle};
 use serde_json::{Value, json};
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GetAncestor, GetShellWindow, SW_MINIMIZE, SW_RESTORE, ShowWindow, WindowFromPoint,
+    GA_ROOT, GetAncestor, GetShellWindow, HWND_NOTOPMOST, SW_MINIMIZE, SW_RESTORE, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, ShowWindow, WindowFromPoint,
 };
 
 use crate::capture::capture;
@@ -412,6 +413,23 @@ fn browser_scenario(
     let band_middle = (14.0 * f64::from(dpi) / 96.0).round() as i32;
     let tag_point = Point::new(c.left + c.width() / 2, c.top - band_middle);
     let zone = (review.tiled.center(), style.window_area(review.tiled, dpi));
+    // The probe's windows stop being top-most (still above every other window), so the browser's
+    // window can come in front of them: browsers take back their normal stacking when made
+    // top-most.
+    for p in probes {
+        // SAFETY: changes the stacking of the probe's own windows.
+        let _ = unsafe {
+            SetWindowPos(
+                p.hwnd,
+                Some(HWND_NOTOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        };
+    }
     let result = crate::browser::scenario(engine, b, work, zone, tag_point, code.hwnd);
     crate::browser::close_pages(b);
     pump_until(800, || false);

@@ -18,7 +18,7 @@ use mosaik_win::window::{Scanner, frame_rect, handle, title, top_level};
 use serde_json::{Value, json};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+    HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
 };
 
 use crate::workspace::{drag_path, state};
@@ -107,13 +107,15 @@ fn tabs(hwnd: HWND, at_least: usize) -> Vec<Rect> {
     }
 }
 
-/// Puts the probe's browser window above every other window, the probe's top-most ones too.
+/// Puts the probe's browser window above every other window that is not top-most (the probe's
+/// own windows are not, for this test: a browser takes back its normal stacking at once when it
+/// is made top-most, job 0052).
 fn on_top(window: HWND) -> Result<(), String> {
     // SAFETY: changes the stacking of a window this probe opened.
     let set = unsafe {
         SetWindowPos(
             window,
-            Some(HWND_TOPMOST),
+            Some(HWND_TOP),
             0,
             0,
             0,
@@ -146,8 +148,7 @@ fn standing(window: HWND) -> Value {
 /// Drags one browser tab from `tab` to `to`, out of its strip. The first steps go straight down,
 /// past the strip, as a person tears a tab off; then on to `to`.
 fn tear_off(tab: Rect, to: Point, owner: HWND) -> Result<(), String> {
-    // Above the probe's own top-most windows: a browser that has just started can set its
-    // window back to the normal stacking once it is ready.
+    // In front again: the browser may have been sent back while it got ready.
     on_top(owner)?;
     let from = tab.center();
     let below = Point::new(from.x, from.y + 160);
@@ -176,7 +177,7 @@ pub fn scenario(
     .map_err(|e| e.to_string())?;
     let window =
         find(b.exe, &page_title(1), 25_000).ok_or_else(|| format!("{}: its window did not open", b.name))?;
-    // Above the probe's own top-most windows, in the middle of the screen.
+    // In front of the probe's own windows, in the middle of the screen.
     let place = Rect::from_origin_size(
         work.left + work.width() / 6,
         work.top + 120,
