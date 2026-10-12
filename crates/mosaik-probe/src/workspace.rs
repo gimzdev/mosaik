@@ -115,6 +115,16 @@ struct Probe {
 pub fn run(args: &[String]) -> Result<Value, String> {
     let drag = args.iter().any(|a| a == "--drag");
     let apps = args.iter().any(|a| a == "--apps");
+    // `--soak N`: N switches between two workspaces, watching for leaks (soak.rs).
+    let soak = args
+        .iter()
+        .position(|a| a == "--soak")
+        .map(|i| {
+            args.get(i + 1)
+                .and_then(|n| n.parse::<usize>().ok())
+                .ok_or("--soak takes a number of switches")
+        })
+        .transpose()?;
     // `--browser edge|chrome`: browser tabs dragged out into the workspace (browser.rs).
     let browser = match args.iter().position(|a| a == "--browser") {
         Some(i) => {
@@ -194,6 +204,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
 
     let result = match &browser {
         Some(b) => browser_scenario(&engine, &probes, dpi, b, work),
+        None if soak.is_some() => soak_scenario(&engine, &probes, dpi, work, soak.unwrap_or_default()),
         None if apps => {
             let only = args
                 .iter()
@@ -443,6 +454,38 @@ fn browser_scenario(
     value["saved"] = json!(saved);
     println!("browser: {value}");
     Ok(value)
+}
+
+/// Switches between two workspaces of the probe windows, `cycles` times (soak.rs); both are
+/// deleted afterwards.
+fn soak_scenario(
+    engine: &Engine,
+    probes: &[Probe],
+    dpi: u32,
+    work: Rect,
+    cycles: usize,
+) -> Result<Value, String> {
+    let c = frame_rect(probes[0].hwnd).ok_or("the code window vanished")?;
+    #[allow(clippy::cast_possible_truncation)]
+    let band_middle = (14.0 * f64::from(dpi) / 96.0).round() as i32;
+    let tag = Point::new(c.left + c.width() / 2, c.top - band_middle);
+    let windows = [
+        (probes[0].hwnd, probes[0].tiled),
+        (probes[1].hwnd, probes[1].tiled),
+        (probes[2].hwnd, probes[2].tiled),
+    ];
+    let original = input::cursor();
+    let result = crate::soak::run(engine, windows, tag, work, cycles);
+    input::move_to(original);
+    for name in ["Soak A", "Soak B"] {
+        let _ = ask(
+            engine,
+            Command::DeleteWorkspace {
+                workspace: name.into(),
+            },
+        );
+    }
+    result
 }
 
 /// Real apps put into the workspace of the three probe windows: into the review zone, onto the

@@ -11,7 +11,8 @@
 //! mosaik-probe idle       CPU and memory of an engine-like loop over 60 s
 //! mosaik-probe workspace  save, switch and reopen with the real engine (--drag: drag to snap;
 //!                         --browser edge|chrome: browser tabs dragged out into a workspace;
-//!                         --apps: real apps into zones and tabs; all three move the mouse)
+//!                         --apps: real apps into zones and tabs; --soak N: N switches,
+//!                         watching for leaks; all but --soak move the mouse much)
 //! ```
 //!
 //! The probes only touch windows they open themselves, and close them afterwards.
@@ -49,6 +50,8 @@ mod matrix;
 mod pixels;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod report;
+#[cfg(windows)]
+mod soak;
 #[cfg(windows)]
 mod state;
 #[cfg(windows)]
