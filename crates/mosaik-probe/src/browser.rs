@@ -1,14 +1,14 @@
-//! Browser tabs into Mosaïk, with the real mouse: a private browser window with three tabs, one
-//! tab dragged out onto a zone (it should land in the zone, as a window of the workspace), and
-//! one dragged out onto another window's tag (it should become a Mosaïk tab of that window).
+//! Browser tabs into Mosaïk, with the real mouse: a browser window with three tabs, one tab
+//! dragged out onto a zone (it should land in the zone, as a window of the workspace), and one
+//! dragged out onto another window's tag (it should become a Mosaïk tab of that window).
 //!
-//! The browser's own windows are never touched: the probe refuses to start while a window of
-//! that browser is on screen (minimise them first), opens a private window (no history, no
-//! session), and closes only the windows showing its own pages.
+//! The user's own browser is never touched: the probe runs a separate copy of the browser with a
+//! profile of its own in the temp folder (so a tab can never land in one of the user's windows,
+//! and nothing reaches their history or session), the engine manages only windows showing the
+//! probe's pages, and the probe closes only those.
 
 use std::time::{Duration, Instant};
 
-use mosaik_core::classify::{Rules, Verdict, classify};
 use mosaik_core::geometry::{Point, Rect};
 use mosaik_engine::Engine;
 use mosaik_win::events::pump_until;
@@ -26,8 +26,6 @@ pub struct Browser {
     pub name: &'static str,
     /// The program, as Mosaïk sees it (lower case).
     pub exe: &'static str,
-    target: &'static str,
-    private: &'static str,
 }
 
 /// `edge` or `chrome`.
@@ -36,22 +34,28 @@ pub fn browser(name: &str) -> Option<Browser> {
         "edge" => Some(Browser {
             name: "Edge",
             exe: "msedge.exe",
-            target: "msedge.exe",
-            private: "--inprivate",
         }),
         "chrome" => Some(Browser {
             name: "Chrome",
             exe: "chrome.exe",
-            target: "chrome.exe",
-            private: "--incognito",
         }),
         _ => None,
     }
 }
 
-/// The title of the probe's page `n`; the windows showing these pages are the probe's.
+/// How every window showing one of the probe's pages is titled: the engine manages those.
+pub const PAGE_TITLE: &str = "Mosaik probe tab";
+
+/// The title of the probe's page `n`.
 fn page_title(n: usize) -> String {
-    format!("Mosaik probe tab {n}")
+    format!("{PAGE_TITLE} {n}")
+}
+
+/// The probe's own profile for `b`, in the temp folder.
+fn profile(b: &Browser) -> std::path::PathBuf {
+    std::env::temp_dir()
+        .join("mosaik-probe")
+        .join(format!("{}-profile", b.name.to_lowercase()))
 }
 
 /// Writes three pages to the temp folder, each with its own title and colour.
@@ -72,16 +76,6 @@ fn pages() -> Result<Vec<String>, String> {
         urls.push(format!("file:///{p}"));
     }
     Ok(urls)
-}
-
-/// Windows of `exe` on screen now (visible, not minimised, not cloaked).
-pub fn on_screen(exe: &str) -> usize {
-    let mut scanner = Scanner::new();
-    top_level()
-        .into_iter()
-        .filter_map(|h| scanner.facts(h))
-        .filter(|f| f.exe.as_deref() == Some(exe) && classify(f, &Rules::default()) == Verdict::Manage)
-        .count()
 }
 
 /// The top-level window of `exe` whose title starts with `wanted`, waiting up to `ms`.
@@ -131,8 +125,12 @@ pub fn scenario(
 ) -> Result<Value, String> {
     let urls = pages()?;
     shell_open(
-        b.target,
-        &format!("{} --new-window {}", b.private, urls.join(" ")),
+        b.exe,
+        &format!(
+            "--user-data-dir=\"{}\" --no-first-run --no-default-browser-check --new-window {}",
+            profile(b).display(),
+            urls.join(" ")
+        ),
     )
     .map_err(|e| e.to_string())?;
     let window =
@@ -200,7 +198,8 @@ pub fn scenario(
     Ok(result)
 }
 
-/// Closes every window showing one of the probe's pages.
+/// Closes every window showing one of the probe's pages (the browser's copy then exits), and
+/// removes the probe's profile.
 pub fn close_pages(b: &Browser) {
     for n in 1..=3 {
         while let Some(h) = find(b.exe, &page_title(n), 0) {
@@ -211,4 +210,7 @@ pub fn close_pages(b: &Browser) {
             }
         }
     }
+    // The browser lets go of its files a moment after its last window closes.
+    pump_until(2000, || false);
+    let _ = std::fs::remove_dir_all(profile(b));
 }

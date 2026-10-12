@@ -148,7 +148,7 @@ impl Engine {
         self.settings.frames.effective_style()
     }
 
-    fn allowed(&self, f: &WindowFacts) -> bool {
+    pub(crate) fn allowed(&self, f: &WindowFacts) -> bool {
         self.config
             .manage_only
             .as_ref()

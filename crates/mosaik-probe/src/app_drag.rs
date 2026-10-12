@@ -36,11 +36,18 @@ pub struct Targets {
     pub work: Rect,
 }
 
-/// Every app of the catalog that is installed, one after the other.
-pub fn scenario(engine: &Engine, scope: &Scope, t: &Targets) -> Value {
+/// Every app of the catalog that is installed, one after the other; with `only`, the apps whose
+/// names start with one of its comma-separated words (`edge,chrome`).
+pub fn scenario(engine: &Engine, scope: &Scope, t: &Targets, only: Option<&str>) -> Value {
     let mut scanner = Scanner::new();
     let mut results = serde_json::Map::new();
-    for app in catalog() {
+    let wanted = |name: &str| {
+        only.is_none_or(|o| {
+            o.split(',')
+                .any(|w| !w.is_empty() && name.to_lowercase().starts_with(&w.trim().to_lowercase()))
+        })
+    };
+    for app in catalog().into_iter().filter(|a| wanted(a.name)) {
         let r = one(engine, scope, &app, t, &mut scanner);
         println!("app {}: {r}", app.name);
         results.insert(app.name.into(), r);
@@ -149,8 +156,17 @@ fn drag_by_title(w: HWND, to: Point) -> Result<Value, String> {
             tries.push(json!({ "grab": null }));
             continue;
         };
+        // What is under the grab point, and the pointer Windows shows there.
+        // SAFETY: read-only hit test.
+        let under = unsafe { WindowFromPoint(POINT { x: grab.x, y: grab.y }) };
+        mosaik_win::input::move_to(grab);
+        pump_until(150, || false);
+        let pointer = mosaik_win::input::pointer();
         let mut t = watched(w, || drag_path(&[grab, to], w))?;
         t["grab"] = json!([grab.x - frame.left, grab.y - frame.top]);
+        t["under"] = json!(mosaik_win::window::class_name(under));
+        t["hit"] = json!(hit(grab, w));
+        t["pointer"] = json!(format!("{pointer:?}"));
         let started = t["move_loop"] == json!(true);
         tries.push(t);
         if started {

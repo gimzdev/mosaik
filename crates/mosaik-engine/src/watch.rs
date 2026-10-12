@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use mosaik_core::classify::{Verdict, classify};
 use mosaik_core::geometry::{Insets, Point, Rect, scale_for_dpi};
 use mosaik_core::layout::{Place, TabGroupId};
 use mosaik_core::snap::{self, DragKind, LiveZone as SnapZone};
@@ -453,6 +454,13 @@ impl Engine {
             return;
         };
         if !self.manageable(&facts) {
+            // Dragged while zones are on, a window Mosaïk must not move would get no zones and
+            // no tag without a word: say why, once.
+            if self.allowed(&facts)
+                && let Verdict::Refuse(why) = classify(&facts, &self.settings.rules)
+            {
+                self.tell_once("refused", "Mosaïk cannot move this window", why.explain());
+            }
             return;
         }
         let zones = active
@@ -470,7 +478,9 @@ impl Engine {
         // is taken for a move.
         let margin = scale_for_dpi(4, facts.dpi.max(96));
         let inner = facts.frame_rect.inset(Insets::uniform(margin));
-        let kind = DragKind::at_start(input::pointer(), inner.contains(input::cursor()));
+        let pointer = input::pointer();
+        let kind = DragKind::at_start(pointer, inner.contains(input::cursor()));
+        tracing::debug!(?pointer, ?kind, frame = ?facts.frame_rect, "drag started");
         self.watch.drag = Some(Drag {
             window: h,
             pid: facts.pid,
@@ -502,7 +512,11 @@ impl Engine {
             return;
         };
         if kind == DragKind::Undecided {
-            let decided = DragKind::once_changed(start, g.frame, input::pointer());
+            let pointer = input::pointer();
+            let decided = DragKind::once_changed(start, g.frame, pointer);
+            if decided != DragKind::Undecided {
+                tracing::debug!(?pointer, ?decided, ?start, now = ?g.frame, "drag decided");
+            }
             if let Some(d) = &mut self.watch.drag {
                 d.kind = decided;
             }

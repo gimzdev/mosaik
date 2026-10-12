@@ -118,14 +118,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     let browser = match args.iter().position(|a| a == "--browser") {
         Some(i) => {
             let name = args.get(i + 1).map(String::as_str).unwrap_or_default();
-            let b = crate::browser::browser(name).ok_or("--browser takes edge or chrome")?;
-            if crate::browser::on_screen(b.exe) > 0 {
-                return Err(format!(
-                    "{} windows are on screen: minimise them first, so the probe never touches them.",
-                    b.name
-                ));
-            }
-            Some(b)
+            Some(crate::browser::browser(name).ok_or("--browser takes edge or chrome")?)
         }
         None => None,
     };
@@ -179,9 +172,12 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     let mut own_pids = vec![mosaik_win::process::own_pid()];
     own_pids.extend(watchdog.as_ref().map(|w| w.pid));
     // The engine manages the probe windows and nothing else: with `--browser`, the browser's
-    // windows too (the user's are not on screen); with `--apps`, each app window the probe opens,
-    // by its handle.
-    let scope = Scope::programs(std::iter::once("mosaik-probe.exe").chain(browser.as_ref().map(|b| b.exe)));
+    // windows showing the probe's pages too; with `--apps`, each app window the probe opens, by
+    // its handle.
+    let mut scope = Scope::programs(["mosaik-probe.exe"]);
+    if browser.is_some() {
+        scope.titles.push(crate::browser::PAGE_TITLE.into());
+    }
     let engine = Engine::start(
         Config {
             data_dir: dir.clone(),
@@ -197,7 +193,14 @@ pub fn run(args: &[String]) -> Result<Value, String> {
 
     let result = match &browser {
         Some(b) => browser_scenario(&engine, &probes, dpi, b, work),
-        None if apps => apps_scenario(&engine, &probes, dpi, work, &scope),
+        None if apps => {
+            let only = args
+                .iter()
+                .position(|a| a == "--only")
+                .and_then(|i| args.get(i + 1))
+                .map(String::as_str);
+            apps_scenario(&engine, &probes, dpi, work, &scope, only)
+        }
         None => scenario(&engine, &probes, drag, dpi, &dir),
     };
     engine.stop();
@@ -428,6 +431,7 @@ fn apps_scenario(
     dpi: u32,
     work: Rect,
     scope: &Scope,
+    only: Option<&str>,
 ) -> Result<Value, String> {
     let style = FrameStyle::default();
     let saved = done(
@@ -453,7 +457,7 @@ fn apps_scenario(
         work,
     };
     let original = input::cursor();
-    let result = crate::app_drag::scenario(engine, scope, &targets);
+    let result = crate::app_drag::scenario(engine, scope, &targets, only);
     input::move_to(original);
     let _ = ask(
         engine,

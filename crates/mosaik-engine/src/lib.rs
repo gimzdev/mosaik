@@ -60,13 +60,16 @@ pub struct Scope {
     /// These windows, whatever their program: windows a test opened in apps the user also has
     /// open. The test adds and removes them while it runs.
     pub windows: Arc<std::sync::Mutex<std::collections::HashSet<mosaik_core::window::WindowHandle>>>,
+    /// Windows whose title starts with one of these: windows an app makes while a test runs
+    /// (a browser tab dragged out becomes a window showing the test's page).
+    pub titles: Vec<String>,
 }
 
 impl Scope {
     pub fn programs<S: Into<String>>(programs: impl IntoIterator<Item = S>) -> Self {
         Self {
             programs: programs.into_iter().map(Into::into).collect(),
-            windows: Arc::default(),
+            ..Self::default()
         }
     }
 
@@ -75,7 +78,9 @@ impl Scope {
             .exe
             .as_deref()
             .is_some_and(|e| self.programs.iter().any(|p| p.eq_ignore_ascii_case(e)));
-        program || self.windows.lock().is_ok_and(|w| w.contains(&f.handle))
+        program
+            || self.titles.iter().any(|t| f.title.starts_with(t.as_str()))
+            || self.windows.lock().is_ok_and(|w| w.contains(&f.handle))
     }
 }
 
