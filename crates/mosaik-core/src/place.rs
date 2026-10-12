@@ -17,16 +17,26 @@ pub fn window_rect_for(frame: Rect, insets: Insets) -> Rect {
 /// Where a window goes when it will not take the target's size: a fixed-size window, or an app
 /// whose minimum size is larger than its zone (Chrome will not go below about 500 px wide).
 ///
-/// Along each axis, a window smaller than the target is centred in it. A larger one keeps the
-/// target's edge that is nearer the work area's edge, so it grows toward the middle of the
+/// A window smaller than the target is centred across it and set at its top, so every window
+/// in a row of zones starts at the same line, right below its zone's band. A larger one keeps
+/// the target's edge that is nearer the work area's edge, so it grows toward the middle of the
 /// screen, over neighbouring zones, instead of off the screen. The result stays inside the work
 /// area whenever it fits there; a window larger than the work area starts at its left or top
 /// edge, so its title bar is on screen. The size is never changed: it is the app's.
 pub fn fit_size(target: Rect, size: Size, work_area: Rect) -> Rect {
-    fn axis(start: i32, end: i32, length: i32, area_start: i32, area_end: i32) -> i32 {
+    /// Where a smaller window goes along an axis.
+    #[derive(Clone, Copy)]
+    enum Smaller {
+        Centred,
+        AtStart,
+    }
+    fn axis(start: i32, end: i32, length: i32, area_start: i32, area_end: i32, smaller: Smaller) -> i32 {
         let span = end - start;
         let at = if length <= span {
-            start + (span - length) / 2
+            match smaller {
+                Smaller::Centred => start + (span - length) / 2,
+                Smaller::AtStart => start,
+            }
         } else if area_end - end < start - area_start {
             end - length
         } else {
@@ -46,6 +56,7 @@ pub fn fit_size(target: Rect, size: Size, work_area: Rect) -> Rect {
         size.width,
         work_area.left,
         work_area.right,
+        Smaller::Centred,
     );
     let top = axis(
         target.top,
@@ -53,6 +64,7 @@ pub fn fit_size(target: Rect, size: Size, work_area: Rect) -> Rect {
         size.height,
         work_area.top,
         work_area.bottom,
+        Smaller::AtStart,
     );
     Rect::from_origin_size(left, top, size.width, size.height)
 }
@@ -174,11 +186,14 @@ mod tests {
     }
 
     #[test]
-    fn smaller_windows_are_centred_in_the_target() {
+    fn smaller_windows_are_centred_across_and_set_at_the_top() {
+        // The owner saw windows that "do not go all the way to the top": a window that keeps a
+        // size of its own sat in the middle of its zone, lower than its neighbours. It starts
+        // at the target's top now, like every other window.
         let work = Rect::new(0, 0, 1920, 1032);
         assert_eq!(
-            fit_size(Rect::new(0, 0, 960, 1032), Size::new(400, 300), work),
-            Rect::new(280, 366, 680, 666)
+            fit_size(Rect::new(0, 32, 960, 1032), Size::new(400, 300), work),
+            Rect::new(280, 32, 680, 332)
         );
     }
 

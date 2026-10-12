@@ -18,8 +18,8 @@ const SHIFT: readonly { value: 'free' | 'snap'; label: string }[] = [
 ];
 
 const TAG_PLACES: readonly { value: 'title' | 'above'; label: string }[] = [
-  { value: 'title', label: 'In each window’s title bar' },
-  { value: 'above', label: 'Above each window' },
+  { value: 'above', label: 'In a bar above each window' },
+  { value: 'title', label: 'In each window’s title bar, where there is room' },
 ];
 
 const HIDING: readonly { value: 'auto' | 'minimize'; label: string }[] = [
@@ -126,6 +126,7 @@ export function SettingsPane({
         />
         <Choice
           label="Tags and tabs"
+          description="In a bar, every window in a zone starts at the same line. In title bars, windows fill their zones; one whose title bar has no room sits below a bar."
           value={settings.frames.tags_in_title_bar ? 'title' : 'above'}
           options={TAG_PLACES}
           onChange={(v) => {

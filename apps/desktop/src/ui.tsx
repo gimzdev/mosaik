@@ -122,20 +122,27 @@ export function Toggle({
 /** One choice among a few, as radio buttons. */
 export function Choice<T extends string>({
   label,
+  description,
   value,
   options,
   onChange,
 }: {
   label: string;
+  description?: string;
   value: T;
   options: readonly { value: T; label: string }[];
   onChange: (value: T) => void;
 }) {
   const name = useId();
   return (
-    <fieldset className="py-3">
+    <fieldset className="py-3" aria-describedby={description ? `${name}-d` : undefined}>
       {/* Floated so it lays out like any other row, not on the fieldset's border. */}
       <legend className="float-left w-full font-semibold">{label}</legend>
+      {description ? (
+        <p id={`${name}-d`} className="clear-both mt-0.5 text-small text-[var(--muted)]">
+          {description}
+        </p>
+      ) : null}
       <div className="clear-both flex flex-wrap gap-2 pt-2">
         {options.map((o) => {
           const on = o.value === value;

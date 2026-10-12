@@ -99,16 +99,25 @@ pub fn holds(zone: Rect, dpi: u32, frame: Rect, style: FrameStyle) -> bool {
 }
 
 /// Whether a window that cannot be resized (a game, a fixed-size tool) sits in the zone at
-/// `zone`: Mosaïk puts it in the zone at its own size (`place::fit_size`), in the middle of a
-/// zone larger than it, over the middle of a zone smaller than it. So its middle is in the zone,
-/// or the zone's middle is in it, and it overlaps the zone's window area by 70% of as much as
-/// its size allows: all of a window smaller than the zone, all of a zone smaller than the
-/// window. A window that could fill the zone and does not is floating over it ([`holds`]).
+/// `zone`: Mosaïk puts it in the zone at its own size (`place::fit_size`), centred across and at
+/// the top of a zone larger than it, over the middle of a zone smaller than it. So along each
+/// axis its middle is in the zone, or the zone's middle is in it, and it overlaps the zone's
+/// window area by 70% of as much as its size allows: all of a window smaller than the zone, all
+/// of a zone smaller than the window. A window that could fill the zone and does not is
+/// floating over it ([`holds`]).
 pub fn holds_fixed(zone: Rect, dpi: u32, frame: Rect, style: FrameStyle) -> bool {
     let area = style.window_area(zone, dpi);
     let best = i64::from(frame.width().min(area.width()).max(0))
         * i64::from(frame.height().min(area.height()).max(0));
-    if best <= 0 || !(zone.contains(frame.center()) || frame.contains(area.center())) {
+    if best <= 0 {
+        return false;
+    }
+    let (middle, area_middle) = (frame.center(), area.center());
+    let across =
+        (zone.left..zone.right).contains(&middle.x) || (frame.left..frame.right).contains(&area_middle.x);
+    let down =
+        (zone.top..zone.bottom).contains(&middle.y) || (frame.top..frame.bottom).contains(&area_middle.y);
+    if !(across && down) {
         return false;
     }
     // Areas of real screens are far below 2^52, so the conversion is exact.
@@ -1325,13 +1334,23 @@ mod tests {
         let zone = Rect::new(960, 0, 1920, 1032);
         let s = style();
         let area = s.window_area(zone, 96);
-        let game = Rect::from_origin_size(
+        let work = Rect::new(0, 0, 1920, 1032);
+        // Where Mosaïk puts it: centred across, at the top.
+        let game = crate::place::fit_size(area, Size::new(640, 480), work);
+        assert_eq!(game.top, area.top);
+        assert!(holds_window(zone, 96, game, s, false), "a game Mosaïk put there");
+        // Where earlier versions put it, in the middle of the zone: still in it.
+        let middle = Rect::from_origin_size(
             area.left + (area.width() - 640) / 2,
             area.top + (area.height() - 480) / 2,
             640,
             480,
         );
-        assert!(holds_window(zone, 96, game, s, false), "a game Mosaïk put there");
+        assert!(holds_window(zone, 96, middle, s, false));
+        // Wider than a third and short: over the next zone across, at the top.
+        let thirds = Rect::new(0, 0, 640, 1032);
+        let short = crate::place::fit_size(s.window_area(thirds, 96), Size::new(1280, 300), work);
+        assert!(holds_window(thirds, 96, short, s, false), "{short:?}");
         assert!(
             !holds_window(zone, 96, game, s, true),
             "a window that could fill the zone is only floating over it"

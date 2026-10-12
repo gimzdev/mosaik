@@ -7,8 +7,8 @@
 //! Measured on real apps (docs/STATUS.md, step 1): Chrome and Edge will not go below about
 //! 500 px wide and Windows Terminal below about 466 px, so a window may keep a size other than
 //! the target's; it is then fitted on screen with [`fit_size`]. A window without a frame to
-//! resize it by (a game, a dialog) is never resized: it keeps its size in the middle of the
-//! target. Some apps also move themselves after a restore (VS Code went back to its previous
+//! resize it by (a game, a dialog) is never resized: it keeps its size, centred across the
+//! target and at its top. Some apps also move themselves after a restore (VS Code went back to its previous
 //! position 300 ms after being restored into a zone), so callers check the result again once
 //! the app has settled ([`settle`]).
 
@@ -133,7 +133,7 @@ fn placement(hwnd: HWND) -> Result<WINDOWPLACEMENT> {
     Ok(wp)
 }
 
-/// Where a window of `size` goes for `target`: in its middle, kept on screen.
+/// Where a window of `size` goes for `target`: centred across it, at its top, kept on screen.
 fn fitted(target: Rect, size: Size) -> Rect {
     monitor_of(target).map_or_else(
         || Rect::from_origin_size(target.left, target.top, size.width, size.height),
@@ -169,8 +169,8 @@ fn set_origin(hwnd: HWND, x: i32, y: i32) -> Result<()> {
 /// Moves `hwnd` so its visible frame covers `target`. Synchronous: when it returns, the window
 /// is where it will stay (the engine moves each window on a thread of its own, `mover.rs`).
 ///
-/// A window without a frame to resize it by keeps its own size, in the middle of `target`: a
-/// game or a dialog stretched by someone else draws blurred, cut off or not at all.
+/// A window without a frame to resize it by keeps its own size, centred across `target` and at
+/// its top: a game or a dialog stretched by someone else draws blurred, cut off or not at all.
 pub fn move_frame(hwnd: HWND, target: Rect) -> Result<Moved> {
     if !exists(hwnd) {
         return Err(Error::WindowGone);

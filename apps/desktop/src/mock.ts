@@ -42,7 +42,7 @@ const settings: Settings = {
   frames: {
     show_frames: true,
     show_tags: true,
-    tags_in_title_bar: true,
+    tags_in_title_bar: false,
     style: { gap: 8, tag_band: 28, border: 2 },
   },
   tab_hiding: null,

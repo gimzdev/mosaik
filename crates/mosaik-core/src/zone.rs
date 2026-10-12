@@ -167,10 +167,12 @@ impl FrameStyle {
 }
 
 /// The band a window wears its tag (or its group's strip) in, above it, given its zone's band
-/// `zone_band`: the zone's band for a window right below it; right above a window that sits
-/// lower in its zone (one that cannot be resized, in the middle of the zone), as tall and as
-/// wide as the window. A window that runs into the zone's band (an app that keeps a height of
-/// its own) keeps the zone's band, over its top edge, so the tag stays in its zone.
+/// `zone_band`: the zone's band for a window right below it, which is every window Mosaïk put in
+/// its zone (`place::fit_size` sets windows of their own size at the zone's top too); right
+/// above a window that sits lower in its zone (one the user or its app moved down, or one placed
+/// by an earlier version), as tall and as wide as the window. A window that runs into the zone's
+/// band (an app that keeps a height of its own) keeps the zone's band, over its top edge, so the
+/// tag stays in its zone.
 pub fn band_above(frame: Rect, zone_band: Rect) -> Rect {
     if frame.top <= zone_band.bottom {
         return zone_band;

@@ -8,7 +8,10 @@ use crate::journal::HideMethod;
 use crate::snap::SnapSettings;
 use crate::zone::FrameStyle;
 
-pub const SETTINGS_VERSION: u32 = 1;
+/// 2: tags and tab strips go in a bar above each window by default, so every window in a zone
+/// starts at the same line (format 1 put them in title bars, and a window whose title bar had no
+/// room sat lower than its neighbours).
+pub const SETTINGS_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -113,8 +116,9 @@ pub struct FrameSettings {
     pub show_frames: bool,
     /// Show the zone's name on its windows.
     pub show_tags: bool,
-    /// Tags and tab strips go in each window's own title bar, so windows fill their zones;
-    /// otherwise in a band above each window.
+    /// Tags and tab strips go in each window's own title bar where it has room, so those
+    /// windows fill their zones. Off (the default): in a bar at the top of each zone, above
+    /// every window alike, so all windows start at the same line.
     pub tags_in_title_bar: bool,
     pub style: FrameStyle,
 }
@@ -124,7 +128,7 @@ impl Default for FrameSettings {
         Self {
             show_frames: true,
             show_tags: true,
-            tags_in_title_bar: true,
+            tags_in_title_bar: false,
             style: FrameStyle::default(),
         }
     }
@@ -205,31 +209,36 @@ mod tests {
     }
 
     #[test]
-    fn tags_go_in_title_bars_unless_set_to_go_above_windows() {
+    fn tags_go_in_a_bar_above_every_window_unless_set_to_go_in_title_bars() {
         let s = Settings::default();
+        assert!(!s.frames.tags_in_title_bar);
         let style = s.frames.effective_style();
+        assert_eq!(style, FrameStyle::default(), "the band above every window");
+        assert!(!style.title_bars);
+        assert_eq!(s.frames.banded_style(), FrameStyle::default());
+        // Hidden tags: no band, every window fills its zone.
+        let mut hidden = s.frames;
+        hidden.show_tags = false;
+        assert_eq!(hidden.effective_style().tag_band, 0);
+        // In title bars (the choice is saved, the session-only flag is not): windows fill their
+        // zones; one whose title bar has no room wears its tag above it, in the usual band.
+        let titles = FrameSettings {
+            tags_in_title_bar: true,
+            ..FrameSettings::default()
+        };
+        let style = titles.effective_style();
         assert!(style.title_bars);
         assert_eq!(style.tag_band, 0, "windows fill their zones");
-        // A window whose title bar has no room wears its tag above it, in the usual band.
-        assert_eq!(s.frames.banded_style(), FrameStyle::default());
-        // Settings saved before tags went in title bars get them there too; the choice is saved,
-        // the session-only flag is not.
-        let older: Settings = serde_json::from_str(r#"{"version":1,"frames":{"show_frames":true,"show_tags":true,"style":{"gap":8,"tag_band":28,"border":2}}}"#).unwrap();
-        assert!(older.frames.tags_in_title_bar);
-        let json = serde_json::to_string(&older).unwrap();
+        assert_eq!(titles.banded_style(), FrameStyle::default());
+        let json = serde_json::to_string(&Settings {
+            frames: titles,
+            ..Settings::default()
+        })
+        .unwrap();
         assert!(
             json.contains("\"tags_in_title_bar\":true") && !json.contains("title_bars"),
             "{json}"
         );
-        // Above windows: the band, or none when tags are hidden.
-        let mut above = FrameSettings {
-            tags_in_title_bar: false,
-            ..FrameSettings::default()
-        };
-        assert_eq!(above.effective_style(), FrameStyle::default());
-        above.show_tags = false;
-        assert_eq!(above.effective_style().tag_band, 0);
-        assert!(!above.effective_style().title_bars);
     }
 
     #[test]

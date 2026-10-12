@@ -48,6 +48,13 @@ pub trait Saved: Serialize + DeserializeOwned + Default {
         Err(format!("no migration from version {from}"))
     }
 
+    /// What the user should know about the step from version `from`, if anything: a change
+    /// they will see. (A step that changes nothing they see says nothing.)
+    fn migration_note(from: u32) -> Option<String> {
+        let _ = from;
+        None
+    }
+
     /// Fixes what can be fixed after loading and describes each fix for the user.
     fn repair(&mut self) -> Vec<String> {
         Vec::new()
@@ -57,6 +64,32 @@ pub trait Saved: Serialize + DeserializeOwned + Default {
 impl Saved for Settings {
     const FILE: &'static str = "settings.json";
     const VERSION: u32 = SETTINGS_VERSION;
+
+    fn migrate_step(mut value: serde_json::Value, from: u32) -> Result<serde_json::Value, String> {
+        match from {
+            // 1 to 2: tags go in the bar above every window, the new default, so windows in
+            // zones all start at the same line. (Format 1 always saved `true`: the old default.)
+            1 => {
+                let settings = value
+                    .as_object_mut()
+                    .ok_or_else(|| "settings are not an object".to_owned())?;
+                let frames = settings
+                    .entry("frames")
+                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+                if let Some(frames) = frames.as_object_mut() {
+                    frames.insert("tags_in_title_bar".to_owned(), serde_json::Value::Bool(false));
+                }
+                Ok(value)
+            }
+            other => Err(format!("no migration from version {other}")),
+        }
+    }
+
+    fn migration_note(from: u32) -> Option<String> {
+        (from == 1).then(|| {
+            "Zone tags now sit in a bar above every window, so the windows in your zones all start at the same line. To put tags back in title bars: Settings, Tags and tabs.".to_owned()
+        })
+    }
 }
 
 impl Saved for WorkspacesFile {
@@ -266,11 +299,7 @@ fn decode<T: Saved>(bytes: &[u8], path: &Path) -> Result<(T, Vec<String>), Store
     let mut notes = Vec::new();
     for from in found..T::VERSION {
         value = T::migrate_step(value, from).map_err(damaged)?;
-        notes.push(format!(
-            "{} was upgraded from format {from} to {}.",
-            T::FILE,
-            from + 1
-        ));
+        notes.extend(T::migration_note(from));
     }
     if let Some(v) = value.get_mut("version") {
         *v = serde_json::Value::from(T::VERSION);
@@ -392,6 +421,39 @@ mod tests {
         fs::remove_file(d.0.join("workspaces.json")).unwrap();
         let loaded = store.load::<WorkspacesFile>().unwrap();
         assert!(matches!(loaded.source, Source::LastGood { .. }));
+    }
+
+    #[test]
+    fn settings_of_format_1_put_tags_above_windows() {
+        // Format 1 always saved where tags go, with the old default (title bars). Format 2 puts
+        // them in the bar above every window, and says so once.
+        let d = TempDir::new("settings1");
+        fs::write(
+            d.0.join("settings.json"),
+            br#"{"version":1,"theme":"dark","frames":{"show_frames":true,"show_tags":true,"tags_in_title_bar":true,"style":{"gap":8,"tag_band":28,"border":2}}}"#,
+        )
+        .unwrap();
+        let loaded = Store::new(&d.0).load::<Settings>().unwrap();
+        assert!(!loaded.value.frames.tags_in_title_bar);
+        assert_eq!(
+            loaded.value.theme,
+            crate::settings::Theme::Dark,
+            "the rest is kept"
+        );
+        assert_eq!(loaded.value.version, SETTINGS_VERSION);
+        assert_eq!(loaded.notes.len(), 1);
+        assert!(loaded.notes[0].contains("same line"), "{:?}", loaded.notes);
+        // A format 1 file with no frames at all gets the new default too.
+        fs::write(d.0.join("settings.json"), br#"{"version":1}"#).unwrap();
+        let loaded = Store::new(&d.0).load::<Settings>().unwrap();
+        assert!(!loaded.value.frames.tags_in_title_bar);
+        // A format 2 file keeps the user's choice, and says nothing.
+        let mut titles = Settings::default();
+        titles.frames.tags_in_title_bar = true;
+        Store::new(&d.0).save(&titles).unwrap();
+        let loaded = Store::new(&d.0).load::<Settings>().unwrap();
+        assert!(loaded.value.frames.tags_in_title_bar);
+        assert!(loaded.notes.is_empty());
     }
 
     #[test]

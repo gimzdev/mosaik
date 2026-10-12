@@ -121,7 +121,7 @@ describe('Mosaïk’s window', () => {
     expect(await screen.findByText('Win+Alt+Space is taken; using Win+Alt+S.')).toBeTruthy();
   });
 
-  it('puts tags in title bars, or above windows when asked', async () => {
+  it('puts tags in a bar above windows, or in title bars when asked', async () => {
     let saved: Command | null = null;
     engine.request.mockImplementation((c) => {
       if (c.cmd === 'set_settings') {
@@ -134,9 +134,12 @@ describe('Mosaïk’s window', () => {
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     const place = await screen.findByRole('group', { name: 'Tags and tabs' });
-    expect(within(place).getByRole('radio', { name: 'In each window’s title bar' })).toHaveProperty('checked', true);
-    await userEvent.click(within(place).getByRole('radio', { name: 'Above each window' }));
-    expect(saved).toMatchObject({ cmd: 'set_settings', settings: { frames: { tags_in_title_bar: false } } });
+    expect(within(place).getByRole('radio', { name: 'In a bar above each window' })).toHaveProperty('checked', true);
+    expect(place.getAttribute('aria-describedby')).toBeTruthy();
+    await userEvent.click(
+      within(place).getByRole('radio', { name: 'In each window’s title bar, where there is room' }),
+    );
+    expect(saved).toMatchObject({ cmd: 'set_settings', settings: { frames: { tags_in_title_bar: true } } });
   });
 
   it('says plainly when the engine cannot be reached, and tries again', async () => {

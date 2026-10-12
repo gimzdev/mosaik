@@ -39,12 +39,14 @@ Vampire Survivors, idle clickers". Three kinds of windows were left out or misha
   windows never are. A workspace's window in full screen is still the workspace's: opening the
   workspace leaves it as it is (not moved, raised or minimised) and does not start its app again,
   and leaving the workspace does not minimise it.
-- **A window without a frame to resize it by keeps its own size.** Mosaïk only moves it: to
-  the middle of its zone, or of its group's place (`fit_size`, ADR 0005, which never changes a
-  size: a window larger than the screen starts at its top-left), also when it comes back from
-  minimised (`mosaik_win::place::move_frame`, with a Windows test). It is in a zone when its
-  middle is in the zone, or the zone's middle is in it, and it overlaps the zone's area by 70% of
-  as much as its size allows (`holds_fixed`): all of it in a larger zone, all of a smaller zone.
+- **A window without a frame to resize it by keeps its own size.** Mosaïk only moves it:
+  centred across its zone, or its group's place, and at the top (`fit_size`, ADR 0005, which
+  never changes a size: a window larger than the screen starts at its top-left), also when it
+  comes back from minimised (`mosaik_win::place::move_frame`, with a Windows test). (Until
+  2026-10-12 it went to the middle of the zone, lower than its neighbours; the owner asked for
+  every window to start at the same line.) It is in a zone when, along each axis, its middle is
+  in the zone or the zone's middle is in it, and it overlaps the zone's area by 70% of as much
+  as its size allows (`holds_fixed`): all of it in a larger zone, all of a smaller zone.
   A window that also covers a neighbouring zone stays in the zone it was put in. Its ring goes
   around the window itself.
 - **Its tag** goes in its title bar when there is room, as for any window (ADR 0011). When it
