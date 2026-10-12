@@ -3,7 +3,8 @@
 //! their colours, scramble them, switch back and time it, then (with `--drag`) drag a window
 //! into another zone with the mouse. `--browser edge|chrome` drags browser tabs out into the
 //! workspace (`browser.rs`); `--apps` puts real apps into zones and tabs (`app_drag.rs`).
-//! Tags go in title bars, as in the app; `--tags-above` puts them above windows.
+//! Tags go in title bars, as in the app; `--tags-above` puts them above windows. `--shots DIR`
+//! saves pictures of the probe's windows (which cover the work area) at a few steps.
 //!
 //! Everything happens in a scratch folder: the user's own workspaces and settings are not read
 //! or written. The probe windows are top-most so the mouse never lands on the user's windows.
@@ -37,6 +38,19 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 /// Set while the engine under test may start a closed probe window again: the title the new
 /// probe window takes (see `main`).
 pub const RELAUNCH_TITLE: &str = "MOSAIK_PROBE_RELAUNCH_TITLE";
+
+/// With `--shots DIR`: a picture of the work area, covered by the probe's own windows.
+fn shot(dir: Option<&std::path::Path>, name: &str) {
+    let Some(dir) = dir else { return };
+    let Ok(t) = mosaik_win::monitors::topology() else {
+        return;
+    };
+    let path = dir.join(format!("{name}.bmp"));
+    match crate::capture::save_bmp(t.primary().work_area, &path) {
+        Ok(()) => println!("shot {name}"),
+        Err(e) => println!("shot {name} not saved: {e}"),
+    }
+}
 
 fn ask(engine: &Engine, command: Command) -> (Reply, f64) {
     let start = Instant::now();
@@ -286,7 +300,14 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             });
             apps_scenario(&engine, &probes, dpi, work, &scope, only, installed)
         }
-        None => scenario(&engine, &probes, drag, dpi, &dir),
+        None => {
+            let shots = args
+                .iter()
+                .position(|a| a == "--shots")
+                .and_then(|i| args.get(i + 1))
+                .map(std::path::PathBuf::from);
+            scenario(&engine, &probes, drag, dpi, &dir, shots.as_deref())
+        }
     };
     engine.stop();
     for p in &probes {
@@ -311,6 +332,7 @@ fn scenario(
     drag: bool,
     dpi: u32,
     dir: &std::path::Path,
+    shots: Option<&std::path::Path>,
 ) -> Result<Value, String> {
     let styles = Styles::of(engine, dpi)?;
     // 1. Save the tiled windows as a workspace.
@@ -336,8 +358,11 @@ fn scenario(
         Some(zone.color)
     };
     let mut after_save = Vec::new();
-    for p in probes {
+    for (i, p) in probes.iter().enumerate() {
         let tag = tag_of(engine, p.hwnd).ok().map(|(t, _)| t);
+        if i + 1 == probes.len() {
+            shot(shots, "1-saved");
+        }
         let frame = frame_rect(p.hwnd).ok_or("a probe window vanished")?;
         let wanted = styles.area(p.tiled, false);
         let colours = colour_of(p.title).map(|c| frame_colours(frame, c, dpi, tag));
@@ -397,7 +422,7 @@ fn scenario(
     // 4. With --drag: tabs and drag to snap, with the mouse; then the same drop where Windows'
     // own snapping also reacts (the screen's top edge, its top centre).
     let dragged = if drag {
-        let mut d = tabs_and_snap(engine, probes, styles)?;
+        let mut d = tabs_and_snap(engine, probes, styles, shots)?;
         d["with_windows_snapping"] = windows_snapping(engine, probes, styles)?;
         Some(d)
     } else {
@@ -1024,7 +1049,12 @@ fn windows_snapping(engine: &Engine, probes: &[Probe], styles: Styles) -> Result
 /// Tabs with the mouse: the terminal is dropped on the code window's tag (they become tabs), the
 /// code tab is clicked, then the terminal's tab is pulled out into the review zone. Then a
 /// window is dragged back into its own zone.
-fn tabs_and_snap(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Value, String> {
+fn tabs_and_snap(
+    engine: &Engine,
+    probes: &[Probe],
+    styles: Styles,
+    shots: Option<&std::path::Path>,
+) -> Result<Value, String> {
     let (code, terminal, review) = (&probes[0], &probes[1], &probes[2]);
     let original = input::cursor();
     let s = f64::from(styles.dpi) / 96.0;
@@ -1040,6 +1070,7 @@ fn tabs_and_snap(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Va
         terminal.hwnd,
     )?;
     let after_join = state(engine)?;
+    shot(shots, "2-joined");
     let strip = after_join.tab_strips.first().cloned();
     let joined = json!({
         "strips": after_join.tab_strips.len(),
