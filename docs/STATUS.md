@@ -192,7 +192,10 @@ Integrity log: events 3033 and 3077 at 16:04, rustc refused the debug build of t
 macro's DLL ("did not meet the Enterprise signing level requirements"). The DLL made again, the
 same size, was let through, and the engine's tests ran (2 passing). `mosaik.ps1 build` and `test`
 now do the same on their own: when cargo fails and the log names files of the build it refused,
-they are removed, said, and cargo runs once more (`Invoke-Cargo`).
+they are removed, said, and cargo runs once more (`Invoke-Cargo`). Job 0097 saw it happen: Smart
+App Control refused a new `mosaikctl` test program ("error: 1 target failed"); `mosaik.ps1 test`
+said "Windows (Smart App Control) refused 1 file(s) this build made:
+mosaikctl-fc4207af53db9f1f.exe. Making them again.", and every test then passed (core 185).
 
 ### Still to do in step 1
 
