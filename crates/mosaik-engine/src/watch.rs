@@ -749,6 +749,12 @@ impl Engine {
         self.watch.preview.hide();
         self.watch.preview_visible = false;
         self.hide_drop_bar();
+        // A window that is gone at the end of its drag (a browser tab dragged back into its
+        // window: the browser closes the window it had made for it) has nowhere to go.
+        if !window::exists(window::hwnd(h)) {
+            self.sync_location_hooks();
+            return;
+        }
         if d.kind == DragKind::Moving {
             if let Some((onto, before)) = d.tab_target {
                 if let Some(g) = self.group_of_window(onto) {
@@ -829,6 +835,10 @@ impl Engine {
         let target = style.window_area(live.rect, live.dpi);
         let moved = mover::move_all(&[(h, To::Frame(target))], mover::WAIT_ONE);
         if let Some(Err(e)) = moved.into_iter().next().map(|o| o.result) {
+            if !window::exists(window::hwnd(h)) {
+                // Closed while it was being moved: nothing to tell.
+                return;
+            }
             tracing::warn!(error = %e, "window not pulled into its zone");
             self.tell_once(
                 "snap",

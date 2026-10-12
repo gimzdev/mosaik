@@ -157,6 +157,29 @@ pub fn geometry(hwnd: HWND) -> Option<Geometry> {
     })
 }
 
+/// Windows' snapping has arranged `hwnd` (snapped to a half, a quarter or a snap layout). `None`
+/// where this Windows cannot tell: `IsWindowArranged` is looked up, not linked, so Mosaïk still
+/// starts on a Windows 10 that lacks it.
+pub fn is_arranged(hwnd: HWND) -> Option<bool> {
+    type IsWindowArranged = unsafe extern "system" fn(HWND) -> BOOL;
+    static FUNCTION: std::sync::OnceLock<Option<IsWindowArranged>> = std::sync::OnceLock::new();
+    let f = FUNCTION.get_or_init(|| {
+        use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+        // SAFETY: user32 is loaded in every process that has windows; the export, when present,
+        // has the signature of `IsWindowArranged` in winuser.h.
+        unsafe {
+            let user32 = GetModuleHandleW(windows::core::w!("user32.dll")).ok()?;
+            let p = GetProcAddress(user32, windows::core::s!("IsWindowArranged"))?;
+            Some(std::mem::transmute::<
+                unsafe extern "system" fn() -> isize,
+                IsWindowArranged,
+            >(p))
+        }
+    });
+    // SAFETY: the function only reads the window's state; any handle value is accepted.
+    f.map(|f| unsafe { f(hwnd) }.as_bool())
+}
+
 pub fn cloak(hwnd: HWND) -> Cloak {
     let mut v = 0u32;
     // SAFETY: the attribute is a DWORD and the buffer is one u32.

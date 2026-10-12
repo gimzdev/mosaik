@@ -1,7 +1,8 @@
 //! Workspaces end to end, with the real engine running in this process and three plain windows
 //! in other processes: save a tiled layout, check the windows went into their zones and wear
 //! their colours, scramble them, switch back and time it, then (with `--drag`) drag a window
-//! into another zone with the mouse.
+//! into another zone with the mouse. `--browser edge|chrome` drags browser tabs out into the
+//! workspace (`browser.rs`); `--apps` puts real apps into zones and tabs (`app_drag.rs`).
 //!
 //! Everything happens in a scratch folder: the user's own workspaces and settings are not read
 //! or written. The probe windows are top-most so the mouse never lands on the user's windows.
@@ -13,7 +14,7 @@ use mosaik_core::editing::ZoneEdit;
 use mosaik_core::geometry::{Point, RatioRect, Rect};
 use mosaik_core::store::{Store, WorkspacesFile};
 use mosaik_core::zone::{FrameStyle, Rgb, ZoneColor};
-use mosaik_engine::{Config, Engine, UiEvent, UiSink};
+use mosaik_engine::{Config, Engine, Scope, UiEvent, UiSink};
 use mosaik_ipc::protocol::{Command, Reply};
 use mosaik_win::events::pump_until;
 use mosaik_win::input::{self, LeftButton};
@@ -22,7 +23,7 @@ use mosaik_win::window::{frame_rect, handle};
 use serde_json::{Value, json};
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GetAncestor, SW_MINIMIZE, ShowWindow, WindowFromPoint,
+    GA_ROOT, GetAncestor, GetShellWindow, SW_MINIMIZE, SW_RESTORE, ShowWindow, WindowFromPoint,
 };
 
 use crate::capture::capture;
@@ -112,6 +113,7 @@ struct Probe {
 
 pub fn run(args: &[String]) -> Result<Value, String> {
     let drag = args.iter().any(|a| a == "--drag");
+    let apps = args.iter().any(|a| a == "--apps");
     // `--browser edge|chrome`: browser tabs dragged out into the workspace (browser.rs).
     let browser = match args.iter().position(|a| a == "--browser") {
         Some(i) => {
@@ -176,7 +178,10 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     };
     let mut own_pids = vec![mosaik_win::process::own_pid()];
     own_pids.extend(watchdog.as_ref().map(|w| w.pid));
-    // The engine manages the probe windows and nothing else.
+    // The engine manages the probe windows and nothing else: with `--browser`, the browser's
+    // windows too (the user's are not on screen); with `--apps`, each app window the probe opens,
+    // by its handle.
+    let scope = Scope::programs(std::iter::once("mosaik-probe.exe").chain(browser.as_ref().map(|b| b.exe)));
     let engine = Engine::start(
         Config {
             data_dir: dir.clone(),
@@ -184,11 +189,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             app_version: "probe".into(),
             own_pids,
             watchdog: watchdog.as_ref().map(|w| w.pid),
-            manage_only: Some(
-                std::iter::once("mosaik-probe.exe".to_owned())
-                    .chain(browser.as_ref().map(|b| b.exe.to_owned()))
-                    .collect(),
-            ),
+            manage_only: Some(scope.clone()),
         },
         sink,
     )
@@ -196,6 +197,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
 
     let result = match &browser {
         Some(b) => browser_scenario(&engine, &probes, dpi, b, work),
+        None if apps => apps_scenario(&engine, &probes, dpi, work, &scope),
         None => scenario(&engine, &probes, drag, dpi, &dir),
     };
     engine.stop();
@@ -295,9 +297,12 @@ fn scenario(
         .ok()
         .and_then(|p| p.memory());
 
-    // 4. With --drag: tabs and drag to snap, with the mouse.
+    // 4. With --drag: tabs and drag to snap, with the mouse; then the same drop where Windows'
+    // own snapping also reacts (the screen's top edge, its top centre).
     let dragged = if drag {
-        Some(tabs_and_snap(engine, probes, dpi)?)
+        let mut d = tabs_and_snap(engine, probes, dpi)?;
+        d["with_windows_snapping"] = windows_snapping(engine, probes, dpi)?;
+        Some(d)
     } else {
         None
     };
@@ -413,6 +418,50 @@ fn browser_scenario(
     value["saved"] = json!(saved);
     println!("browser: {value}");
     Ok(value)
+}
+
+/// Real apps put into the workspace of the three probe windows: into the review zone, onto the
+/// code window's tag. The workspace is deleted afterwards.
+fn apps_scenario(
+    engine: &Engine,
+    probes: &[Probe],
+    dpi: u32,
+    work: Rect,
+    scope: &Scope,
+) -> Result<Value, String> {
+    let style = FrameStyle::default();
+    let saved = done(
+        &ask(
+            engine,
+            Command::Save {
+                workspace: Some("Probe apps".into()),
+            },
+        )
+        .0,
+    )?;
+    pump_until(700, || false);
+    let (code, review) = (&probes[0], &probes[2]);
+    let c = frame_rect(code.hwnd).ok_or("the code window vanished")?;
+    #[allow(clippy::cast_possible_truncation)]
+    let band_middle = (14.0 * f64::from(dpi) / 96.0).round() as i32;
+    let targets = crate::app_drag::Targets {
+        code: code.hwnd,
+        tag_point: Point::new(c.left + c.width() / 2, c.top - band_middle),
+        group_area: c,
+        zone_point: review.tiled.center(),
+        zone_area: style.window_area(review.tiled, dpi),
+        work,
+    };
+    let original = input::cursor();
+    let result = crate::app_drag::scenario(engine, scope, &targets);
+    input::move_to(original);
+    let _ = ask(
+        engine,
+        Command::DeleteWorkspace {
+            workspace: "Probe apps".into(),
+        },
+    );
+    Ok(json!({ "saved": saved, "apps": result }))
 }
 
 fn zones(engine: &Engine, workspace: &str) -> Result<(Vec<ZoneEdit>, String), String> {
@@ -664,15 +713,130 @@ pub(crate) fn drag_path(points: &[Point], expected: HWND) -> Result<(), String> 
     Ok(())
 }
 
-fn state(engine: &Engine) -> Result<Box<mosaik_ipc::protocol::StateSnapshot>, String> {
+pub(crate) fn state(engine: &Engine) -> Result<Box<mosaik_ipc::protocol::StateSnapshot>, String> {
     match engine.request(Command::State, TIMEOUT) {
         Reply::State(s) => Ok(s),
         other => Err(format!("state: {other:?}")),
     }
 }
 
-fn hidden(s: &mosaik_ipc::protocol::StateSnapshot, h: HWND) -> bool {
+pub(crate) fn hidden(s: &mosaik_ipc::protocol::StateSnapshot, h: HWND) -> bool {
     s.hidden.iter().any(|w| w.handle == handle(h))
+}
+
+/// The windows of Windows' shell on screen now (Snap Assist, the snap layouts bar...): handle and
+/// class.
+fn shell_windows() -> Vec<(u64, String)> {
+    // SAFETY: no arguments; the shell's desktop window, or none.
+    let shell = unsafe { GetShellWindow() };
+    if shell.is_invalid() {
+        return Vec::new();
+    }
+    let pid = mosaik_win::window::pid(shell);
+    mosaik_win::window::top_level()
+        .into_iter()
+        .filter(|&h| {
+            mosaik_win::window::pid(h) == pid
+                && mosaik_win::window::geometry(h).is_some_and(|g| g.visible && !g.cloaked && !g.minimized)
+        })
+        .map(|h| (handle(h).0, mosaik_win::window::class_name(h)))
+        .collect()
+}
+
+/// Drops where Windows' own snapping also watches the pointer: the review window onto the code
+/// group's strip at the screen's top edge and at its top centre (Windows 11's snap layouts
+/// bar), and into the code zone at the screen's left edge. After each: where the window ended,
+/// whether Windows maximised or arranged it, which shell windows appeared. Then the window goes
+/// back to its zone.
+fn windows_snapping(engine: &Engine, probes: &[Probe], dpi: u32) -> Result<Value, String> {
+    let style = FrameStyle::default();
+    let (code, review) = (&probes[0], &probes[2]);
+    let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
+    let screen = topology.monitor_for_rect(code.tiled).bounds;
+    let zone = code.tiled;
+    #[allow(clippy::cast_possible_truncation)]
+    let along = |share: f64| {
+        let x = (f64::from(screen.left) + f64::from(screen.width()) * share).round() as i32;
+        x.clamp(zone.left + 40, zone.right - 40)
+    };
+    let drops = [
+        (
+            "onto the strip at the top edge",
+            Point::new(along(0.3), screen.top),
+            true,
+        ),
+        (
+            "onto the strip at the top centre",
+            Point::new(along(0.5), screen.top),
+            true,
+        ),
+        (
+            "into the zone at the left edge",
+            Point::new(screen.left, zone.center().y),
+            false,
+        ),
+    ];
+    let mut results = Vec::new();
+    for (name, to, onto_strip) in drops {
+        let r = frame_rect(review.hwnd).ok_or("the review window vanished")?;
+        let shell_before = shell_windows();
+        drag(Point::new(r.left + r.width() / 3, r.top + 12), to, review.hwnd)?;
+        let soon = frame_rect(review.hwnd);
+        pump_until(1200, || false);
+        let st = state(engine)?;
+        let strip = st
+            .tab_strips
+            .iter()
+            .find(|s| s.tabs.iter().any(|t| t.window == handle(review.hwnd)))
+            .cloned();
+        let frame = frame_rect(review.hwnd);
+        let maximized = mosaik_win::window::geometry(review.hwnd).is_some_and(|g| g.maximized);
+        let appeared: Vec<String> = shell_windows()
+            .into_iter()
+            .filter(|(h, _)| !shell_before.iter().any(|(b, _)| b == h))
+            .map(|(_, class)| class)
+            .collect();
+        results.push(json!({
+            "drop": name,
+            "pointer": [to.x, to.y],
+            "became_a_tab": strip.is_some(),
+            "zone_error_px": (!onto_strip).then(|| frame.map(|f| edge_error(f, style.window_area(zone, dpi)))).flatten(),
+            "maximized": maximized,
+            "arranged_by_windows": mosaik_win::window::is_arranged(review.hwnd),
+            "moved_in_the_next_second": soon.zip(frame).map(|(a, b)| edge_error(b, a)),
+            "frame": frame.map(|f| [f.left, f.top, f.right, f.bottom]),
+            "shell_windows_appeared": appeared,
+        }));
+        // What Windows left on screen (Snap Assist waits for a choice): Escape closes it.
+        if !appeared.is_empty() {
+            input::key(windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE.0, true);
+            input::key(windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE.0, false);
+            pump_until(500, || false);
+        }
+        // Back to its own zone: out of the strip by its tab, or by its title bar.
+        let chip = strip.and_then(|s| {
+            s.tabs
+                .iter()
+                .find(|t| t.window == handle(review.hwnd))
+                .map(|t| t.chip.center())
+        });
+        if let Some(chip) = chip {
+            drag(chip, review.tiled.center(), review.hwnd)?;
+        } else {
+            if maximized {
+                // SAFETY: restores the probe's own window, so its title bar is where it is grabbed.
+                let _ = unsafe { ShowWindow(review.hwnd, SW_RESTORE) };
+                pump_until(500, || false);
+            }
+            let r = frame_rect(review.hwnd).ok_or("the review window vanished")?;
+            drag(
+                Point::new(r.left + r.width() / 3, r.top + 12),
+                review.tiled.center(),
+                review.hwnd,
+            )?;
+        }
+    }
+    Ok(json!({ "windows_snapping_on": mosaik_win::os::snapping_on(), "drops": results }))
 }
 
 /// Tabs with the mouse: the terminal is dropped on the code window's tag (they become tabs), the

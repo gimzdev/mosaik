@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 use mosaik_core::classify::{Rules, Verdict, classify};
 use mosaik_core::geometry::{Point, Rect};
 use mosaik_engine::Engine;
-use mosaik_ipc::protocol::{Command, Reply};
 use mosaik_win::events::pump_until;
 use mosaik_win::place::{edge_error, move_frame};
 use mosaik_win::process::shell_open;
@@ -19,6 +18,8 @@ use mosaik_win::window::{Scanner, frame_rect, handle, title, top_level};
 use serde_json::{Value, json};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos};
+
+use crate::workspace::{drag_path, state};
 
 /// A browser the probe can drive.
 pub struct Browser {
@@ -110,19 +111,12 @@ fn tabs(hwnd: HWND, at_least: usize) -> Vec<Rect> {
     }
 }
 
-fn state(engine: &Engine) -> Result<Box<mosaik_ipc::protocol::StateSnapshot>, String> {
-    match engine.request(Command::State, Duration::from_secs(15)) {
-        Reply::State(s) => Ok(s),
-        other => Err(format!("state: {other:?}")),
-    }
-}
-
 /// Drags one browser tab from `tab` to `to`, out of its strip. The first steps go straight down,
 /// past the strip, as a person tears a tab off; then on to `to`.
 fn tear_off(tab: Rect, to: Point, owner: HWND) -> Result<(), String> {
     let from = tab.center();
     let below = Point::new(from.x, from.y + 160);
-    crate::workspace::drag_path(&[from, below, to], owner)
+    drag_path(&[from, below, to], owner)
 }
 
 /// The scenario: `zone_target` is where a tab dropped onto a zone should land (a zone's window

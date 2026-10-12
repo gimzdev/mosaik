@@ -149,11 +149,10 @@ impl Engine {
     }
 
     fn allowed(&self, f: &WindowFacts) -> bool {
-        self.config.manage_only.as_ref().is_none_or(|exes| {
-            f.exe
-                .as_deref()
-                .is_some_and(|e| exes.iter().any(|x| x.eq_ignore_ascii_case(e)))
-        })
+        self.config
+            .manage_only
+            .as_ref()
+            .is_none_or(|scope| scope.allows(f))
     }
 
     /// A window Mosaïk manages now: on screen, an app window, not elevated.

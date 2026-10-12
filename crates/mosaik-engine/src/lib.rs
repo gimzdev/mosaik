@@ -45,10 +45,37 @@ pub struct Config {
     /// The watchdog's process id. Without a running watchdog Mosaïk hides nothing (ADR 0006);
     /// one that stops is started again.
     pub watchdog: Option<u32>,
-    /// For probes and tests: manage only the windows of these programs (file names such as
-    /// `mosaik-probe.exe`), so a test run never touches the user's own windows, and apps it
-    /// starts are recognised too. `None` in the app.
-    pub manage_only: Option<Vec<String>>,
+    /// For probes and tests: manage only these windows, so a test run never touches the user's
+    /// own windows. `None` in the app.
+    pub manage_only: Option<Scope>,
+}
+
+/// The windows a probe or test lets the engine manage.
+#[derive(Clone, Debug, Default)]
+pub struct Scope {
+    /// Every window of these programs (file names such as `mosaik-probe.exe`), so the windows
+    /// of apps a test starts are recognised too.
+    pub programs: Vec<String>,
+    /// These windows, whatever their program: windows a test opened in apps the user also has
+    /// open. The test adds and removes them while it runs.
+    pub windows: Arc<std::sync::Mutex<std::collections::HashSet<mosaik_core::window::WindowHandle>>>,
+}
+
+impl Scope {
+    pub fn programs<S: Into<String>>(programs: impl IntoIterator<Item = S>) -> Self {
+        Self {
+            programs: programs.into_iter().map(Into::into).collect(),
+            windows: Arc::default(),
+        }
+    }
+
+    pub(crate) fn allows(&self, f: &mosaik_core::window::WindowFacts) -> bool {
+        let program = f
+            .exe
+            .as_deref()
+            .is_some_and(|e| self.programs.iter().any(|p| p.eq_ignore_ascii_case(e)));
+        program || self.windows.lock().is_ok_and(|w| w.contains(&f.handle))
+    }
 }
 
 /// Something the interface has to do.

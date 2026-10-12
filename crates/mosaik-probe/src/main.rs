@@ -9,8 +9,9 @@
 //! mosaik-probe watchdog   window recovery after the main process is killed
 //! mosaik-probe hotkey     the switcher shortcut on the installed keyboard layouts (presses keys)
 //! mosaik-probe idle       CPU and memory of an engine-like loop over 60 s
-//! mosaik-probe workspace  save, switch and reopen with the real engine (--drag: drag to snap,
-//!                         moves the mouse)
+//! mosaik-probe workspace  save, switch and reopen with the real engine (--drag: drag to snap;
+//!                         --browser edge|chrome: browser tabs dragged out into a workspace;
+//!                         --apps: real apps into zones and tabs; all three move the mouse)
 //! ```
 //!
 //! The probes only touch windows they open themselves, and close them afterwards.
@@ -18,6 +19,8 @@
 // A command-line tool: printing is its output.
 #![allow(clippy::print_stdout)]
 
+#[cfg(windows)]
+mod app_drag;
 #[cfg(windows)]
 mod apps;
 #[cfg(windows)]

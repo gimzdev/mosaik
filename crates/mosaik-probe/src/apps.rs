@@ -37,11 +37,37 @@ fn animated_page() -> String {
     format!("file:///{p}")
 }
 
+/// The first of `paths` that exists (a packaged app's alias counts), or nothing: the app is not
+/// installed, and opening it says so rather than letting Windows show an error.
+fn first_existing(paths: &[String]) -> String {
+    paths
+        .iter()
+        .find(|p| std::path::Path::new(p).symlink_metadata().is_ok())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// A Firefox profile of the probe's own, so the user's profile, session and history are never
+/// touched: no welcome pages, no question when a window with several tabs closes.
+fn firefox_profile() -> String {
+    let dir = std::env::temp_dir().join("mosaik-probe").join("firefox");
+    let prefs = "user_pref(\"browser.aboutwelcome.enabled\", false);\n\
+user_pref(\"browser.shell.checkDefaultBrowser\", false);\n\
+user_pref(\"browser.startup.homepage_override.mstone\", \"ignore\");\n\
+user_pref(\"browser.tabs.warnOnClose\", false);\n\
+user_pref(\"datareporting.policy.firstRunURL\", \"\");\n";
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join("user.js"), prefs);
+    dir.to_string_lossy().into_owned()
+}
+
 /// Chrome, Edge, VS Code (Electron), Windows Terminal, Explorer, Word (Office), Calculator (UWP)
-/// and Notepad. Browsers open private windows so no session or history is touched, on a page
-/// that keeps drawing.
+/// and Notepad; then, where installed, Firefox, Notepad++, Paint, Excel and Git Bash (mintty).
+/// Browsers open private windows (Firefox a profile of its own) so no session or history is
+/// touched, on a page that keeps drawing.
 pub fn catalog() -> Vec<App> {
-    let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let env = |name: &str| std::env::var(name).unwrap_or_default();
+    let (local, pf, pf86) = (env("LOCALAPPDATA"), env("ProgramFiles"), env("ProgramFiles(x86)"));
     let page = animated_page();
     vec![
         App {
@@ -100,6 +126,50 @@ pub fn catalog() -> Vec<App> {
             exe: "applicationframehost.exe",
             class: Some("ApplicationFrameWindow"),
         },
+        App {
+            name: "Firefox",
+            target: first_existing(&[
+                format!("{pf}\\Mozilla Firefox\\firefox.exe"),
+                format!("{local}\\Mozilla Firefox\\firefox.exe"),
+            ]),
+            args: format!("-no-remote -profile \"{}\" -new-window {page}", firefox_profile()),
+            exe: "firefox.exe",
+            class: Some("MozillaWindowClass"),
+        },
+        App {
+            name: "Notepad++",
+            target: first_existing(&[
+                format!("{pf}\\Notepad++\\notepad++.exe"),
+                format!("{pf86}\\Notepad++\\notepad++.exe"),
+            ]),
+            args: "-multiInst -nosession".into(),
+            exe: "notepad++.exe",
+            class: Some("Notepad++"),
+        },
+        App {
+            name: "Paint",
+            target: first_existing(&[format!("{local}\\Microsoft\\WindowsApps\\mspaint.exe")]),
+            args: String::new(),
+            exe: "mspaint.exe",
+            class: Some("MSPaintApp"),
+        },
+        App {
+            name: "Excel",
+            target: first_existing(&[
+                format!("{pf}\\Microsoft Office\\root\\Office16\\EXCEL.EXE"),
+                format!("{pf86}\\Microsoft Office\\root\\Office16\\EXCEL.EXE"),
+            ]),
+            args: "/x".into(),
+            exe: "excel.exe",
+            class: Some("XLMAIN"),
+        },
+        App {
+            name: "Git Bash (mintty)",
+            target: first_existing(&[format!("{pf}\\Git\\git-bash.exe")]),
+            args: String::new(),
+            exe: "mintty.exe",
+            class: Some("mintty"),
+        },
     ]
 }
 
@@ -112,6 +182,9 @@ pub struct Opened {
 
 /// Opens `app` and waits (up to 25 s) for a new, manageable window of it.
 pub fn open(app: &App, scanner: &mut Scanner) -> Result<Opened, String> {
+    if app.target.is_empty() {
+        return Err(format!("{}: not installed", app.name));
+    }
     let before: HashSet<u64> = top_level().into_iter().map(|h| handle(h).0).collect();
     let start = Instant::now();
     shell_open(&app.target, &app.args).map_err(|e| e.to_string())?;
