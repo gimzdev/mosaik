@@ -189,34 +189,69 @@ fn side_point(f: Rect, side: Side, k: i32) -> Point {
     }
 }
 
-/// A point half way along `w`'s `side` where a press resizes it: Windows answers that side's
-/// hit-test code there, and `w` is the window under it (a neighbour's invisible resize border
-/// can reach over).
-fn grab(w: HWND, side: Side) -> Option<Point> {
-    let f = frame_rect(w)?;
-    let code = match side {
+/// The side facing `side` on a neighbour across a line.
+const fn facing(side: Side) -> Side {
+    match side {
+        Side::Left => Side::Right,
+        Side::Right => Side::Left,
+        Side::Top => Side::Bottom,
+        Side::Bottom => Side::Top,
+    }
+}
+
+fn hit_code(side: Side) -> Option<i32> {
+    i32::try_from(match side {
         Side::Left => HTLEFT,
         Side::Top => HTTOP,
         Side::Right => HTRIGHT,
         Side::Bottom => HTBOTTOM,
-    };
-    let code = i32::try_from(code).ok()?;
-    // From the visible border out (Windows' resize border reaches a few pixels beyond it), then
-    // a pixel or two in.
-    [0, 1, 2, 3, 4, 5, -1, -2]
-        .into_iter()
-        .map(|k| side_point(f, side, k))
-        .find(|p| {
-            // SAFETY: read-only hit test.
-            let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: p.x, y: p.y }), GA_ROOT) };
-            under == w && mosaik_win::titlebar::hit_code(w, *p) == Some(code)
-        })
+    })
+    .ok()
 }
 
-/// Resizes `w` by its `side`, `by` pixels (right or down when positive) with the mouse, Shift
-/// held when `free`; returns the engine's state once the windows settle.
-fn resize(engine: &Engine, w: HWND, side: Side, by: i32, free: bool) -> Result<Box<StateSnapshot>, String> {
-    let from = grab(w, side).ok_or_else(|| format!("no point of the window's {side:?} edge resizes it"))?;
+/// Where a press resizes `w` by its `side`, half way along it: a point where Windows answers that
+/// side's hit-test code and `w` is the window under the pointer. Zones are only as far apart as
+/// their rings, so the neighbour across the line can be the window there (its invisible resize
+/// border reaches over): then its facing side is grabbed, which moves the same line. Returns the
+/// point, the window grabbed and its side.
+fn grab(w: HWND, side: Side) -> Option<(Point, HWND, Side)> {
+    let f = frame_rect(w)?;
+    // From the visible border out (Windows' resize border reaches a few pixels beyond it), then
+    // a pixel or two in.
+    let points: Vec<Point> = [0, 1, 2, 3, 4, 5, -1, -2]
+        .into_iter()
+        .map(|k| side_point(f, side, k))
+        .collect();
+    // SAFETY: read-only hit test.
+    let under = |p: Point| unsafe { GetAncestor(WindowFromPoint(POINT { x: p.x, y: p.y }), GA_ROOT) };
+    let own = points
+        .iter()
+        .find(|p| under(**p) == w && mosaik_win::titlebar::hit_code(w, **p) == hit_code(side))
+        .map(|p| (*p, w, side));
+    own.or_else(|| {
+        points.iter().find_map(|p| {
+            let n = under(*p);
+            (n != w
+                && mosaik_win::window::class_name(n) == "MosaikProbeDummy"
+                && mosaik_win::titlebar::hit_code(n, *p) == hit_code(facing(side)))
+            .then_some((*p, n, facing(side)))
+        })
+    })
+}
+
+/// A resize by the mouse: the window grabbed (`w`, or its neighbour across the line) and its
+/// side, and the engine's state once the windows settled.
+struct Resized {
+    window: HWND,
+    side: Side,
+    st: Box<StateSnapshot>,
+}
+
+/// Resizes `w` by its `side` (or its neighbour by the facing side: the same line), `by` pixels
+/// (right or down when positive) with the mouse, Shift held when `free`.
+fn resize(engine: &Engine, w: HWND, side: Side, by: i32, free: bool) -> Result<Resized, String> {
+    let (from, window, side) =
+        grab(w, side).ok_or_else(|| format!("no point of the window's {side:?} edge resizes it"))?;
     let to = match side {
         Side::Left | Side::Right => Point::new(from.x + by, from.y),
         Side::Top | Side::Bottom => Point::new(from.x, from.y + by),
@@ -225,10 +260,14 @@ fn resize(engine: &Engine, w: HWND, side: Side, by: i32, free: bool) -> Result<B
     if free {
         keys.press(VK_SHIFT);
     }
-    let dragged = drag_path(&[from, to], w);
+    let dragged = drag_path(&[from, to], window);
     drop(keys);
     dragged?;
-    settled(engine)
+    Ok(Resized {
+        window,
+        side,
+        st: settled(engine)?,
+    })
 }
 
 /// A workspace's zones on the main monitor, in pixels.
@@ -361,7 +400,7 @@ fn follow(engine: &Engine, styles: Styles, work: Rect, opened: &mut Vec<Opened>)
 
     // 2a. Code's right edge 150 px left: the line between Code and the right column moves with
     // it, both windows on the right follow.
-    let st = resize(engine, code, Side::Right, -150, false)?;
+    let st = resize(engine, code, Side::Right, -150, false)?.st;
     let z1 = zones(engine, WORKSPACE, work)?;
     let (c0, c1) = (zone_of(&st, &z0, code), zone_of(&st, &z1, code));
     let moved = c0.zip(c1).map(|(a, b)| b.right - a.right);
@@ -378,7 +417,7 @@ fn follow(engine: &Engine, styles: Styles, work: Rect, opened: &mut Vec<Opened>)
 
     // 2b. Terminal's bottom edge 100 px down: the line between Terminal and Review moves; Code
     // stays.
-    let st = resize(engine, terminal, Side::Bottom, 100, false)?;
+    let st = resize(engine, terminal, Side::Bottom, 100, false)?.st;
     let z2 = zones(engine, WORKSPACE, work)?;
     let moved = zone_of(&st, &z1, terminal)
         .zip(zone_of(&st, &z2, terminal))
@@ -397,7 +436,7 @@ fn follow(engine: &Engine, styles: Styles, work: Rect, opened: &mut Vec<Opened>)
     );
 
     // 2b'. The same line from the other side: Review's top edge 50 px up.
-    let st = resize(engine, review, Side::Top, -50, false)?;
+    let st = resize(engine, review, Side::Top, -50, false)?.st;
     let z2b = zones(engine, WORKSPACE, work)?;
     let moved = zone_of(&st, &z2, review)
         .zip(zone_of(&st, &z2b, review))
@@ -421,7 +460,7 @@ fn follow(engine: &Engine, styles: Styles, work: Rect, opened: &mut Vec<Opened>)
 
     // 2c. Code's right edge 400 px right: Review keeps its minimum width and pushes the line
     // back, so no window overlaps another and each fills its zone.
-    let st = resize(engine, code, Side::Right, 400, false)?;
+    let st = resize(engine, code, Side::Right, 400, false)?.st;
     let z3 = zones(engine, WORKSPACE, work)?;
     let moved = zone_of(&st, &z2, code)
         .zip(zone_of(&st, &z3, code))
@@ -452,7 +491,7 @@ fn follow(engine: &Engine, styles: Styles, work: Rect, opened: &mut Vec<Opened>)
     );
 
     // 2d. Code's left edge, on the screen's border: no line there; the window goes back.
-    let st = resize(engine, code, Side::Left, 80, false)?;
+    let st = resize(engine, code, Side::Left, 80, false)?.st;
     let z4 = zones(engine, WORKSPACE, work)?;
     let fits = fit(&st, &z4, styles, &w);
     out.insert(
@@ -464,18 +503,26 @@ fn follow(engine: &Engine, styles: Styles, work: Rect, opened: &mut Vec<Opened>)
         }),
     );
 
-    // 2e. Shift held: Terminal's left edge 60 px left, freely; the zones stay.
-    let before = frame_rect(terminal).ok_or("Terminal vanished")?;
-    let _st = resize(engine, terminal, Side::Left, -60, true)?;
+    // 2e. Shift held: Terminal's left edge (or Code's right edge, the same line) 60 px left,
+    // freely: the window grabbed changes size and the zones stay.
+    let frames_before = frames(&w);
+    let r = resize(engine, terminal, Side::Left, -60, true)?;
     let z5 = zones(engine, WORKSPACE, work)?;
-    let after = frame_rect(terminal).ok_or("Terminal vanished")?;
-    let grew = before.left - after.left;
+    let i = w.iter().position(|h| *h == r.window).unwrap_or(0);
+    let (b, a) = (frames_before[i], frame_rect(r.window).ok_or("a window vanished")?);
+    let moved = match r.side {
+        Side::Left => a.left - b.left,
+        Side::Right => a.right - b.right,
+        Side::Top => a.top - b.top,
+        Side::Bottom => a.bottom - b.bottom,
+    };
     out.insert(
         "with_shift".into(),
         json!({
             "zones_kept": rects(&z5) == rects(&z4),
-            "window_grew_px": grew,
-            "ok": rects(&z5) == rects(&z4) && (grew - 60).abs() <= 3,
+            "grabbed": mosaik_win::window::title(r.window),
+            "edge_moved_px": moved,
+            "ok": rects(&z5) == rects(&z4) && (moved + 60).abs() <= 3,
         }),
     );
     let ok = out.values().all(|v| v["ok"] == json!(true));
@@ -733,6 +780,74 @@ fn is_handle(q: Option<&QuickMenuState>) -> bool {
     q.is_some_and(|q| !q.open)
 }
 
+/// The top-level windows whose rectangle holds `p`, front to back as Windows stacks them: the
+/// first is the one the pointer reaches.
+fn stack_at(p: Point) -> Vec<String> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
+    };
+    let own = mosaik_win::process::own_pid();
+    mosaik_win::window::top_level()
+        .into_iter()
+        .filter(|h| {
+            mosaik_win::window::is_visible(*h)
+                && mosaik_win::window::window_rect(*h).is_some_and(|r| r.contains(p))
+        })
+        .take(6)
+        .map(|h| {
+            // SAFETY: reads a window's extended style.
+            let ex = unsafe { GetWindowLongW(h, GWL_EXSTYLE) }.cast_unsigned();
+            format!(
+                "{}{}{}{}",
+                mosaik_win::window::class_name(h),
+                if mosaik_win::window::pid(h) == own {
+                    " (this process)"
+                } else {
+                    ""
+                },
+                if ex & WS_EX_TOPMOST.0 != 0 { " topmost" } else { "" },
+                if ex & WS_EX_TRANSPARENT.0 != 0 {
+                    " click-through"
+                } else {
+                    ""
+                },
+            )
+        })
+        .collect()
+}
+
+/// The engine thread's input state, read through its quick-menu handle: which window holds the
+/// mouse, and whether a move or a menu loop runs.
+fn engine_thread_input() -> Value {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GUITHREADINFO, GetGUIThreadInfo, GetWindowThreadProcessId,
+    };
+    let own = mosaik_win::process::own_pid();
+    let Some(edge) = mosaik_win::window::top_level()
+        .into_iter()
+        .find(|h| mosaik_win::window::class_name(*h) == "MosaikEdge" && mosaik_win::window::pid(*h) == own)
+    else {
+        return json!("no handle window in this process");
+    };
+    // SAFETY: reads the thread that owns our own window.
+    let thread = unsafe { GetWindowThreadProcessId(edge, None) };
+    let mut info = GUITHREADINFO {
+        cbSize: u32::try_from(std::mem::size_of::<GUITHREADINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+    // SAFETY: a sized GUITHREADINFO for a thread of this process.
+    let read = unsafe { GetGUIThreadInfo(thread, &raw mut info) }.is_ok();
+    let class = |h: HWND| (!h.is_invalid()).then(|| mosaik_win::window::class_name(h));
+    json!({
+        "read": read,
+        "capture": class(info.hwndCapture),
+        "active": class(info.hwndActive),
+        "flags": info.flags.0,
+        "handle_rect": mosaik_win::window::window_rect(edge).map(|r| [r.left, r.top, r.right, r.bottom]),
+        "handle_visible": mosaik_win::window::is_visible(edge),
+    })
+}
+
 /// Moves the pointer from `from` to `to` in small steps, as a hand does.
 fn glide(from: Point, to: Point) {
     for i in 1..=12 {
@@ -836,23 +951,33 @@ fn quick_menu(
             // What is under the pointer, and the handle as the engine sees it; then a click,
             // which opens the menu too, so the rest can still be tried.
             let at = input::cursor();
-            // SAFETY: read-only hit test.
-            let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: at.x, y: at.y }), GA_ROOT) };
             let handle_now = state(engine)?.quick_menu;
-            out.insert(
-                "did_not_open_resting".into(),
-                json!({
-                    "pointer": [at.x, at.y],
-                    "under": mosaik_win::window::class_name(under),
-                    "under_is_mosaik": mosaik_win::window::pid(under) == mosaik_win::process::own_pid(),
-                    "handle": handle_now.map(|q| [q.rect.left, q.rect.top, q.rect.right, q.rect.bottom]),
-                }),
-            );
+            let seen = json!({
+                "pointer": [at.x, at.y],
+                "windows_there_front_to_back": stack_at(at),
+                "engine_thread": engine_thread_input(),
+                "handle": handle_now.map(|q| [q.rect.left, q.rect.top, q.rect.right, q.rect.bottom]),
+            });
+            println!("quick menu: did not open when the pointer rested on the handle: {seen}");
+            out.insert("did_not_open_resting".into(), seen);
             drop(LeftButton::press());
             let (clicked, _) = wait_menu(engine, 1500, is_open)?;
-            clicked
-                .filter(|m| m.open)
-                .ok_or("the menu opened neither when the pointer rested on the handle nor on a click")?
+            match clicked.filter(|m| m.open) {
+                Some(m) => m,
+                None => {
+                    let at = input::cursor();
+                    out.insert(
+                        "did_not_open_on_a_click".into(),
+                        json!({
+                            "pointer": [at.x, at.y],
+                            "windows_there_front_to_back": stack_at(at),
+                            "engine_thread": engine_thread_input(),
+                        }),
+                    );
+                    out.insert("ok".into(), json!(false));
+                    return Ok(Value::Object(out));
+                }
+            }
         }
     };
     let labels: Vec<&str> = menu.rows.iter().map(|r| r.label.as_str()).collect();
