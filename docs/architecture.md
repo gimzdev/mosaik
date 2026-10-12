@@ -71,8 +71,10 @@ the engine gathers windows and applies the result.
 - **Tags in title bars** (ADR 0011): the tag goes in a free stretch of the window's own title
   bar, against its buttons. Mosaïk finds the free stretches by asking the window what is under a
   row of points, as Windows does wherever the pointer goes (`WM_NCHITTEST`), on a thread of its
-  own (`titles`). A window whose title bar has no room wears its tag above it, below a band at
-  the top of its zone; a setting puts every tag above its window.
+  own (`titles`): when it first needs a tag, after a resize (and once more when the app has
+  settled), when its title changes or it comes to the front. A window whose title bar has no
+  room wears its tag above it, below a band at the top of its zone, once two readings a quarter
+  of a second apart agree; a setting puts every tag above its window.
 - **Drag to snap**: while a window is dragged by its title bar, the open workspace's zones show
   under it; the zone under the pointer (or within 48 px) is tinted, and the window is pulled into
   it on release. Shift moves freely; a setting swaps that. A window that was not part of the
