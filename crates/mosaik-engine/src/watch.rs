@@ -481,7 +481,7 @@ impl Engine {
         if !g.framable() {
             return None;
         }
-        let zone = active.zone_for(g.frame, g.resizable, style)?.clone();
+        let zone = self.zone_of(h, g.frame, g.resizable, style)?.clone();
         // The tag goes in the window's title bar, or above it, in the band at the top of its
         // zone (the one it is placed below, or will be); not at all for the moment its title bar
         // is being read.

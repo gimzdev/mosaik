@@ -50,6 +50,14 @@ pub(crate) fn move_all(moves: &[(WindowHandle, To)], wait: Duration) -> Vec<Outc
             .name("mosaik-move".into())
             .spawn(move || {
                 let hwnd = window::hwnd(window);
+                // A game or a video in full screen is never moved: it would leave full screen.
+                if window::geometry(hwnd).is_some_and(|g| g.full_screen) {
+                    let _ = worker_tx.send(Outcome {
+                        window,
+                        result: Err("it is in full screen, so Mosaïk leaves it there".into()),
+                    });
+                    return;
+                }
                 let result = match to {
                     To::Frame(r) => place::move_frame(hwnd, r)
                         .map(|m| m.wanted)

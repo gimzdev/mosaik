@@ -82,8 +82,7 @@ pub struct WindowFacts {
     /// `WS_MINIMIZEBOX`: it can be minimised, as app windows can (a splash screen cannot).
     #[serde(default)]
     pub minimize_box: bool,
-    /// It covers its whole monitor, taskbar included, without being maximised: a game or a
-    /// video in full screen.
+    /// A game or a video in full screen ([`is_full_screen`]).
     #[serde(default)]
     pub full_screen: bool,
     /// Passes the Alt+Tab rule: it is its own root owner's last active popup.
@@ -103,5 +102,71 @@ impl WindowFacts {
     /// The invisible borders around the visible frame.
     pub fn frame_insets(&self) -> Insets {
         Insets::between(self.window_rect, self.frame_rect)
+    }
+}
+
+/// Whether a window whose visible frame is `frame` is a game or a video in full screen: over the
+/// whole of its monitor (`monitor`, its bounds), taskbar included, within 2 px, and not
+/// maximised. A window with Windows' title bar and resize frame is not, even there: it is a
+/// window placed over a monitor without a taskbar (by Mosaïk, in a zone as large as the
+/// monitor). Browsers, players and games in full screen drop both, or never had them.
+pub fn is_full_screen(frame: Rect, monitor: Rect, maximized: bool, caption: bool, resizable: bool) -> bool {
+    !maximized
+        && !(caption && resizable)
+        && [
+            frame.left - monitor.left,
+            frame.top - monitor.top,
+            frame.right - monitor.right,
+            frame.bottom - monitor.bottom,
+        ]
+        .iter()
+        .all(|d| d.abs() <= 2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_screen_is_the_whole_monitor_without_a_window_frame() {
+        let monitor = Rect::new(0, 0, 1920, 1080);
+        // A browser or a player in full screen, a borderless game.
+        assert!(is_full_screen(monitor, monitor, false, false, false));
+        // A game a pixel short of the monitor, as some keep the taskbar reachable.
+        assert!(is_full_screen(
+            Rect::new(0, 0, 1920, 1079),
+            monitor,
+            false,
+            false,
+            false
+        ));
+        // A window with its title bar and resize frame over a monitor with no taskbar, as Mosaïk
+        // places one in a zone as large as the monitor (review of job 0078).
+        assert!(!is_full_screen(
+            Rect::new(2, 2, 1918, 1078),
+            monitor,
+            false,
+            true,
+            true
+        ));
+        // Maximised, or across two monitors, or in a zone.
+        assert!(!is_full_screen(monitor, monitor, true, false, false));
+        assert!(!is_full_screen(
+            Rect::new(0, 0, 3840, 1080),
+            monitor,
+            false,
+            false,
+            false
+        ));
+        assert!(!is_full_screen(
+            Rect::new(4, 4, 956, 1028),
+            monitor,
+            false,
+            false,
+            false
+        ));
+        // On a monitor left of the main one.
+        let left = Rect::new(-2560, -360, 0, 1080);
+        assert!(is_full_screen(left, left, false, true, false));
     }
 }

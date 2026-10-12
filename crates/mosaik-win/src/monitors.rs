@@ -30,8 +30,6 @@ pub fn rect(r: RECT) -> Rect {
     Rect::new(r.left, r.top, r.right, r.bottom)
 }
 
-/// The DPI of the monitor `hwnd` is on (mostly): what its pixels on screen are scaled by, whatever
-/// the window's own DPI awareness (a window that is not DPI aware reports 96 for itself).
 /// The bounds of the monitor `hwnd` is on (taskbar included); `None` when Windows cannot say.
 pub fn bounds_of_monitor_of(hwnd: HWND) -> Option<Rect> {
     // SAFETY: a monitor handle for any window (the nearest monitor when it is off screen).
@@ -46,6 +44,8 @@ pub fn bounds_of_monitor_of(hwnd: HWND) -> Option<Rect> {
         .then(|| rect(info.rcMonitor))
 }
 
+/// The DPI of the monitor `hwnd` is on (mostly): what its pixels on screen are scaled by, whatever
+/// the window's own DPI awareness (a window that is not DPI aware reports 96 for itself).
 pub fn dpi_of_monitor_of(hwnd: HWND) -> u32 {
     // SAFETY: read-only; any handle value is accepted and the nearest monitor is returned.
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };

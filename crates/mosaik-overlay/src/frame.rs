@@ -121,9 +121,10 @@ impl Frame {
         match band.filter(|_| look.fill_band) {
             Some(b) => {
                 if self.band.is_none() {
-                    self.band = Some(Tint::new()?);
+                    self.band = Some(Tint::band()?);
                 }
                 if let Some(t) = &mut self.band {
+                    t.set_owner(window);
                     t.show(b, band_color(look.dark), 255, (px(corner), Corners::Top), stack)?;
                 }
             }

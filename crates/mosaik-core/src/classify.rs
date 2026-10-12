@@ -146,11 +146,6 @@ pub fn classify(w: &WindowFacts, rules: &Rules) -> Verdict {
     if is_shell(w) {
         return Verdict::Ignore(Ignore::Shell);
     }
-    // Moving a full-screen game or video would take it out of full screen: not even a rule
-    // makes Mosaïk touch it.
-    if w.full_screen && !w.maximized {
-        return Verdict::Pending(Pending::FullScreen);
-    }
 
     let rule = rules
         .user
@@ -181,6 +176,11 @@ pub fn classify(w: &WindowFacts, rules: &Rules) -> Verdict {
         if w.popup && !(w.caption || w.resizable || w.minimize_box) {
             return Verdict::Ignore(Ignore::Popup);
         }
+    }
+    // An app's window in full screen (a game, a video): moving it would take it out of full
+    // screen, so not even a rule makes Mosaïk touch it until it leaves full screen.
+    if w.full_screen {
+        return Verdict::Pending(Pending::FullScreen);
     }
 
     match w.elevation {
@@ -436,9 +436,16 @@ mod tests {
         assert_eq!(classify(&playing, &always), Verdict::Pending(Pending::FullScreen));
         let windowed = WindowFacts {
             full_screen: false,
-            ..playing
+            ..playing.clone()
         };
         assert_eq!(classify(&windowed, &rules), Verdict::Manage);
+        // Something over the whole screen that is not an app's window (an overlay) is not a
+        // window of a workspace, in full screen or not.
+        let overlay = WindowFacts {
+            tool_window: true,
+            ..playing
+        };
+        assert_eq!(classify(&overlay, &rules), Verdict::Ignore(Ignore::ToolWindow));
     }
 
     #[test]

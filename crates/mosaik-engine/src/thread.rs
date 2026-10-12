@@ -686,8 +686,8 @@ impl Engine {
                 if let Some(slot) = active.slot_of(w.handle) {
                     w.slot = Some(slot.clone());
                     let resizable = window::geometry(window::hwnd(w.handle)).is_none_or(|g| g.resizable);
-                    w.zone = active
-                        .zone_for(w.frame_rect, resizable, style)
+                    w.zone = self
+                        .zone_of(w.handle, w.frame_rect, resizable, style)
                         .map(|z| z.id.clone());
                     w.tab_group = groups
                         .iter()

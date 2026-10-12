@@ -64,7 +64,9 @@ the engine gathers windows and applies the result.
   the window and the zone's window area cover at least 70% of each other. A browser that will
   not shrink to a narrow zone still counts; a small window floating over a zone does not. A
   window without a frame to resize it by (most games) is never resized, only moved to the middle
-  of its zone; it is in the zone when its centre is and 70% of it is inside (`holds_fixed`).
+  of its zone; it is in the zone when its middle is (or the zone's middle is in it) and it
+  overlaps the zone by 70% of as much as its size allows (`holds_fixed`). A window that covers
+  two zones stays in the one it was put in; with zones that overlap, the nearest middle wins.
 - **A layout changes only by the user's hand**: saving, dropping a window into a zone, or moving
   one of the workspace's windows by mouse. Windows an app moved on its own, or a window
   maximised for a moment, go back to their places the next time the workspace opens.
@@ -82,7 +84,8 @@ the engine gathers windows and applies the result.
   settled), when its title changes or it comes to the front. A window whose title bar has no
   room wears its tag above it, below a band at the top of its zone, once two readings a quarter
   of a second apart agree; the band is solid and inside the window's ring, so the two read as
-  one. A setting puts every tag above its window.
+  one, and a press on it moves the window as its title bar would (Windows' own move loop,
+  started with `SC_MOVE`). A setting puts every tag above its window.
 - **Drag to snap**: while a window is dragged by its title bar, the open workspace's zones show
   under it; the zone under the pointer (or within 48 px) is tinted, and the window is pulled into
   it on release. Shift moves freely; a setting swaps that. A window that was not part of the

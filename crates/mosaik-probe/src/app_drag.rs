@@ -308,7 +308,34 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         "tag": tag_place(&st, w),
         "tag_owner_hidden": hidden(&st, t.code),
     });
+    // 6. A window wearing its tag above it: dragged by that band, which works as its title bar.
+    if wears_above(&st, w) {
+        out["by_band"] = by_band(engine, w, t).unwrap_or_else(|e| json!({ "failed": e }));
+    }
     Ok(out)
+}
+
+/// Presses on the band above `w` (beside its tag, which lets presses through to the band) and
+/// drags it into the tag owner's zone: Windows' own move loop runs for `w`, and it lands in that
+/// zone, below a band again.
+fn by_band(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
+    let f = frame_rect(w).ok_or("the window vanished")?;
+    let dpi = geometry(w).map_or(96, |g| g.dpi.max(96));
+    let px = |v: i32| v * i32::try_from(dpi).unwrap_or(96) / 96;
+    let on_band = Point::new(f.left + f.width() * 2 / 3, f.top - px(12));
+    let into = Point::new(
+        t.group_zone.center().x,
+        t.group_zone.top + t.group_zone.height() * 2 / 3,
+    );
+    let drag = watched(w, || drag_path(&[on_band, into], w))?;
+    let st = settled(engine)?;
+    Ok(json!({
+        "drag": drag,
+        "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
+        "error_px": error_in(&st, w, t.group_zone, t),
+        "kept_size": kept_size(&st, w, t.group_zone, t),
+        "tag_above": wears_above(&st, w),
+    }))
 }
 
 /// A point of `w`'s title bar where pressing the mouse moves the window, as the window itself
@@ -560,6 +587,8 @@ fn self_moved_as(
                 "tag": tag_place(&st, w),
             });
         }
+        // 4. Dragged by its band, which works as its title bar.
+        out["by_band"] = by_band(engine, w, t).unwrap_or_else(|e| json!({ "failed": e }));
         Ok(out)
     })();
     close(w);

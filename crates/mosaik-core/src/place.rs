@@ -20,16 +20,24 @@ pub fn window_rect_for(frame: Rect, insets: Insets) -> Rect {
 /// Along each axis, a window smaller than the target is centred in it. A larger one keeps the
 /// target's edge that is nearer the work area's edge, so it grows toward the middle of the
 /// screen, over neighbouring zones, instead of off the screen. The result stays inside the work
-/// area whenever it fits there.
+/// area whenever it fits there; a window larger than the work area starts at its left or top
+/// edge, so its title bar is on screen. The size is never changed: it is the app's.
 pub fn fit_size(target: Rect, size: Size, work_area: Rect) -> Rect {
     fn axis(start: i32, end: i32, length: i32, area_start: i32, area_end: i32) -> i32 {
         let span = end - start;
-        if length <= span {
+        let at = if length <= span {
             start + (span - length) / 2
         } else if area_end - end < start - area_start {
             end - length
         } else {
             start
+        };
+        if area_end <= area_start {
+            at
+        } else if length >= area_end - area_start {
+            area_start
+        } else {
+            at.clamp(area_start, area_end - length)
         }
     }
     let left = axis(
@@ -46,7 +54,7 @@ pub fn fit_size(target: Rect, size: Size, work_area: Rect) -> Rect {
         work_area.top,
         work_area.bottom,
     );
-    Rect::from_origin_size(left, top, size.width, size.height).fit_inside(work_area)
+    Rect::from_origin_size(left, top, size.width, size.height)
 }
 
 /// Keeps a window reachable: if no monitor's work area holds a grab handle at its top-left
@@ -175,6 +183,23 @@ mod tests {
     }
 
     #[test]
+    fn windows_larger_than_the_work_area_keep_their_size() {
+        let work = Rect::new(0, 0, 1920, 1032);
+        // A game drawing 1920 x 1080 with its title bar and borders, in a half-screen zone: its
+        // size is the app's, so it stays, at the work area's top-left (review of job 0078: it
+        // was shrunk to the work area, and restored from minimised at that size).
+        assert_eq!(
+            fit_size(Rect::new(0, 0, 960, 1032), Size::new(1936, 1119), work),
+            Rect::new(0, 0, 1936, 1119)
+        );
+        // Taller than the work area only: in the middle across, at the top.
+        assert_eq!(
+            fit_size(Rect::new(960, 0, 1920, 1032), Size::new(800, 1100), work),
+            Rect::new(1040, 0, 1840, 1100)
+        );
+    }
+
+    #[test]
     fn larger_windows_grow_toward_the_middle_of_the_screen() {
         let work = Rect::new(0, 0, 1920, 1032);
         // Measured: Chrome keeps 502 px in a 420 px zone at the right edge. It must end at the
@@ -287,6 +312,17 @@ mod tests {
             let overlap = r.overlap_area(target);
             let best = i64::from(w.min(target.width())) * i64::from(h.min(target.height()));
             prop_assert_eq!(overlap, best, "{:?} in {:?}", r, target);
+        }
+
+        /// Whatever its size, a window keeps it, and its top-left corner (where its title bar
+        /// starts) is on screen.
+        #[test]
+        fn fit_size_never_changes_a_size(tl in 0i32..1800, tt in 0i32..1000, tw in 1i32..1920, th in 1i32..1032, w in 1i32..4000, h in 1i32..3000) {
+            let work = Rect::new(0, 0, 1920, 1032);
+            let target = Rect::from_origin_size(tl, tt, tw, th).fit_inside(work);
+            let r = fit_size(target, Size::new(w, h), work);
+            prop_assert_eq!((r.width(), r.height()), (w, h));
+            prop_assert!(work.contains(Point::new(r.left, r.top)), "{:?} starts off {:?}", r, work);
         }
 
         /// Ratios survive a scale change: the same layout on the same monitor at another DPI

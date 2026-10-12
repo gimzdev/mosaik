@@ -99,22 +99,22 @@ pub fn holds(zone: Rect, dpi: u32, frame: Rect, style: FrameStyle) -> bool {
 }
 
 /// Whether a window that cannot be resized (a game, a fixed-size tool) sits in the zone at
-/// `zone`: Mosaïk puts it in the middle of the zone at its own size, so its centre is in the
-/// zone and most of it (70%) lies in the zone's window area, however small it is next to the
-/// zone. A window that could fill the zone and does not is floating over it ([`holds`]).
+/// `zone`: Mosaïk puts it in the zone at its own size (`place::fit_size`), in the middle of a
+/// zone larger than it, over the middle of a zone smaller than it. So its middle is in the zone,
+/// or the zone's middle is in it, and it overlaps the zone's window area by 70% of as much as
+/// its size allows: all of a window smaller than the zone, all of a zone smaller than the
+/// window. A window that could fill the zone and does not is floating over it ([`holds`]).
 pub fn holds_fixed(zone: Rect, dpi: u32, frame: Rect, style: FrameStyle) -> bool {
-    if !zone.contains(frame.center()) {
-        return false;
-    }
-    let own = frame.area();
-    if own <= 0 {
-        return false;
-    }
     let area = style.window_area(zone, dpi);
+    let best = i64::from(frame.width().min(area.width()).max(0))
+        * i64::from(frame.height().min(area.height()).max(0));
+    if best <= 0 || !(zone.contains(frame.center()) || frame.contains(area.center())) {
+        return false;
+    }
     // Areas of real screens are far below 2^52, so the conversion is exact.
     #[allow(clippy::cast_precision_loss)]
-    let inside = frame.overlap_area(area) as f64 / own as f64;
-    inside >= IN_ZONE
+    let covered = frame.overlap_area(area) as f64 / best as f64;
+    covered >= IN_ZONE
 }
 
 /// [`holds`] for a window the user can resize, [`holds_fixed`] for one that cannot be.
@@ -133,11 +133,38 @@ pub fn zone_holding(
     zones: &[(ZoneId, Rect, u32)],
     style: FrameStyle,
 ) -> Option<ZoneId> {
+    holding(
+        frame,
+        resizable,
+        zones.iter().map(|(id, rect, dpi)| (id, *rect, *dpi)),
+        style,
+    )
+    .cloned()
+}
+
+/// Of `zones` (each with its rectangle and its monitor's DPI), the one a window whose visible
+/// frame is `frame` sits in ([`holds_window`]). When several hold it (zones that overlap), the
+/// one whose middle is nearest the window's, then the smallest.
+pub fn holding<'a, Z>(
+    frame: Rect,
+    resizable: bool,
+    zones: impl IntoIterator<Item = (&'a Z, Rect, u32)>,
+    style: FrameStyle,
+) -> Option<&'a Z> {
+    let middle = frame.center();
+    let off = |r: Rect| {
+        let c = r.center();
+        let (dx, dy) = (
+            i64::from(c.x) - i64::from(middle.x),
+            i64::from(c.y) - i64::from(middle.y),
+        );
+        dx * dx + dy * dy
+    };
     zones
-        .iter()
+        .into_iter()
         .filter(|(_, rect, dpi)| holds_window(*rect, *dpi, frame, style, resizable))
-        .min_by_key(|(_, rect, _)| rect.area())
-        .map(|(id, _, _)| id.clone())
+        .min_by_key(|(_, rect, _)| (off(*rect), rect.area()))
+        .map(|(z, _, _)| z)
 }
 
 /// Whether two workspace names are the same for the user: case and surrounding spaces do not
@@ -398,11 +425,25 @@ pub fn remember(
         if w.minimized || !w.visible {
             continue;
         }
+        // The zone it is placed in, when it is still there: a window larger than its zone can
+        // cover a neighbouring zone just as well.
+        let placed_in = workspace
+            .layout
+            .slot(&p.slot)
+            .and_then(|s| workspace.layout.effective_place(s))
+            .and_then(|place| match place {
+                Place::Zone { zone } => zones.iter().find(|(id, _, _)| id == zone),
+                _ => None,
+            })
+            .filter(|(_, rect, dpi)| holds_window(*rect, *dpi, w.frame_rect, style, w.resizable))
+            .map(|(id, _, _)| id.clone());
         let place = if w.maximized {
             Place::Maximized {
                 monitor: remembered_index(&mut refs, topology.monitor_for_rect(w.frame_rect), topology),
             }
-        } else if let Some(zone) = zone_holding(w.frame_rect, w.resizable, &zones, style) {
+        } else if let Some(zone) =
+            placed_in.or_else(|| zone_holding(w.frame_rect, w.resizable, &zones, style))
+        {
             Place::Zone { zone }
         } else {
             free_place(&mut refs, topology, w.frame_rect)
@@ -518,6 +559,13 @@ pub fn plan_switch(
         });
     }
     let background: HashSet<WindowHandle> = plan.tabs.iter().flat_map(TabShow::background).collect();
+    // A window in full screen (a video, a game) is the workspace's, but stays as it is: moving,
+    // raising or minimising it would take it out of full screen.
+    let full_screen: HashSet<WindowHandle> = windows
+        .iter()
+        .filter(|w| w.full_screen)
+        .map(|w| w.handle)
+        .collect();
     // Front to back by slot; a tab group is as far forward as its front-most tab, whichever tab
     // shows (a hidden tab saved last takes the group's place when the others are closed).
     let position: HashMap<&SlotId, usize> = to
@@ -543,7 +591,7 @@ pub fn plan_switch(
         match assigned.get(&slot.id) {
             Some(window) => {
                 plan.assigned.push((slot.id.clone(), *window));
-                if background.contains(window) {
+                if background.contains(window) || full_screen.contains(window) {
                     continue;
                 }
                 if let Some(target) = resolver.target(&slot.place) {
@@ -569,7 +617,7 @@ pub fn plan_switch(
             .iter()
             .filter(|w| w.visible && !w.minimized && w.cloak == crate::window::Cloak::None)
             .map(|w| w.handle)
-            .filter(|h| previous.contains(h) && !used.contains(h))
+            .filter(|h| previous.contains(h) && !used.contains(h) && !full_screen.contains(h))
             .collect();
     }
     // Slots are front to back: raise from the back so the first slot ends on top.
@@ -730,6 +778,7 @@ pub fn zone_around(frame: Rect, style: FrameStyle, dpi: u32) -> Rect {
 mod tests {
     use super::*;
     use crate::fixtures;
+    use crate::geometry::Size;
     use crate::window::WindowFacts;
 
     /// An app window as most are: titled, with a caption and a frame to resize it by.
@@ -970,6 +1019,41 @@ mod tests {
     }
 
     #[test]
+    fn a_fixed_window_over_two_zones_stays_in_the_zone_it_was_put_in() {
+        // A 1280 x 720 game in the left third covers the middle third too: remembered after a
+        // move by hand, it stays in the zone it was put in, which still holds it.
+        let t = fixtures::single_1080p_100();
+        let thirds: Vec<WindowFacts> = [0, 640, 1280]
+            .into_iter()
+            .enumerate()
+            .map(|(i, x)| win(i as u64 + 1, "app.exe", "App", Rect::new(x, 0, x + 640, 1032)))
+            .collect();
+        let seen: Vec<Seen> = thirds.iter().map(|w| seen(w, "App")).collect();
+        let w = capture(WorkspaceId("w".into()), "W".into(), &seen, &t, style(), None);
+        assert_eq!(w.layout.zones.len(), 3);
+        let r = Resolver::new(&w.layout, &t, style());
+        let first = w.layout.slots[0].clone();
+        let Some(Target::Frame(area)) = r.target(&first.place) else {
+            unreachable!()
+        };
+        let game = WindowFacts {
+            resizable: false,
+            frame_rect: crate::place::fit_size(area, Size::new(1280, 720), t.primary().work_area),
+            ..thirds[0].clone()
+        };
+        let after = remember(
+            &w,
+            &[Present {
+                slot: first.id.clone(),
+                window: &game,
+            }],
+            &t,
+            style(),
+        );
+        assert_eq!(after.layout.slot(&first.id).map(|s| &s.place), Some(&first.place));
+    }
+
+    #[test]
     fn remember_follows_windows_and_keeps_closed_ones() {
         let t = fixtures::single_1080p_100();
         let ws = snapped();
@@ -1142,6 +1226,54 @@ mod tests {
     }
 
     #[test]
+    fn a_window_in_full_screen_is_left_where_it_is_and_not_started_again() {
+        // Review of job 0078: the workspace's browser plays a video in full screen. Opening the
+        // workspace leaves it in full screen, and does not start a second browser; leaving a
+        // workspace does not minimise its video either.
+        let t = fixtures::single_1080p_100();
+        let ws = snapped();
+        let all: Vec<Seen> = ws.iter().map(|w| seen(w, "App")).collect();
+        let w = capture(WorkspaceId("w".into()), "W".into(), &all, &t, style(), None);
+        let video = WindowFacts {
+            full_screen: true,
+            caption: false,
+            resizable: false,
+            frame_rect: Rect::new(0, 0, 1920, 1080),
+            ..ws[1].clone()
+        };
+        let plan = plan_switch(
+            &w,
+            &[&ws[0], &video, &ws[2]],
+            &[],
+            &t,
+            style(),
+            SwitchSettings::default(),
+        );
+        assert!(plan.assigned.iter().any(|(_, h)| *h == video.handle), "{plan:?}");
+        assert!(plan.launch.is_empty() && plan.missing.is_empty(), "{plan:?}");
+        assert!(!plan.moves.iter().any(|m| m.window == video.handle), "{plan:?}");
+        assert!(!plan.raise.contains(&video.handle) && plan.focus != Some(video.handle));
+        // Leaving for a workspace without the browser.
+        let other = capture(
+            WorkspaceId("o".into()),
+            "O".into(),
+            &[seen(&ws[0], "App")],
+            &t,
+            style(),
+            None,
+        );
+        let plan = plan_switch(
+            &other,
+            &[&ws[0], &video],
+            &[video.handle],
+            &t,
+            style(),
+            SwitchSettings::default(),
+        );
+        assert!(plan.minimize.is_empty(), "{plan:?}");
+    }
+
+    #[test]
     fn only_windows_on_screen_are_minimised() {
         let t = fixtures::single_1080p_100();
         let ws = snapped();
@@ -1214,6 +1346,56 @@ mod tests {
             zone_holding(game, false, &[(ZoneId::new("z"), zone, 96)], s),
             Some(ZoneId::new("z"))
         );
+    }
+
+    #[test]
+    fn a_fixed_window_larger_than_its_zone_is_in_it_where_mosaik_puts_it() {
+        // Review of job 0078: 1280 x 720 in a right-third zone, and 1600 x 900 in a half, hang
+        // over the next zone where `fit_size` puts them, and were taken for floating windows.
+        let work = Rect::new(0, 0, 1920, 1032);
+        let s = style();
+        let thirds = [
+            (ZoneId::new("left"), Rect::new(0, 0, 640, 1032), 96),
+            (ZoneId::new("middle"), Rect::new(640, 0, 1280, 1032), 96),
+            (ZoneId::new("right"), Rect::new(1280, 0, 1920, 1032), 96),
+        ];
+        let halves = [
+            (ZoneId::new("left"), Rect::new(0, 0, 960, 1032), 96),
+            (ZoneId::new("right"), Rect::new(960, 0, 1920, 1032), 96),
+        ];
+        for (zones, size) in [
+            (&thirds[..], Size::new(1280, 720)),
+            (&halves[..], Size::new(1600, 900)),
+            (&halves[..], Size::new(1000, 1000)),
+        ] {
+            for (id, zone, _) in zones {
+                let frame = crate::place::fit_size(s.window_area(*zone, 96), size, work);
+                assert!(
+                    holds_window(*zone, 96, frame, s, false),
+                    "{size:?} at {frame:?} in {id:?}"
+                );
+                // It may cover a neighbouring zone as well: the zone it was put in is kept then
+                // (`remember`, and the engine's `zone_of`).
+                assert!(
+                    zone_holding(frame, false, zones, s).is_some(),
+                    "{size:?} at {frame:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_belongs_to_the_zone_whose_middle_is_nearest() {
+        // Zones that overlap (review of job 0078): a window filling the larger one belongs to it,
+        // not to the smaller one it also covers mostly.
+        let s = style();
+        let large = (ZoneId::new("large"), Rect::new(0, 0, 1000, 1000), 96);
+        let small = (ZoneId::new("small"), Rect::new(0, 0, 900, 900), 96);
+        let zones = [large.clone(), small.clone()];
+        for (zone, id) in [(large.1, &large.0), (small.1, &small.0)] {
+            let filling = s.window_area(zone, 96);
+            assert_eq!(zone_holding(filling, true, &zones, s).as_ref(), Some(id));
+        }
     }
 
     #[test]

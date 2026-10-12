@@ -254,16 +254,14 @@ impl Engine {
             let Some(g) = window::geometry(window::hwnd(visible)) else {
                 return Spot::Nowhere;
             };
-            if g.minimized || g.cloaked || (g.maximized && !style.title_bars) {
+            if g.minimized || g.cloaked || g.full_screen || (g.maximized && !style.title_bars) {
                 return Spot::Later;
             }
             (g.frame, g.maximized)
         };
         let resizable = window::geometry(window::hwnd(visible)).is_none_or(|g| g.resizable);
         let zone = self
-            .active
-            .as_ref()
-            .and_then(|a| a.zone_for(frame, resizable, style))
+            .zone_of(visible, frame, resizable, style)
             .filter(|_| !maximized)
             .cloned();
         let monitor = self.topology.as_ref().map(|t| t.monitor_for_rect(frame).clone());
@@ -1097,7 +1095,19 @@ impl Engine {
                             self.set_timer(timer::DRAG, DRAG_TICK_MS);
                         }
                         Some(Hit::More) => self.show_next_tab(&group),
-                        None => {}
+                        // The strip's band, or the zone's tag at its start: the title bar of the
+                        // tab that shows, as a window's band is.
+                        None => {
+                            tabbar::cancel_press();
+                            let visible = self
+                                .groups_now()
+                                .into_iter()
+                                .find(|n| n.id == group)
+                                .and_then(|g| g.visible().map(|(_, w)| *w));
+                            if let Some(w) = visible {
+                                arrange::start_move(window::hwnd(w));
+                            }
+                        }
                     }
                 }
                 BarInput::Move { at, .. } => self.bar_drag_to(at),
@@ -1242,9 +1252,10 @@ impl Engine {
     }
 }
 
-/// Whether a window must move to reach `to` (a window already there is left alone).
+/// Whether a window must move to reach `to` (a window already there is left alone, and one in
+/// full screen too).
 fn needs_move(w: WindowHandle, to: To) -> bool {
-    let Some(g) = window::geometry(window::hwnd(w)) else {
+    let Some(g) = window::geometry(window::hwnd(w)).filter(|g| !g.full_screen) else {
         return false;
     };
     match to {

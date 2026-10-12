@@ -6,18 +6,19 @@ use mosaik_core::geometry::Rect;
 use mosaik_core::zone::Rgb;
 use mosaik_win::error::{Context, Result};
 use mosaik_win::own::{WindowClass, destroy};
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, EndPaint, FillRect, HDC, HGDIOBJ,
     InvalidateRect, PAINTSTRUCT, SetWindowRgn,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, DefWindowProcW, GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, LWA_ALPHA,
-    MA_NOACTIVATE, SW_HIDE, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SWP_SHOWWINDOW,
-    SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_CLOSE, WM_ERASEBKGND,
-    WM_MOUSEACTIVATE, WM_PAINT, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
-    WS_POPUP,
+    CS_HREDRAW, CS_VREDRAW, DefWindowProcW, GWLP_USERDATA, GetClientRect, GetPropW, GetWindowLongPtrW,
+    LWA_ALPHA, MA_NOACTIVATE, RemovePropW, SW_HIDE, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER,
+    SWP_SHOWWINDOW, SetLayeredWindowAttributes, SetPropW, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    WINDOW_EX_STYLE, WM_CLOSE, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_MOUSEACTIVATE, WM_PAINT, WNDPROC,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
 };
+use windows::core::{PCWSTR, w};
 
 use crate::layered::{Stack, restack_windows};
 
@@ -56,6 +57,24 @@ unsafe extern "system" fn tint_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
     }
 }
 
+/// The property of a band's window that names the window the band belongs to.
+const OWNER: PCWSTR = w!("MosaikBandOwner");
+
+/// A band above a window works as that window's title bar: a press on it moves the window, in
+/// Windows' own move loop. Everything else is a tint's.
+unsafe extern "system" fn band_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if msg == WM_LBUTTONDOWN {
+        // SAFETY: reads a property of our own window (null when none is set).
+        let owner = HWND(unsafe { GetPropW(hwnd, OWNER) }.0);
+        if !owner.is_invalid() {
+            mosaik_win::arrange::start_move(owner);
+        }
+        return LRESULT(0);
+    }
+    // SAFETY: a tint's handling of its own window's messages.
+    unsafe { tint_proc(hwnd, msg, wparam, lparam) }
+}
+
 /// Which corners of a tint are rounded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Corners {
@@ -64,25 +83,49 @@ pub enum Corners {
     Top,
 }
 
-/// A click-through, never-activated rounded rectangle of one colour.
+/// A never-activated rounded rectangle of one colour: click-through, or a window's band.
 pub struct Tint {
     hwnd: HWND,
     shown: Option<Rect>,
     look: Option<(Rgb, u8, i32)>,
     shape: Option<(i32, i32, i32, Corners)>,
+    /// For a band: the window it belongs to.
+    owner: Option<isize>,
 }
 
 impl Tint {
+    /// A tint clicks go through.
     pub fn new() -> Result<Self> {
-        let class = WindowClass::register_with("MosaikTint", Some(tint_proc), CS_HREDRAW | CS_VREDRAW)?;
-        let ex = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+        Self::make("MosaikTint", Some(tint_proc), WS_EX_TRANSPARENT)
+    }
+
+    /// The band above a window (see [`Tint::set_owner`]): solid, it works as the window's title
+    /// bar, so a press on it moves the window rather than reaching whatever is behind it.
+    pub fn band() -> Result<Self> {
+        Self::make("MosaikBand", Some(band_proc), WINDOW_EX_STYLE(0))
+    }
+
+    fn make(class: &str, proc: WNDPROC, input: WINDOW_EX_STYLE) -> Result<Self> {
+        let class = WindowClass::register_with(class, proc, CS_HREDRAW | CS_VREDRAW)?;
+        let ex = WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | input;
         let hwnd = class.create("", WS_POPUP, ex, Rect::new(0, 0, 1, 1), None)?;
         Ok(Self {
             hwnd,
             shown: None,
             look: None,
             shape: None,
+            owner: None,
         })
+    }
+
+    /// The window a band belongs to: a press on the band moves it.
+    pub fn set_owner(&mut self, owner: isize) {
+        if self.owner == Some(owner) {
+            return;
+        }
+        // SAFETY: a property on our own window, removed before the window is destroyed.
+        let set = unsafe { SetPropW(self.hwnd, OWNER, Some(HANDLE(owner as *mut core::ffi::c_void))) };
+        self.owner = set.is_ok().then_some(owner);
     }
 
     pub fn hwnd(&self) -> HWND {
@@ -166,6 +209,10 @@ impl Tint {
 
 impl Drop for Tint {
     fn drop(&mut self) {
+        if self.owner.is_some() {
+            // SAFETY: removes the property set on our own window, before it goes.
+            let _ = unsafe { RemovePropW(self.hwnd, OWNER) };
+        }
         destroy(self.hwnd);
     }
 }

@@ -441,11 +441,12 @@ impl Engine {
             Fit::strip(i32::MAX, dpi)
         } else {
             let style = self.style();
-            let label = match (self.settings.frames.show_tags, &self.active) {
-                (true, Some(a)) if a.slot_of(h).is_some() => {
-                    a.zone_for(g.frame, g.resizable, style).map(|z| z.name.clone())
-                }
-                _ => None,
+            let in_workspace = self.active.as_ref().is_some_and(|a| a.slot_of(h).is_some());
+            let label = if self.settings.frames.show_tags && in_workspace {
+                self.zone_of(h, g.frame, g.resizable, style)
+                    .map(|z| z.name.clone())
+            } else {
+                None
             };
             let Some(label) = label else { return false };
             Fit::tag(self.tag_width(&label, dpi), dpi)
@@ -503,9 +504,7 @@ impl Engine {
             }
             // The zone it is in, found before it moves.
             let zone = window::geometry(window::hwnd(h)).and_then(|g| {
-                self.active
-                    .as_ref()
-                    .and_then(|a| a.zone_for(g.frame, g.resizable, self.style_of(h)))
+                self.zone_of(h, g.frame, g.resizable, self.style_of(h))
                     .map(|z| (z.rect, z.dpi))
             });
             if want {

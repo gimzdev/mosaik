@@ -19,8 +19,8 @@ use mosaik_core::store::StoreError;
 use mosaik_core::topology::Topology;
 use mosaik_core::window::{Cloak, WindowFacts, WindowHandle};
 use mosaik_core::workspace::{
-    GroupSeen, Move, Present, Seen, TabSeen, capture, edge_distance, holds_window, plan_refit, plan_switch,
-    regroup, remember, same_name, workspace_id,
+    GroupSeen, Move, Present, Seen, TabSeen, capture, edge_distance, holding, holds_window, plan_refit,
+    plan_switch, regroup, remember, same_name, workspace_id,
 };
 use mosaik_core::zone::{FrameStyle, ZoneColor, ZoneId};
 use mosaik_ipc::protocol::{ErrorCode, Reply};
@@ -72,13 +72,42 @@ impl Active {
     }
 
     /// The zone a window whose visible frame is `frame` sits in (the rule is
-    /// `mosaik_core::workspace::holds_window`: filling it, or in its middle at its own size for
-    /// a window that cannot be resized); the smallest one when zones overlap.
+    /// `mosaik_core::workspace::holds_window`: filling it, or at its own size for a window that
+    /// cannot be resized); when several hold it, the one whose middle is nearest.
     pub fn zone_for(&self, frame: Rect, resizable: bool, style: FrameStyle) -> Option<&LiveZone> {
-        self.zones
-            .iter()
+        holding(
+            frame,
+            resizable,
+            self.zones.iter().map(|z| (z, z.rect, z.dpi)),
+            style,
+        )
+    }
+}
+
+impl Engine {
+    /// The zone of the open workspace that window `h`, whose visible frame is `frame`, sits in:
+    /// the zone its slot (or its tab group) is placed in, when that zone holds it, since a
+    /// window larger than its zone can cover a neighbouring zone just as well; else whichever
+    /// zone holds it.
+    pub(crate) fn zone_of(
+        &self,
+        h: WindowHandle,
+        frame: Rect,
+        resizable: bool,
+        style: FrameStyle,
+    ) -> Option<&LiveZone> {
+        let active = self.active.as_ref()?;
+        let placed_in = active.slot_of(h).and_then(|slot| {
+            let layout = &self.file.workspaces.iter().find(|w| w.id == active.id)?.layout;
+            match layout.effective_place(layout.slot(slot)?)? {
+                Place::Zone { zone } => Some(zone),
+                _ => None,
+            }
+        });
+        placed_in
+            .and_then(|id| active.zones.iter().find(|z| &z.id == id))
             .filter(|z| holds_window(z.rect, z.dpi, frame, style, resizable))
-            .min_by_key(|z| z.rect.area())
+            .or_else(|| active.zone_for(frame, resizable, style))
     }
 }
 
@@ -169,12 +198,13 @@ impl Engine {
         self.allowed(f) && classify(f, &self.settings.rules) == Verdict::Manage
     }
 
-    /// A window a workspace may move: a managed one, or a minimised one it restores.
+    /// A window that can fill a slot when a workspace opens: a managed one, a minimised one it
+    /// restores, or one in full screen, which it leaves as it is (`plan_switch`).
     fn movable(&self, f: &WindowFacts) -> bool {
         self.allowed(f)
             && matches!(
                 classify(f, &self.settings.rules),
-                Verdict::Manage | Verdict::Pending(Pending::Minimized)
+                Verdict::Manage | Verdict::Pending(Pending::Minimized | Pending::FullScreen)
             )
     }
 

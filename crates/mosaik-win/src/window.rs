@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 
 use mosaik_core::geometry::Rect;
-use mosaik_core::window::{Cloak, Elevation, WindowFacts, WindowHandle};
+use mosaik_core::window::{Cloak, Elevation, WindowFacts, WindowHandle, is_full_screen};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT, WAIT_OBJECT_0};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CAPTION_COLOR, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TEXT_COLOR, DwmGetWindowAttribute,
@@ -128,13 +128,31 @@ pub struct Geometry {
     /// `WS_THICKFRAME`: it can be resized, so in a zone it fills it (one that cannot sits in
     /// the middle of it at its own size).
     pub resizable: bool,
+    /// A game or a video in full screen (`mosaik_core::window::is_full_screen`): left alone.
+    pub full_screen: bool,
 }
 
 impl Geometry {
-    /// Visible, not minimised, maximised or cloaked: a window that can wear a frame.
+    /// Visible, not minimised, maximised, cloaked or in full screen: a window that can wear a
+    /// frame (and that Mosaïk may move back into its place).
     pub fn framable(&self) -> bool {
-        self.visible && !self.minimized && !self.maximized && !self.cloaked
+        self.visible && !self.minimized && !self.maximized && !self.cloaked && !self.full_screen
     }
+}
+
+/// Whether `hwnd`, whose visible frame is `frame`, is in full screen (see
+/// `mosaik_core::window::is_full_screen`).
+fn in_full_screen(hwnd: HWND, frame: Rect, maximized: bool, style: u32) -> bool {
+    !maximized
+        && crate::monitors::bounds_of_monitor_of(hwnd).is_some_and(|monitor| {
+            is_full_screen(
+                frame,
+                monitor,
+                maximized,
+                style & WS_CAPTION.0 == WS_CAPTION.0,
+                style & WS_THICKFRAME.0 != 0,
+            )
+        })
 }
 
 pub fn geometry(hwnd: HWND) -> Option<Geometry> {
@@ -151,14 +169,16 @@ pub fn geometry(hwnd: HWND) -> Option<Geometry> {
             style_bits(GetWindowLongPtrW(hwnd, GWL_STYLE)),
         )
     };
+    let frame = frame_rect(hwnd)?;
     Some(Geometry {
-        frame: frame_rect(hwnd)?,
+        frame,
         visible,
         minimized,
         maximized,
         cloaked: cloak(hwnd) != Cloak::None,
         dpi,
         resizable: style & WS_THICKFRAME.0 != 0,
+        full_screen: in_full_screen(hwnd, frame, maximized, style),
     })
 }
 
@@ -439,19 +459,7 @@ impl Scanner {
         };
         let window_rect = window_rect(hwnd)?;
         let frame_rect = frame_rect(hwnd).unwrap_or(window_rect);
-        // Exactly over its whole monitor, taskbar included, and not maximised: a game or a video
-        // in full screen (a window stretched over two monitors is not).
-        let full_screen = !maximized
-            && crate::monitors::bounds_of_monitor_of(hwnd).is_some_and(|m| {
-                [
-                    frame_rect.left - m.left,
-                    frame_rect.top - m.top,
-                    frame_rect.right - m.right,
-                    frame_rect.bottom - m.bottom,
-                ]
-                .iter()
-                .all(|d| d.abs() <= 2)
-            });
+        let full_screen = in_full_screen(hwnd, frame_rect, maximized, style);
         Some(WindowFacts {
             handle: handle(hwnd),
             pid,

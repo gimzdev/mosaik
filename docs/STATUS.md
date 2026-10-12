@@ -393,6 +393,18 @@ game in full screen                    left alone ("pending: full screen"); the 
 - **Games of a fixed size were stretched** (job 0077: the probe's fixed-size game filled its
   zone): a window without a frame to resize it by is now only moved, with a Windows test that
   failed on the old code (job 0078: 626 x 473 became 1060 x 1032) and passes on the new.
+- Found by a review of these changes, each fixed with a test that failed first (`mosaik-core`,
+  151 tests): a fixed-size window larger than the work area was shrunk to it, and restored from
+  minimised at that size (`fit_size` never changes a size now); one larger than its zone, where
+  Mosaïk put it, was not counted in the zone, and one covering two zones could be counted in the
+  wrong one (`holds_fixed`, and the zone a window was put in is kept); opening a workspace whose
+  window was in full screen started its app again (it is the workspace's, left as it is); a
+  window in full screen still wore its frame and could be moved below a band (never framed or
+  moved now); a window placed over a monitor without a taskbar was taken for one in full
+  screen (a window with Windows' title bar and resize frame never is); with zones that overlap,
+  a window filling the larger was counted in the smaller (the nearest middle wins); the solid
+  band let presses through to whatever was behind it (a press on it moves its window, in
+  Windows' own move loop).
 
 ### Tags and tabs in title bars (jobs 0062 to 0070) — ADR 0011
 

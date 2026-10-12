@@ -29,18 +29,34 @@ Vampire Survivors, idle clickers". Three kinds of windows were left out or misha
   toast) stays out. Every other rule is unchanged: it must be in Alt+Tab, have no owner, and so
   on (`mosaik_core::classify`, with tests).
 - **A window in full screen is left alone** (`Pending::FullScreen`): no frame, no tag, never
-  moved, not saved into a workspace, whatever the user's rules say, until it leaves full screen;
-  then it is an ordinary window again. Full screen is a frame within 2 px of its monitor's
-  bounds, not maximised (`WindowFacts::full_screen`); the desktop and the shell's windows are
-  never taken for one.
+  moved (the mover refuses it), not saved into a workspace, whatever the user's rules say, until
+  it leaves full screen; then it is an ordinary window again. Full screen
+  (`window::is_full_screen`) is a frame within 2 px of its monitor's bounds, not maximised, and
+  without Windows' title bar and resize frame: a window that has both, placed over a whole
+  monitor without a taskbar (by Mosaïk, in a zone that large), is not; browsers, players and
+  games in full screen have neither. It is checked after the rules that tell an app's window,
+  so an overlay over the whole screen is not taken for one, and the desktop and the shell's
+  windows never are. A workspace's window in full screen is still the workspace's: opening the
+  workspace leaves it as it is (not moved, raised or minimised) and does not start its app again,
+  and leaving the workspace does not minimise it.
 - **A window without a frame to resize it by keeps its own size.** Mosaïk only moves it: to
-  the middle of its zone, or of its group's place (`fit_size`, ADR 0005), also when it comes
-  back from minimised (`mosaik_win::place::move_frame`, with a Windows test). It is in a zone
-  when its centre is in the zone and at least 70% of it is inside the zone's area
-  (`holds_fixed`), since it cannot fill the zone. Its ring goes around the window itself.
+  the middle of its zone, or of its group's place (`fit_size`, ADR 0005, which never changes a
+  size: a window larger than the screen starts at its top-left), also when it comes back from
+  minimised (`mosaik_win::place::move_frame`, with a Windows test). It is in a zone when its
+  middle is in the zone, or the zone's middle is in it, and it overlaps the zone's area by 70% of
+  as much as its size allows (`holds_fixed`): all of it in a larger zone, all of a smaller zone.
+  A window that also covers a neighbouring zone stays in the zone it was put in. Its ring goes
+  around the window itself.
 - **Its tag** goes in its title bar when there is room, as for any window (ADR 0011). When it
   needs a band, the band sits right above the window, not at the top of the zone
   (`zone::band_above`).
+- **A band works as its window's title bar.** Solid, it looks like part of the window, so a
+  press on it is a press on the window's title bar: the window comes to the front and Windows
+  moves it with the pointer, in its own move loop (`WM_SYSCOMMAND` with `SC_MOVE` from the title
+  bar, posted to the window), so zones, tags and Windows' snapping follow as for any drag. The
+  same goes for a strip's band between its chips, and for the zone's tag at a strip's start.
+- **When zones overlap**, a window belongs to the one whose middle is nearest its own, then the
+  smallest (`workspace::holding`).
 
 ## Measurements
 
@@ -62,6 +78,14 @@ game in full screen                                    left alone ("pending: ful
 
 Before the change the same fixed-size windows filled their zones (job 0077), and the new
 Windows test failed on the old code (job 0078: 626 x 473 became 1060 x 1032).
+
+A review of the change found, and tests now cover: a fixed-size window larger than the work
+area was shrunk to it (`fit_size` fitted sizes as well as places); one larger than its zone was
+not counted in it, and one over two zones could be counted in the wrong one; opening a workspace
+whose window was in full screen started its app again; a window in full screen still wore its
+frame and could be moved into a band; a window placed over a monitor without a taskbar, with a
+small gap, was taken for one in full screen; the solid band let presses through to whatever was
+behind it.
 
 ## Consequences
 
