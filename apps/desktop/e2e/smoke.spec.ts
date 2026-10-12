@@ -46,6 +46,22 @@ test('the Tab key goes round the window and never leaves it', async ({ page }) =
   await expect(last).toBeFocused();
 });
 
+test('a dialog keeps the Tab key inside it', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
+  await page.getByRole('button', { name: 'Start from a preset' }).click();
+  await page.getByRole('button', { name: 'Thirds' }).click();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Leave without saving?' });
+  await expect(dialog).toBeVisible();
+  const discard = dialog.getByRole('button', { name: 'Discard changes' });
+  await discard.focus();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(discard).toBeFocused();
+});
+
 test('a dark theme can be chosen, and stays accessible', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings' }).click();

@@ -50,9 +50,9 @@ pub struct FrameLook {
 pub enum TagPlace {
     /// At the right end of this free stretch of the window's own title bar.
     TitleBar(Rect),
-    /// At the left end of this band at the top of the window's zone, also when the window keeps
-    /// a height of its own that runs into the band (an app's minimum size): the tag stays in
-    /// its zone.
+    /// Above the window, in this band at the top of its zone: also when the window keeps a
+    /// height of its own that runs into the band (an app's minimum size), the tag stays in its
+    /// zone.
     Band(Rect),
     /// Right above the window.
     Above,
@@ -114,8 +114,13 @@ impl Frame {
                     self.tag.show(canvas, at, &tag, room.width(), stack)?;
                 }
                 TagPlace::Band(band) => {
-                    let at = Point::new(band.left, band.bottom - above);
-                    self.tag.show(canvas, at, &tag, band.width(), stack)?;
+                    // Right above the window, as when it sits below the band; never higher than
+                    // the band, so a window whose app keeps a height that runs into the band has
+                    // its tag in the band, over its top edge.
+                    let left = frame.left.max(band.left);
+                    let at = Point::new(left, frame.top.max(band.bottom) - above);
+                    let room = (band.right - left).min(frame.width());
+                    self.tag.show(canvas, at, &tag, room, stack)?;
                 }
                 TagPlace::Above => {
                     let at = Point::new(frame.left, frame.top - above);

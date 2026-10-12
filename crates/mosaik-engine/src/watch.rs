@@ -398,7 +398,7 @@ impl Engine {
             .unwrap_or_default();
         let keep: HashSet<WindowHandle> = windows.iter().copied().collect();
         self.watch.frames.retain(|h, _| keep.contains(h));
-        self.titles.banded.retain(|h| keep.contains(h));
+        self.titles.keep_only(&keep);
         self.update_bands(&windows);
         for h in windows {
             self.refresh_ring(h);
@@ -487,12 +487,14 @@ impl Engine {
             match self.tag_spot(h, g.frame, &zone.name, zone.dpi) {
                 TitleSpot::In(r) => (true, TagPlace::TitleBar(r), Some((r, BarPlace::TitleBar))),
                 TitleSpot::Above => {
+                    // With tags in title bars, a window just found to have no room is not below
+                    // its band yet: the band it is about to sit below.
                     let band = self.style_of(h).tag_area(zone.rect, zone.dpi).or_else(|| {
-                        self.settings
-                            .frames
-                            .banded_style()
-                            .for_tabs()
-                            .tag_area(zone.rect, zone.dpi)
+                        let banded = self.settings.frames.banded_style().for_tabs();
+                        self.style()
+                            .title_bars
+                            .then(|| banded.tag_area(zone.rect, zone.dpi))
+                            .flatten()
                     });
                     (
                         true,

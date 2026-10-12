@@ -48,13 +48,30 @@ describe('the Tab key in Mosaïk’s window', () => {
     expect(document.activeElement).toBe(byId('auto'));
   });
 
-  it('stays inside an open dialog', () => {
+  it('is not held by a dialog that is merely open (a modal one holds it: the browser test)', () => {
     document.body.innerHTML = `
       <button id="page">Settings</button>
       <dialog open><button id="cancel">Cancel</button><button id="discard">Discard changes</button></dialog>`;
     byId('discard')?.focus();
     expect(tab().defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(byId('cancel'));
+    expect(document.activeElement).toBe(byId('page'));
+  });
+
+  it('goes by tabindex first, then the page’s order', () => {
+    document.body.innerHTML = `<button id="zero">Zero</button><button id="one" tabindex="1">One</button>`;
+    // The order: One (tabindex 1), then Zero.
+    byId('zero')?.focus();
+    expect(tab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(byId('one'));
+  });
+
+  it('keeps radio groups of different forms apart', () => {
+    document.body.innerHTML = `
+      <form><input type="radio" name="theme" id="a" checked /></form>
+      <form><input type="radio" name="theme" id="b" checked /></form>`;
+    byId('b')?.focus();
+    expect(tab().defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(byId('a'));
   });
 
   it('leaves alone keys that are not a plain Tab, and Tabs already handled', () => {

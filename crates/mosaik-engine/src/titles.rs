@@ -40,6 +40,10 @@ const TITLE_EVERY: Duration = Duration::from_secs(1);
 /// it was made narrower, had one free stretch, and two once it had settled).
 const SETTLED: Duration = Duration::from_millis(300);
 
+/// A window read at a size it no longer has (Mosaïk moved it meanwhile) is read again this much
+/// later, once its app has caught up.
+const CAUGHT_UP: Duration = Duration::from_millis(100);
+
 /// What Mosaïk knows of a window's title bar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Bar {
@@ -65,10 +69,13 @@ pub(crate) enum TitleSpot {
 }
 
 struct Known {
+    /// The window's size when it was last read.
     size: Size,
     title: String,
-    /// The last reading the app answered in full (`None`: it never has).
+    /// The last reading the app answered in full (`None`: it never has), and the size the window
+    /// had then: its stretches are a guess at any other size.
     room: Option<TitleRoom>,
+    room_size: Size,
     /// When it was last read, and whether the app failed to answer then.
     at: Instant,
     failed: bool,
@@ -107,7 +114,13 @@ impl Reader {
                     };
                     match (job, next) {
                         (Some((w, wait)), _) => {
-                            due.push((Instant::now() + wait, w));
+                            // One reading per window: asked again, it is taken at the earlier
+                            // of the two times.
+                            let at = Instant::now() + wait;
+                            match due.iter_mut().find(|(_, x)| *x == w) {
+                                Some(job) => job.0 = job.0.min(at),
+                                None => due.push((at, w)),
+                            }
                             continue;
                         }
                         (None, None) => return,
@@ -145,8 +158,8 @@ pub(crate) struct Titles {
     /// Title bars cannot be read this session (the thread did not start): tags go above windows.
     broken: bool,
     known: HashMap<WindowHandle, Known>,
-    /// Asked and not answered yet.
-    asked: HashSet<WindowHandle>,
+    /// Asked and not answered yet, and when the reading is due.
+    asked: HashMap<WindowHandle, Instant>,
     /// Windows wearing their tag above them for want of room in their title bar.
     pub(crate) banded: HashSet<WindowHandle>,
     /// Windows a reading would move into (`true`) or out of their band, and since when: they
@@ -180,9 +193,20 @@ impl Titles {
         self.proposed.clear();
     }
 
-    /// How many windows' title bars are being read.
+    /// Forgets the bands of windows that left the open workspace.
+    pub(crate) fn keep_only(&mut self, windows: &HashSet<WindowHandle>) {
+        self.banded.retain(|h| windows.contains(h));
+        self.proposed.retain(|h, _| windows.contains(h));
+    }
+
+    /// How many windows' title bars are being read, or will be to decide a change of band.
     pub(crate) fn reading(&self) -> u32 {
-        u32::try_from(self.asked.len()).unwrap_or(u32::MAX)
+        let waiting = self
+            .proposed
+            .keys()
+            .filter(|h| !self.asked.contains_key(h))
+            .count();
+        u32::try_from(self.asked.len() + waiting).unwrap_or(u32::MAX)
     }
 }
 
@@ -218,9 +242,11 @@ impl Engine {
         self.ask_title_after(h, Duration::ZERO);
     }
 
-    /// Asks the reader for `h`'s title bar `wait` from now, unless it is being read already.
+    /// Asks the reader for `h`'s title bar `wait` from now, unless a reading of it is due by
+    /// then already.
     fn ask_title_after(&mut self, h: WindowHandle, wait: Duration) {
-        if self.titles.asked.contains(&h) {
+        let due = Instant::now() + wait;
+        if self.titles.asked.get(&h).is_some_and(|at| *at <= due) {
             return;
         }
         if self.titles.reader.is_none() && !self.titles.broken {
@@ -241,7 +267,7 @@ impl Engine {
         if let Some(r) = &self.titles.reader
             && r.jobs.send((h, wait)).is_ok()
         {
-            self.titles.asked.insert(h);
+            self.titles.asked.insert(h, due);
         }
     }
 
@@ -263,13 +289,18 @@ impl Engine {
             let previous = self.titles.known.get(&w);
             let before = previous.and_then(|k| k.room.clone());
             let resized = previous.is_none_or(|k| k.size != reading.frame.size());
-            // An app busy for a moment keeps the room it was last read with.
+            // An app busy for a moment keeps the room it was last read with, at the size it was
+            // read at.
             let failed = reading.room.is_none();
+            let room_size = match previous {
+                Some(k) if failed => k.room_size,
+                _ => reading.frame.size(),
+            };
             let (took, room_runs) = (reading.took, reading.room.as_ref().map(|r| r.runs.len()));
             let room = reading.room.or_else(|| before.clone());
             let changed = resized || room != before;
             // Read at a size it no longer has (it moved into a zone or a group meanwhile): read
-            // again, now.
+            // again once its app has caught up.
             let now = window::geometry(window::hwnd(w)).map(|g| g.frame.size());
             let outdated = now.is_some_and(|size| size != reading.frame.size());
             self.titles.known.insert(
@@ -278,6 +309,7 @@ impl Engine {
                     size: reading.frame.size(),
                     title: reading.title,
                     room,
+                    room_size,
                     at: reading.at,
                     failed,
                     stale: false,
@@ -293,10 +325,17 @@ impl Engine {
                 changed,
                 "title bar read"
             );
-            if outdated {
-                self.ask_title(w);
-            } else if resized {
-                self.ask_title_after(w, SETTLED);
+            // Not while the user moves or sizes it: the end of that reads it anyway.
+            let user_moves_it =
+                self.watch.moving == Some(w) || self.watch.drag.as_ref().is_some_and(|d| d.window == w);
+            let again = match (outdated, resized) {
+                _ if user_moves_it => None,
+                (true, _) => Some(CAUGHT_UP),
+                (false, true) => Some(SETTLED),
+                (false, false) => None,
+            };
+            if let Some(wait) = again {
+                self.ask_title_after(w, wait);
             }
             // A change of band waiting for this reading is decided now, also when nothing changed.
             if changed || self.titles.proposed.contains_key(&w) {
@@ -413,7 +452,7 @@ impl Engine {
         };
         match self.title_bar(h, g.frame) {
             Bar::Room(room) => {
-                let read = self.titles.known.get(&h).map_or(g.frame.size(), |k| k.size);
+                let read = self.titles.known.get(&h).map_or(g.frame.size(), |k| k.room_size);
                 titlebar::needs_band(&room, read, g.frame, fit, banded)
             }
             // Never answered: a strip must be reachable, so it goes above the window; a tag
@@ -429,7 +468,10 @@ impl Engine {
     pub(crate) fn update_bands(&mut self, windows: &[WindowHandle]) {
         let mut moves = Vec::new();
         for &h in windows {
+            // Decided again when it is shown, or put down: a change proposed meanwhile would be
+            // confirmed by readings taken while it was hidden or moving.
             if self.watch.moving == Some(h) || self.hiding.hidden.contains_key(&h) {
+                self.titles.proposed.remove(&h);
                 continue;
             }
             let want = self.wants_band(h);
