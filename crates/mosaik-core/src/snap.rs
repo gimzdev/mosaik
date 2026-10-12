@@ -91,6 +91,18 @@ impl DragKind {
     }
 }
 
+/// `p` is on the outer edge of the desktop, where the pointer stops: the edge pixel of a monitor
+/// with no monitor beyond it. Windows' own snapping reacts to a window dragged there.
+pub fn at_screen_edge(p: Point, monitors: &[Rect]) -> bool {
+    let on_any = |q: Point| monitors.iter().any(|m| m.contains(q));
+    monitors.iter().filter(|m| m.contains(p)).any(|m| {
+        (p.x == m.left && !on_any(Point::new(p.x - 1, p.y)))
+            || (p.x == m.right - 1 && !on_any(Point::new(p.x + 1, p.y)))
+            || (p.y == m.top && !on_any(Point::new(p.x, p.y - 1)))
+            || (p.y == m.bottom - 1 && !on_any(Point::new(p.x, p.y + 1)))
+    })
+}
+
 /// A zone as it is on screen right now.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiveZone {
@@ -127,6 +139,24 @@ pub fn target(cursor: Point, zones: &[LiveZone], settings: SnapSettings) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screen_edges_are_where_the_pointer_stops() {
+        let one = [Rect::new(0, 0, 1920, 1080)];
+        assert!(at_screen_edge(Point::new(576, 0), &one));
+        assert!(at_screen_edge(Point::new(0, 516), &one));
+        assert!(at_screen_edge(Point::new(1919, 300), &one));
+        assert!(at_screen_edge(Point::new(300, 1079), &one));
+        assert!(!at_screen_edge(Point::new(528, 18), &one));
+        // Two side by side, the second one above the line of the first: the shared edge is
+        // crossed, not an edge; the part of the second's left edge above the first is one.
+        let two = [Rect::new(0, 0, 1920, 1080), Rect::new(1920, -200, 3840, 880)];
+        assert!(!at_screen_edge(Point::new(1919, 500), &two));
+        assert!(!at_screen_edge(Point::new(1920, 500), &two));
+        assert!(at_screen_edge(Point::new(1920, -100), &two));
+        assert!(at_screen_edge(Point::new(2500, -200), &two));
+        assert!(!at_screen_edge(Point::new(5000, 0), &two));
+    }
 
     #[test]
     fn a_resize_arrow_means_a_resize_from_the_start() {

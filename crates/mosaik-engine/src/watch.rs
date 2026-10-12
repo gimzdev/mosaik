@@ -751,6 +751,9 @@ impl Engine {
             return;
         }
         if d.kind == DragKind::Moving {
+            if d.tab_target.is_some() || d.target.is_some() {
+                self.note_windows_snapping(input::cursor());
+            }
             if let Some((onto, before)) = d.tab_target {
                 if let Some(g) = self.group_of_window(onto) {
                     self.hide_bar(&g.id);

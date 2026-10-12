@@ -147,10 +147,12 @@ fn watched(w: HWND, drag: impl FnOnce() -> Result<(), String>) -> Result<Value, 
 }
 
 /// Drags `w` by its title bar to `to`. When the press does not start Windows' move loop, once
-/// more from a point lower in the title bar; both tries are recorded.
+/// more from other points of the title bar; both tries are recorded.
 fn drag_by_title(w: HWND, to: Point) -> Result<Value, String> {
     let mut tries = Vec::new();
-    for rows in [[6, 12, 20], [14, 22, 30]] {
+    // Where a person grabs a title bar: its middle, not its top edge (some apps resize from the
+    // few pixels along the top).
+    for rows in [[12, 20, 28], [6, 16, 32]] {
         let frame = frame_rect(w).ok_or("the window vanished")?;
         let Some(grab) = grab_point(w, rows) else {
             tries.push(json!({ "grab": null }));

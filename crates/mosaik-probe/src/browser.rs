@@ -147,7 +147,12 @@ pub fn scenario(
     let _ = unsafe { SetWindowPos(window, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE) };
     pump_until(1500, || false);
     let before = tabs(window, 3);
-    let mut result = json!({ "browser": b.name, "tabs_found": before.len() });
+    let mut result = json!({
+        "browser": b.name,
+        "tabs_found": before.len(),
+        "window": frame_rect(window).map(|f| [f.left, f.top, f.right, f.bottom]),
+        "tabs": before.iter().map(|t| [t.left, t.top, t.right, t.bottom]).collect::<Vec<_>>(),
+    });
     if before.len() < 3 {
         result["skipped"] = json!("the browser's tabs were not found (UI Automation)");
         return Ok(result);
@@ -155,7 +160,10 @@ pub fn scenario(
 
     // 1. Tab 2 onto a zone.
     let (zone_point, zone_area) = zone_target;
-    tear_off(before[1], zone_point, window)?;
+    if let Err(e) = tear_off(before[1], zone_point, window) {
+        result["onto_zone"] = json!({ "failed": e });
+        return Ok(result);
+    }
     pump_until(1200, || false);
     let second = find(b.exe, &page_title(2), 3000);
     let st = state(engine)?;

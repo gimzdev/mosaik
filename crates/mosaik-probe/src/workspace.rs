@@ -684,7 +684,9 @@ fn drag(from: Point, to: Point, expected: HWND) -> Result<(), String> {
 
 /// Presses the left button at the first point (only on `expected`, a window this probe opened,
 /// or on what the engine in this process draws), moves through the others in small steps,
-/// releases at the last.
+/// releases at the last. Each stretch starts slowly and speeds up, as a hand does: some apps
+/// (Chromium's) only start Windows' move once they see the pointer move inside the window, and
+/// decide move or resize from where it is then.
 pub(crate) fn drag_path(points: &[Point], expected: HWND) -> Result<(), String> {
     let (Some(&from), Some(_)) = (points.first(), points.get(1)) else {
         return Err("a drag needs two points".into());
@@ -693,7 +695,14 @@ pub(crate) fn drag_path(points: &[Point], expected: HWND) -> Result<(), String> 
     let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: from.x, y: from.y }), GA_ROOT) };
     let ours = under == expected || mosaik_win::window::pid(under) == mosaik_win::process::own_pid();
     if !ours {
-        return Err("another window is where the probe would press the mouse; not pressing it there".into());
+        let same_app = mosaik_win::window::pid(under) == mosaik_win::window::pid(expected);
+        return Err(format!(
+            "another window ({}{}) is where the probe would press the mouse at {},{}; not pressing it there",
+            mosaik_win::window::class_name(under),
+            if same_app { ", of the same app" } else { "" },
+            from.x,
+            from.y
+        ));
     }
     input::move_to(from);
     pump_until(150, || false);
@@ -704,10 +713,9 @@ pub(crate) fn drag_path(points: &[Point], expected: HWND) -> Result<(), String> 
             let (a, b) = (pair[0], pair[1]);
             let steps = 40;
             for i in 1..=steps {
-                input::move_to(Point::new(
-                    a.x + (b.x - a.x) * i / steps,
-                    a.y + (b.y - a.y) * i / steps,
-                ));
+                // Eased in: the share of the way covered grows with the square of the time.
+                let share = |v: i32| v * i * i / (steps * steps);
+                input::move_to(Point::new(a.x + share(b.x - a.x), a.y + share(b.y - a.y)));
                 pump_until(16, || false);
             }
         }
