@@ -272,6 +272,11 @@ function Invoke-Check {
     Say 'winget (App Installer, from the Microsoft Store) installs these; it is not on this PC.' Yellow
     return $false
   }
+  # Nobody to answer (a script or CI): say what to run instead of asking.
+  if ([Console]::IsInputRedirected) {
+    foreach ($n in $missing) { Say ("  winget install --id {0} --exact {1}" -f $n.Id, ($n.Args -join ' ')) }
+    return $false
+  }
   foreach ($n in $missing) {
     $answer = Read-Host ("Install {0} with winget ({1})? [y/N]" -f $n.Name, $n.Id)
     if ($answer -notmatch '^(y|yes|o|oui)$') { continue }

@@ -66,6 +66,25 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --no-fail-fast -p mosaik-core -p mosaik-ipc -p mosaik-win -p mosaik-overlay -p mosaik-engine --all-features
       - run: cargo build --release -p mosaik-desktop -p mosaik-watchdog -p mosaik-ipc
+      # The one-file app, made and checked with Windows PowerShell 5.1 as people will run it.
+      - name: Pack mosaik.ps1, unpack it and check it matches the repository
+        shell: powershell
+        run: |
+          # Each step stops the job when it fails (only the last exit code counts otherwise).
+          powershell -NoProfile -ExecutionPolicy Bypass -File mosaik.ps1 pack; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File target\mosaik.ps1 verify .; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File target\mosaik.ps1 unpack "$env:RUNNER_TEMP\unpacked"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File target\mosaik.ps1 verify "$env:RUNNER_TEMP\unpacked"; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: The Store package
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File installer\msix\package.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mosaik
+          path: |
+            target/mosaik.ps1
+            target/msix/*.msix
+          if-no-files-found: error
 
   interface:
     name: Interface
