@@ -9,6 +9,9 @@
 //! mosaik-probe watchdog   window recovery after the main process is killed
 //! mosaik-probe hotkey     the switcher shortcut on the installed keyboard layouts (presses keys)
 //! mosaik-probe idle       CPU and memory of an engine-like loop over 60 s
+//! mosaik-probe smart      what 1.1 adds, with the real engine: windows on one line, zones
+//!                         that follow a resized window, Arrange and Undo, the quick menu
+//!                         (moves the mouse)
 //! mosaik-probe workspace  save, switch and reopen with the real engine (--drag: drag to snap;
 //!                         --browser edge|chrome: browser tabs dragged out into a workspace;
 //!                         --apps: real apps into zones and tabs; --soak N: N switches,
@@ -54,6 +57,8 @@ mod pixels;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod report;
 #[cfg(windows)]
+mod smart;
+#[cfg(windows)]
 mod soak;
 #[cfg(windows)]
 mod state;
@@ -94,7 +99,7 @@ fn main() {
     }
     let Some(command) = args.first().cloned() else {
         eprintln!(
-            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace|titlebar|ui-tour> [--out file.json]"
+            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace|smart|titlebar|ui-tour> [--out file.json]"
         );
         std::process::exit(2);
     };
@@ -122,6 +127,7 @@ fn main() {
         "idle" => idle::run(&args),
         "dummy" => dummy::run(&args),
         "workspace" => workspace::run(&args),
+        "smart" => smart::run(&args),
         "titlebar" => titlebar::run(&args),
         "ui-tour" => ui_tour::run(&args),
         _ => Err(format!("unknown command {command}")),

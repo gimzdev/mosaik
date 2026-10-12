@@ -125,8 +125,8 @@ pub struct Geometry {
     pub maximized: bool,
     pub cloaked: bool,
     pub dpi: u32,
-    /// `WS_THICKFRAME`: it can be resized, so in a zone it fills it (one that cannot sits in
-    /// the middle of it at its own size).
+    /// `WS_THICKFRAME`: it can be resized, so in a zone it fills it (one that cannot keeps its
+    /// own size, centred across the zone and at its top).
     pub resizable: bool,
     /// A game or a video in full screen (`mosaik_core::window::is_full_screen`): left alone.
     pub full_screen: bool,

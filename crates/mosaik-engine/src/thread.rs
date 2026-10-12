@@ -755,6 +755,7 @@ impl Engine {
             });
         }
         snapshot.title_bars_reading = self.titles.reading();
+        snapshot.quick_menu = self.quick_state();
         Reply::State(Box::new(snapshot))
     }
 

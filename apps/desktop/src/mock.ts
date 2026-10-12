@@ -47,7 +47,7 @@ const settings: Settings = {
   },
   tab_hiding: null,
   switching: { minimize_others: true, launch_missing: true },
-  edge: { enabled: true, side: 'right', position: 30 },
+  edge: { enabled: true, side: 'right', position: 300 },
   theme: 'system',
   start_with_windows: false,
   onboarding_done: params.get('welcome') !== '1',

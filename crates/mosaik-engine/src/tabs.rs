@@ -712,7 +712,7 @@ impl Engine {
 
     /// Brings back windows Mosaïk hid (`true`: minimised, in the taskbar). Returns the ones
     /// still hidden.
-    fn show_windows(&mut self, list: &[(WindowHandle, bool)]) -> HashSet<WindowHandle> {
+    pub(crate) fn show_windows(&mut self, list: &[(WindowHandle, bool)]) -> HashSet<WindowHandle> {
         let batch: Vec<(WindowHandle, Request)> = list
             .iter()
             .filter_map(|(w, minimised)| {

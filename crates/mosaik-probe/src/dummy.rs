@@ -27,6 +27,9 @@ thread_local! {
     /// `--fixed`: no frame to resize it by, as most games' windows. It takes whatever size it is
     /// given, as many games do: Mosaïk is the one that must keep its size.
     static FIXED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `--min-width N`: the window will not be narrower than N pixels, as a browser keeps
+    /// about 500.
+    static MIN_WIDTH: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
 }
 
 /// The app's own title bar in a `--borderless` window, and its buttons at the right of it.
@@ -35,7 +38,8 @@ const OWN_BUTTONS: i32 = 138;
 const RESIZE_EDGE: i32 = 6;
 
 /// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost] [--self-move] [--no-title-room]
-/// [--borderless] [--fixed] [--full-screen]`: shows the window and runs until it is closed or the
+/// [--borderless] [--fixed] [--full-screen] [--min-width N]`: shows the window and runs until it
+/// is closed or the
 /// process is killed. `--topmost` keeps it above the user's windows, so a probe that presses the
 /// mouse on its title bar never lands on something else. `--full-screen` covers the main monitor,
 /// taskbar included, borderless, as a game in full screen.
@@ -46,6 +50,13 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
     let full_screen = has("--full-screen");
     BORDERLESS.with(|m| m.set(has("--borderless") || full_screen));
     FIXED.with(|m| m.set(has("--fixed") || full_screen));
+    let min_width = args
+        .iter()
+        .position(|a| a == "--min-width")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|n| n.parse::<i32>().ok())
+        .unwrap_or(0);
+    MIN_WIDTH.with(|m| m.set(min_width));
     let title = args
         .iter()
         .position(|a| a == "--title")
@@ -115,6 +126,19 @@ unsafe extern "system" fn dummy_proc(
         // SAFETY: ends this process's message loop.
         unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0) };
         return windows::Win32::Foundation::LRESULT(0);
+    }
+    let min_width = MIN_WIDTH.with(std::cell::Cell::get);
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_GETMINMAXINFO && min_width > 0 {
+        // SAFETY: Windows passes a valid MINMAXINFO with this message; the default handling
+        // fills it first.
+        unsafe {
+            let hit = plain_wndproc(hwnd, msg, wparam, lparam);
+            let info = lparam.0 as *mut windows::Win32::UI::WindowsAndMessaging::MINMAXINFO;
+            if let Some(info) = info.as_mut() {
+                info.ptMinTrackSize.x = info.ptMinTrackSize.x.max(min_width);
+            }
+            return hit;
+        }
     }
     if BORDERLESS.with(std::cell::Cell::get) {
         use windows::Win32::UI::WindowsAndMessaging::{

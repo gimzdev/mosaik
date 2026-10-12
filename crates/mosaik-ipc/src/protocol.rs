@@ -192,6 +192,26 @@ pub struct StateSnapshot {
     /// change), so tests can wait for them.
     #[serde(default)]
     pub title_bars_reading: u32,
+    /// The quick menu at the screen's edge, while it shows, so tests can point at it by its
+    /// numbers.
+    #[serde(default)]
+    pub quick_menu: Option<QuickMenuState>,
+}
+
+/// The quick menu's handle on screen, or the menu itself while it is open.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuickMenuState {
+    pub rect: Rect,
+    pub open: bool,
+    /// The open menu's rows, top to bottom.
+    pub rows: Vec<QuickMenuRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuickMenuRow {
+    pub label: String,
+    pub rect: Rect,
+    pub enabled: bool,
 }
 
 /// A tab group's strip as drawn: where it is, each tab's chip and window, the one that shows.
@@ -629,6 +649,15 @@ mod tests {
                 }],
             }],
             title_bars_reading: 1,
+            quick_menu: Some(QuickMenuState {
+                rect: Rect::new(1654, 196, 1920, 556),
+                open: true,
+                rows: vec![QuickMenuRow {
+                    label: "Arrange windows".into(),
+                    rect: Rect::new(1670, 272, 1906, 306),
+                    enabled: true,
+                }],
+            }),
         };
         let r = Response::new(9, Reply::State(Box::new(state)));
         let bytes = encode(&r).unwrap();

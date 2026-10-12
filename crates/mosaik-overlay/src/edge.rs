@@ -270,11 +270,12 @@ pub struct Row {
 
 /// Sizes at 96 DPI.
 mod size {
-    /// The line, and the strip around it that takes the pointer.
+    /// The line, and the strip around it that takes the pointer: narrow, since the pointer
+    /// stops at the screen's edge anyway, and a window in a zone there is only 4 px from it.
     pub const LINE: f32 = 4.0;
     pub const LINE_WIDE: f32 = 6.0;
     pub const LINE_LENGTH: f32 = 56.0;
-    pub const STRIP: f32 = 12.0;
+    pub const STRIP: f32 = 8.0;
     pub const STRIP_LENGTH: f32 = 76.0;
     pub const PANEL: f32 = 256.0;
     pub const HEADER: f32 = 50.0;
@@ -344,7 +345,10 @@ pub fn handle_rect(place: Place) -> Rect {
 /// The middle of a handle placed so it stays on its edge, for a pointer dragging it to `y`.
 pub fn clamp_middle(place: Place, y: i32) -> i32 {
     let half = px(size::STRIP_LENGTH * scale(place.dpi)) / 2;
-    y.clamp(place.work.top + half, (place.work.bottom - half).max(place.work.top + half))
+    y.clamp(
+        place.work.top + half,
+        (place.work.bottom - half).max(place.work.top + half),
+    )
 }
 
 impl Edge {
@@ -381,7 +385,13 @@ impl Edge {
     }
 
     /// Shows the handle: the line at `place`, wider while the pointer is on it (`wide`).
-    pub fn show_handle(&mut self, canvas: &mut Canvas, place: Place, wide: bool, palette: Palette) -> Result<()> {
+    pub fn show_handle(
+        &mut self,
+        canvas: &mut Canvas,
+        place: Place,
+        wide: bool,
+        palette: Palette,
+    ) -> Result<()> {
         let want = Shown::Handle { place, wide, palette };
         if self.shown.as_ref() == Some(&want) && self.window.shown_at().is_some() {
             return Ok(());
@@ -397,7 +407,10 @@ impl Edge {
             Side::Right => w - inset - line,
         };
         let top = (h - length) / 2.0;
-        let surface = self.window.surface(usize::try_from(r.width()).unwrap_or(1), usize::try_from(r.height()).unwrap_or(1))?;
+        let surface = self.window.surface(
+            usize::try_from(r.width()).unwrap_or(1),
+            usize::try_from(r.height()).unwrap_or(1),
+        )?;
         canvas.render(surface, |pen| {
             // Faintly there everywhere, so the whole strip takes the pointer.
             pen.fill_round(Area::new(0.0, 0.0, w, h), 0.0, Rgba(0.0, 0.0, 0.0, 1.0 / 255.0));
@@ -407,6 +420,8 @@ impl Edge {
             Ok(())
         })?;
         self.window.present(r.origin(), 255)?;
+        // Above windows kept on top that came after it (a video player, Task Manager).
+        crate::layered::restack(&[&self.window], crate::layered::Stack::Topmost);
         self.shown = Some(want);
         self.rows.clear();
         Ok(())
@@ -462,7 +477,12 @@ impl Edge {
             if r.rule_before {
                 y += size::RULE * s;
             }
-            let a = Area::new(shadow + size::PAD * s, y, shadow + panel_w - size::PAD * s, y + size::ROW * s);
+            let a = Area::new(
+                shadow + size::PAD * s,
+                y,
+                shadow + panel_w - size::PAD * s,
+                y + size::ROW * s,
+            );
             placed.push((a, r, hot == Some(i) && r.enabled));
             y += size::ROW * s;
         }
@@ -470,20 +490,35 @@ impl Edge {
         let detail_size = 12.0 * s;
         let widths: Vec<f32> = rows
             .iter()
-            .map(|r| r.detail.as_deref().map_or(0.0, |d| canvas.text_width(d, detail_size, Weight::Normal)))
+            .map(|r| {
+                r.detail
+                    .as_deref()
+                    .map_or(0.0, |d| canvas.text_width(d, detail_size, Weight::Normal))
+            })
             .collect();
-        let surface = self.window.surface(usize::try_from(w).unwrap_or(1), usize::try_from(h).unwrap_or(1))?;
+        let surface = self
+            .window
+            .surface(usize::try_from(w).unwrap_or(1), usize::try_from(h).unwrap_or(1))?;
         let panel = Area::new(shadow, shadow, shadow + panel_w, shadow + panel_h);
         let radius = size::RADIUS * s;
         canvas.render(surface, |pen| {
-            pen.fill_round(Area::new(0.0, 0.0, f(w), f(h)), 0.0, Rgba(0.0, 0.0, 0.0, 1.0 / 255.0));
+            pen.fill_round(
+                Area::new(0.0, 0.0, f(w), f(h)),
+                0.0,
+                Rgba(0.0, 0.0, 0.0, 1.0 / 255.0),
+            );
             if palette.shadow {
                 // A soft shadow: rings of growing size and fading darkness.
                 let steps = 8;
                 for k in (1..=steps).rev() {
                     let grow = shadow * f(k) / f(steps);
                     let alpha = 0.10 * (1.0 - f(k) / f(steps + 1));
-                    let a = Area::new(panel.left - grow, panel.top - grow + 2.0 * s, panel.right + grow, panel.bottom + grow + 2.0 * s);
+                    let a = Area::new(
+                        panel.left - grow,
+                        panel.top - grow + 2.0 * s,
+                        panel.right + grow,
+                        panel.bottom + grow + 2.0 * s,
+                    );
                     pen.fill_round(a, radius + grow, Rgba(0.0, 0.0, 0.0, alpha / f(steps) * 4.0));
                 }
             }
@@ -510,7 +545,16 @@ impl Edge {
             for (i, (a, r, lit)) in placed.iter().enumerate() {
                 if r.rule_before {
                     let y = a.top - size::RULE * s / 2.0;
-                    pen.fill_round(Area::new(panel.left + 12.0 * s, y - s / 2.0, panel.right - 12.0 * s, y + s / 2.0), 0.0, palette.line);
+                    pen.fill_round(
+                        Area::new(
+                            panel.left + 12.0 * s,
+                            y - s / 2.0,
+                            panel.right - 12.0 * s,
+                            y + s / 2.0,
+                        ),
+                        0.0,
+                        palette.line,
+                    );
                 }
                 if *lit {
                     pen.fill_round(*a, 6.0 * s, palette.hover);
@@ -527,7 +571,11 @@ impl Edge {
                     &r.label,
                     Area::new(a.left + 10.0 * s, a.top, label_right, a.bottom),
                     13.5 * s,
-                    if r.primary { Weight::SemiBold } else { Weight::Normal },
+                    if r.primary {
+                        Weight::SemiBold
+                    } else {
+                        Weight::Normal
+                    },
                     Align::Leading,
                     color,
                 )?;
@@ -545,6 +593,7 @@ impl Edge {
             Ok(())
         })?;
         self.window.present(at.origin(), 255)?;
+        crate::layered::restack(&[&self.window], crate::layered::Stack::Topmost);
         self.rows = placed
             .iter()
             .map(|(a, _, _)| {
@@ -558,6 +607,14 @@ impl Edge {
             .collect();
         self.shown = Some(want);
         Ok(())
+    }
+
+    /// The open menu's rows, and where each is on screen.
+    pub fn menu_rows(&self) -> Vec<(&Row, Rect)> {
+        match &self.shown {
+            Some(Shown::Menu { rows, .. }) => rows.iter().zip(self.rows.iter().copied()).collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// The row of the open menu under `p` (screen coordinates).
@@ -585,7 +642,7 @@ mod tests {
     #[test]
     fn the_handle_sits_on_its_edge_and_stays_on_screen() {
         let r = handle_rect(place(Side::Right, 310));
-        assert_eq!((r.right, r.width(), r.height()), (1920, 12, 76));
+        assert_eq!((r.right, r.width(), r.height()), (1920, 8, 76));
         assert_eq!(r.top + r.height() / 2, 310);
         assert_eq!(handle_rect(place(Side::Left, 310)).left, 0);
         // Dragged past the top or the bottom, it stops at the end of the edge.
@@ -600,6 +657,6 @@ mod tests {
         let mut p = place(Side::Right, 500);
         p.dpi = 192;
         let r = handle_rect(p);
-        assert_eq!((r.width(), r.height()), (24, 152));
+        assert_eq!((r.width(), r.height()), (16, 152));
     }
 }

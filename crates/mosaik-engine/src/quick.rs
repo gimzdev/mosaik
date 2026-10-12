@@ -11,7 +11,7 @@ use std::time::Instant;
 use mosaik_core::geometry::{Point, Rect, scale_for_dpi};
 use mosaik_core::settings::EdgeSide;
 use mosaik_core::window::WindowHandle;
-use mosaik_ipc::protocol::{Command, Reply};
+use mosaik_ipc::protocol::{Command, QuickMenuRow, QuickMenuState, Reply};
 use mosaik_overlay::edge::{self, Edge, EdgeInput, Palette, Place, Row, Side};
 use mosaik_win::{input, window};
 
@@ -58,8 +58,8 @@ pub(crate) struct Quick {
     /// The pointer is on the handle: it shows wider.
     over: bool,
     press: Option<Press>,
-    /// Hidden while a game or a video fills the main monitor.
-    full_screen: bool,
+    /// The game or video filling the main monitor in front: the handle hides while it is.
+    full_screen: Option<WindowHandle>,
 }
 
 impl Engine {
@@ -81,7 +81,7 @@ impl Engine {
         }
         let monitor = self.topology.as_ref()?.primary().clone();
         let work = monitor.work_area;
-        let middle = work.top + work.height() * edge.position.clamp(0, 100) / 100;
+        let middle = work.top + work.height() * edge.position.clamp(0, 1000) / 1000;
         let place = Place {
             work,
             side: match edge.side {
@@ -110,7 +110,7 @@ impl Engine {
             return;
         };
         self.quick.place = Some(place);
-        if self.quick.full_screen {
+        if self.quick.full_screen.is_some() {
             if let Some(e) = &mut self.quick.edge {
                 e.hide();
             }
@@ -234,6 +234,24 @@ impl Engine {
         self.watch.put_canvas(canvas);
     }
 
+    /// The handle or the menu as `mosaikctl state` shows them.
+    pub(crate) fn quick_state(&self) -> Option<QuickMenuState> {
+        let edge = self.quick.edge.as_ref()?;
+        Some(QuickMenuState {
+            rect: edge.shown_at()?,
+            open: edge.menu_open(),
+            rows: edge
+                .menu_rows()
+                .into_iter()
+                .map(|(row, rect)| QuickMenuRow {
+                    label: row.label.clone(),
+                    rect,
+                    enabled: row.enabled,
+                })
+                .collect(),
+        })
+    }
+
     fn menu_open(&self) -> bool {
         self.quick.edge.as_ref().is_some_and(Edge::menu_open)
     }
@@ -350,7 +368,9 @@ impl Engine {
     /// The handle was dragged along its edge to `middle`: the place is kept in the settings.
     fn keep_quick_place(&mut self, place: Place, middle: i32) {
         let height = place.work.height().max(1);
-        let position = ((middle - place.work.top) * 100 / height).clamp(0, 100);
+        // Rounded to the nearest thousandth: the handle stays within a pixel of where it was
+        // let go.
+        let position = (((middle - place.work.top) * 1000 + height / 2) / height).clamp(0, 1000);
         let mut settings = self.settings.clone();
         settings.edge.position = position;
         if let Reply::Error { message, .. } = self.set_settings(settings) {
@@ -360,21 +380,49 @@ impl Engine {
     }
 
     /// A window came to the front: a game or a video filling the main monitor hides the
-    /// handle until something else comes to the front.
+    /// handle while it stays in front and in full screen.
     pub(crate) fn quick_follow_foreground(&mut self, h: WindowHandle) {
         let Some(place) = self.quick.place else { return };
-        let full = window::geometry(window::hwnd(h)).is_some_and(|g| g.full_screen && g.frame.contains(Point::new(place.work.left + place.work.width() / 2, place.work.top + place.work.height() / 2)));
+        let middle = Point::new(
+            place.work.left + place.work.width() / 2,
+            place.work.top + place.work.height() / 2,
+        );
+        let full = window::geometry(window::hwnd(h))
+            .is_some_and(|g| g.full_screen && g.frame.contains(middle))
+            .then_some(h);
         if full == self.quick.full_screen {
             return;
         }
+        let was_hidden = self.quick.full_screen.is_some();
         self.quick.full_screen = full;
-        if full {
+        if full.is_some() {
             self.kill_timer(timer::QUICK);
             if let Some(e) = &mut self.quick.edge {
                 e.hide();
             }
-        } else {
+        } else if was_hidden {
             self.place_quick();
+        }
+    }
+
+    /// Window `h` moved, was hidden, minimised or closed. The game in full screen leaving it
+    /// (closed, or back in a window) brings the handle back without anything else coming to
+    /// the front; the window in front going into full screen (a video) hides it.
+    pub(crate) fn quick_window_changed(&mut self, h: WindowHandle) {
+        if self.quick.place.is_none() {
+            return;
+        }
+        let front = mosaik_win::arrange::foreground().map(window::handle);
+        if self.quick.full_screen != Some(h) && front != Some(h) {
+            return;
+        }
+        match front.filter(|f| window::exists(window::hwnd(*f))) {
+            Some(f) => self.quick_follow_foreground(f),
+            None if self.quick.full_screen.is_some() => {
+                self.quick.full_screen = None;
+                self.place_quick();
+            }
+            None => {}
         }
     }
 
@@ -407,7 +455,10 @@ impl Engine {
             }
         };
         if let Reply::Error { message, hint, .. } = reply {
-            self.notice("Mosaïk", hint.map_or(message.clone(), |h| format!("{message} {h}")));
+            self.notice(
+                "Mosaïk",
+                hint.map_or(message.clone(), |h| format!("{message} {h}")),
+            );
         }
     }
 }

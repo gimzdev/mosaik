@@ -335,7 +335,11 @@ impl Engine {
                 Some("Arrange can be undone for ten minutes, until a workspace is opened, saved or edited."),
             );
         };
-        let at = self.file.workspaces.iter().position(|w| w.id == undo.workspace_id);
+        let at = self
+            .file
+            .workspaces
+            .iter()
+            .position(|w| w.id == undo.workspace_id);
         match (undo.workspace, at) {
             (Some(before), Some(i)) => self.file.workspaces[i] = before,
             (Some(before), None) => self.file.workspaces.push(before),
@@ -352,7 +356,16 @@ impl Engine {
                 self.file.active = None;
             }
         }
-        // Tabs Arrange made show again; then every window goes back where it was.
+        // Tabs Arrange made show again, as the windows they were (a window no longer the
+        // workspace's would come back minimised); then every window goes back where it was.
+        // Arrange only took windows on screen, so any of them hidden now is one of its tabs.
+        let tabs_made: Vec<(WindowHandle, bool)> = undo
+            .windows
+            .iter()
+            .filter(|(h, _, _)| self.hiding.hidden.contains_key(h))
+            .map(|(h, _, _)| (*h, false))
+            .collect();
+        self.show_windows(&tabs_made);
         self.hiding.resume();
         self.sync_tabs();
         let topology = self.refresh_topology();

@@ -44,7 +44,7 @@
       "settings": {
         "edge": {
           "enabled": true,
-          "position": 30,
+          "position": 300,
           "side": "right"
         },
         "frames": {
@@ -166,7 +166,7 @@
       "settings": {
         "edge": {
           "enabled": true,
-          "position": 30,
+          "position": 300,
           "side": "right"
         },
         "frames": {

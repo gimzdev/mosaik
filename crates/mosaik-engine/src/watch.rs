@@ -291,6 +291,7 @@ impl Engine {
                     if let Some(f) = self.watch.frames.get_mut(&h) {
                         f.frame.hide();
                     }
+                    self.quick_window_changed(h);
                     sync |= tab(self);
                 }
                 EVENT_SYSTEM_MINIMIZEEND | EVENT_OBJECT_UNCLOAKED => {
@@ -315,11 +316,15 @@ impl Engine {
                         self.refresh_strip(&g.id);
                     }
                 }
-                EVENT_OBJECT_DESTROY => sync |= self.forget(h),
+                EVENT_OBJECT_DESTROY => {
+                    self.quick_window_changed(h);
+                    sync |= self.forget(h);
+                }
                 _ => {}
             }
         }
         for h in moved {
+            self.quick_window_changed(h);
             if self.watch.drag.as_ref().is_some_and(|d| d.window == h) {
                 self.drag_update();
             } else if self.watch.pressed.is_some_and(|p| p.window == h) && self.self_move_begins(h) {

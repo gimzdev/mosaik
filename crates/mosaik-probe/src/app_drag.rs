@@ -459,8 +459,8 @@ pub fn kinds(engine: &Engine, t: &Targets) -> Value {
         out.insert(name.into(), r);
     }
     // A borderless game of a fixed size that moves itself when dragged anywhere, with no title
-    // bar to grab and no room for a tag: it keeps its size in the middle of its zone, below a
-    // band right above it.
+    // bar to grab and no room for a tag: it keeps its size, centred across its zone and at its
+    // top, below a band right above it.
     let small_self = Rect::from_origin_size(
         t.work.left + t.work.width() / 3,
         t.work.top + t.work.height() / 4,

@@ -61,7 +61,7 @@ const RANGES: [(&str, i32, i32); 5] = [
     ("The tag band", 0, 64),
     ("The frame width", 0, 16),
     ("The distance zones pull windows from", 0, 400),
-    ("The quick menu's place along the edge", 0, 100),
+    ("The quick menu's place along the edge", 0, 1000),
 ];
 
 /// Whether `settings.json` was read when Mosaïk started. When it was not (written by a newer
@@ -201,8 +201,9 @@ pub enum EdgeSide {
 pub struct EdgeSettings {
     pub enabled: bool,
     pub side: EdgeSide,
-    /// Where the handle's middle is along the edge, in percent of the work area's height from
-    /// its top. Dragging the handle moves it.
+    /// Where the handle's middle is along the edge, in thousandths of the work area's height
+    /// from its top (fine enough that a handle dragged by the pixel stays where it was let
+    /// go). Dragging the handle moves it.
     pub position: i32,
 }
 
@@ -211,7 +212,7 @@ impl Default for EdgeSettings {
         Self {
             enabled: true,
             side: EdgeSide::Right,
-            position: 30,
+            position: 300,
         }
     }
 }
@@ -286,7 +287,9 @@ mod tests {
         assert_eq!(s.edge, EdgeSettings::default());
         assert!(s.edge.enabled && s.edge.side == EdgeSide::Right);
         // Settings saved before these existed get them on.
-        let older: Settings = serde_json::from_str(r#"{"version":2,"snap":{"enabled":true,"invert_shift":false,"near":48}}"#).unwrap();
+        let older: Settings =
+            serde_json::from_str(r#"{"version":2,"snap":{"enabled":true,"invert_shift":false,"near":48}}"#)
+                .unwrap();
         assert!(older.snap.resize_zones && older.edge.enabled);
     }
 
@@ -310,12 +313,12 @@ mod tests {
         let c = s.clamped();
         assert_eq!((c.frames.style.gap, c.snap.near), (64, 0));
         let mut s = Settings::default();
-        s.edge.position = 140;
+        s.edge.position = 1400;
         assert_eq!(
             s.problem().as_deref(),
-            Some("The quick menu's place along the edge must be from 0 to 100; it is 140.")
+            Some("The quick menu's place along the edge must be from 0 to 1000; it is 1400.")
         );
-        assert_eq!(s.clamped().edge.position, 100);
+        assert_eq!(s.clamped().edge.position, 1000);
         assert_eq!(c.problem(), None);
     }
 

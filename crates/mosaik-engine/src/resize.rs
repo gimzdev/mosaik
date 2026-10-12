@@ -79,7 +79,12 @@ impl Engine {
 
     /// When a drag of `h` starts, with its visible frame at `start`: the zones its resize would
     /// move, if it fills a zone of the open workspace.
-    pub(crate) fn zone_resize_for(&self, h: WindowHandle, start: Rect, resizable: bool) -> Option<ZoneResize> {
+    pub(crate) fn zone_resize_for(
+        &self,
+        h: WindowHandle,
+        start: Rect,
+        resizable: bool,
+    ) -> Option<ZoneResize> {
         if !resizable || !self.settings.snap.resize_zones {
             return None;
         }
@@ -175,7 +180,11 @@ impl Engine {
         }
         let changed = self.set_zone_areas(&zr.ids, &zr.areas, &areas);
         let outcomes = self.refit(&topology, Some(&changed));
-        tracing::info!(zones = changed.len(), windows = outcomes.len(), "zones followed a resize");
+        tracing::info!(
+            zones = changed.len(),
+            windows = outcomes.len(),
+            "zones followed a resize"
+        );
         // An app that kept a larger size than its zone pushes the line back, once. (One that
         // kept a smaller size, a window of its own size, leaves its zone as it is.)
         let mut corrected = areas.clone();
