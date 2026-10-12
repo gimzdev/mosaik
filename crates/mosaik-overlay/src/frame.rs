@@ -2,13 +2,13 @@
 //! zones shown while a window is dragged.
 
 use mosaik_core::geometry::{Insets, Point, Rect};
-use mosaik_core::zone::ZoneColor;
+use mosaik_core::zone::{Rgb, ZoneColor};
 use mosaik_win::error::Result;
 
 use crate::canvas::{Canvas, Rgba};
-use crate::layered::{LayeredWindow, Stack, restack, restack_windows};
+use crate::layered::{LayeredWindow, Stack, restack_windows};
 use crate::shapes::{Ring, RingLook, Tag, TagLook};
-use crate::tint::Tint;
+use crate::tint::{Corners, Tint};
 use windows::Win32::Foundation::HWND;
 
 fn scale(dpi: u32) -> f32 {
@@ -43,6 +43,24 @@ pub struct FrameLook {
     pub ring: bool,
     pub tag: bool,
     pub tag_at: TagPlace,
+    /// The band above the window that is its own (its tag, or its group's strip, sits in it):
+    /// inside its ring with the window, so the two read as one. `None` when it wears its tag in
+    /// its own title bar.
+    pub band: Option<Rect>,
+    /// The band is filled here (a single window's), not by its group's strip.
+    pub fill_band: bool,
+    /// Mosaïk's dark theme, or Windows' dark mode.
+    pub dark: bool,
+}
+
+/// The colour of a band above a window: solid, as a title bar is (job 0076: the owner asked for
+/// no see-through gap above a window), close to Windows' own title bars.
+pub fn band_color(dark: bool) -> Rgb {
+    if dark {
+        Rgb(0x11, 0x14, 0x1B)
+    } else {
+        Rgb(0xED, 0xEF, 0xEA)
+    }
 }
 
 /// Where a window's tag goes.
@@ -70,6 +88,8 @@ pub fn tag_width(canvas: &mut Canvas, label: &str, dpi: u32) -> i32 {
 pub struct Frame {
     ring: Ring,
     tag: Tag,
+    /// The band's fill, made on first use and kept.
+    band: Option<Tint>,
 }
 
 impl Frame {
@@ -77,6 +97,7 @@ impl Frame {
         Ok(Self {
             ring: Ring::new("MosaikFrame", false)?,
             tag: Tag::new("MosaikTag", false)?,
+            band: None,
         })
     }
 
@@ -86,14 +107,41 @@ impl Frame {
         let width = px(2.0 * s).max(1);
         let corner = if look.rounded { 8.0 * s } else { 0.0 };
         let stack = Stack::Above(window);
+        // The band, over the window's width and down to its top edge (a window whose app keeps
+        // a height that runs into the band keeps all of its own title bar).
+        let band = look.band.and_then(|b| {
+            Rect::new(
+                frame.left.max(b.left),
+                b.top,
+                frame.right.min(b.right),
+                frame.top.min(b.bottom),
+            )
+            .intersection(b)
+        });
+        match band.filter(|_| look.fill_band) {
+            Some(b) => {
+                if self.band.is_none() {
+                    self.band = Some(Tint::new()?);
+                }
+                if let Some(t) = &mut self.band {
+                    t.show(b, band_color(look.dark), 255, (px(corner), Corners::Top), stack)?;
+                }
+            }
+            None => {
+                if let Some(t) = &mut self.band {
+                    t.hide();
+                }
+            }
+        }
         if look.ring {
             let ring = RingLook {
                 color: Rgba::of(look.color.fill(), 1.0),
                 width,
                 radius: corner + f(width),
             };
+            let around = band.map_or(frame, |b| frame.union(b));
             self.ring
-                .show(canvas, frame.outset(Insets::uniform(width)), ring, stack)?;
+                .show(canvas, around.outset(Insets::uniform(width)), ring, stack)?;
         } else {
             self.ring.hide();
         }
@@ -130,6 +178,8 @@ impl Frame {
         } else {
             self.tag.hide();
         }
+        // Each piece stacked itself as it showed; in one step now, the tag in front of the band.
+        self.restack(window);
         Ok(())
     }
 
@@ -138,20 +188,30 @@ impl Frame {
         self.tag.window().shown_at()
     }
 
-    /// Puts the frame back right above its window (after the window came to the front).
+    /// Puts the frame back right above its window (after the window came to the front): the
+    /// tag in front, then the ring, then the band.
     pub fn restack(&self, window: isize) {
-        let mut all: Vec<&LayeredWindow> = vec![self.tag.window()];
-        all.extend(self.ring.windows());
-        restack(&all, Stack::Above(window));
+        let mut all: Vec<HWND> = std::iter::once(self.tag.window())
+            .chain(self.ring.windows())
+            .filter(|w| w.shown_at().is_some())
+            .map(LayeredWindow::hwnd)
+            .collect();
+        all.extend(self.band.as_ref().filter(|t| t.is_shown()).map(Tint::hwnd));
+        restack_windows(&all, Stack::Above(window));
     }
 
     pub fn hide(&mut self) {
         self.ring.hide();
         self.tag.hide();
+        if let Some(t) = &mut self.band {
+            t.hide();
+        }
     }
 
     pub fn is_shown(&self) -> bool {
-        self.ring.is_shown() || self.tag.window().shown_at().is_some()
+        self.ring.is_shown()
+            || self.tag.window().shown_at().is_some()
+            || self.band.as_ref().is_some_and(Tint::is_shown)
     }
 }
 
@@ -268,7 +328,13 @@ impl Preview {
             self.tint = Some(Tint::new()?);
         }
         if let Some(t) = &mut self.tint {
-            t.show(outline, shown.view.color.fill(), TINT_ALPHA, px(8.0 * s), stack)?;
+            t.show(
+                outline,
+                shown.view.color.fill(),
+                TINT_ALPHA,
+                (px(8.0 * s), Corners::All),
+                stack,
+            )?;
         }
         self.restack();
         Ok(())

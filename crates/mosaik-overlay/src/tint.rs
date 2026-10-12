@@ -1,6 +1,6 @@
-//! A translucent solid shape: the zone a dragged window would drop into. Windows composes it at
-//! a fixed opacity from a solid colour, so it costs no bitmap however large the zone (a 4K zone
-//! drawn as a bitmap would be 33 MB).
+//! A solid shape, translucent or not: the zone a dragged window would drop into, and the band a
+//! window wears its tag in above it. Windows composes it at a fixed opacity from a solid colour,
+//! so it costs no bitmap however large the zone (a 4K zone drawn as a bitmap would be 33 MB).
 
 use mosaik_core::geometry::Rect;
 use mosaik_core::zone::Rgb;
@@ -56,12 +56,20 @@ unsafe extern "system" fn tint_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
     }
 }
 
-/// A click-through, never-activated translucent rounded rectangle.
+/// Which corners of a tint are rounded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Corners {
+    All,
+    /// The top two: a band that sits on a window's top edge.
+    Top,
+}
+
+/// A click-through, never-activated rounded rectangle of one colour.
 pub struct Tint {
     hwnd: HWND,
     shown: Option<Rect>,
     look: Option<(Rgb, u8, i32)>,
-    shape: Option<(i32, i32, i32)>,
+    shape: Option<(i32, i32, i32, Corners)>,
 }
 
 impl Tint {
@@ -81,8 +89,15 @@ impl Tint {
         self.hwnd
     }
 
-    /// Shows the tint over `at` in `color` at `alpha` (0 to 255), corners rounded by `radius`.
-    pub fn show(&mut self, at: Rect, color: Rgb, alpha: u8, radius: i32, stack: Stack) -> Result<()> {
+    /// Shows the tint over `at` in `color` at `alpha` (0 to 255), `corners` rounded by `radius`.
+    pub fn show(
+        &mut self,
+        at: Rect,
+        color: Rgb,
+        alpha: u8,
+        (radius, corners): (i32, Corners),
+        stack: Stack,
+    ) -> Result<()> {
         let look = (color, alpha, radius);
         if self.look != Some(look) {
             // SAFETY: our own window: its colour, its opacity, and a repaint.
@@ -111,11 +126,23 @@ impl Tint {
             )
             .ctx("SetWindowPos")?;
         }
-        let shape = (at.width(), at.height(), radius);
+        let shape = (at.width(), at.height(), radius, corners);
         if self.shape != Some(shape) {
+            // Square bottom corners: the rounded ones fall below the window, where nothing shows.
+            let below = match corners {
+                Corners::All => 0,
+                Corners::Top => radius,
+            };
             // SAFETY: a region for our own window; Windows owns it once set.
             unsafe {
-                let rgn = CreateRoundRectRgn(0, 0, at.width() + 1, at.height() + 1, 2 * radius, 2 * radius);
+                let rgn = CreateRoundRectRgn(
+                    0,
+                    0,
+                    at.width() + 1,
+                    at.height() + 1 + below,
+                    2 * radius,
+                    2 * radius,
+                );
                 let _ = SetWindowRgn(self.hwnd, Some(rgn), true);
             }
             self.shape = Some(shape);

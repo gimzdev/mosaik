@@ -19,6 +19,7 @@ use mosaik_core::geometry::{Insets, Point, Rect, scale_for_dpi};
 use mosaik_core::layout::{Place, TabGroupId};
 use mosaik_core::snap::{self, DragKind, LiveZone as SnapZone};
 use mosaik_core::window::WindowHandle;
+use mosaik_core::zone::band_above;
 use mosaik_overlay::canvas::Canvas;
 use mosaik_overlay::frame::{Frame, FrameLook, Preview, TagPlace, ZoneView};
 use mosaik_overlay::layered::Stack;
@@ -34,7 +35,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::mover::{self, To};
-use crate::tabs::{AsIsize, BarDrag};
+use crate::tabs::{AsIsize, BarDrag, Spot};
 use crate::thread::{Engine, WM_EVENTS, timer};
 use crate::titles::TitleSpot;
 
@@ -131,7 +132,8 @@ pub(crate) struct Watch {
     pub(crate) moving: Option<WindowHandle>,
     /// The drag preview is on screen (it steps aside while Shift is held).
     pub(crate) preview_visible: bool,
-    rounded: bool,
+    /// Windows 11 rounds window corners; frames and bands follow.
+    pub(crate) rounded: bool,
 }
 
 impl Watch {
@@ -479,7 +481,7 @@ impl Engine {
         if !g.framable() {
             return None;
         }
-        let zone = active.zone_for(g.frame, style)?.clone();
+        let zone = active.zone_for(g.frame, g.resizable, style)?.clone();
         // The tag goes in the window's title bar, or above it, in the band at the top of its
         // zone (the one it is placed below, or will be); not at all for the moment its title bar
         // is being read.
@@ -489,13 +491,18 @@ impl Engine {
                 TitleSpot::Above => {
                     // With tags in title bars, a window just found to have no room is not below
                     // its band yet: the band it is about to sit below.
-                    let band = self.style_of(h).tag_area(zone.rect, zone.dpi).or_else(|| {
-                        let banded = self.settings.frames.banded_style().for_tabs();
-                        self.style()
-                            .title_bars
-                            .then(|| banded.tag_area(zone.rect, zone.dpi))
-                            .flatten()
-                    });
+                    // Right above the window (one that cannot be resized sits lower in its zone).
+                    let band = self
+                        .style_of(h)
+                        .tag_area(zone.rect, zone.dpi)
+                        .or_else(|| {
+                            let banded = self.settings.frames.banded_style().for_tabs();
+                            self.style()
+                                .title_bars
+                                .then(|| banded.tag_area(zone.rect, zone.dpi))
+                                .flatten()
+                        })
+                        .map(|b| band_above(g.frame, b));
                     (
                         true,
                         band.map_or(TagPlace::Above, TagPlace::Band),
@@ -510,6 +517,21 @@ impl Engine {
         if !(ring || tag) {
             return None;
         }
+        // The band above the window that is its own: its tag's, or, for the tab that shows, its
+        // group's strip's when that goes above it. The strip fills its band itself.
+        let band = match (&tag_at, self.group_of_window(h).filter(|g| g.open.len() > 1)) {
+            (_, Some(g)) if g.visible().is_some_and(|(_, w)| *w == h) => match self.strip_spot(&g.id, h) {
+                Spot::At {
+                    band,
+                    place: BarPlace::Band,
+                    ..
+                } => Some(band),
+                _ => None,
+            },
+            (_, Some(_)) => None,
+            (TagPlace::Band(b), None) if tag => Some(*b),
+            _ => None,
+        };
         let look = FrameLook {
             color: zone.color,
             label: zone.name.clone(),
@@ -518,6 +540,9 @@ impl Engine {
             ring,
             tag,
             tag_at,
+            band,
+            fill_band: !in_group,
+            dark: self.dark_theme(),
         };
         Some(FrameInfo {
             rect: g.frame,
@@ -853,6 +878,7 @@ impl Engine {
             label: info.zone.name.clone(),
             dpi: info.zone.dpi,
             dark: self.dark_theme(),
+            rounded: self.watch.rounded,
         };
         // Above the dragged window, which would otherwise cover it around the pointer.
         let above = self.watch.drag.as_ref().map_or(onto, |d| d.window);

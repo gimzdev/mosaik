@@ -32,6 +32,20 @@ pub fn rect(r: RECT) -> Rect {
 
 /// The DPI of the monitor `hwnd` is on (mostly): what its pixels on screen are scaled by, whatever
 /// the window's own DPI awareness (a window that is not DPI aware reports 96 for itself).
+/// The bounds of the monitor `hwnd` is on (taskbar included); `None` when Windows cannot say.
+pub fn bounds_of_monitor_of(hwnd: HWND) -> Option<Rect> {
+    // SAFETY: a monitor handle for any window (the nearest monitor when it is off screen).
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    let mut info = MONITORINFO {
+        cbSize: u32::try_from(std::mem::size_of::<MONITORINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+    // SAFETY: `info` is a MONITORINFO with its size set.
+    unsafe { GetMonitorInfoW(monitor, &raw mut info) }
+        .as_bool()
+        .then(|| rect(info.rcMonitor))
+}
+
 pub fn dpi_of_monitor_of(hwnd: HWND) -> u32 {
     // SAFETY: read-only; any handle value is accepted and the nearest monitor is returned.
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };

@@ -94,30 +94,51 @@ fn close_to(a: Rgb, b: Rgb) -> bool {
     (0.6..=1.05).contains(&factor) && near(a.0, b.0) && near(a.1, b.1) && near(a.2, b.2)
 }
 
+/// The solid band above a window that wears its tag above it, in the light and the dark theme
+/// (`mosaik_overlay::frame::band_color`).
+const BANDS: [Rgb; 2] = [Rgb(0xED, 0xEF, 0xEA), Rgb(0x11, 0x14, 0x1B)];
+
+/// For a window wearing its tag above it: whether the band it sits in is solid, read between the
+/// tag and the window's right edge. `None` when its tag is in its title bar (or not shown).
+pub(crate) fn band_is_solid(frame: Rect, tag: Option<Rect>, dpi: u32) -> Option<bool> {
+    let t = tag.filter(|t| t.top < frame.top)?;
+    let margin = i32::try_from(12 * dpi.max(96) / 96).unwrap_or(12);
+    let got = pixel(Point::new(frame.right - margin, t.center().y));
+    Some(got.is_some_and(|c| BANDS.iter().any(|b| close_to(c, *b))))
+}
+
 /// Checks the ring around a window and its tag (`tag`, as the engine reports it): the pixel just
-/// outside the middle of each side, and one inside the tag pill.
+/// outside the middle of each side, and one inside the tag pill. A window wearing its tag above
+/// it, in a band, has the band inside its ring: the ring's top runs above the band, and the band
+/// is solid between the tag and the window's right edge.
 pub(crate) fn frame_colours(frame: Rect, color: ZoneColor, dpi: u32, tag: Option<Rect>) -> Value {
     let s = f64::from(dpi) / 96.0;
-    // Inside the pill: a few pixels from its left end, half way down.
     #[allow(clippy::cast_possible_truncation)]
-    let tag = tag.map(|t| Point::new(t.left + (4.0 * s).round() as i32, t.center().y));
+    let px = |v: f64| (v * s).round() as i32;
+    let above = tag.filter(|t| t.top < frame.top);
+    // The band's top: 3 px above the tag (25 px above the band's bottom, 28 px high).
+    let top = above.map_or(frame.top, |t| t.top - px(3.0));
+    // Inside the pill: a few pixels from its left end, half way down.
+    let in_tag = tag.map(|t| Point::new(t.left + px(4.0), t.center().y));
     let mut points = vec![
-        ("top", Point::new(frame.center().x, frame.top - 1)),
+        ("top", Point::new(frame.center().x, top - 1)),
         ("bottom", Point::new(frame.center().x, frame.bottom)),
         ("left", Point::new(frame.left - 1, frame.center().y)),
         ("right", Point::new(frame.right, frame.center().y)),
     ];
-    points.extend(tag.map(|t| ("tag", t)));
+    points.extend(in_tag.map(|t| ("tag", t)));
     let mut ok = tag.is_some();
     let mut seen = serde_json::Map::new();
+    let hex = |c: Option<Rgb>| json!(c.map(|Rgb(r, g, b)| format!("#{r:02X}{g:02X}{b:02X}")));
     for (name, p) in points {
         let got = pixel(p);
-        let good = got.is_some_and(|c| close_to(c, color.fill()));
-        ok &= good;
-        seen.insert(
-            name.into(),
-            json!(got.map(|Rgb(r, g, b)| format!("#{r:02X}{g:02X}{b:02X}"))),
-        );
+        ok &= got.is_some_and(|c| close_to(c, color.fill()));
+        seen.insert(name.into(), hex(got));
+    }
+    if let Some(t) = above {
+        let got = pixel(Point::new(frame.right - px(12.0), t.center().y));
+        ok &= got.is_some_and(|c| BANDS.iter().any(|b| close_to(c, *b)));
+        seen.insert("band".into(), hex(got));
     }
     json!({ "expected": format!("#{:02X}{:02X}{:02X}", color.fill().0, color.fill().1, color.fill().2), "ok": ok, "seen": seen })
 }
@@ -651,6 +672,18 @@ fn apps_scenario(
             println!("installed list: {r}");
         }
         return Ok(json!({ "saved": saved, "installed": r }));
+    }
+    // `--only kinds`: windows standing in for kinds of apps (borderless, fixed size, full screen).
+    if only.is_some_and(|o| o.split(',').any(|w| w.trim() == "kinds")) {
+        let r = crate::app_drag::kinds(engine, &targets);
+        input::move_to(original);
+        let _ = ask(
+            engine,
+            Command::DeleteWorkspace {
+                workspace: "Probe apps".into(),
+            },
+        );
+        return Ok(json!({ "saved": saved, "kinds": r }));
     }
     let mut result = crate::app_drag::scenario(engine, scope, &targets, only);
     // A window its app drags itself, without Windows' move loop.

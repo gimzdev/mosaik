@@ -25,7 +25,7 @@ use mosaik_ipc::protocol::{Command, ErrorCode, HotkeyState, Reply, WorkspaceSumm
 use mosaik_win::apps::Apps;
 use mosaik_win::own::{WindowClass, destroy};
 use mosaik_win::rescue::Report;
-use mosaik_win::window::Scanner;
+use mosaik_win::window::{self, Scanner};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -685,7 +685,10 @@ impl Engine {
             for w in &mut snapshot.windows {
                 if let Some(slot) = active.slot_of(w.handle) {
                     w.slot = Some(slot.clone());
-                    w.zone = active.zone_for(w.frame_rect, style).map(|z| z.id.clone());
+                    let resizable = window::geometry(window::hwnd(w.handle)).is_none_or(|g| g.resizable);
+                    w.zone = active
+                        .zone_for(w.frame_rect, resizable, style)
+                        .map(|z| z.id.clone());
                     w.tab_group = groups
                         .iter()
                         .find(|g| g.open.iter().any(|(_, h)| *h == w.handle))

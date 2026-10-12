@@ -28,6 +28,8 @@ pub enum Verdict {
 pub enum Pending {
     Minimized,
     Untitled,
+    /// A game or a video in full screen: left alone until it leaves full screen.
+    FullScreen,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +146,11 @@ pub fn classify(w: &WindowFacts, rules: &Rules) -> Verdict {
     if is_shell(w) {
         return Verdict::Ignore(Ignore::Shell);
     }
+    // Moving a full-screen game or video would take it out of full screen: not even a rule
+    // makes Mosaïk touch it.
+    if w.full_screen && !w.maximized {
+        return Verdict::Pending(Pending::FullScreen);
+    }
 
     let rule = rules
         .user
@@ -167,9 +174,11 @@ pub fn classify(w: &WindowFacts, rules: &Rules) -> Verdict {
         if !w.alt_tab {
             return Verdict::Ignore(Ignore::NotInAltTab);
         }
-        // Popups without a frame (splash screens, menus) are not app windows; a popup with a
-        // resizable frame and a caption or window buttons is (Calculator, Telegram).
-        if w.popup && !(w.resizable && w.caption) {
+        // Popups with nothing of a window about them (splash screens, menus) are not app
+        // windows. A popup with a caption, a frame to resize it by or a minimise button is: a
+        // borderless app that draws its own title bar (Steam, launchers), a game in a window
+        // of its own size, Calculator.
+        if w.popup && !(w.caption || w.resizable || w.minimize_box) {
             return Verdict::Ignore(Ignore::Popup);
         }
     }
@@ -371,6 +380,65 @@ mod tests {
             ),
             Verdict::Manage
         );
+    }
+
+    #[test]
+    fn borderless_app_windows_are_managed_and_splash_screens_are_not() {
+        let rules = Rules::default();
+        // Steam: a borderless window the user can resize, with its own title bar drawn inside.
+        let steam = WindowFacts {
+            popup: true,
+            caption: false,
+            resizable: true,
+            minimize_box: true,
+            ..app("steamwebhelper.exe", "SDL_app", "Steam")
+        };
+        assert_eq!(classify(&steam, &rules), Verdict::Manage);
+        // A game or a launcher in a borderless window of a fixed size, with a taskbar button.
+        let game = WindowFacts {
+            popup: true,
+            caption: false,
+            resizable: false,
+            minimize_box: true,
+            ..app("game.exe", "UnityWndClass", "Vampire Survivors")
+        };
+        assert_eq!(classify(&game, &rules), Verdict::Manage);
+        // A splash screen: no frame to resize it by and nothing to minimise.
+        let splash = WindowFacts {
+            popup: true,
+            caption: false,
+            resizable: false,
+            minimize_box: false,
+            ..app("game.exe", "SplashWnd", "Loading")
+        };
+        assert_eq!(classify(&splash, &rules), Verdict::Ignore(Ignore::Popup));
+    }
+
+    #[test]
+    fn a_full_screen_window_is_left_alone_until_it_leaves_full_screen() {
+        let rules = Rules::default();
+        let playing = WindowFacts {
+            popup: true,
+            caption: false,
+            minimize_box: true,
+            full_screen: true,
+            ..app("game.exe", "UnityWndClass", "Vampire Survivors")
+        };
+        assert_eq!(classify(&playing, &rules), Verdict::Pending(Pending::FullScreen));
+        // Even when the user said to always manage the app.
+        let always = Rules {
+            user: vec![Rule {
+                app: AppMatch::exe("game.exe"),
+                action: RuleAction::Always,
+            }],
+            learned: vec![],
+        };
+        assert_eq!(classify(&playing, &always), Verdict::Pending(Pending::FullScreen));
+        let windowed = WindowFacts {
+            full_screen: false,
+            ..playing
+        };
+        assert_eq!(classify(&windowed, &rules), Verdict::Manage);
     }
 
     #[test]

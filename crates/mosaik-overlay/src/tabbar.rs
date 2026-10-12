@@ -196,6 +196,8 @@ pub struct BarLook {
     pub dpi: u32,
     /// Chips drawn for a dark theme (else light).
     pub dark: bool,
+    /// Windows 11 rounds window corners: a band's top corners follow.
+    pub rounded: bool,
 }
 
 fn px(v: f32) -> i32 {
@@ -414,7 +416,16 @@ impl TabBar {
                 usize::try_from(band.width()).unwrap_or(1),
                 usize::try_from(band.height()).unwrap_or(1),
             )?;
+            let (w, h_band) = (f(band.width()), f(band.height()));
+            let band_fill = Rgba::of(crate::frame::band_color(look.dark), 1.0);
+            let corner = if look.rounded { 8.0 * s } else { 0.0 };
             canvas.render(surface, |pen| {
+                // Above the window, the strip is a solid band (no gap to see through), its top
+                // corners following the window's; in a title bar, only its chips are drawn.
+                if place == BarPlace::Band {
+                    pen.fill_round(Area::new(0.0, 0.0, w, h_band), corner, band_fill);
+                    pen.fill_round(Area::new(0.0, corner.min(h_band), w, h_band), 0.0, band_fill);
+                }
                 if let Some(t) = layout.tag {
                     let tag = Area::new(t.x, top, t.end(), top + h);
                     pen.fill_round(tag, h / 2.0, zone);

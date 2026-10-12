@@ -125,6 +125,15 @@ fn error_in(st: &StateSnapshot, w: HWND, zone: Rect, t: &Targets) -> Option<i32>
     frame_rect(w).map(|f| edge_error(f, t.styles.area(zone, wears_above(st, w))))
 }
 
+/// For a window wearing its tag above it: whether its band is solid (`null` otherwise).
+fn band_solid(st: &StateSnapshot, w: HWND, t: &Targets) -> Value {
+    let me = st.windows.iter().find(|x| x.handle == handle(w));
+    let tag = me.and_then(|x| x.tag);
+    frame_rect(w)
+        .and_then(|f| crate::workspace::band_is_solid(f, tag, t.styles.dpi))
+        .map_or(Value::Null, Value::Bool)
+}
+
 /// For a window whose app kept a size of its own (a minimum larger than the room it was given):
 /// that size, and how far the window is from where the engine fits it (`fit_size`: on screen,
 /// covering as much of its place as it can). `null` when it took the size it was given.
@@ -240,6 +249,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         "drag": drag,
         "error_px": error_in(&st, w, t.zone, t),
         "kept_size": kept_size(&st, w, t.zone, t),
+        "band_solid": band_solid(&st, w, t),
         "tag_above": wears_above(&st, w),
         "tag": tag_place(&st, w),
         "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
@@ -373,6 +383,93 @@ fn hit(p: Point, root: HWND) -> Option<u32> {
     }
 }
 
+/// Windows standing in for kinds of apps the catalog has none of: one that draws its own title
+/// bar in a borderless window (Steam, launchers), a game in a window of a fixed size, the same
+/// borderless; each put through the catalog's steps. Then a game in full screen, which Mosaïk
+/// leaves alone: a workspace saved while it plays does not take it in.
+pub fn kinds(engine: &Engine, t: &Targets) -> Value {
+    let mut out = serde_json::Map::new();
+    let wide = Rect::from_origin_size(
+        t.work.left + t.work.width() / 4,
+        t.work.top + t.work.height() / 5,
+        t.work.width() / 2,
+        t.work.height() * 3 / 5,
+    );
+    let small = Rect::from_origin_size(
+        t.work.left + t.work.width() / 3,
+        t.work.top + t.work.height() / 4,
+        640,
+        420,
+    );
+    for (name, options, rect) in [
+        ("Probe borderless app", " --topmost --borderless", wide),
+        ("Probe game in a fixed window", " --topmost --fixed", small),
+        ("Probe borderless game", " --topmost --borderless --fixed", small),
+    ] {
+        let r = crate::dummy::spawn_with(name, rect, options).map_or_else(
+            |e| json!({ "failed": e }),
+            |(process, w)| {
+                pump_until(500, || false);
+                let r = steps(engine, w, t).unwrap_or_else(|e| json!({ "failed": e }));
+                close(w);
+                if !process.wait(3000) {
+                    let _ = process.kill();
+                }
+                r
+            },
+        );
+        println!("kind {name}: {r}");
+        out.insert(name.into(), r);
+    }
+    let full = full_screen(engine).unwrap_or_else(|e| json!({ "failed": e }));
+    println!("kind full screen: {full}");
+    out.insert("Probe game in full screen".into(), full);
+    Value::Object(out)
+}
+
+/// A game in full screen over the main monitor: what Mosaïk calls it, and what a workspace saved
+/// meanwhile takes in.
+fn full_screen(engine: &Engine) -> Result<Value, String> {
+    use mosaik_ipc::protocol::{Command, Reply};
+    let (process, w) = crate::dummy::spawn_with(
+        "Probe game in full screen",
+        Rect::from_origin_size(0, 0, 10, 10),
+        " --full-screen",
+    )?;
+    pump_until(800, || false);
+    let st = settled(engine)?;
+    let verdict = st
+        .windows
+        .iter()
+        .find(|x| x.handle == handle(w))
+        .map(|x| json!(x.verdict));
+    let saved = match engine.request(
+        Command::Save {
+            workspace: Some("Probe full screen".into()),
+        },
+        std::time::Duration::from_secs(15),
+    ) {
+        Reply::Done { message } => message,
+        other => format!("{other:?}"),
+    };
+    let _ = engine.request(
+        Command::DeleteWorkspace {
+            workspace: "Probe full screen".into(),
+        },
+        std::time::Duration::from_secs(15),
+    );
+    let frame = frame_rect(w);
+    close(w);
+    if !process.wait(3000) {
+        let _ = process.kill();
+    }
+    Ok(json!({
+        "verdict": verdict,
+        "saved": saved,
+        "frame": frame.map(|f| [f.left, f.top, f.right, f.bottom]),
+    }))
+}
+
 /// A window whose app drags it itself (no move loop of Windows': the probe's own window with
 /// `--self-move`), dragged by a press in it into the zone, then onto the tag, then pulled out of
 /// its group by its tab. Its title bar has no caption to grab (`--no-title-room`), as with such
@@ -399,6 +496,7 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
         out["into_zone"] = json!({
             "drag": drag,
             "error_px": error_in(&st, w, t.zone, t),
+            "band_solid": band_solid(&st, w, t),
             "tag_above": wears_above(&st, w),
             "tag": tag_place(&st, w),
             "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),

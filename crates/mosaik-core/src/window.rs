@@ -79,6 +79,13 @@ pub struct WindowFacts {
     pub caption: bool,
     /// `WS_THICKFRAME`: the user can resize it.
     pub resizable: bool,
+    /// `WS_MINIMIZEBOX`: it can be minimised, as app windows can (a splash screen cannot).
+    #[serde(default)]
+    pub minimize_box: bool,
+    /// It covers its whole monitor, taskbar included, without being maximised: a game or a
+    /// video in full screen.
+    #[serde(default)]
+    pub full_screen: bool,
     /// Passes the Alt+Tab rule: it is its own root owner's last active popup.
     pub alt_tab: bool,
     pub elevation: Elevation,

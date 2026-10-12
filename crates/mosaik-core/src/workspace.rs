@@ -98,11 +98,44 @@ pub fn holds(zone: Rect, dpi: u32, frame: Rect, style: FrameStyle) -> bool {
     covered >= IN_ZONE
 }
 
-/// The zone a window sits in (see [`holds`]); the smallest one when zones overlap.
-pub fn zone_holding(frame: Rect, zones: &[(ZoneId, Rect, u32)], style: FrameStyle) -> Option<ZoneId> {
+/// Whether a window that cannot be resized (a game, a fixed-size tool) sits in the zone at
+/// `zone`: Mosaïk puts it in the middle of the zone at its own size, so its centre is in the
+/// zone and most of it (70%) lies in the zone's window area, however small it is next to the
+/// zone. A window that could fill the zone and does not is floating over it ([`holds`]).
+pub fn holds_fixed(zone: Rect, dpi: u32, frame: Rect, style: FrameStyle) -> bool {
+    if !zone.contains(frame.center()) {
+        return false;
+    }
+    let own = frame.area();
+    if own <= 0 {
+        return false;
+    }
+    let area = style.window_area(zone, dpi);
+    // Areas of real screens are far below 2^52, so the conversion is exact.
+    #[allow(clippy::cast_precision_loss)]
+    let inside = frame.overlap_area(area) as f64 / own as f64;
+    inside >= IN_ZONE
+}
+
+/// [`holds`] for a window the user can resize, [`holds_fixed`] for one that cannot be.
+pub fn holds_window(zone: Rect, dpi: u32, frame: Rect, style: FrameStyle, resizable: bool) -> bool {
+    if resizable {
+        holds(zone, dpi, frame, style)
+    } else {
+        holds_fixed(zone, dpi, frame, style)
+    }
+}
+
+/// The zone a window sits in (see [`holds_window`]); the smallest one when zones overlap.
+pub fn zone_holding(
+    frame: Rect,
+    resizable: bool,
+    zones: &[(ZoneId, Rect, u32)],
+    style: FrameStyle,
+) -> Option<ZoneId> {
     zones
         .iter()
-        .filter(|(_, rect, dpi)| holds(*rect, *dpi, frame, style))
+        .filter(|(_, rect, dpi)| holds_window(*rect, *dpi, frame, style, resizable))
         .min_by_key(|(_, rect, _)| rect.area())
         .map(|(id, _, _)| id.clone())
 }
@@ -213,7 +246,7 @@ pub fn capture(
             picks.push(Pick::Maximized(m_index));
             continue;
         }
-        if let Some(z) = zone_holding(w.frame_rect, &kept_live, style) {
+        if let Some(z) = zone_holding(w.frame_rect, w.resizable, &kept_live, style) {
             picks.push(Pick::Kept(z));
             continue;
         }
@@ -369,7 +402,7 @@ pub fn remember(
             Place::Maximized {
                 monitor: remembered_index(&mut refs, topology.monitor_for_rect(w.frame_rect), topology),
             }
-        } else if let Some(zone) = zone_holding(w.frame_rect, &zones, style) {
+        } else if let Some(zone) = zone_holding(w.frame_rect, w.resizable, &zones, style) {
             Place::Zone { zone }
         } else {
             free_place(&mut refs, topology, w.frame_rect)
@@ -699,6 +732,7 @@ mod tests {
     use crate::fixtures;
     use crate::window::WindowFacts;
 
+    /// An app window as most are: titled, with a caption and a frame to resize it by.
     fn win(h: u64, exe: &str, title: &str, frame: Rect) -> WindowFacts {
         WindowFacts {
             handle: WindowHandle(h),
@@ -706,6 +740,9 @@ mod tests {
             class: "C".into(),
             title: title.into(),
             visible: true,
+            caption: true,
+            resizable: true,
+            minimize_box: true,
             frame_rect: frame,
             window_rect: frame,
             dpi: 96,
@@ -1147,6 +1184,36 @@ mod tests {
         );
         // Hiding tags moves the window area by the band: windows placed before still count.
         assert!(holds(zone, 96, area, s.without_tags()));
+    }
+
+    #[test]
+    fn a_window_of_a_fixed_size_sits_in_its_zone_at_its_own_size() {
+        // A game in a 640x480 window that cannot be resized, put in the middle of a half-screen
+        // zone (job 0076: the owner wants games and idle clickers in zones too).
+        let zone = Rect::new(960, 0, 1920, 1032);
+        let s = style();
+        let area = s.window_area(zone, 96);
+        let game = Rect::from_origin_size(
+            area.left + (area.width() - 640) / 2,
+            area.top + (area.height() - 480) / 2,
+            640,
+            480,
+        );
+        assert!(holds_window(zone, 96, game, s, false), "a game Mosaïk put there");
+        assert!(
+            !holds_window(zone, 96, game, s, true),
+            "a window that could fill the zone is only floating over it"
+        );
+        // Larger than the zone: fitted on screen, most of it over the zone.
+        let wide = Rect::new(1912 - 1100, 100, 1912, 800);
+        assert!(holds_window(zone, 96, wide, s, false));
+        // Spanning two zones: not in either.
+        let across = Rect::from_origin_size(700, 300, 640, 480);
+        assert!(!holds_window(zone, 96, across, s, false));
+        assert_eq!(
+            zone_holding(game, false, &[(ZoneId::new("z"), zone, 96)], s),
+            Some(ZoneId::new("z"))
+        );
     }
 
     #[test]

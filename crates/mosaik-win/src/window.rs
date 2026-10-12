@@ -28,7 +28,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetClassNameW,
     GetLastActivePopup, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
     InternalGetWindowText, IsIconic, IsWindow, IsWindowVisible, IsZoomed, WS_CAPTION, WS_CHILD,
-    WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
+    WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::BOOL;
 
@@ -125,6 +125,9 @@ pub struct Geometry {
     pub maximized: bool,
     pub cloaked: bool,
     pub dpi: u32,
+    /// `WS_THICKFRAME`: it can be resized, so in a zone it fills it (one that cannot sits in
+    /// the middle of it at its own size).
+    pub resizable: bool,
 }
 
 impl Geometry {
@@ -139,12 +142,13 @@ pub fn geometry(hwnd: HWND) -> Option<Geometry> {
         return None;
     }
     // SAFETY: read-only queries on a window that existed a moment ago.
-    let (visible, minimized, maximized, dpi) = unsafe {
+    let (visible, minimized, maximized, dpi, style) = unsafe {
         (
             IsWindowVisible(hwnd).as_bool(),
             IsIconic(hwnd).as_bool(),
             IsZoomed(hwnd).as_bool(),
             GetDpiForWindow(hwnd),
+            style_bits(GetWindowLongPtrW(hwnd, GWL_STYLE)),
         )
     };
     Some(Geometry {
@@ -154,6 +158,7 @@ pub fn geometry(hwnd: HWND) -> Option<Geometry> {
         maximized,
         cloaked: cloak(hwnd) != Cloak::None,
         dpi,
+        resizable: style & WS_THICKFRAME.0 != 0,
     })
 }
 
@@ -433,6 +438,20 @@ impl Scanner {
             )
         };
         let window_rect = window_rect(hwnd)?;
+        let frame_rect = frame_rect(hwnd).unwrap_or(window_rect);
+        // Exactly over its whole monitor, taskbar included, and not maximised: a game or a video
+        // in full screen (a window stretched over two monitors is not).
+        let full_screen = !maximized
+            && crate::monitors::bounds_of_monitor_of(hwnd).is_some_and(|m| {
+                [
+                    frame_rect.left - m.left,
+                    frame_rect.top - m.top,
+                    frame_rect.right - m.right,
+                    frame_rect.bottom - m.bottom,
+                ]
+                .iter()
+                .all(|d| d.abs() <= 2)
+            });
         Some(WindowFacts {
             handle: handle(hwnd),
             pid,
@@ -452,10 +471,12 @@ impl Scanner {
             popup: style & WS_POPUP.0 != 0,
             caption: style & WS_CAPTION.0 == WS_CAPTION.0,
             resizable: style & WS_THICKFRAME.0 != 0,
+            minimize_box: style & WS_MINIMIZEBOX.0 != 0,
+            full_screen,
             alt_tab: passes_alt_tab_rule(hwnd),
             elevation: info.elevation,
             window_rect,
-            frame_rect: frame_rect(hwnd).unwrap_or(window_rect),
+            frame_rect,
             dpi,
             own_process: pid == self.own_pid || self.own_pids.contains(&pid),
         })

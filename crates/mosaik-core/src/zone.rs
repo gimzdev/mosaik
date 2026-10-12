@@ -166,6 +166,23 @@ impl FrameStyle {
     }
 }
 
+/// The band a window wears its tag (or its group's strip) in, above it, given its zone's band
+/// `zone_band`: the zone's band for a window right below it; right above a window that sits
+/// lower in its zone (one that cannot be resized, in the middle of the zone), as tall and as
+/// wide as the window. A window that runs into the zone's band (an app that keeps a height of
+/// its own) keeps the zone's band, over its top edge, so the tag stays in its zone.
+pub fn band_above(frame: Rect, zone_band: Rect) -> Rect {
+    if frame.top <= zone_band.bottom {
+        return zone_band;
+    }
+    Rect::new(
+        frame.left.max(zone_band.left),
+        frame.top - zone_band.height(),
+        frame.right.min(zone_band.right),
+        frame.top,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +210,21 @@ mod tests {
         assert_eq!(title_bars.for_tabs(), title_bars);
         assert_eq!(title_bars.window_area(zone, 96), Rect::new(4, 4, 956, 1028));
         assert_eq!(title_bars.tag_area(zone, 96), None);
+    }
+
+    #[test]
+    fn a_band_sits_right_above_its_window() {
+        let zone_band = Rect::new(4, 4, 956, 32);
+        // A window below the band, filling the zone: the zone's band.
+        let filling = Rect::new(4, 32, 956, 1028);
+        assert_eq!(band_above(filling, zone_band), zone_band);
+        // A game of a fixed size in the middle of the zone: right above it, as tall.
+        let game = Rect::new(160, 300, 800, 780);
+        assert_eq!(band_above(game, zone_band), Rect::new(160, 272, 800, 300));
+        // Calculator, keeping a height that runs 22 px into the band: the zone's band, over its
+        // top edge.
+        let tall = Rect::new(4, 10, 956, 1028);
+        assert_eq!(band_above(tall, zone_band), zone_band);
     }
 
     #[test]

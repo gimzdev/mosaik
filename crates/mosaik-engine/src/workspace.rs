@@ -19,8 +19,8 @@ use mosaik_core::store::StoreError;
 use mosaik_core::topology::Topology;
 use mosaik_core::window::{Cloak, WindowFacts, WindowHandle};
 use mosaik_core::workspace::{
-    GroupSeen, Move, Present, Seen, TabSeen, capture, edge_distance, holds, plan_refit, plan_switch, regroup,
-    remember, same_name, workspace_id,
+    GroupSeen, Move, Present, Seen, TabSeen, capture, edge_distance, holds_window, plan_refit, plan_switch,
+    regroup, remember, same_name, workspace_id,
 };
 use mosaik_core::zone::{FrameStyle, ZoneColor, ZoneId};
 use mosaik_ipc::protocol::{ErrorCode, Reply};
@@ -72,11 +72,12 @@ impl Active {
     }
 
     /// The zone a window whose visible frame is `frame` sits in (the rule is
-    /// `mosaik_core::workspace::holds`); the smallest one when zones overlap.
-    pub fn zone_for(&self, frame: Rect, style: FrameStyle) -> Option<&LiveZone> {
+    /// `mosaik_core::workspace::holds_window`: filling it, or in its middle at its own size for
+    /// a window that cannot be resized); the smallest one when zones overlap.
+    pub fn zone_for(&self, frame: Rect, resizable: bool, style: FrameStyle) -> Option<&LiveZone> {
         self.zones
             .iter()
-            .filter(|z| holds(z.rect, z.dpi, frame, style))
+            .filter(|z| holds_window(z.rect, z.dpi, frame, style, resizable))
             .min_by_key(|z| z.rect.area())
     }
 }

@@ -1,11 +1,14 @@
 //! A plain window in its own process, with a classic title bar: something the other probes can
-//! drag, hide and kill around without touching the user's apps.
+//! drag, hide and kill around without touching the user's apps. Options make it stand in for
+//! other kinds of apps: one that draws its own title bar in a borderless window (Steam, launchers),
+//! a game in a window of a fixed size, a game in full screen.
 
 use mosaik_core::geometry::Rect;
 use mosaik_win::own::{WindowClass, plain_wndproc};
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MSG, SW_SHOWNOACTIVATE, ShowWindow, TranslateMessage, WINDOW_EX_STYLE,
-    WS_EX_TOPMOST, WS_OVERLAPPEDWINDOW,
+    WS_CAPTION, WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    WS_SYSMENU, WS_THICKFRAME,
 };
 
 thread_local! {
@@ -17,15 +20,31 @@ thread_local! {
     /// `--no-title-room`: no point of the title bar answers "caption" (an app that draws its own
     /// title bar and moves the window itself): Mosaïk finds no room in it for a tag.
     static NO_ROOM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `--borderless`: no frame of Windows' at all; the app draws its title bar inside the
+    /// window and says where it is (the top 32 px, but for its own buttons at the right), as
+    /// Steam's and many launchers' windows do (SDL, CEF).
+    static BORDERLESS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `--fixed`: it cannot be resized, as most games' windows.
+    static FIXED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost] [--self-move] [--no-title-room]`:
-/// shows the window and runs until it is closed or the process is killed. `--topmost` keeps it
-/// above the user's windows, so a probe that presses the mouse on its title bar never lands on
-/// something else.
+/// The app's own title bar in a `--borderless` window, and its buttons at the right of it.
+const OWN_TITLE_BAR: i32 = 32;
+const OWN_BUTTONS: i32 = 138;
+const RESIZE_EDGE: i32 = 6;
+
+/// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost] [--self-move] [--no-title-room]
+/// [--borderless] [--fixed] [--full-screen]`: shows the window and runs until it is closed or the
+/// process is killed. `--topmost` keeps it above the user's windows, so a probe that presses the
+/// mouse on its title bar never lands on something else. `--full-screen` covers the main monitor,
+/// taskbar included, borderless, as a game in full screen.
 pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
-    SELF_MOVE.with(|m| m.set(args.iter().any(|a| a == "--self-move")));
-    NO_ROOM.with(|m| m.set(args.iter().any(|a| a == "--no-title-room")));
+    let has = |o: &str| args.iter().any(|a| a == o);
+    SELF_MOVE.with(|m| m.set(has("--self-move")));
+    NO_ROOM.with(|m| m.set(has("--no-title-room")));
+    let full_screen = has("--full-screen");
+    BORDERLESS.with(|m| m.set(has("--borderless") || full_screen));
+    FIXED.with(|m| m.set(has("--fixed") || full_screen));
     let title = args
         .iter()
         .position(|a| a == "--title")
@@ -41,14 +60,33 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
             (v.len() == 4).then(|| Rect::new(v[0], v[1], v[2], v[3]))
         })
         .unwrap_or(Rect::from_origin_size(200, 200, 640, 420));
-    let ex = if args.iter().any(|a| a == "--topmost") {
+    let rect = if full_screen {
+        mosaik_win::monitors::topology()
+            .map_err(|e| e.to_string())?
+            .primary()
+            .bounds
+    } else {
+        rect
+    };
+    let ex = if has("--topmost") {
         WS_EX_TOPMOST
     } else {
         WINDOW_EX_STYLE(0)
     };
+    // Borderless: a popup, with the frame to resize it by and the buttons of a window, as SDL and
+    // CEF make them; fixed: without the frame and the maximise button.
+    let style = match (
+        BORDERLESS.with(std::cell::Cell::get),
+        FIXED.with(std::cell::Cell::get),
+    ) {
+        (false, false) => WS_OVERLAPPEDWINDOW,
+        (false, true) => WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        (true, false) => WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+        (true, true) => WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
+    };
     let class = WindowClass::register("MosaikProbeDummy", Some(dummy_proc)).map_err(|e| e.to_string())?;
     let hwnd = class
-        .create(&title, WS_OVERLAPPEDWINDOW, ex, rect, None)
+        .create(&title, style, ex, rect, None)
         .map_err(|e| e.to_string())?;
     // SAFETY: our own window; standard message loop until WM_QUIT.
     unsafe {
@@ -76,6 +114,47 @@ unsafe extern "system" fn dummy_proc(
         // SAFETY: ends this process's message loop.
         unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0) };
         return windows::Win32::Foundation::LRESULT(0);
+    }
+    if BORDERLESS.with(std::cell::Cell::get) {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT,
+            HTTOPRIGHT, WM_NCCALCSIZE, WM_NCHITTEST,
+        };
+        match msg {
+            // No frame of Windows': the whole window is the app's.
+            WM_NCCALCSIZE if wparam.0 != 0 => return windows::Win32::Foundation::LRESULT(0),
+            WM_NCHITTEST => {
+                let mut r = windows::Win32::Foundation::RECT::default();
+                // SAFETY: our own window; valid out pointer.
+                let _ = unsafe { GetWindowRect(hwnd, &raw mut r) };
+                // Screen coordinates as MAKELPARAM packs them, signed 16-bit each.
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let word = |shift: u32| i32::from(((lparam.0 >> shift) & 0xFFFF) as u16 as i16);
+                let (x, y) = (word(0), word(16));
+                let fixed = FIXED.with(std::cell::Cell::get);
+                let (left, right) = (x < r.left + RESIZE_EDGE, x >= r.right - RESIZE_EDGE);
+                let (top, bottom) = (y < r.top + RESIZE_EDGE, y >= r.bottom - RESIZE_EDGE);
+                let code = match (fixed, top, bottom, left, right) {
+                    (false, true, _, true, _) => HTTOPLEFT,
+                    (false, true, _, _, true) => HTTOPRIGHT,
+                    (false, _, true, true, _) => HTBOTTOMLEFT,
+                    (false, _, true, _, true) => HTBOTTOMRIGHT,
+                    (false, true, ..) => HTTOP,
+                    (false, _, true, ..) => HTBOTTOM,
+                    (false, _, _, true, _) => HTLEFT,
+                    (false, _, _, _, true) => HTRIGHT,
+                    _ if y < r.top + OWN_TITLE_BAR
+                        && x < r.right - OWN_BUTTONS
+                        && !NO_ROOM.with(std::cell::Cell::get) =>
+                    {
+                        HTCAPTION
+                    }
+                    _ => HTCLIENT,
+                };
+                return windows::Win32::Foundation::LRESULT(isize::try_from(code).unwrap_or(1));
+            }
+            _ => {}
+        }
     }
     if msg == windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST && NO_ROOM.with(std::cell::Cell::get) {
         use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, HTCAPTION, HTCLIENT};

@@ -20,7 +20,7 @@ use mosaik_core::store::Saved;
 use mosaik_core::tabs::{GroupNow, Reach, plan_tabs};
 use mosaik_core::window::{Cloak, WindowHandle};
 use mosaik_core::workspace::{app_match, edge_distance};
-use mosaik_core::zone::{ZoneColor, ZoneId};
+use mosaik_core::zone::{ZoneColor, ZoneId, band_above};
 use mosaik_overlay::layered::Stack;
 use mosaik_overlay::tabbar::{self, BarInput, BarLook, BarPlace, Hit, TabBar, TabView};
 use mosaik_win::hide::Hidden;
@@ -259,10 +259,11 @@ impl Engine {
             }
             (g.frame, g.maximized)
         };
+        let resizable = window::geometry(window::hwnd(visible)).is_none_or(|g| g.resizable);
         let zone = self
             .active
             .as_ref()
-            .and_then(|a| a.zone_for(frame, style))
+            .and_then(|a| a.zone_for(frame, resizable, style))
             .filter(|_| !maximized)
             .cloned();
         let monitor = self.topology.as_ref().map(|t| t.monitor_for_rect(frame).clone());
@@ -300,7 +301,8 @@ impl Engine {
             && let Some(band) = banded.tag_area(z.rect, z.dpi)
         {
             return Spot::At {
-                band,
+                // Right above the visible tab (one that cannot be resized sits lower in the zone).
+                band: band_above(frame, band),
                 place: BarPlace::Band,
                 color,
                 label,
@@ -478,6 +480,7 @@ impl Engine {
             label: label.clone(),
             dpi: *dpi,
             dark: self.dark_theme(),
+            rounded: self.watch.rounded,
         };
         // While a window is dragged over the strip, the strip shows above it.
         let above = match (drop_at, dragged) {

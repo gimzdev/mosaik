@@ -14,7 +14,8 @@ pub struct App {
     pub name: &'static str,
     pub target: String,
     pub args: String,
-    /// The program that owns the window, lower case.
+    /// The program that owns the window, lower case (several, separated by `|`, when the app's
+    /// window may belong to one of its helper programs).
     pub exe: &'static str,
     /// The window class, when the program owns several kinds of windows.
     pub class: Option<&'static str>,
@@ -170,6 +171,20 @@ pub fn catalog() -> Vec<App> {
             exe: "mintty.exe",
             class: Some("mintty"),
         },
+        // Steam's library window: borderless, its own title bar drawn by Steam (SDL and CEF).
+        // Opening it shows the window of the Steam already running, signed in or not; the test
+        // presses only where Steam says its title bar is free, and closing the window leaves
+        // Steam in the tray.
+        App {
+            name: "Steam",
+            target: first_existing(&[
+                format!("{pf86}\\Steam\\steam.exe"),
+                format!("{pf}\\Steam\\steam.exe"),
+            ]),
+            args: "steam://open/main".into(),
+            exe: "steam.exe|steamwebhelper.exe",
+            class: None,
+        },
     ]
 }
 
@@ -195,7 +210,10 @@ pub fn open(app: &App, scanner: &mut Scanner) -> Result<Opened, String> {
                 continue;
             }
             let Some(f) = scanner.facts(h) else { continue };
-            let exe_ok = f.exe.as_deref() == Some(app.exe);
+            let exe_ok = f
+                .exe
+                .as_deref()
+                .is_some_and(|e| app.exe.split('|').any(|x| x == e));
             let class_ok = app.class.is_none_or(|c| f.class.eq_ignore_ascii_case(c));
             if exe_ok && class_ok && classify(&f, &Rules::default()) == Verdict::Manage {
                 // Let the app finish its first layout before measuring anything.

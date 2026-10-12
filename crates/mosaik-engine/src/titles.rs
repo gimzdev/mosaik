@@ -443,7 +443,7 @@ impl Engine {
             let style = self.style();
             let label = match (self.settings.frames.show_tags, &self.active) {
                 (true, Some(a)) if a.slot_of(h).is_some() => {
-                    a.zone_for(g.frame, style).map(|z| z.name.clone())
+                    a.zone_for(g.frame, g.resizable, style).map(|z| z.name.clone())
                 }
                 _ => None,
             };
@@ -505,7 +505,7 @@ impl Engine {
             let zone = window::geometry(window::hwnd(h)).and_then(|g| {
                 self.active
                     .as_ref()
-                    .and_then(|a| a.zone_for(g.frame, self.style_of(h)))
+                    .and_then(|a| a.zone_for(g.frame, g.resizable, self.style_of(h)))
                     .map(|z| (z.rect, z.dpi))
             });
             if want {
