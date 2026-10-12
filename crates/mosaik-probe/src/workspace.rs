@@ -56,13 +56,13 @@ fn shot(dir: Option<&std::path::Path>, name: &str, windows: &[HWND], dpi: u32) {
     }
 }
 
-fn ask(engine: &Engine, command: Command) -> (Reply, f64) {
+pub(crate) fn ask(engine: &Engine, command: Command) -> (Reply, f64) {
     let start = Instant::now();
     let reply = engine.request(command, TIMEOUT);
     (reply, start.elapsed().as_secs_f64() * 1000.0)
 }
 
-fn done(reply: &Reply) -> Result<String, String> {
+pub(crate) fn done(reply: &Reply) -> Result<String, String> {
     match reply {
         Reply::Done { message } => Ok(message.clone()),
         Reply::Error { message, hint, .. } => Err(format!("{message} {}", hint.clone().unwrap_or_default())),
@@ -96,7 +96,7 @@ fn close_to(a: Rgb, b: Rgb) -> bool {
 
 /// Checks the ring around a window and its tag (`tag`, as the engine reports it): the pixel just
 /// outside the middle of each side, and one inside the tag pill.
-fn frame_colours(frame: Rect, color: ZoneColor, dpi: u32, tag: Option<Rect>) -> Value {
+pub(crate) fn frame_colours(frame: Rect, color: ZoneColor, dpi: u32, tag: Option<Rect>) -> Value {
     let s = f64::from(dpi) / 96.0;
     // Inside the pill: a few pixels from its left end, half way down.
     #[allow(clippy::cast_possible_truncation)]
@@ -122,11 +122,11 @@ fn frame_colours(frame: Rect, color: ZoneColor, dpi: u32, tag: Option<Rect>) -> 
     json!({ "expected": format!("#{:02X}{:02X}{:02X}", color.fill().0, color.fill().1, color.fill().2), "ok": ok, "seen": seen })
 }
 
-struct Probe {
-    title: &'static str,
-    process: mosaik_win::process::Process,
-    hwnd: HWND,
-    tiled: Rect,
+pub(crate) struct Probe {
+    pub(crate) title: &'static str,
+    pub(crate) process: mosaik_win::process::Process,
+    pub(crate) hwnd: HWND,
+    pub(crate) tiled: Rect,
 }
 
 /// The styles the engine places windows with: its own (tags in title bars, or in a band above
@@ -139,7 +139,7 @@ pub(crate) struct Styles {
 }
 
 impl Styles {
-    fn of(engine: &Engine, dpi: u32) -> Result<Self, String> {
+    pub(crate) fn of(engine: &Engine, dpi: u32) -> Result<Self, String> {
         match engine.request(Command::Settings, TIMEOUT) {
             Reply::Settings { settings, .. } => Ok(Self {
                 style: settings.frames.effective_style(),
@@ -230,14 +230,20 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             }
         })
     };
-    // An editor on the left, a terminal and a review window stacked on the right.
+    // An editor on the left, a terminal and a review window stacked on the right; with
+    // `--monitors`, the editor on the main monitor and the other two side by side on another.
+    let two_monitors = args.iter().any(|a| a == "--monitors");
     let split = work.left + work.width() * 55 / 100;
     let middle = work.top + work.height() / 2;
-    let layout = [
-        ("Probe Code", Rect::new(work.left, work.top, split, work.bottom)),
-        ("Probe Terminal", Rect::new(split, work.top, work.right, middle)),
-        ("Probe Review", Rect::new(split, middle, work.right, work.bottom)),
-    ];
+    let layout = if two_monitors {
+        crate::monitors::layout(&topology)?
+    } else {
+        [
+            ("Probe Code", Rect::new(work.left, work.top, split, work.bottom)),
+            ("Probe Terminal", Rect::new(split, work.top, work.right, middle)),
+            ("Probe Review", Rect::new(split, middle, work.right, work.bottom)),
+        ]
+    };
     let mut probes = Vec::new();
     for (title, tiled) in layout {
         let start = Rect::from_origin_size(work.left + 100, work.top + 100, 500, 400);
@@ -285,6 +291,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     let result = match &browser {
         Some(b) => browser_scenario(&engine, &probes, dpi, b, work),
         None if soak.is_some() => soak_scenario(&engine, &probes, work, soak.unwrap_or_default()),
+        None if two_monitors => crate::monitors::scenario(&engine, &probes, &topology, &dir),
         None if args.iter().any(|a| a == "--eight") => {
             let aside: Vec<HWND> = probes.iter().map(|p| p.hwnd).collect();
             crate::soak::eight(&engine, &aside, work)
@@ -871,7 +878,7 @@ impl Probe {
 
 /// Presses the left button at `from` (only on a window of this probe: a probe window, or the
 /// tab strip the engine in this process draws), moves to `to` in small steps, releases.
-fn drag(from: Point, to: Point, expected: HWND) -> Result<(), String> {
+pub(crate) fn drag(from: Point, to: Point, expected: HWND) -> Result<(), String> {
     drag_path(&[from, to], expected)
 }
 

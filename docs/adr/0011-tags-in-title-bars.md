@@ -47,7 +47,10 @@ stretches of its title bar.
   places tags and strips until the new reading comes, but moves no window into or out of a band
   (job 0067: Calculator, made the visible tab of a wider group, would have had a 224 px stretch
   for its strip). A reading taken at a size the window no longer has (it moved into a zone or a
-  group meanwhile) is taken again at once.
+  group meanwhile) is taken again at once. And a window moves into or out of its band only when
+  a second reading, taken at least 250 ms after the first asked for it, agrees: an app shown
+  again answers differently for a moment (job 0070: Calculator, shown again as a tab, had room
+  for a strip in one reading and not in the next, 40 ms later, and moved twice).
 - **No room, no squeezing.** A window whose title bar has no stretch wide enough (an app that
   draws its own title bar and moves its window itself, a narrow editor full of menus) wears its
   tag or strip above it, as before: it is placed below a band at the top of its zone (`banded`).
@@ -72,8 +75,10 @@ stretches of its title bar.
   of its title bar is its own content): it wears its tag above it.
 - A long title can run under the tag in a narrow window: Windows draws classic titles from the
   left and truncates them at the buttons; the tag covers their end, as browsers' tabs do.
-- Reading costs about 200 messages to the app per reading, a few milliseconds for an app that is
-  responsive, on Mosaïk's reading thread.
+- Reading costs about 200 messages to the app, 3 to 30 ms per window measured (job 0070: the
+  probe's windows, VS Code, Calculator), on Mosaïk's reading thread. A window that must go into
+  or out of a band does so about a quarter of a second after its first reading, once the second
+  agrees.
 - A window that is not per-monitor DPI aware is asked in its own scaled coordinates
   (`PhysicalToLogicalPointForPerMonitorDPI`); this is tested at 100% only so far.
 - A title bar changed while its window stays in front, without a new title, is read again only

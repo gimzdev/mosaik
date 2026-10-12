@@ -47,6 +47,8 @@ mod idle;
 mod kbd;
 #[cfg(windows)]
 mod matrix;
+#[cfg(windows)]
+mod monitors;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod pixels;
 #[cfg_attr(not(windows), allow(dead_code))]
