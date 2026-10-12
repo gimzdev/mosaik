@@ -61,8 +61,8 @@ new in this version" and the listing below change.
     place in one click, with undo · Tabs for any app, not only the browser · One shortcut to
     switch workspaces, with a preview of each · Works across monitors and scales · Your layouts
     stay on your computer · A safety net brings back every window, always.
-  - *What's new in this version* (1.1.0): "Every window in a zone now starts on the same line,
-    below its zone's bar. Resize a window and the zones beside it follow. Arrange puts every
+  - *What's new in this version* (1.1.0): "Every window starts at the top of its zone, and zones
+    sit closer together. Resize a window and the zones beside it follow. Arrange puts every
     window in the zone that suits it, in one click, with undo. A quick menu at the screen's
     edge. Four more zone presets."
   - *Screenshots*: at least one, 1920x1080, of Mosaïk in use (zones with tags, a tab strip, the

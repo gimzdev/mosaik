@@ -36,13 +36,13 @@ const monitors: MonitorState[] = [
 ];
 
 const settings: Settings = {
-  version: 3,
+  version: 4,
   switcher_hotkey: 'Win+Alt+Space',
   snap: { enabled: true, invert_shift: false, near: 48, resize_zones: true },
   frames: {
     show_frames: true,
     show_tags: true,
-    tags_in_title_bar: false,
+    tags_in_title_bar: true,
     style: { gap: 4, tag_band: 28, border: 2 },
   },
   tab_hiding: null,

@@ -3,7 +3,7 @@
 //! their colours, scramble them, switch back and time it, then (with `--drag`) drag a window
 //! into another zone with the mouse. `--browser edge|chrome` drags browser tabs out into the
 //! workspace (`browser.rs`); `--apps` puts real apps into zones and tabs (`app_drag.rs`).
-//! Tags go above windows, as in the app; `--title-bars` puts them in title bars. `--shots DIR`
+//! Tags go in title bars, as in the app; `--tags-above` puts them above windows. `--shots DIR`
 //! saves pictures of the probe windows' title bars at a few steps.
 //!
 //! Everything happens in a scratch folder: the user's own workspaces and settings are not read
@@ -245,9 +245,9 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     let dir = std::env::temp_dir().join(format!("mosaik-probe-workspace-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    if args.iter().any(|a| a == "--title-bars") {
+    if args.iter().any(|a| a == "--tags-above") {
         let mut settings = Settings::default();
-        settings.frames.tags_in_title_bar = true;
+        settings.frames.tags_in_title_bar = false;
         Store::new(&dir).save(&settings).map_err(|e| e.to_string())?;
     }
     let notices: Arc<Mutex<Vec<String>>> = Arc::default();

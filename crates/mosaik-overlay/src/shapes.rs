@@ -3,6 +3,7 @@
 //! and a tag (a pill with a name in it).
 
 use mosaik_core::geometry::{Point, Rect};
+use mosaik_core::zone::{TagCut, tag_cut};
 use mosaik_win::error::Result;
 
 use crate::canvas::{Align, Area, Canvas, Rgba, Weight};
@@ -163,6 +164,30 @@ impl TagLook {
     pub fn height(&self) -> i32 {
         px(f(mosaik_core::zone::CHIP_HEIGHT) * self.scale)
     }
+
+    /// The DPI of the monitor the tag is drawn for.
+    fn dpi(&self) -> u32 {
+        // Scales are a few hundred percent at most.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let dpi = (self.scale * 96.0).round() as u32;
+        dpi.max(1)
+    }
+
+    /// What the tag shows when it is cut to `cut`, and the room kept at each end: the zone's
+    /// name, or its initial alone (in capitals, as initials are written).
+    fn shown(&self, cut: TagCut) -> Option<(String, f32)> {
+        let text = match cut {
+            TagCut::Hidden => return None,
+            TagCut::Initial(_) => self.text.trim().chars().next()?.to_uppercase().collect(),
+            TagCut::Whole(_) | TagCut::Trimmed(_) => self.text.clone(),
+        };
+        let pad = if matches!(cut, TagCut::Initial(_)) {
+            0.0
+        } else {
+            Self::PAD * self.scale
+        };
+        (!text.trim().is_empty()).then_some((text, pad))
+    }
 }
 
 /// The width a tag needs to show all of `text` at `scale` (1.0 at 100%).
@@ -173,7 +198,7 @@ pub fn tag_width(canvas: &mut Canvas, text: &str, scale: f32) -> i32 {
 /// A pill-shaped name tag.
 pub struct Tag {
     window: LayeredWindow,
-    drawn: Option<(TagLook, i32)>,
+    drawn: Option<(TagLook, TagCut)>,
     /// The width the text needs, for the look it was measured for: measuring lays the text out,
     /// which is not worth doing every time the window moves.
     natural: Option<(String, u32, i32)>,
@@ -188,8 +213,9 @@ impl Tag {
         })
     }
 
-    /// How wide the tag is drawn for `look`, at most `max_width` pixels.
-    pub fn width(&mut self, canvas: &mut Canvas, look: &TagLook, max_width: i32) -> i32 {
+    /// How the tag is drawn for `look` in at most `max_width` pixels: whole, cut short, cut to
+    /// its initial, or not at all (`mosaik_core::zone::tag_cut`).
+    pub fn cut(&mut self, canvas: &mut Canvas, look: &TagLook, max_width: i32) -> TagCut {
         // Scales are a few hundred percent at most.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let scale_key = (look.scale * 100.0).round() as u32;
@@ -201,7 +227,12 @@ impl Tag {
                 width
             }
         };
-        natural.min(max_width)
+        tag_cut(natural, max_width, look.dpi())
+    }
+
+    /// How wide the tag is drawn for `look`, at most `max_width` pixels (0 when it is not).
+    pub fn width(&mut self, canvas: &mut Canvas, look: &TagLook, max_width: i32) -> i32 {
+        self.cut(canvas, look, max_width).width()
     }
 
     /// Shows the tag with its top-left corner at `at`, at most `max_width` pixels wide.
@@ -214,20 +245,19 @@ impl Tag {
         stack: Stack,
     ) -> Result<()> {
         let text_size = TagLook::TEXT * look.scale;
-        let pad = TagLook::PAD * look.scale;
-        let width = self.width(canvas, look, max_width);
-        let height = look.height();
-        if width < height || look.text.trim().is_empty() {
+        let cut = self.cut(canvas, look, max_width);
+        let (width, height) = (cut.width(), look.height());
+        let Some((text, pad)) = look.shown(cut).filter(|_| width >= height) else {
             self.hide();
             return Ok(());
-        }
-        if self.drawn.as_ref() != Some(&(look.clone(), width)) {
+        };
+        if self.drawn.as_ref() != Some(&(look.clone(), cut)) {
             let surface = self.window.surface(size(width), size(height))?;
             canvas.render(surface, |pen| {
                 let all = Area::new(0.0, 0.0, f(width), f(height));
                 pen.fill_round(all, f(height) / 2.0, look.fill);
                 pen.text(
-                    &look.text,
+                    &text,
                     Area::new(pad, 0.0, f(width) - pad, f(height)),
                     text_size,
                     Weight::SemiBold,
@@ -236,7 +266,7 @@ impl Tag {
                 )
             })?;
             self.window.present(at, 255)?;
-            self.drawn = Some((look.clone(), width));
+            self.drawn = Some((look.clone(), cut));
         } else if self.window.shown_at().is_none() {
             self.window.present(at, 255)?;
         } else {

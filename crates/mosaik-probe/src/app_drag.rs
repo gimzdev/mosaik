@@ -460,7 +460,7 @@ pub fn kinds(engine: &Engine, t: &Targets) -> Value {
     }
     // A borderless game of a fixed size that moves itself when dragged anywhere, with no title
     // bar to grab and no room for a tag: it keeps its size, centred across its zone and at its
-    // top, below a band right above it.
+    // top, and wears its ring alone (below a band right above it with tags set to go above).
     let small_self = Rect::from_origin_size(
         t.work.left + t.work.width() / 3,
         t.work.top + t.work.height() / 4,
@@ -529,7 +529,8 @@ fn full_screen(engine: &Engine) -> Result<Value, String> {
 /// A window whose app drags it itself (no move loop of Windows': the probe's own window with
 /// `--self-move`), dragged by a press in it into the zone, then onto the tag, then pulled out of
 /// its group by its tab. Its title bar has no caption to grab (`--no-title-room`), as with such
-/// apps, so it wears its tag and strip above it, below a band.
+/// apps: as the tab that shows, it wears its group's strip above it, below a band; alone, its
+/// ring alone, at the top of its zone.
 pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
     let place = Rect::from_origin_size(
         t.work.left + t.work.width() / 3,

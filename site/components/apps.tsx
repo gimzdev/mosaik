@@ -1,5 +1,5 @@
 /* The pretend apps drawn inside the demo desktops. Plain markup, sized in pixels on a 1280 px canvas. */
-import { memo, useId, type ReactNode } from 'react';
+import { memo, useId, type CSSProperties, type ReactNode } from 'react';
 import { TILES, ZONE, type Win } from '@/lib/data';
 import { Icon, Wordmark } from '@/components/ui';
 
@@ -843,30 +843,24 @@ export const AppBody = memo(function AppBody({ win }: { win: Pick<Win, 'kind' | 
 });
 
 /**
- * A window. With Mosaïk it sits right below a bar carrying its zone's tag (and a tab group's chips, `strip`),
- * and the zone's ring goes around the bar and the window together, as in the app; plain, it is just a window,
- * below the bar's room; flat, it is maximised.
+ * A window. With Mosaïk it wears its zone frame, and its zone tag in its own title bar, next to its buttons
+ * (`tagAt` places it elsewhere in that bar); plain, it is just a window; flat, it is maximised.
  */
-export function ZoneFrame({ tag, zone, plain, flat, strip, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; strip?: ReactNode; children: ReactNode }) {
+export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; tagAt?: CSSProperties; children: ReactNode }) {
   const z = ZONE[zone];
-  if (flat) return <div className="h-full w-full overflow-hidden">{children}</div>;
   return (
     <div className="relative h-full w-full">
+      <span
+        className="absolute z-10 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
+        style={{ top: 7, right: 140, ...tagAt, background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
+      >
+        {tag}
+      </span>
       <div
-        className="pointer-events-none absolute inset-0 rounded-[10px] transition-opacity duration-300"
-        style={{ boxShadow: `0 0 0 2px ${z.bg}, 0 22px 44px -12px rgba(0,0,0,0.6)`, opacity: plain ? 0 : 1 }}
-      />
-      <div className="absolute inset-x-0 top-0 flex h-[28px] items-center gap-1.5 rounded-t-[10px] bg-[#11141B] px-[5px] transition-opacity duration-300" style={{ opacity: plain ? 0 : 1 }}>
-        <span className="flex h-[20px] shrink-0 items-center rounded-full px-[10px] text-[11.5px] font-semibold leading-none" style={{ background: z.bg, color: z.fg }}>
-          {tag}
-        </span>
-        {strip}
-      </div>
-      <div
-        className="absolute inset-x-0 bottom-0 top-[28px] overflow-hidden transition-[box-shadow,border-radius] duration-300"
+        className="h-full w-full overflow-hidden transition-[box-shadow] duration-300"
         style={{
-          borderRadius: plain ? 10 : '0 0 10px 10px',
-          boxShadow: plain ? '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)' : 'none',
+          borderRadius: flat ? 0 : 10,
+          boxShadow: flat ? 'none' : plain ? '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)' : `0 0 0 2px ${z.bg}, 0 22px 44px -12px rgba(0,0,0,0.6)`,
         }}
       >
         {children}

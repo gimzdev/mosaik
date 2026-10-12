@@ -3,7 +3,7 @@
 //! A zone is stored as a fraction of its monitor's work area, so it keeps its shape when the
 //! resolution, the scale or the taskbar changes. Inside the zone, with a small gap between
 //! neighbouring zones, the window wears the zone's tag in its own title bar, or sits below a band
-//! that carries the tag (tags set to go above windows, or no room in its title bar).
+//! that carries the tag when tags are set to go above windows.
 
 use serde::{Deserialize, Serialize};
 
@@ -119,6 +119,53 @@ impl Default for FrameStyle {
 
 /// The height of a tag and of a tab's chip at 100%.
 pub const CHIP_HEIGHT: i32 = 21;
+
+/// The width of a tag cut down to its zone's initial, at 100%: the least room a tag is drawn in.
+pub const TAG_INITIAL: i32 = 24;
+
+/// The least room, at 100%, for a tag's name cut short with an ellipsis ("Res…"); with less, the
+/// initial alone.
+pub const TAG_TRIMMED: i32 = 48;
+
+/// How a zone's tag fits the room it has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TagCut {
+    /// The whole name, this wide.
+    Whole(i32),
+    /// The name cut short with an ellipsis, this wide.
+    Trimmed(i32),
+    /// The zone's initial alone, this wide.
+    Initial(i32),
+    /// No room: no tag (the window wears its ring alone).
+    Hidden,
+}
+
+impl TagCut {
+    /// How wide the tag is drawn (0 when it is not).
+    pub const fn width(self) -> i32 {
+        match self {
+            TagCut::Whole(w) | TagCut::Trimmed(w) | TagCut::Initial(w) => w,
+            TagCut::Hidden => 0,
+        }
+    }
+}
+
+/// How a tag whose whole name is `natural` pixels wide fits in `room` pixels, on a monitor at
+/// `dpi`: whole, cut short, cut to its initial, or not at all.
+pub fn tag_cut(natural: i32, room: i32, dpi: u32) -> TagCut {
+    let px = |v: i32| scale_for_dpi(v, dpi);
+    if natural <= 0 {
+        TagCut::Hidden
+    } else if natural <= room {
+        TagCut::Whole(natural)
+    } else if room >= px(TAG_TRIMMED) {
+        TagCut::Trimmed(room)
+    } else if room >= px(TAG_INITIAL) {
+        TagCut::Initial(px(TAG_INITIAL))
+    } else {
+        TagCut::Hidden
+    }
+}
 
 /// The least band height a tab strip needs.
 pub const TAB_STRIP_BAND: i32 = 24;
@@ -244,6 +291,31 @@ mod tests {
         let a = style.window_area(Rect::new(0, 0, 1920, 2064), 192);
         let b = style.window_area(Rect::new(1920, 0, 3840, 2064), 192);
         assert_eq!(b.left - a.right, 2 * scale_for_dpi(style.border, 192));
+    }
+
+    #[test]
+    fn a_tag_with_little_room_is_cut_to_its_initial_then_to_nothing() {
+        // "Research", 81 px wide whole, in title bars with less and less room.
+        assert_eq!(tag_cut(81, 300, 96), TagCut::Whole(81));
+        assert_eq!(tag_cut(81, 81, 96), TagCut::Whole(81));
+        // The name cut short ("Res…"), as wide as the room.
+        assert_eq!(tag_cut(81, 60, 96), TagCut::Trimmed(60));
+        assert_eq!(tag_cut(81, 48, 96), TagCut::Trimmed(48));
+        // Too little for letters and an ellipsis: the initial alone, in a chip of its own width
+        // (a browser full of tabs keeps a short stretch to be grabbed by).
+        assert_eq!(tag_cut(81, 47, 96), TagCut::Initial(24));
+        assert_eq!(tag_cut(81, 24, 96), TagCut::Initial(24));
+        // Less than that: no tag; the window wears its ring alone.
+        assert_eq!(tag_cut(81, 23, 96), TagCut::Hidden);
+        assert_eq!(tag_cut(81, 0, 96), TagCut::Hidden);
+        // A short name fits where its initial would.
+        assert_eq!(tag_cut(30, 30, 96), TagCut::Whole(30));
+        // Everything scales with the monitor.
+        assert_eq!(tag_cut(162, 90, 192), TagCut::Initial(48));
+        assert_eq!(tag_cut(162, 96, 192), TagCut::Trimmed(96));
+        assert_eq!(tag_cut(162, 47, 192), TagCut::Hidden);
+        // Nothing measured yet (no canvas): nothing to draw.
+        assert_eq!(tag_cut(0, 300, 96), TagCut::Hidden);
     }
 
     #[test]

@@ -2,11 +2,13 @@
 
 ## 1.1.0
 
-### Every window on one line
+### Every window at the top of its zone
 
-- Every window in a zone now sits right below a bar at the top of its zone that carries its tag,
-  so windows side by side start at the same line, whatever their title bars. Settings from 1.0
-  move to it once, with a note; tags can still go in title bars (Settings, Tags and tabs).
+- A window whose title bar has little room for its zone's tag no longer sits lower than its
+  neighbours: it stays at the top of its zone, and its tag is cut short, then to the zone's
+  initial in a small round chip; with no room even for that, it wears its coloured ring alone.
+  Only the tab that shows of a group with no room for its tabs sits below a bar, so the tabs
+  stay in reach. Every window fills its zone; no band of empty space sits above any of them.
 - A window that cannot be resized keeps its size centred across its zone and at its top, on the
   same line as its neighbours, no longer in the middle.
 - Zones sit closer together: windows are as far apart as their coloured rings are wide, so no
@@ -46,7 +48,7 @@
 ### Under the hood
 
 - `mosaikctl state` lists the quick menu, where it is and its rows. The protocol is version 3;
-  settings are format 3.
+  settings are format 4, and settings from 1.0 move to it on their own.
 
 ## 1.0.0
 

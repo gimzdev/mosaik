@@ -41,19 +41,15 @@ pub trait Saved: Serialize + DeserializeOwned + Default {
     const FILE: &'static str;
     const VERSION: u32;
 
-    /// Upgrades the JSON of an older version by one step. Every version bump adds a step here,
-    /// with a test that loads a file of the old version.
-    fn migrate_step(value: serde_json::Value, from: u32) -> Result<serde_json::Value, String> {
+    /// Moves the JSON of an older version `from` to the current version in one move, with what
+    /// the user should know about it, if anything: the changes they will see, in one note (a
+    /// move that changes nothing they see says nothing). One move rather than a step per
+    /// version, so a later version can undo what an earlier one changed without undoing what
+    /// the user chose. Every version bump adds to it, with a test that loads a file of each older
+    /// version.
+    fn migrate(value: serde_json::Value, from: u32) -> Result<(serde_json::Value, Option<String>), String> {
         let _ = value;
         Err(format!("no migration from version {from}"))
-    }
-
-    /// What the user should know about the move from version `from` to the current one, if
-    /// anything: the changes they will see, in one note. (A move that changes nothing they see
-    /// says nothing.)
-    fn migration_note(from: u32) -> Option<String> {
-        let _ = from;
-        None
     }
 
     /// Fixes what can be fixed after loading and describes each fix for the user.
@@ -66,46 +62,49 @@ impl Saved for Settings {
     const FILE: &'static str = "settings.json";
     const VERSION: u32 = SETTINGS_VERSION;
 
-    fn migrate_step(mut value: serde_json::Value, from: u32) -> Result<serde_json::Value, String> {
-        match from {
-            // 1 to 2: tags go in the bar above every window, the new default, so windows in
-            // zones all start at the same line. (Format 1 always saved `true`: the old default.)
-            1 => {
-                let settings = value
-                    .as_object_mut()
-                    .ok_or_else(|| "settings are not an object".to_owned())?;
-                let frames = settings
-                    .entry("frames")
-                    .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-                if let Some(frames) = frames.as_object_mut() {
-                    frames.insert("tags_in_title_bar".to_owned(), serde_json::Value::Bool(false));
-                }
-                Ok(value)
-            }
-            // 2 to 3: zones sit as far apart as their two rings are wide (4 px), so no desktop
-            // shows between windows, unless the user chose another space than the old default.
-            2 => {
-                if let Some(style) = value
-                    .pointer_mut("/frames/style")
-                    .and_then(serde_json::Value::as_object_mut)
-                    && style.get("gap").and_then(serde_json::Value::as_i64) == Some(8)
-                {
-                    style.insert("gap".to_owned(), serde_json::Value::from(4));
-                }
-                Ok(value)
-            }
-            other => Err(format!("no migration from version {other}")),
+    fn migrate(
+        mut value: serde_json::Value,
+        from: u32,
+    ) -> Result<(serde_json::Value, Option<String>), String> {
+        // 1 is 1.0's format. 2 and 3 were only saved by development builds of 1.1: 2 put tags in
+        // a bar above every window, which left a band of empty space above each one, and 3 also
+        // put zones 4 px apart.
+        if !(1..SETTINGS_VERSION).contains(&from) {
+            return Err(format!("no migration from version {from}"));
         }
-    }
-
-    fn migration_note(from: u32) -> Option<String> {
-        match from {
-            1 => Some(
-                "Zone tags now sit in a bar above every window, so the windows in your zones all start at the same line, and zones sit closer together. To put tags back in title bars: Settings, Tags and tabs.".to_owned(),
+        let frames = value
+            .as_object_mut()
+            .ok_or_else(|| "settings are not an object".to_owned())?
+            .entry("frames")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+            .as_object_mut()
+            .ok_or_else(|| "the frame settings are not an object".to_owned())?;
+        // Zones sit as far apart as their two rings are wide (4 px, was 8), so no desktop shows
+        // between windows; a space the user chose stays.
+        let mut closer = false;
+        if from <= 2
+            && let Some(style) = frames.get_mut("style").and_then(serde_json::Value::as_object_mut)
+            && style.get("gap").and_then(serde_json::Value::as_i64) == Some(8)
+        {
+            style.insert("gap".to_owned(), serde_json::Value::from(4));
+            closer = true;
+        }
+        // Tags are back in title bars by default; 1.0's files keep where the user put them.
+        let titles = from >= 2;
+        if titles {
+            frames.insert("tags_in_title_bar".to_owned(), serde_json::Value::Bool(true));
+        }
+        let note = match (titles, closer) {
+            (true, true) => Some(
+                "Zone tags are back in title bars and zones sit closer together: every window fills its zone, and no desktop shows between windows. To put tags in a bar above every window: Settings, Tags and tabs.",
             ),
-            2 => Some("Zones sit closer together: no desktop shows between windows now.".to_owned()),
-            _ => None,
-        }
+            (true, false) => Some(
+                "Zone tags are back in title bars: every window fills its zone, with no band above it. To put tags in a bar above every window: Settings, Tags and tabs.",
+            ),
+            (false, true) => Some("Zones sit closer together: no desktop shows between windows now."),
+            (false, false) => None,
+        };
+        Ok((value, note.map(str::to_owned)))
     }
 }
 
@@ -314,11 +313,10 @@ fn decode<T: Saved>(bytes: &[u8], path: &Path) -> Result<(T, Vec<String>), Store
         });
     }
     let mut notes = Vec::new();
-    for from in found..T::VERSION {
-        value = T::migrate_step(value, from).map_err(damaged)?;
-    }
     if found < T::VERSION {
-        notes.extend(T::migration_note(found));
+        let (moved, note) = T::migrate(value, found).map_err(damaged)?;
+        value = moved;
+        notes.extend(note);
     }
     if let Some(v) = value.get_mut("version") {
         *v = serde_json::Value::from(T::VERSION);
@@ -442,72 +440,108 @@ mod tests {
         assert!(matches!(loaded.source, Source::LastGood { .. }));
     }
 
+    /// Writes `json` as the settings file in `d` and loads it.
+    fn load_settings(d: &TempDir, json: &[u8]) -> Loaded<Settings> {
+        fs::write(d.0.join("settings.json"), json).unwrap();
+        Store::new(&d.0).load::<Settings>().unwrap()
+    }
+
     #[test]
-    fn settings_of_format_1_put_tags_above_windows() {
-        // Format 1 always saved where tags go, with the old default (title bars). Format 2 puts
-        // them in the bar above every window, and says so once.
+    fn settings_of_1_0_keep_where_tags_go_and_bring_zones_closer() {
+        // The owner: "space lost between zones". 1.0 put zones 8 px apart; now they are as far
+        // apart as their two rings are wide (4 px), so no desktop shows between windows. Where
+        // tags go is the user's (title bars, unless they chose the bar), and so is a space they
+        // chose; one note says what changed, and none when nothing did.
         let d = TempDir::new("settings1");
-        fs::write(
-            d.0.join("settings.json"),
+        let loaded = load_settings(
+            &d,
             br#"{"version":1,"theme":"dark","frames":{"show_frames":true,"show_tags":true,"tags_in_title_bar":true,"style":{"gap":8,"tag_band":28,"border":2}}}"#,
-        )
-        .unwrap();
-        let loaded = Store::new(&d.0).load::<Settings>().unwrap();
-        assert!(!loaded.value.frames.tags_in_title_bar);
+        );
+        assert!(loaded.value.frames.tags_in_title_bar);
+        assert_eq!(loaded.value.frames.style.gap, 4);
         assert_eq!(
             loaded.value.theme,
             crate::settings::Theme::Dark,
             "the rest is kept"
         );
         assert_eq!(loaded.value.version, SETTINGS_VERSION);
-        assert_eq!(loaded.notes.len(), 1);
-        assert!(loaded.notes[0].contains("same line"), "{:?}", loaded.notes);
-        // A format 1 file with no frames at all gets the new default too.
-        fs::write(d.0.join("settings.json"), br#"{"version":1}"#).unwrap();
-        let loaded = Store::new(&d.0).load::<Settings>().unwrap();
+        assert_eq!(
+            loaded.notes,
+            ["Zones sit closer together: no desktop shows between windows now."]
+        );
+        // Tags the user put in a bar above every window stay there.
+        let loaded = load_settings(
+            &d,
+            br#"{"version":1,"frames":{"tags_in_title_bar":false,"style":{"gap":8,"tag_band":28,"border":2}}}"#,
+        );
         assert!(!loaded.value.frames.tags_in_title_bar);
-        // A format 2 file keeps the user's choice, and says nothing.
-        let mut titles = Settings::default();
-        titles.frames.tags_in_title_bar = true;
-        Store::new(&d.0).save(&titles).unwrap();
-        let loaded = Store::new(&d.0).load::<Settings>().unwrap();
+        assert_eq!(loaded.value.frames.style.gap, 4);
+        // A space the user chose stays, and nothing they see changed: no note.
+        let loaded = load_settings(
+            &d,
+            br#"{"version":1,"frames":{"tags_in_title_bar":true,"style":{"gap":16,"tag_band":28,"border":2}}}"#,
+        );
+        assert_eq!(loaded.value.frames.style.gap, 16);
+        assert!(loaded.notes.is_empty(), "{:?}", loaded.notes);
+        // A format 1 file with no frames at all gets the defaults.
+        let loaded = load_settings(&d, br#"{"version":1}"#);
         assert!(loaded.value.frames.tags_in_title_bar);
-        assert!(loaded.notes.is_empty());
+        assert!(loaded.notes.is_empty(), "{:?}", loaded.notes);
     }
 
     #[test]
-    fn settings_from_before_bring_zones_closer() {
-        // The owner: "space lost between zones". Zones used to be 8 px apart; now they are as
-        // far apart as their two rings are wide (4 px). Settings saved with the old default
-        // get the new one, with one note for the whole move; a space the user chose stays.
-        let d = TempDir::new("settings-gap");
-        let gap = |json: &[u8]| {
-            fs::write(d.0.join("settings.json"), json).unwrap();
-            let loaded = Store::new(&d.0).load::<Settings>().unwrap();
-            (loaded.value.frames.style.gap, loaded.notes)
-        };
-        let (g, notes) = gap(
-            br#"{"version":1,"frames":{"tags_in_title_bar":true,"style":{"gap":8,"tag_band":28,"border":2}}}"#,
+    fn settings_of_development_builds_of_1_1_put_tags_back_in_title_bars() {
+        // Formats 2 and 3 were only saved by development builds of 1.1, which put tags in a bar
+        // above every window: the owner found the bar blank, lost space. Title bars are the
+        // default again, so every window fills its zone; one note says so.
+        let d = TempDir::new("settings-dev");
+        let loaded = load_settings(
+            &d,
+            br#"{"version":2,"frames":{"tags_in_title_bar":false,"style":{"gap":8,"tag_band":28,"border":2}}}"#,
         );
-        assert_eq!(g, 4);
-        assert_eq!(notes.len(), 1, "one note for the whole move: {notes:?}");
+        assert!(loaded.value.frames.tags_in_title_bar);
+        assert_eq!(loaded.value.frames.style.gap, 4);
+        assert_eq!(
+            loaded.notes.len(),
+            1,
+            "one note for the whole move: {:?}",
+            loaded.notes
+        );
         assert!(
-            notes[0].contains("same line") && notes[0].contains("closer"),
-            "{notes:?}"
+            loaded.notes[0].contains("title bars") && loaded.notes[0].contains("closer"),
+            "{:?}",
+            loaded.notes
         );
-        // Saved by a build of 1.1 before this change.
-        let (g, _) = gap(br#"{"version":2,"frames":{"style":{"gap":8,"tag_band":28,"border":2}}}"#);
-        assert_eq!(g, 4);
-        // A space the user chose stays.
-        let (g, _) = gap(br#"{"version":1,"frames":{"style":{"gap":16,"tag_band":28,"border":2}}}"#);
-        assert_eq!(g, 16);
-        // In the current format, 8 is the user's choice.
-        let mut wide = Settings::default();
-        wide.frames.style.gap = 8;
-        Store::new(&d.0).save(&wide).unwrap();
+        let loaded = load_settings(
+            &d,
+            br#"{"version":3,"frames":{"tags_in_title_bar":false,"style":{"gap":4,"tag_band":28,"border":2}}}"#,
+        );
+        assert!(loaded.value.frames.tags_in_title_bar);
+        assert_eq!(loaded.notes.len(), 1);
+        assert!(
+            loaded.notes[0].contains("title bars") && !loaded.notes[0].contains("closer"),
+            "{:?}",
+            loaded.notes
+        );
+        // In the current format, both are the user's choice, and nothing is said.
+        let mut chosen = Settings::default();
+        chosen.frames.tags_in_title_bar = false;
+        chosen.frames.style.gap = 8;
+        Store::new(&d.0).save(&chosen).unwrap();
         let loaded = Store::new(&d.0).load::<Settings>().unwrap();
+        assert!(!loaded.value.frames.tags_in_title_bar);
         assert_eq!(loaded.value.frames.style.gap, 8);
         assert!(loaded.notes.is_empty());
+        // A version no Mosaïk wrote is damaged, not guessed at.
+        fs::write(d.0.join("settings.json"), br#"{"version":0}"#).unwrap();
+        assert!(matches!(
+            Store::new(&d.0).load::<Settings>(),
+            Err(StoreError::Damaged { .. })
+                | Ok(Loaded {
+                    source: Source::LastGood { .. },
+                    ..
+                })
+        ));
     }
 
     #[test]

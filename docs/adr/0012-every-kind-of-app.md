@@ -51,7 +51,8 @@ Vampire Survivors, idle clickers". Three kinds of windows were left out or misha
   around the window itself.
 - **Its tag** goes in its title bar when there is room, as for any window (ADR 0011). When it
   needs a band, the band sits right above the window, not at the top of the zone
-  (`zone::band_above`).
+  (`zone::band_above`). (Since 1.1 a window alone needs one only with tags set to go above
+  windows; in title bars, one with no room wears its ring alone, ADR 0011.)
 - **A band works as its window's title bar.** Solid, it looks like part of the window, so a
   press on it is a press on the window's title bar: the window comes to the front, and dragged,
   it follows the pointer, with the zones showing and tags and strips taking it as for any drag.

@@ -519,8 +519,8 @@ impl Engine {
         }
         let zone = self.zone_of(h, g.frame, g.resizable, style)?.clone();
         // The tag goes in the window's title bar, or above it, in the band at the top of its
-        // zone (the one it is placed below, or will be); not at all for the moment its title bar
-        // is being read.
+        // zone when tags go above windows (or while it still sits below one); not at all for the
+        // moment its title bar is being read.
         let (tag, tag_at, drop_area) = if tag {
             match self.tag_spot(h, g.frame, &zone.name, zone.dpi) {
                 TitleSpot::In(r) => (true, TagPlace::TitleBar(r), Some((r, BarPlace::TitleBar))),
@@ -534,20 +534,17 @@ impl Engine {
                 {
                     (false, TagPlace::Above, None)
                 }
+                // With tags in title bars, a window alone whose title bar has no room even for
+                // its zone's initial wears its ring alone, at the top of its zone like its
+                // neighbours: it is never moved below a band for its tag (`wants_band`).
+                TitleSpot::Above if self.style().title_bars && !self.titles.banded.contains(&h) => {
+                    (false, TagPlace::Above, None)
+                }
                 TitleSpot::Above => {
-                    // With tags in title bars, a window just found to have no room is not below
-                    // its band yet: the band it is about to sit below.
                     // Right above the window (one that cannot be resized sits lower in its zone).
                     let band = self
                         .style_of(h)
                         .tag_area(zone.rect, zone.dpi)
-                        .or_else(|| {
-                            let banded = self.settings.frames.banded_style().for_tabs();
-                            self.style()
-                                .title_bars
-                                .then(|| banded.tag_area(zone.rect, zone.dpi))
-                                .flatten()
-                        })
                         .map(|b| band_above(g.frame, b));
                     (
                         true,

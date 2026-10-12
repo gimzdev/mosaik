@@ -755,7 +755,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
 __MK_EOF__
 put components/apps.tsx <<'__MK_EOF__'
 /* The pretend apps drawn inside the demo desktops. Plain markup, sized in pixels on a 1280 px canvas. */
-import { memo, useId, type ReactNode } from 'react';
+import { memo, useId, type CSSProperties, type ReactNode } from 'react';
 import { TILES, ZONE, type Win } from '@/lib/data';
 import { Icon, Wordmark } from '@/components/ui';
 
@@ -1599,30 +1599,24 @@ export const AppBody = memo(function AppBody({ win }: { win: Pick<Win, 'kind' | 
 });
 
 /**
- * A window. With Mosaïk it sits right below a bar carrying its zone's tag (and a tab group's chips, `strip`),
- * and the zone's ring goes around the bar and the window together, as in the app; plain, it is just a window,
- * below the bar's room; flat, it is maximised.
+ * A window. With Mosaïk it wears its zone frame, and its zone tag in its own title bar, next to its buttons
+ * (`tagAt` places it elsewhere in that bar); plain, it is just a window; flat, it is maximised.
  */
-export function ZoneFrame({ tag, zone, plain, flat, strip, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; strip?: ReactNode; children: ReactNode }) {
+export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; tagAt?: CSSProperties; children: ReactNode }) {
   const z = ZONE[zone];
-  if (flat) return <div className="h-full w-full overflow-hidden">{children}</div>;
   return (
     <div className="relative h-full w-full">
+      <span
+        className="absolute z-10 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
+        style={{ top: 7, right: 140, ...tagAt, background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
+      >
+        {tag}
+      </span>
       <div
-        className="pointer-events-none absolute inset-0 rounded-[10px] transition-opacity duration-300"
-        style={{ boxShadow: `0 0 0 2px ${z.bg}, 0 22px 44px -12px rgba(0,0,0,0.6)`, opacity: plain ? 0 : 1 }}
-      />
-      <div className="absolute inset-x-0 top-0 flex h-[28px] items-center gap-1.5 rounded-t-[10px] bg-[#11141B] px-[5px] transition-opacity duration-300" style={{ opacity: plain ? 0 : 1 }}>
-        <span className="flex h-[20px] shrink-0 items-center rounded-full px-[10px] text-[11.5px] font-semibold leading-none" style={{ background: z.bg, color: z.fg }}>
-          {tag}
-        </span>
-        {strip}
-      </div>
-      <div
-        className="absolute inset-x-0 bottom-0 top-[28px] overflow-hidden transition-[box-shadow,border-radius] duration-300"
+        className="h-full w-full overflow-hidden transition-[box-shadow] duration-300"
         style={{
-          borderRadius: plain ? 10 : '0 0 10px 10px',
-          boxShadow: plain ? '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)' : 'none',
+          borderRadius: flat ? 0 : 10,
+          boxShadow: flat ? 'none' : plain ? '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)' : `0 0 0 2px ${z.bg}, 0 22px 44px -12px rgba(0,0,0,0.6)`,
         }}
       >
         {children}
@@ -1787,7 +1781,7 @@ export function Stage() {
         <div key={`${ws.id}-${w.id}`} className="win" style={vars(g.a.rects[i], g.b.rects[i], look, z)}>
           <div className="relative h-full">
             <AppWindow win={w} plain={!ordered} />
-            <div className="dim inset-x-0 bottom-0 top-[28px] rounded-[10px]" style={{ opacity: dim }} />
+            <div className="dim inset-0 rounded-[10px]" style={{ opacity: dim }} />
           </div>
         </div>,
       ];
@@ -1931,26 +1925,23 @@ export function TabsArt() {
       <Scaled className={ART}>
         <Wallpaper />
         <div className="absolute" style={{ left: 36, top: 52, width: 1090, height: 710 }}>
-          {/* The zone's tag starts the strip, in the bar above the window, as in the app. */}
-          <ZoneFrame
-            tag="Code"
-            zone="lapis"
-            strip={
-              <>
+          {/* The zone's tag starts the strip, as in the app. */}
+          <ZoneFrame tag="Code" zone="lapis" tagAt={{ top: 17, right: 'auto', left: 14 }}>
+            <div className="flex h-full flex-col bg-[#16181D]">
+              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] pl-[80px] pr-3 text-[14px]">
                 {TABS.map(([name, c], i) => (
-                  <div key={name} className={`flex h-[22px] items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] ${i ? 'text-[#8E97AA]' : 'bg-[#272B37] font-semibold text-white'}`}>
-                    <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: c }} />
+                  <div key={name} className={`flex h-[38px] items-center gap-2.5 rounded-t-[10px] px-5 ${i ? 'text-[#8E97AA]' : 'bg-[#1E2027] font-semibold text-white'}`} style={i ? undefined : { boxShadow: `inset 0 3px 0 ${c}` }}>
+                    <span className="h-3 w-3 rounded-[4px]" style={{ background: c }} />
                     {name}
                   </div>
                 ))}
-                <div className="flex h-[22px] items-center gap-1 rounded-[6px] border-[1.5px] border-dashed border-[#F4B13A] px-2 text-[12px] font-semibold text-[#F4B13A]">
-                  <Icon n="plus" s={12} w={2} /> Drop to add
+                <div className="mb-1.5 ml-1 flex h-[30px] items-center gap-1.5 rounded-[8px] border-2 border-dashed border-[#F4B13A] px-3 text-[13px] font-semibold text-[#F4B13A]">
+                  <Icon n="plus" s={14} w={2} /> Drop to add
                 </div>
-              </>
-            }
-          >
-            <div className="h-full bg-[#16181D]">
-              <EditorApp bare />
+              </div>
+              <div className="min-h-0 flex-1">
+                <EditorApp bare />
+              </div>
             </div>
           </ZoneFrame>
         </div>
@@ -2322,7 +2313,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
-  // Each zone holds its window and, right above it, the bar with its tag, as in the app; a gap between zones.
+  // Windows fill their zones (each wears its tag in its own title bar), as far apart as their two rings are wide.
   return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + PAD / 2), width: r1(cols * colW - PAD), height: r1(rows * rowH - PAD) };
 }
 

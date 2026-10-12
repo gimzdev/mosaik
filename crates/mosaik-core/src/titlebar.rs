@@ -5,13 +5,16 @@
 //! whether Windows draws that title bar (a classic one) or the app does (browsers, editors,
 //! terminals, Office). Mosaïk asks the same question along one row of the title bar ([`scan`]) and
 //! draws the tag, or the strip, in such a stretch ([`TitleRoom::spot`]), so the window keeps its
-//! whole zone. A window with no stretch wide enough wears its tag above it, in a band, as it does
-//! when tags are set to go above windows.
+//! whole zone. A tag with less room than its name needs is cut short, then to the zone's initial
+//! ([`crate::zone::tag_cut`]); a window with no stretch even for that wears its ring alone, at the
+//! top of its zone like its neighbours. Only the tab that shows of a group whose title bar has no
+//! room for the group's strip goes below a band, with the strip in it: the way to its other tabs
+//! must stay in reach.
 
 use std::time::{Duration, Instant};
 
 use crate::geometry::{Point, Rect, Size, scale_for_dpi};
-use crate::zone::CHIP_HEIGHT;
+use crate::zone::{CHIP_HEIGHT, TAG_INITIAL};
 
 /// What a window answers for a point of its title bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,8 +45,6 @@ const FINE: i32 = 2;
 
 /// Space kept between a tag or strip and the ends of its stretch.
 const MARGIN: i32 = 6;
-/// The shortest a tag gets in a title bar (the first letters of the zone's name).
-const TAG_LEAST: i32 = 48;
 /// The narrowest a strip gets in a title bar: the visible tab's chip and the "+N" chip of the
 /// others, with the start of the zone's tag.
 const STRIP_LEAST: i32 = 140;
@@ -89,7 +90,7 @@ impl Fit {
         let px = |v: i32| scale_for_dpi(v, dpi);
         Self {
             need: natural,
-            least: px(TAG_LEAST),
+            least: px(TAG_INITIAL),
             keep: 0,
             margin: px(MARGIN),
             height: px(CHIP_HEIGHT),
@@ -256,9 +257,9 @@ pub fn band_step(
     }
 }
 
-/// Whether a window must wear its tag, or its group's strip, above it, below a band in its
-/// zone: its title bar, read while its frame was `read` in size and now `frame`, has no stretch
-/// with room for `fit`. Read at another size, its stretches are only a guess (each keeps to the
+/// Whether the tab that shows of a group must wear the group's strip above it, below a band in
+/// its zone: its title bar, read while its frame was `read` in size and now `frame`, has no
+/// stretch with room for `fit`. Read at another size, its stretches are only a guess (each keeps to the
 /// edges that bound it, so all of them grow as the window widens), and a guess must not move a
 /// window: it keeps its band, or no band (`banded`), until it is read at its size.
 pub fn needs_band(room: &TitleRoom, read: Size, frame: Rect, fit: Fit, banded: bool) -> bool {
@@ -328,6 +329,23 @@ mod tests {
         let room = scan(frame, 96, bar(&[(150, 230)], 0, 30)).unwrap();
         assert!(room.spot(frame, Fit::tag(60, 96)).is_some());
         assert_eq!(room.spot(frame, Fit::strip(300, 96)), None);
+    }
+
+    #[test]
+    fn a_short_stretch_still_has_room_for_the_initial_of_a_tag() {
+        // A browser full of tabs keeps 46 px of caption by its buttons to be grabbed by: no room
+        // for a 90 px name, nor for letters and an ellipsis, but for the zone's initial.
+        let frame = Rect::new(0, 0, 1200, 800);
+        let room = scan(frame, 96, bar(&[(1000, 1046)], 0, 40)).unwrap();
+        let spot = room.spot(frame, Fit::tag(90, 96)).unwrap();
+        assert!(spot.left >= 1000 && spot.right <= 1046, "{spot:?}");
+        assert_eq!(
+            crate::zone::tag_cut(90, spot.width(), 96),
+            crate::zone::TagCut::Initial(24)
+        );
+        // 34 px of caption is too short even for that: the window wears its ring alone.
+        let room = scan(frame, 96, bar(&[(1000, 1034)], 0, 40)).unwrap();
+        assert_eq!(room.spot(frame, Fit::tag(90, 96)), None);
     }
 
     #[test]

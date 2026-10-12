@@ -29,7 +29,7 @@ stretches of its title bar.
   window answers "caption" over most of its minimise button, which is drawn wider than the
   window's answers assume (job 0062).
 - **The tag** goes at the right end of the rightmost stretch with room for the zone's whole name
-  (else of the widest with room for 48 px), next to the window's buttons, where title bars rarely
+  (else of the widest with room for 48 px; since 1.1, 24 px, its initial), next to the window's buttons, where title bars rarely
   keep their own controls, centred on the caption's height. It lets clicks through: pressing on
   it grabs the title bar under it. A window dropped anywhere on that stretch joins the window as
   a tab, as it did on the band.
@@ -77,23 +77,30 @@ stretches of its title bar.
 - **The setting** "Tags and tabs: in each window's title bar / above each window" keeps the band
   for everyone who prefers it (`FrameSettings::tags_in_title_bar`).
 
-## Amended 2026-10-12 (1.1): the band is the default
+## Amended 2026-10-12 (1.1): every window at the top of its zone
 
 The owner, using 1.0 every day: "sometimes apps don't go all the way to top ... lets normalize all
 apps stopping before top bar". With tags in title bars, windows side by side started at
 different heights: one with room in its title bar filled its zone, its neighbour without room
-(Calculator, VS Code as a group's visible tab, an app drawing its own title bar) sat below a
-band, 28 px lower; and a window of a fixed size sat in the middle of its zone (ADR 0012, now at
-its top).
+(Calculator, an app drawing its own title bar) sat below a band, 28 px lower; and a window of a
+fixed size sat in the middle of its zone (ADR 0012, now at its top).
 
-- **Every window in a zone now sits right below a bar at the top of its zone** that carries its
-  tag, or its group's strip: windows side by side start at the same line, whatever their title
-  bars (`tags_in_title_bar` is off by default).
-- **Settings saved by 1.0 move to it once** (settings format 2, `Settings::migrate_step`), with a
-  notice saying where to put tags back in title bars (Settings, Tags and tabs), which is still
-  there for whoever prefers one row: the setting's description says that windows without room
-  then sit lower.
-- Everything above about reading title bars still holds when the setting is on.
+A development build of 1.1 then put every window below a bar at the top of its zone, so all
+started at the same line. The owner, using it: "there's still too much space between zones ...
+we shouldn't have blank lost space": the bar was 28 px of mostly empty space above every window,
+over the window's own title bar, the two rows this ADR set out to end.
+
+- **Tags stay in title bars by default, and a window alone never goes below a band**, so every
+  window fills its zone and starts at its top, whatever its title bar. A tag with less room than
+  its name needs is cut short with an ellipsis down to 48 px, then to the zone's initial alone in
+  a round chip 24 px wide (`mosaik_core::zone::tag_cut`); a window whose title bar has no stretch
+  even for that wears its ring alone, which still carries its zone's colour.
+- **Only the tab that shows of a group whose title bar has no room for the group's strip** sits
+  below a band, with the strip in it: the way to the group's other tabs must stay in reach.
+- **The bar above every window stays a setting** (Settings, Tags and tabs: in a bar above each
+  window), for whoever prefers every name in full.
+- Settings saved by those development builds (formats 2 and 3) move back to title bars once,
+  with a note; 1.0's keep where the user put tags (format 4, `Settings::migrate`).
 
 ## Consequences
 
@@ -102,7 +109,8 @@ its top).
   Windows Terminal, Word, Excel and Git Bash have room for the tag and the strip. VS Code keeps
   one free stretch left of its command centre: room for the tag, not for a strip, so as a group's
   visible tab it goes below a band. Calculator keeps 40 px of caption beside its buttons (the rest
-  of its title bar is its own content): it wears its tag above it.
+  of its title bar is its own content): it wore its tag above it; since 1.1 it wears its zone's
+  initial there.
 - A long title can run under the tag in a narrow window: Windows draws classic titles from the
   left and truncates them at the buttons; the tag covers their end, as browsers' tabs do.
 - Reading costs about 200 messages to the app, 3 to 30 ms per window measured (job 0070: the

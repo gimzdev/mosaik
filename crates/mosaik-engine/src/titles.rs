@@ -413,8 +413,12 @@ impl Engine {
             .then(|| self.style_of(h).window_area(zone, dpi))
     }
 
-    /// Whether `h` must wear its tag (or its group's strip) above it: tags go in title bars, it
-    /// shows one, and its title bar has no room for it. Unchanged while its title bar is not read.
+    /// Whether `h` must wear its group's strip above it: tags go in title bars, it is the tab
+    /// that shows of a group, and its title bar has no room for the strip (the way to the
+    /// group's other tabs must stay in reach). A window alone never goes below a band: one whose
+    /// title bar has too little room for its tag wears it cut short, or its ring alone, at the
+    /// top of its zone like its neighbours (the owner: "we shouldn't have blank lost space").
+    /// Unchanged while its title bar is not read.
     fn wants_band(&mut self, h: WindowHandle) -> bool {
         let banded = self.titles.banded.contains(&h);
         if !self.style().title_bars || self.titles.broken {
@@ -444,28 +448,16 @@ impl Engine {
         let strip = self
             .group_of_window(h)
             .is_some_and(|grp| grp.open.len() > 1 && grp.visible().is_some_and(|(_, w)| *w == h));
-        let fit = if strip {
-            Fit::strip(i32::MAX, dpi)
-        } else {
-            let style = self.style();
-            let in_workspace = self.active.as_ref().is_some_and(|a| a.slot_of(h).is_some());
-            let label = if self.settings.frames.show_tags && in_workspace {
-                self.zone_of(h, g.frame, g.resizable, style)
-                    .map(|z| z.name.clone())
-            } else {
-                None
-            };
-            let Some(label) = label else { return false };
-            Fit::tag(self.tag_width(&label, dpi), dpi)
-        };
+        if !strip {
+            return false;
+        }
         match self.title_bar(h, g.frame) {
             Bar::Room(room) => {
                 let read = self.titles.known.get(&h).map_or(g.frame.size(), |k| k.room_size);
-                titlebar::needs_band(&room, read, g.frame, fit, banded)
+                titlebar::needs_band(&room, read, g.frame, Fit::strip(i32::MAX, dpi), banded)
             }
-            // Never answered: a strip must be reachable, so it goes above the window; a tag
-            // waits for an answer.
-            Bar::Unread => strip || banded,
+            // Never answered: the strip must be in reach, so it goes above the window.
+            Bar::Unread => true,
             Bar::Pending => banded,
         }
     }

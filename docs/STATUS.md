@@ -18,6 +18,7 @@ re-run before each release.
 | 6. Product UI | done: every page reviewed, tested in a browser and toured on Windows (names, Tab key, light and dark, smallest size); a Windows contrast theme and Narrator by ear are in the release checks | [Step 6](#step-6-product-ui) |
 | 7. Hardening | in progress: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
+| 1.1 | built; zones that follow a resize, Arrange and its undo, zones 4 px apart verified on Windows; the quick menu's hover by hand; tags back in title bars with no band above a window alone, checked by tests (on Windows: next run with the mouse) | [1.1](#11) |
 
 ## Step 1: verify assumptions
 
@@ -661,6 +662,47 @@ switch time (mean)           32.5 ms      33.1 ms
   `npm audit`: 0 vulnerabilities; a fresh build from a copy with Windows line endings works.
   Deploy only once the Store listing is live (the Download buttons install from it).
 
+## 1.1
+
+What the owner asked for on 2026-10-12, and the evidence. Jobs run on the owner's PC (1920x1080
+at 100%, two virtual monitors attached), with `mosaik-probe smart` (the engine in the probe's
+process, its own windows, a scratch folder).
+
+- **Zones that follow a resize** (ADR 0013, job 0092): dragging the line between Code and
+  Terminal 150 px left, a line 100 px down and back up 50 px: the zones on both sides and their
+  windows followed, every window 0 px from its zone; with Shift, the window alone (+60 px), the
+  zones kept. A line pushed 400 px into a window that will not get narrower than 710 px stopped
+  at 296 px: the zones made room for the app. The windows were then left 104 px from their zones:
+  the check after a move compared a window moved twice with its first place
+  (`workspace::last_places`, with a test that failed before the fix).
+- **Arrange** (ADR 0014, jobs 0092 and 0093): four windows and one that cannot be resized, no
+  workspace open: a new workspace "Workspace 1" in quarters in 44 to 46 ms, every resizable
+  window 0 px from its zone, the fixed one centred across its zone and at its top (0 px), the top
+  row's tops on one line. Undo: every window back, 0 px, in 16 to 17 ms, and no workspace left.
+  Arranging twice moved nothing; a fifth window became a tab (a strip of two), the others did not
+  move, and undo brought it back, shown.
+- **Zones 4 px apart** (job 0093): `workspace --drag` and every kind of app (`kinds`), all 0 px
+  from their zones; settings of format 2 moved to the new space once, with the note shown in the
+  app's window.
+- **The quick menu** (ADR 0015): the handle at the right edge opened its menu when the pointer
+  rested on it, on the owner's desktop (2026-10-12, seen on screen: "No workspace open", Arrange
+  windows, Switch workspace Win+Alt+Space...). In the probe the pointer reached the handle and
+  the menu did not open (job 0093); Mosaïk now opens it from its own hover timer, and the probe
+  says why when it does not (the windows under the pointer, the engine thread's input state).
+- **No blank space above windows** (the owner: "we shouldn't have blank lost space"): a
+  development build put every window below a 28 px bar at the top of its zone; tags are back in
+  title bars by default, a window alone is never lowered (a tag with little room shows the
+  zone's initial, or the window wears its ring alone), and settings of formats 2 and 3 move back
+  once (format 4). Checked by tests: core 184 (`tag_cut`, the initial's room in a title bar, both
+  migrations, failing before the change), the interface's 50 and 13 smoke tests in a browser;
+  clippy clean for Windows. The site's desktops show it (screenshots at desktop and phone width).
+- **Left for the next run with the mouse** (the owner's PC was in use): `smart` (the line grabbed
+  by the edge facing it, now that zones are 4 px apart; the quick menu from the probe),
+  `workspace --drag`, `kinds` and `workspace --apps` with tags in title bars (a window with no
+  room stays at the top of its zone; Calculator wears its zone's initial), the engine's own tests
+  (debug builds fail to load the `tracing-attributes` macro on that PC: E0463, under
+  investigation), then the release build, the Store package and Mosaïk restarted on 1.1.
+
 ## Owner decisions
 
 - 2026-10-11: the Patreon link is https://www.patreon.com/gimzdev (About and the tray menu only).
@@ -685,3 +727,7 @@ switch time (mean)           32.5 ms      33.1 ms
   app once per run.
 - 2026-10-12: every kind of app, Steam, launchers and games included (ADR 0012); one row of
   title bar wherever possible, and where a band is needed above a window, a solid one (ADR 0011).
+- 2026-10-12 (1.1): every window starts at the top of its zone ("normalize all apps"); zones that
+  follow a resize; Arrange, "very smart", with undo; a quick menu on a line at the screen's right
+  edge; at least one vertical preset; no space lost between zones (4 px) and no blank band above
+  windows (tags in title bars, a window alone never lowered).
