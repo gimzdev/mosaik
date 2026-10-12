@@ -4,7 +4,7 @@
 //! into another zone with the mouse. `--browser edge|chrome` drags browser tabs out into the
 //! workspace (`browser.rs`); `--apps` puts real apps into zones and tabs (`app_drag.rs`).
 //! Tags go in title bars, as in the app; `--tags-above` puts them above windows. `--shots DIR`
-//! saves pictures of the probe's windows (which cover the work area) at a few steps.
+//! saves pictures of the probe windows' title bars at a few steps.
 //!
 //! Everything happens in a scratch folder: the user's own workspaces and settings are not read
 //! or written. The probe windows are top-most so the mouse never lands on the user's windows.
@@ -39,14 +39,18 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 /// probe window takes (see `main`).
 pub const RELAUNCH_TITLE: &str = "MOSAIK_PROBE_RELAUNCH_TITLE";
 
-/// With `--shots DIR`: a picture of the work area, covered by the probe's own windows.
-fn shot(dir: Option<&std::path::Path>, name: &str) {
+/// With `--shots DIR`: a picture of the title bars of `windows` (probe windows), with what Mosaïk
+/// draws in them, and nothing else of the screen.
+fn shot(dir: Option<&std::path::Path>, name: &str, windows: &[HWND], dpi: u32) {
     let Some(dir) = dir else { return };
-    let Ok(t) = mosaik_win::monitors::topology() else {
-        return;
-    };
+    let bar = i32::try_from(48 * dpi / 96).unwrap_or(48);
+    let regions: Vec<Rect> = windows
+        .iter()
+        .filter_map(|w| frame_rect(*w))
+        .map(|f| Rect::new(f.left, f.top, f.right, (f.top + bar).min(f.bottom)))
+        .collect();
     let path = dir.join(format!("{name}.bmp"));
-    match crate::capture::save_bmp(t.primary().work_area, &path) {
+    match crate::capture::save_bmp(&regions, &path) {
         Ok(()) => println!("shot {name}"),
         Err(e) => println!("shot {name} not saved: {e}"),
     }
@@ -361,7 +365,8 @@ fn scenario(
     for (i, p) in probes.iter().enumerate() {
         let tag = tag_of(engine, p.hwnd).ok().map(|(t, _)| t);
         if i + 1 == probes.len() {
-            shot(shots, "1-saved");
+            let all: Vec<HWND> = probes.iter().map(|p| p.hwnd).collect();
+            shot(shots, "1-saved", &all, dpi);
         }
         let frame = frame_rect(p.hwnd).ok_or("a probe window vanished")?;
         let wanted = styles.area(p.tiled, false);
@@ -884,12 +889,29 @@ pub(crate) fn drag_path(points: &[Point], expected: HWND) -> Result<(), String> 
     let ours = under == expected || mosaik_win::window::pid(under) == mosaik_win::process::own_pid();
     if !ours {
         let same_app = mosaik_win::window::pid(under) == mosaik_win::window::pid(expected);
+        let at = |h: HWND| {
+            mosaik_win::window::geometry(h).map_or_else(
+                || "gone".to_owned(),
+                |g| {
+                    format!(
+                        "{},{} to {},{}{}",
+                        g.frame.left,
+                        g.frame.top,
+                        g.frame.right,
+                        g.frame.bottom,
+                        if g.visible && !g.cloaked { "" } else { ", hidden" }
+                    )
+                },
+            )
+        };
         return Err(format!(
-            "another window ({}{}) is where the probe would press the mouse at {},{}; not pressing it there",
+            "another window ({}{}, at {}) is where the probe would press the mouse at {},{}, over its own window (at {}); not pressing it there",
             mosaik_win::window::class_name(under),
             if same_app { ", of the same app" } else { "" },
+            at(under),
             from.x,
-            from.y
+            from.y,
+            at(expected)
         ));
     }
     input::move_to(from);
@@ -1070,7 +1092,7 @@ fn tabs_and_snap(
         terminal.hwnd,
     )?;
     let after_join = state(engine)?;
-    shot(shots, "2-joined");
+    shot(shots, "2-joined", &[terminal.hwnd], styles.dpi);
     let strip = after_join.tab_strips.first().cloned();
     let joined = json!({
         "strips": after_join.tab_strips.len(),

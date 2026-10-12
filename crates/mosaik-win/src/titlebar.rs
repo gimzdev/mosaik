@@ -3,19 +3,27 @@
 //! `mosaik_core::titlebar`.
 //!
 //! Each point is asked of the window real input would reach there: the deepest visible, enabled
-//! child of the window under that point, passing on to its parent when it answers "transparent",
-//! as Windows does. Other windows covering the title bar do not matter. Asking sends a message to
+//! child of the window under that point (as `WindowFromPoint` finds it: a child drawn see-through
+//! still takes the mouse, as the title bar of a Store app's frame does), passing on to its parent
+//! when it answers "transparent", as Windows does. Other windows covering the title bar do not
+//! matter. Asking sends a message to
 //! the app, which may be busy: it is given up after a moment, and at once for an app that is not
 //! responding. This runs on a thread of its own, never the engine's.
+//!
+//! The buttons Windows draws on a classic title bar are not asked about: they are where Windows
+//! says they are (`DWMWA_CAPTION_BUTTON_BOUNDS`). Measured on Windows 11 (job 0062): asked, a
+//! classic window answers "caption" over most of its minimise button, which Windows 11 draws
+//! wider than the window's own answers assume.
 
 use mosaik_core::geometry::{Point, Rect};
 use mosaik_core::titlebar::{self, Hit, TitleRoom};
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::{DWMWA_CAPTION_BUTTON_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::HiDpi::PhysicalToLogicalPointForPerMonitorDPI;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT, ChildWindowFromPointEx, GA_PARENT, GetAncestor,
-    HTCAPTION, HTTRANSPARENT, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_NCHITTEST,
+    CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, ChildWindowFromPointEx, GA_PARENT, GetAncestor, HTCAPTION,
+    HTTRANSPARENT, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_NCHITTEST,
 };
 
 use crate::window;
@@ -40,7 +48,13 @@ pub struct Reading {
 pub fn read(hwnd: HWND) -> Option<Reading> {
     let g = window::geometry(hwnd)?;
     let title = window::title(hwnd);
-    let room = titlebar::scan(g.frame, g.dpi.max(96), |p| hit(hwnd, p));
+    let buttons = caption_buttons(hwnd);
+    let room = titlebar::scan(g.frame, g.dpi.max(96), |p| {
+        if buttons.is_some_and(|b| b.contains(p)) {
+            return Some(Hit::Other);
+        }
+        hit(hwnd, p)
+    });
     Some(Reading {
         frame: g.frame,
         title,
@@ -48,9 +62,40 @@ pub fn read(hwnd: HWND) -> Option<Reading> {
     })
 }
 
+/// Where the buttons Windows draws in `hwnd`'s title bar are, on screen; `None` when Windows
+/// draws none there (apps that draw their own title bar).
+fn caption_buttons(hwnd: HWND) -> Option<Rect> {
+    let mut r = RECT::default();
+    // SAFETY: the attribute is a RECT and the buffer is exactly one RECT.
+    unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_BUTTON_BOUNDS,
+            (&raw mut r).cast::<std::ffi::c_void>(),
+            u32::try_from(std::mem::size_of::<RECT>()).unwrap_or(0),
+        )
+    }
+    .ok()?;
+    // Relative to the window's top-left corner; meaningless while it is minimised or hidden.
+    let window = window::window_rect(hwnd)?;
+    let buttons = Rect::new(r.left, r.top, r.right, r.bottom).offset(window.left, window.top);
+    (!buttons.is_empty() && window.contains_rect(buttons)).then_some(buttons)
+}
+
 /// What `root` (a top-level window) answers for the screen point `p`; `None` when it does not
 /// answer in time.
 fn hit(root: HWND, p: Point) -> Option<Hit> {
+    let code = hit_code(root, p)?;
+    Some(if u32::try_from(code) == Ok(HTCAPTION) {
+        Hit::Caption
+    } else {
+        Hit::Other
+    })
+}
+
+/// The `WM_NCHITTEST` code `root` (a top-level window) answers for the screen point `p`, asked
+/// as Mosaïk asks it when reading title bars; `None` when it does not answer in time.
+pub fn hit_code(root: HWND, p: Point) -> Option<i32> {
     let mut h = deepest_child(root, p);
     loop {
         let code = ask(h, p)?;
@@ -58,21 +103,17 @@ fn hit(root: HWND, p: Point) -> Option<Hit> {
             // SAFETY: read-only; any handle value is accepted.
             let parent = unsafe { GetAncestor(h, GA_PARENT) };
             if parent.is_invalid() {
-                return Some(Hit::Other);
+                return Some(code);
             }
             h = parent;
             continue;
         }
-        return Some(if u32::try_from(code) == Ok(HTCAPTION) {
-            Hit::Caption
-        } else {
-            Hit::Other
-        });
+        return Some(code);
     }
 }
 
-/// The deepest visible, enabled, not see-through child of `root` under `p` (`root` itself
-/// outside its client area, where its title bar may be).
+/// The deepest visible, enabled child of `root` under `p` (`root` itself outside its client
+/// area, where its title bar may be).
 fn deepest_child(root: HWND, p: Point) -> HWND {
     let mut h = root;
     for _ in 0..DEPTH {
@@ -82,9 +123,7 @@ fn deepest_child(root: HWND, p: Point) -> HWND {
             break;
         }
         // SAFETY: read-only lookup among the window's children.
-        let child = unsafe {
-            ChildWindowFromPointEx(h, pt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT)
-        };
+        let child = unsafe { ChildWindowFromPointEx(h, pt, CWP_SKIPINVISIBLE | CWP_SKIPDISABLED) };
         if child.is_invalid() || child == h {
             break;
         }

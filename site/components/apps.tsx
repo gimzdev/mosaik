@@ -1,5 +1,5 @@
 /* The pretend apps drawn inside the demo desktops. Plain markup, sized in pixels on a 1280 px canvas. */
-import { memo, useId, type ReactNode } from 'react';
+import { memo, useId, type CSSProperties, type ReactNode } from 'react';
 import { TILES, ZONE, type Win } from '@/lib/data';
 import { Icon, Wordmark } from '@/components/ui';
 
@@ -842,14 +842,17 @@ export const AppBody = memo(function AppBody({ win }: { win: Pick<Win, 'kind' | 
   }
 });
 
-/** A window. With Mosaïk it wears its zone frame and tag; plain, it is just a window; flat, it is maximised. */
-export function ZoneFrame({ tag, zone, plain, flat, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; children: ReactNode }) {
+/**
+ * A window. With Mosaïk it wears its zone frame, and its zone tag in its own title bar, next to its buttons
+ * (`tagAt` places it elsewhere in that bar); plain, it is just a window; flat, it is maximised.
+ */
+export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; tagAt?: CSSProperties; children: ReactNode }) {
   const z = ZONE[zone];
   return (
     <div className="relative h-full w-full">
       <span
-        className="absolute -top-[25px] left-0 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
-        style={{ background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
+        className="absolute z-10 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
+        style={{ top: 7, right: 140, ...tagAt, background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
       >
         {tag}
       </span>

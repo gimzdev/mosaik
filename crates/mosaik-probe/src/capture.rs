@@ -1,7 +1,7 @@
 //! Screen captures of small regions, compared numerically: used to check that a window shown
 //! again repaints at once instead of flashing stale or black content (the analysis is in
-//! `pixels`). With `--shots`, the workspace probe also saves pictures of its own windows, for a
-//! look at what Mosaïk draws on them.
+//! `pixels`). With `--shots`, the workspace probe also saves pictures of its own windows' title
+//! bars (nothing else of the screen), for a look at what Mosaïk draws in them.
 
 use mosaik_core::geometry::Rect;
 use windows::Win32::Graphics::Gdi::{
@@ -54,13 +54,22 @@ pub fn capture(r: Rect) -> Option<Vec<u32>> {
     }
 }
 
-/// Saves the pixels of `r` on screen as a 24-bit BMP file.
-pub fn save_bmp(r: Rect, path: &std::path::Path) -> Result<(), String> {
-    let pixels = capture(r).ok_or("the screen could not be captured")?;
-    let (w, h) = (
-        usize::try_from(r.width()).map_err(|e| e.to_string())?,
-        usize::try_from(r.height()).map_err(|e| e.to_string())?,
-    );
+/// Saves the pixels of `regions` on screen, one under the other with a black line between them,
+/// as a 24-bit BMP file.
+pub fn save_bmp(regions: &[Rect], path: &std::path::Path) -> Result<(), String> {
+    let size = |v: i32| usize::try_from(v).map_err(|e| e.to_string());
+    let w = size(regions.iter().map(|r| r.width()).max().unwrap_or(0))?;
+    let mut pixels: Vec<u32> = Vec::new();
+    for r in regions {
+        let part = capture(*r).ok_or("the screen could not be captured")?;
+        let rw = size(r.width())?;
+        for row in part.chunks(rw.max(1)) {
+            pixels.extend_from_slice(row);
+            pixels.resize(pixels.len() + (w - rw), 0);
+        }
+        pixels.resize(pixels.len() + w * 2, 0);
+    }
+    let h = pixels.len() / w.max(1);
     // Rows are padded to four bytes and stored bottom row first.
     let row = (w * 3).div_ceil(4) * 4;
     let size = 54 + row * h;

@@ -270,8 +270,8 @@ export function ZonesArt() {
         <ZoneBox x={40} y={52} w={720} h={700} zone="lapis" />
         <ZoneBox x={788} y={52} w={452} h={340} zone="verdigris" />
         <ZoneBox x={788} y={410} w={452} h={342} zone="saffron" filled />
-        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={96} w={688} h={640} />
-        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={96} w={420} h={280} />
+        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={68} w={688} h={668} />
+        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={68} w={420} h={308} />
         <p className="absolute text-center text-[18px] font-semibold text-[#F4B13A]" style={{ left: 788, top: 560, width: 452 }}>
           Release to place in Review
         </p>
@@ -291,9 +291,10 @@ export function TabsArt() {
       <Scaled className={ART}>
         <Wallpaper />
         <div className="absolute" style={{ left: 36, top: 52, width: 1090, height: 710 }}>
-          <ZoneFrame tag="Code" zone="lapis">
+          {/* The zone's tag starts the strip, as in the app. */}
+          <ZoneFrame tag="Code" zone="lapis" tagAt={{ top: 17, right: 'auto', left: 14 }}>
             <div className="flex h-full flex-col bg-[#16181D]">
-              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] px-3 text-[14px]">
+              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] pl-[80px] pr-3 text-[14px]">
                 {TABS.map(([name, c], i) => (
                   <div key={name} className={`flex h-[38px] items-center gap-2.5 rounded-t-[10px] px-5 ${i ? 'text-[#8E97AA]' : 'bg-[#1E2027] font-semibold text-white'}`} style={i ? undefined : { boxShadow: `inset 0 3px 0 ${c}` }}>
                     <span className="h-3 w-3 rounded-[4px]" style={{ background: c }} />

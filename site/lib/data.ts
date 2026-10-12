@@ -79,7 +79,6 @@ export const WORKSPACES: Workspace[] = [
 const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
-const TAG = 28; // room above a window for its zone tag
 const TASKBAR = 40; // the Windows taskbar, along the bottom
 const [TOP, BOTTOM, SIDE, PAD] = [22, TASKBAR + 14, 26, 12];
 
@@ -91,7 +90,8 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
-  return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + TAG), width: r1(cols * colW - PAD), height: r1(rows * rowH - TAG - PAD / 2) };
+  // Windows fill their zones (each wears its tag in its own title bar), with a gap between them.
+  return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + PAD / 2), width: r1(cols * colW - PAD), height: r1(rows * rowH - PAD) };
 }
 
 /** Where a maximised window sits: everything above the taskbar. */
@@ -109,7 +109,7 @@ function mulberry32(seed: number) {
 }
 
 export interface DeskLayout {
-  /** each window's frame, including the strip above it for the zone tag */
+  /** each window's frame */
   rects: Rect[];
   /** how far each window moves for the messy desktop */
   poses: { x: number; y: number }[];
@@ -127,10 +127,7 @@ export interface DeskLayout {
 export function deskLayout(index: number, deskH: number): DeskLayout {
   const rnd = mulberry32((index + 1) * 7919 + 13);
   const jit = (n: number) => Math.round((rnd() - 0.5) * 2 * n);
-  const rects = WORKSPACES[index].windows.map((win) => {
-    const b = slotBox(win.slot, deskH);
-    return { left: b.left, top: b.top - TAG, width: b.width, height: b.height + TAG };
-  });
+  const rects = WORKSPACES[index].windows.map((win) => slotBox(win.slot, deskH));
   const order = rects.map((_, i) => i).sort((a, b) => rects[b].width * rects[b].height - rects[a].width * rects[a].height);
   const placed = rects.map((r) => ({ left: r.left, top: r.top }));
   const maxB = deskH - TASKBAR - 12;

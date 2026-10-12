@@ -759,7 +759,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
 __MK_EOF__
 put components/apps.tsx <<'__MK_EOF__'
 /* The pretend apps drawn inside the demo desktops. Plain markup, sized in pixels on a 1280 px canvas. */
-import { memo, useId, type ReactNode } from 'react';
+import { memo, useId, type CSSProperties, type ReactNode } from 'react';
 import { TILES, ZONE, type Win } from '@/lib/data';
 import { Icon, Wordmark } from '@/components/ui';
 
@@ -1602,14 +1602,17 @@ export const AppBody = memo(function AppBody({ win }: { win: Pick<Win, 'kind' | 
   }
 });
 
-/** A window. With Mosaïk it wears its zone frame and tag; plain, it is just a window; flat, it is maximised. */
-export function ZoneFrame({ tag, zone, plain, flat, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; children: ReactNode }) {
+/**
+ * A window. With Mosaïk it wears its zone frame, and its zone tag in its own title bar, next to its buttons
+ * (`tagAt` places it elsewhere in that bar); plain, it is just a window; flat, it is maximised.
+ */
+export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; tagAt?: CSSProperties; children: ReactNode }) {
   const z = ZONE[zone];
   return (
     <div className="relative h-full w-full">
       <span
-        className="absolute -top-[25px] left-0 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
-        style={{ background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
+        className="absolute z-10 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
+        style={{ top: 7, right: 140, ...tagAt, background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
       >
         {tag}
       </span>
@@ -1905,8 +1908,8 @@ export function ZonesArt() {
         <ZoneBox x={40} y={52} w={720} h={700} zone="lapis" />
         <ZoneBox x={788} y={52} w={452} h={340} zone="verdigris" />
         <ZoneBox x={788} y={410} w={452} h={342} zone="saffron" filled />
-        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={96} w={688} h={640} />
-        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={96} w={420} h={280} />
+        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={68} w={688} h={668} />
+        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={68} w={420} h={308} />
         <p className="absolute text-center text-[18px] font-semibold text-[#F4B13A]" style={{ left: 788, top: 560, width: 452 }}>
           Release to place in Review
         </p>
@@ -1926,9 +1929,10 @@ export function TabsArt() {
       <Scaled className={ART}>
         <Wallpaper />
         <div className="absolute" style={{ left: 36, top: 52, width: 1090, height: 710 }}>
-          <ZoneFrame tag="Code" zone="lapis">
+          {/* The zone's tag starts the strip, as in the app. */}
+          <ZoneFrame tag="Code" zone="lapis" tagAt={{ top: 17, right: 'auto', left: 14 }}>
             <div className="flex h-full flex-col bg-[#16181D]">
-              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] px-3 text-[14px]">
+              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] pl-[80px] pr-3 text-[14px]">
                 {TABS.map(([name, c], i) => (
                   <div key={name} className={`flex h-[38px] items-center gap-2.5 rounded-t-[10px] px-5 ${i ? 'text-[#8E97AA]' : 'bg-[#1E2027] font-semibold text-white'}`} style={i ? undefined : { boxShadow: `inset 0 3px 0 ${c}` }}>
                     <span className="h-3 w-3 rounded-[4px]" style={{ background: c }} />
@@ -2300,7 +2304,6 @@ export const WORKSPACES: Workspace[] = [
 const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
-const TAG = 28; // room above a window for its zone tag
 const TASKBAR = 40; // the Windows taskbar, along the bottom
 const [TOP, BOTTOM, SIDE, PAD] = [22, TASKBAR + 14, 26, 12];
 
@@ -2312,7 +2315,8 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
-  return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + TAG), width: r1(cols * colW - PAD), height: r1(rows * rowH - TAG - PAD / 2) };
+  // Windows fill their zones (each wears its tag in its own title bar), with a gap between them.
+  return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + PAD / 2), width: r1(cols * colW - PAD), height: r1(rows * rowH - PAD) };
 }
 
 /** Where a maximised window sits: everything above the taskbar. */
@@ -2330,7 +2334,7 @@ function mulberry32(seed: number) {
 }
 
 export interface DeskLayout {
-  /** each window's frame, including the strip above it for the zone tag */
+  /** each window's frame */
   rects: Rect[];
   /** how far each window moves for the messy desktop */
   poses: { x: number; y: number }[];
@@ -2348,10 +2352,7 @@ export interface DeskLayout {
 export function deskLayout(index: number, deskH: number): DeskLayout {
   const rnd = mulberry32((index + 1) * 7919 + 13);
   const jit = (n: number) => Math.round((rnd() - 0.5) * 2 * n);
-  const rects = WORKSPACES[index].windows.map((win) => {
-    const b = slotBox(win.slot, deskH);
-    return { left: b.left, top: b.top - TAG, width: b.width, height: b.height + TAG };
-  });
+  const rects = WORKSPACES[index].windows.map((win) => slotBox(win.slot, deskH));
   const order = rects.map((_, i) => i).sort((a, b) => rects[b].width * rects[b].height - rects[a].width * rects[a].height);
   const placed = rects.map((r) => ({ left: r.left, top: r.top }));
   const maxB = deskH - TASKBAR - 12;

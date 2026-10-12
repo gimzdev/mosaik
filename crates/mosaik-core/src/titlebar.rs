@@ -42,12 +42,12 @@ const FINE: i32 = 2;
 const MARGIN: i32 = 6;
 /// The shortest a tag gets in a title bar (the first letters of the zone's name).
 const TAG_LEAST: i32 = 48;
-/// The narrowest a strip gets in a title bar: the zone's tag, the visible tab's chip and the
-/// "+N" chip of the others.
-const STRIP_LEAST: i32 = 180;
+/// The narrowest a strip gets in a title bar: the visible tab's chip and the "+N" chip of the
+/// others, with the start of the zone's tag.
+const STRIP_LEAST: i32 = 140;
 /// Left free at the start of a strip's stretch: the chips take the mouse, and the window must
 /// still have a stretch of title bar to be grabbed by.
-const GRAB: i32 = 40;
+const GRAB: i32 = 32;
 
 /// A free stretch of a title bar, as its distances from the frame's left and right edges. When
 /// the window is resized, a stretch keeps to what bounds it (the tabs or the title on its left,
@@ -253,7 +253,7 @@ mod tests {
         // of the stretch left free to grab the window by.
         let strip = room.spot(frame, Fit::strip(900, 96)).unwrap();
         let (left, right) = room.runs_on(frame)[1];
-        assert_eq!((strip.left, strip.right), (left + 6 + 40, right - 6));
+        assert_eq!((strip.left, strip.right), (left + 6 + 32, right - 6));
     }
 
     #[test]
@@ -264,7 +264,7 @@ mod tests {
         assert!(room.runs.is_empty());
         assert_eq!(room.spot(frame, Fit::tag(60, 96)), None);
         // A stretch with room for a tag but not for a strip.
-        let room = scan(frame, 96, bar(&[(150, 260)], 0, 30)).unwrap();
+        let room = scan(frame, 96, bar(&[(150, 230)], 0, 30)).unwrap();
         assert!(room.spot(frame, Fit::tag(60, 96)).is_some());
         assert_eq!(room.spot(frame, Fit::strip(300, 96)), None);
     }

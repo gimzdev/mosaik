@@ -105,6 +105,19 @@ fn click(at: Point, expected: HWND) -> Result<(), String> {
     drag_path(&[at, at], expected)
 }
 
+/// Where `w`'s tag is drawn, from its frame's top-left corner and its right edge: `[left, top,
+/// from the right, bottom]` (negative tops are above the window).
+fn tag_place(st: &StateSnapshot, w: HWND) -> Option<[i32; 4]> {
+    let me = st.windows.iter().find(|x| x.handle == handle(w))?;
+    let (t, f) = (me.tag?, me.frame_rect);
+    Some([
+        t.left - f.left,
+        t.top - f.top,
+        f.right - t.right,
+        t.bottom - f.top,
+    ])
+}
+
 /// How far `w` is from where it belongs in `zone`: filling it (its tag in its title bar), or
 /// below a band when it wears its tag or its group's strip above it.
 fn error_in(st: &StateSnapshot, w: HWND, zone: Rect, t: &Targets) -> Option<i32> {
@@ -172,6 +185,8 @@ fn drag_by_title(w: HWND, to: Point) -> Result<Value, String> {
         t["grab"] = json!([grab.x - frame.left, grab.y - frame.top]);
         t["under"] = json!(mosaik_win::window::class_name(under));
         t["hit"] = json!(hit(grab, w));
+        // The same point asked as the engine asks it when reading title bars.
+        t["read_as"] = json!(mosaik_win::titlebar::hit_code(w, grab));
         t["pointer"] = json!(format!("{pointer:?}"));
         let started = t["move_loop"] == json!(true);
         tries.push(t);
@@ -203,6 +218,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         "drag": drag,
         "error_px": error_in(&st, w, t.zone, t),
             "tag_above": wears_above(&st, w),
+            "tag": tag_place(&st, w),
         "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
     });
 
@@ -253,6 +269,7 @@ fn steps(engine: &Engine, w: HWND, t: &Targets) -> Result<Value, String> {
         "in_a_strip": strip_with(&st, w).is_some(),
         "error_px": error_in(&st, w, t.zone, t),
             "tag_above": wears_above(&st, w),
+            "tag": tag_place(&st, w),
         "tag_owner_hidden": hidden(&st, t.code),
     });
     Ok(out)
@@ -359,6 +376,7 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
             "drag": drag,
             "error_px": error_in(&st, w, t.zone, t),
             "tag_above": wears_above(&st, w),
+            "tag": tag_place(&st, w),
             "zone": st.windows.iter().find(|x| x.handle == handle(w)).and_then(|x| x.zone.clone()),
         });
         // 2. Onto the other window's tag.
@@ -380,6 +398,7 @@ pub fn self_moved(engine: &Engine, t: &Targets) -> Result<Value, String> {
                 "in_a_strip": strip_with(&st, w).is_some(),
                 "error_px": error_in(&st, w, t.zone, t),
             "tag_above": wears_above(&st, w),
+            "tag": tag_place(&st, w),
             });
         }
         Ok(out)
