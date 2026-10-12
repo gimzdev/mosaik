@@ -188,7 +188,9 @@ impl Engine {
         if old.theme != self.settings.theme {
             switcher::set_theme(self.settings.theme);
         }
-        if old.frames.effective_style() != self.settings.frames.effective_style() {
+        if old.frames.effective_style() != self.settings.frames.effective_style()
+            || old.frames.banded_style() != self.settings.frames.banded_style()
+        {
             // Tags moved between title bars and bands above windows, or bands came or went:
             // windows take their places again.
             self.titles.unband_all();

@@ -49,7 +49,9 @@ pub fn read(hwnd: HWND) -> Option<Reading> {
     let g = window::geometry(hwnd)?;
     let title = window::title(hwnd);
     let buttons = caption_buttons(hwnd);
-    let room = titlebar::scan(g.frame, g.dpi.max(96), |p| {
+    // Pixels on screen are the monitor's, also for a window that is not DPI aware.
+    let dpi = crate::monitors::dpi_of_monitor_of(hwnd);
+    let room = titlebar::scan(g.frame, dpi, |p| {
         if buttons.is_some_and(|b| b.contains(p)) {
             return Some(Hit::Other);
         }

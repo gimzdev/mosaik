@@ -407,8 +407,12 @@ impl Engine {
         self.sync_tabs();
     }
 
-    /// The frame of one window, and its group's strip when it is the tab that shows.
+    /// The frame of one window, and its group's strip when it is the tab that shows; the window
+    /// first in or out of a band if its title bar's room, or what it shows, says so.
     pub(crate) fn refresh_frame(&mut self, h: WindowHandle) {
+        if self.style().title_bars && self.active.as_ref().is_some_and(|a| a.slot_of(h).is_some()) {
+            self.update_bands(&[h]);
+        }
         self.refresh_ring(h);
         if let Some(g) = self.group_of_window(h)
             && g.visible().is_some_and(|(_, w)| *w == h)

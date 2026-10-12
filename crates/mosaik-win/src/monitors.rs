@@ -14,9 +14,10 @@ use windows::Win32::Devices::Display::{
     DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo,
     GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
 };
-use windows::Win32::Foundation::{ERROR_SUCCESS, LPARAM, RECT};
+use windows::Win32::Foundation::{ERROR_SUCCESS, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    MONITORINFOEXW, MonitorFromWindow,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
@@ -27,6 +28,17 @@ use crate::text::from_wide;
 
 pub fn rect(r: RECT) -> Rect {
     Rect::new(r.left, r.top, r.right, r.bottom)
+}
+
+/// The DPI of the monitor `hwnd` is on (mostly): what its pixels on screen are scaled by, whatever
+/// the window's own DPI awareness (a window that is not DPI aware reports 96 for itself).
+pub fn dpi_of_monitor_of(hwnd: HWND) -> u32 {
+    // SAFETY: read-only; any handle value is accepted and the nearest monitor is returned.
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    let (mut dx, mut dy) = (96u32, 96u32);
+    // SAFETY: a monitor handle from Windows and valid out pointers.
+    let _ = unsafe { GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dx, &mut dy) };
+    dx.max(96)
 }
 
 struct Raw {

@@ -62,9 +62,11 @@ pub(crate) enum TitleSpot {
 struct Known {
     size: Size,
     title: String,
-    /// `None`: the app did not answer in time.
+    /// The last reading the app answered in full (`None`: it never has).
     room: Option<TitleRoom>,
+    /// When it was last read, and whether the app failed to answer then.
     at: Instant,
+    failed: bool,
     /// Read again at the next chance.
     stale: bool,
 }
@@ -150,7 +152,7 @@ impl Engine {
                 let fresh = !k.stale
                     && k.size == frame.size()
                     && (k.title == title || k.at.elapsed() < TITLE_EVERY)
-                    && (k.room.is_some() || k.at.elapsed() < RETRY);
+                    && (!k.failed || k.at.elapsed() < RETRY);
                 (k.room.clone().map_or(Bar::Unread, Bar::Room), fresh)
             }
             None => (Bar::Pending, false),
@@ -192,7 +194,8 @@ impl Engine {
     }
 
     /// Takes the readings that arrived: each window read shows its tag or strip where it now
-    /// goes, and moves into or out of a band when that changed.
+    /// goes, and moves into or out of a band when that changed. A tab group whose visible tab was
+    /// read may now reach its other tabs differently: what shows is decided again.
     pub(crate) fn take_titles(&mut self) {
         let Some(reader) = &self.titles.reader else {
             return;
@@ -205,18 +208,19 @@ impl Engine {
                 self.titles.forget(w);
                 continue;
             };
-            let changed = self
-                .titles
-                .known
-                .get(&w)
-                .is_none_or(|before| before.room != reading.room);
+            let before = self.titles.known.get(&w).and_then(|k| k.room.clone());
+            // An app busy for a moment keeps the room it was last read with.
+            let failed = reading.room.is_none();
+            let room = reading.room.or_else(|| before.clone());
+            let changed = !self.titles.known.contains_key(&w) || room != before;
             self.titles.known.insert(
                 w,
                 Known {
                     size: reading.frame.size(),
                     title: reading.title,
-                    room: reading.room,
+                    room,
                     at: Instant::now(),
+                    failed,
                     stale: false,
                 },
             );
@@ -227,9 +231,12 @@ impl Engine {
         if read.is_empty() {
             return;
         }
-        self.update_bands(&read);
+        let tabs = read.iter().any(|w| self.group_of_window(*w).is_some());
         for w in read {
             self.refresh_frame(w);
+        }
+        if tabs {
+            self.sync_tabs();
         }
     }
 
@@ -302,10 +309,17 @@ impl Engine {
         let Some(g) = window::geometry(window::hwnd(h)) else {
             return false;
         };
-        if !g.framable() {
+        // A background tab Mosaïk keeps hidden (parked off screen, say) stays as it is.
+        if !g.framable() || self.hiding.hidden.contains_key(&h) {
             return banded;
         }
-        let dpi = g.dpi.max(96);
+        // The monitor's, as the tag and the strip are drawn with (a window that is not DPI aware
+        // reports 96 for itself).
+        let dpi = self
+            .topology
+            .as_ref()
+            .map_or(g.dpi, |t| t.monitor_for_rect(g.frame).dpi)
+            .max(96);
         let strip = self
             .group_of_window(h)
             .is_some_and(|grp| grp.open.len() > 1 && grp.visible().is_some_and(|(_, w)| *w == h));
@@ -324,17 +338,20 @@ impl Engine {
         };
         match self.title_bar(h, g.frame) {
             Bar::Room(room) => room.spot(g.frame, fit).is_none(),
-            // Not read yet, or its app is busy: as it is until it answers.
-            Bar::Pending | Bar::Unread => banded,
+            // Never answered: a strip must be reachable, so it goes above the window; a tag
+            // waits for an answer.
+            Bar::Unread => strip || banded,
+            Bar::Pending => banded,
         }
     }
 
     /// Puts each of `windows` into or out of a band when its title bar's room says so, and moves
-    /// it to its place again (not while the user is moving it).
+    /// it to its place again (not while the user is moving it, nor while it is a hidden tab).
+    /// Where it goes now is what a switch's settling checks.
     pub(crate) fn update_bands(&mut self, windows: &[WindowHandle]) {
         let mut moves = Vec::new();
         for &h in windows {
-            if self.watch.moving == Some(h) {
+            if self.watch.moving == Some(h) || self.hiding.hidden.contains_key(&h) {
                 continue;
             }
             let want = self.wants_band(h);
@@ -372,8 +389,15 @@ impl Engine {
             return;
         }
         for o in mover::move_all(&moves, mover::WAIT_ONE) {
-            if let Err(e) = o.result {
-                tracing::debug!(error = %e, "window not moved into or out of its band");
+            match o.result {
+                Ok(wanted) => {
+                    if let Some(a) = &mut self.active
+                        && let Some(p) = a.placed.iter_mut().find(|(w, _)| *w == o.window)
+                    {
+                        p.1 = wanted;
+                    }
+                }
+                Err(e) => tracing::debug!(error = %e, "window not moved into or out of its band"),
             }
         }
     }

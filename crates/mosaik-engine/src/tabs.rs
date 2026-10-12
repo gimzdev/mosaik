@@ -289,7 +289,13 @@ impl Engine {
             TitleSpot::Above | TitleSpot::NoAnswer if maximized => return Spot::Later,
             TitleSpot::Above | TitleSpot::NoAnswer => {}
         }
-        let banded = self.style_of(visible).for_tabs();
+        // Above the window: in the band it sits below once banded (with tags in title bars, the
+        // band's height even before it moves there, so the strip can be reached at once).
+        let banded = if style.title_bars {
+            self.settings.frames.banded_style().for_tabs()
+        } else {
+            self.style_of(visible).for_tabs()
+        };
         if let Some(z) = &zone
             && let Some(band) = banded.tag_area(z.rect, z.dpi)
         {
