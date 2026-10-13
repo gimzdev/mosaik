@@ -19,7 +19,7 @@ re-run before each release.
 | 7. Hardening | done here: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers, soak, two screens at two scales; left for the owner by hand: sleep and resume, a screen unplugged; not possible here: RDP (Windows 11 Home has no Remote Desktop host), Windows 10 | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.1 | built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.1](#11) |
-| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0128): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu; every test and every probe check passing; the Store package 2.0.0.0 ready for the owner to submit | [2.0](#20) |
+| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0133): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 2.0.0.0 ready; sending it from `./mosaik1.sh --deploy --app` checked against a stand-in of the Store, and waiting on the owner's Microsoft Entra tenant (Partner Center has none yet) | [2.0](#20) |
 
 ## Step 1: verify assumptions
 
@@ -1010,17 +1010,18 @@ process, its own windows, a scratch folder).
 
 What the owner asked for on 2026-10-13, after opening 1.0 from the Store ("break everything and
 redo everything", "the dark theme default was much better", "production ready"), and the
-evidence (ADR 0024). Jobs 0122 to 0128 ran on the owner's PC: the main screen 1920 x 1080 at 100%,
+evidence (ADR 0024). Jobs 0122 to 0133 ran on the owner's PC: the main screen 1920 x 1080 at 100%,
 two virtual screens of 2560 x 1440 at 125% to its right (so the side menu's line is on the left
 edge, where the pointer stops).
 
 - **The window, rebuilt**: Home (the screen as the chosen layout would leave it, Smart and the
   ten layouts, Arrange and Undo; the workspaces beside it, then the suggested sets), a
   workspace's page, the zone editor, Settings. In a browser (2026-10-13): type check, lint and
-  format clean, 88 component tests, 27 smoke tests in Chromium (light, dark, high contrast, the
-  keyboard path, Mosaïk not answering). On Windows, `mosaik.ps1 test`, "Every test passed" (job
-  0126: core 241, IPC 11 and 10, Win32 11 and 7 with real windows, overlays 8, engine 2 and 1,
-  the interface's 88, clippy with warnings as errors); rustfmt clean. The tour (jobs 0122, 0123, 0126): 29 pictures,
+  format clean, 92 component tests, 28 smoke tests in Chromium (light, dark, high contrast, the
+  keyboard path, Mosaïk not answering, a window dragged onto another). On Windows,
+  `mosaik.ps1 test`, "Every test passed" (job 0133: core 246, IPC 12 and 10, Win32 11 and 7 with
+  real windows, overlays 8, engine 2 and 1, the interface's 92, clippy with warnings as errors,
+  and the scripts' own tests below); rustfmt clean. The tour (jobs 0122, 0123, 0126): 29 pictures,
   every control named, on Home, a workspace's page, the zones and Settings, dark, light, at the
   smallest size and with keyboard focus.
 - **Dark by default** (settings format 6): the owner's settings, written as format 1 by the
@@ -1063,6 +1064,41 @@ edge, where the pointer stops).
   the game hid the pointer. `workspace` (job 0126): saved in 24 ms, opened in 25 ms, 3 of 3
   windows in their zones, a closed app started again once, 0 px; the probe's memory with
   frames 8.5 MB private.
+- **Windows dragged onto each other** (the owner, 2026-10-13: "in this view we should be able to
+  drag drop apps to permute them"): on Home's picture a window dropped on another trades places
+  with it, each keeping its zone's name and colour; one dropped on an empty zone of a layout
+  moves there; Enter, Enter and Escape do the same from the keyboard; Arrange puts them so, Reset
+  puts the picture back (protocol 8: `moves` on `arrange` and `preview_arrange`). Tests first in
+  the core (traded with names and colours, into an empty zone, a window that needs more room
+  making room again, moves that name nothing) and in the interface (four component tests, a
+  smoke test that drags with the mouse in Chromium). Job 0132's probe found two windows of one
+  app keeping their places' names ("Browser 2" went to the window that was "Browser"), while the
+  colours followed: names are now told apart in the order of the zones before the move (test
+  first, `windows_of_one_app_keep_their_own_zone_names_when_moved`). Job 0133,
+  `mosaik-probe smart`, Halves with the first window dropped on the second: the preview in 1.4 ms
+  traded them, with their names and colours, and moved nothing on screen; Arrange put them there
+  in 12 ms (0 px each), Undo put them back (0 px). The tour (job 0133) dragged Chrome onto Claude
+  in the picture with the real mouse: they traded places, Reset put them back, and no window
+  moved (Arrange is never clicked).
+- **Sending to the Store from a script** (ADR 0025): `./mosaik1.sh --deploy --app` runs
+  `mosaik.ps1 publish`, then deploys the site. `installer/msix/test-publish.ps1`, part of
+  `mosaik.ps1 test`, runs `publish.ps1` against a stand-in of Microsoft's token and submission
+  services that checks every request: 16 checks passing in jobs 0132 and 0133 (the token, the
+  waiting submission deleted, a new one from the last published, the old package removed and the
+  new one added, "What's new" in the listing and nothing else changed, the ZIP uploaded as a block
+  blob, the commit, the status read until the Store has it); without keys and nobody to answer,
+  it says what it needs and sends nothing. The build step's own test
+  (`installer/test-mosaik-ps1.ps1`): job 0132's `mosaik.ps1 build` stopped at once on Windows
+  PowerShell 5.1 ("The property 'Count' cannot be found on this object"); job 0133 ran the test
+  against the script as job 0132 had it (every case failing), as the next commit had it (the
+  case where Windows does not start the new build failing) and as it was then (6 of 6 passing).
+  Then `mosaik.ps1 build` with the owner's Mosaïk running from the folder: it quit, the build
+  took 146 s, Mosaïk started again in the tray (a new process, the old one gone); with none
+  running, 121 s. Smart App Control then refused the new `mosaikctl.exe` while `mosaik.exe` ran
+  (job 0133): the build now stops a Mosaïk it cannot ask, and its watchdog brings back its
+  windows. Partner Center (2026-10-13): the developer account has no Microsoft Entra tenant yet,
+  which the submission API needs; making one creates an admin account with a password, the
+  owner's to do.
 - **Previews on the owner's own screen** (`mosaikctl preview`, asked only, job 0126): Smart in
   12 ms (Chrome 1114 x 1032 as the browser, Windows Terminal 806 x 568, Claude 806 x 464; File
   Explorer and two others minimised), Thirds and Quarters in 10 ms.
@@ -1073,14 +1109,16 @@ edge, where the pointer stops).
 - **The Store's 1.0 opened while 2.0 runs** (job 0126): from the Start menu, it handed over and
   left: Mosaïk 2's window showed 1.0 s later, and no 1.0 process was left 3 s later. 1.0 does
   not start with Windows on this PC (its startup task is off, state 0).
-- **Built and packed** (job 0126): release build in 80 s, `Mosaik_2.0.0.0_x64.msix` 2.90 MB;
-  `pack`, 264 files, checked file by file against the repository; `mosaik.ps1` and `mosaik1.sh`
-  beside the repository, dated that day. Mosaïk 2 left in the tray on the owner's own data
-  (job 0128: version 2.0.0, protocol 7, its watchdog, Win+Alt+Space registered, no window).
-- **The site** (`mosaik1.sh` 1.8.0): its first home page back (the title, "Every project gets
-  its own workspace: your apps and windows arranged and ready in one click.", "Free and open
-  source.", desktops of two to four windows); the site folder is what the script writes (its 23
-  files compared one by one, 2026-10-13).
+- **Built and packed** (job 0133): release build in 121 s, `Mosaik_2.0.0.0_x64.msix` 2.90 MB;
+  `pack`, 270 files, checked file by file against the repository; `mosaik.ps1` and `mosaik1.sh`
+  beside the repository, dated that day. Mosaïk 2 left in the tray on the owner's own data:
+  opened by hand its window shows in 0.3 s, with `--background` none (job 0133; job 0128 read
+  version 2.0.0, its watchdog and Win+Alt+Space registered through `mosaikctl`, which Smart App
+  Control refused in job 0133).
+- **The site** (`mosaik1.sh` 1.9.0, with `--app`): its first home page back (the title, "Every
+  project gets its own workspace: your apps and windows arranged and ready in one click.", "Free
+  and open source.", desktops of two to four windows); the site folder is what the script writes
+  (its 23 files compared one by one, 2026-10-13, again after 1.9.0); `shellcheck` clean.
 
 ## Owner decisions
 
