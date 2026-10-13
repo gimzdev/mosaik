@@ -66,6 +66,9 @@ pub(crate) mod timer {
     pub const QUICK_HOVER: usize = 8;
     /// A frame of the quick menu sliding in or fading away.
     pub const QUICK_ANIM: usize = 9;
+    /// Tab strips and frames go back above their windows, once a window raised a moment ago
+    /// has come up (its app raises it when it gets round to it).
+    pub const STACK: usize = 10;
 }
 
 /// Shift a timer id into the `Pending::timers` bit set.
@@ -483,6 +486,9 @@ impl Engine {
         }
         if todo.timers & timer_bit(timer::QUICK_ANIM) != 0 {
             self.quick_anim_tick();
+        }
+        if todo.timers & timer_bit(timer::STACK) != 0 {
+            self.stack_tick();
         }
         if todo.displays {
             // Windows sends several of these for one change; act once it is done.

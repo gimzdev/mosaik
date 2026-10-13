@@ -129,6 +129,20 @@ impl AppMatch {
         }
     }
 
+    /// Two matches name the same app: by package id when both have one, else by program file
+    /// when both have one. A set's Terminal (its package id) is the Terminal a window was saved
+    /// with (its program and package id); Claude from the Start menu (its program) is the Claude
+    /// whose window also says its id.
+    pub fn same_app(&self, other: &AppMatch) -> bool {
+        let same = |x: &Option<String>, y: &Option<String>| match (x, y) {
+            (Some(x), Some(y)) => Some(x.eq_ignore_ascii_case(y)),
+            _ => None,
+        };
+        same(&self.aumid, &other.aumid)
+            .or_else(|| same(&self.exe, &other.exe))
+            .unwrap_or(false)
+    }
+
     /// How well a window fits, or `None` when it cannot be this slot's window.
     pub fn score(&self, w: &WindowFacts) -> Option<u32> {
         if self.exe.is_none() && self.aumid.is_none() && self.class.is_none() {
@@ -142,7 +156,7 @@ impl AppMatch {
             score += 100;
         }
         if let Some(aumid) = &self.aumid {
-            if w.aumid.as_deref() != Some(aumid.as_str()) {
+            if !w.aumid.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(aumid)) {
                 return None;
             }
             score += 100;
@@ -237,6 +251,67 @@ mod tests {
             AppMatch::default().score(&win(4, "a.exe", "b", "c")).is_none(),
             "an empty match matches nothing"
         );
+    }
+
+    #[test]
+    fn a_packaged_app_is_found_by_its_id_whatever_its_case() {
+        // A set's Terminal comes from the Start menu ("…!App"); its window's id comes from its
+        // process. Ids are not case-sensitive.
+        let terminal = AppMatch {
+            aumid: Some("Microsoft.WindowsTerminal_8wekyb3d8bbwe!App".into()),
+            ..AppMatch::default()
+        };
+        let window = WindowFacts {
+            aumid: Some("microsoft.windowsterminal_8wekyb3d8bbwe!app".into()),
+            ..win(
+                1,
+                "WindowsTerminal.exe",
+                "CASCADIA_HOSTING_WINDOW_CLASS",
+                "PowerShell",
+            )
+        };
+        assert_eq!(terminal.score(&window), Some(100));
+        let other = WindowFacts {
+            aumid: Some("Microsoft.WindowsNotepad_8wekyb3d8bbwe!App".into()),
+            ..win(2, "Notepad.exe", "Notepad", "x")
+        };
+        assert_eq!(terminal.score(&other), None);
+    }
+
+    #[test]
+    fn the_same_app_by_package_id_or_program() {
+        let by_id = |id: &str| AppMatch {
+            aumid: Some(id.into()),
+            ..AppMatch::default()
+        };
+        let by_exe = |exe: &str| AppMatch {
+            exe: Some(exe.into()),
+            ..AppMatch::default()
+        };
+        let saved_terminal = AppMatch {
+            exe: Some("windowsterminal.exe".into()),
+            aumid: Some("Microsoft.WindowsTerminal_8wekyb3d8bbwe!App".into()),
+            ..AppMatch::default()
+        };
+        assert!(by_id("microsoft.windowsterminal_8wekyb3d8bbwe!app").same_app(&saved_terminal));
+        let saved_claude = AppMatch {
+            exe: Some("claude.exe".into()),
+            aumid: Some("com.squirrel.AnthropicClaude.claude".into()),
+            ..AppMatch::default()
+        };
+        assert!(by_exe("Claude.exe").same_app(&saved_claude));
+        assert!(!by_exe("chrome.exe").same_app(&saved_claude));
+        // Two Store apps in one host program are told apart by their ids.
+        let host = |id: &str| AppMatch {
+            exe: Some("applicationframehost.exe".into()),
+            aumid: Some(id.into()),
+            ..AppMatch::default()
+        };
+        assert!(
+            !host("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App")
+                .same_app(&host("Microsoft.Paint_8wekyb3d8bbwe!App"))
+        );
+        assert!(!AppMatch::default().same_app(&AppMatch::default()));
     }
 
     #[test]

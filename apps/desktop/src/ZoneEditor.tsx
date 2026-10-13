@@ -139,7 +139,7 @@ export function ZoneEditor({
           <Status text={loadProblem} error />
         </div>
         <div className="mt-3">
-          <Button onClick={onClose}>Back to workspaces</Button>
+          <Button onClick={onClose}>Back</Button>
         </div>
       </article>
     );

@@ -120,23 +120,32 @@ the engine gathers windows and applies the result.
   a workspace, a drop, the zone editor, a resize by hand, a tab clicked, an app added or moved.
   A title bar read again later (a window brought forward) changes no band and moves no window;
   a tab group's strip always sits at the right end of its visible tab's title bar.
-- **A workspace's apps** (ADR 0018): the Workspaces page lists them with their zones; adding a
-  window on screen, moving an app to another zone or removing it is a pure edit
-  (`mosaik_core::editing`), saved, then applied at once in the open workspace.
+- **A workspace's apps** (ADR 0018, 0023): the home page lists them, and a workspace's ⋯ menu
+  shows them with their zones; adding a window on screen, moving an app to another zone or
+  removing it is a pure edit (`mosaik_core::editing`), saved, then applied at once in the open
+  workspace.
 - **The home page** (ADR 0016): a picture of the main monitor, drawn from `preview_arrange`
   (the same preparation as Arrange, changing nothing). While the pointer or the keyboard is on
   Arrange or one of ten layouts, the windows glide to where they would go and the zones appear,
   and the caption says the task Arrange read; a click does it. A layout replaces the main
   monitor's zones with its own, for the windows that fit them, and Undo brings them back. Below,
-  each workspace lists its apps.
+  every workspace with its apps, Open, and a ⋯ menu for the rest (ADR 0023). Mosaïk's window has
+  two places, Home and Settings (with About at its end).
 - **Sets of apps** (ADR 0022): the apps of the Start menu (read from the shell's Apps folder on a
   thread of their own, kept ten minutes) that go together for a task, chosen by
   `mosaik_core::sets`, are offered on the home page. A click opens the workspace that has the
-  set's apps, or makes one laid out for its task, starting the apps that are not open. At the
-  end of the welcome, the windows open are sorted into a workspace per task, without moving any.
-- **The quick menu** (ADR 0015, 0017): a thin line on an edge of the main monitor slides open
-  as soon as the pointer stops on it, onto Mosaïk's window and the open workspace, Arrange, the
-  switcher, saving, the zone editor and snapping, without taking the keyboard. It hides while a game or a video fills the main monitor.
+  set's apps, or makes one laid out for its task (three windows to a view, `task::MOST_IN_VIEW`;
+  the set's other apps as tabs with the app they go with, `task::tabs_for`), starting the apps
+  that are not open. An app open is used (packaged apps' windows take their process's
+  AppUserModelID, `AppMatch::same_app`); a start still pending when the workspace is opened again
+  stands for its slot; a started app is placed when its window shows or uncloaks (ADR 0023). At
+  the end of the welcome, the windows open are sorted into a workspace per task, without moving
+  any.
+- **The quick menu** (ADR 0015, 0017, 0023): a thin line on an edge of the main monitor slides
+  open as soon as the pointer stops on it, onto Mosaïk's window and the open workspace, Arrange,
+  the switcher, saving, the zone editor and snapping, without taking the keyboard. It sits on the
+  edge chosen if the pointer stops there, else on the other (`mosaik_core::edge`), and does not
+  answer while an app hides or confines the pointer, as games do (`input::pointer_taken`). It hides while a game or a video fills the main monitor.
   Dragged along its edge, it stays there. Apps that drag their window themselves, without Windows' move loop, are followed
   too: a window that took the mouse and moves at the same size is being dragged. A window Mosaïk must not move (an app running as administrator, or one Windows
   protects) gets no zones, and the user is told why once, when the drag ends.
@@ -162,6 +171,8 @@ shell's cloak (ADR 0003).
 - **Using it**: click a chip to show that tab; drag a chip along the strip to reorder; drag it
   away from the strip to pull it out (zones show, as when dragging a window; Shift moves
   freely; Esc cancels). A crowded strip shrinks its chips, then gathers the rest in a "+N" chip.
+  The strips and frames are put back above their windows 120 ms and 400 ms after a chip is
+  clicked, for apps that raise their window again once it shows (ADR 0023).
 - **One rule decides what shows** (`mosaik_core::tabs::plan_tabs`, applied by `sync_tabs` after
   anything that changes groups): a window stays hidden only while it is a background tab of a
   group of the open workspace whose other tabs can be reached, through its strip, or through

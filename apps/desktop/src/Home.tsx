@@ -1,18 +1,18 @@
 // The home page: tidy the screen in one click. A picture of the main screen shows where each
 // window would go while the pointer (or the keyboard) is on Arrange or a layout; a click does it,
 // and Undo puts everything back. Below, sets of the apps installed that go together, and the
-// saved workspaces with their apps, one click away (Apps shows them in full, to change them).
-// Words are few: the picture shows what each button does.
+// saved workspaces, each opened in a click, with the rest in its ⋯ menu. Words are few: the
+// picture shows what each button does.
 
 import { useCallback, useEffect, useState } from 'react';
 
 import { PRESETS, type Preset, presetShape } from './editor/model';
 import { onWorkspacesChanged, request } from './engine';
-import { type ArrangePreview, TASK_WORDS, type WorkspaceSummary, type ZoneColor, errorMessage } from './protocol';
+import { type ArrangePreview, TASK_WORDS, type ZoneColor, errorMessage } from './protocol';
 import { Sets } from './Sets';
 import { Stage } from './Stage';
 import { Button, Keys, PageTitle, useSay } from './ui';
-import { AppsPanel } from './WorkspaceApps';
+import { WorkspaceList } from './Workspaces';
 
 /** The layouts, the most used first (landscape screens), then rows and the whole screen. */
 const ORDER: readonly Preset[] = [
@@ -57,26 +57,6 @@ function Tile({ preset }: { preset: Preset }) {
   );
 }
 
-/** A workspace's apps at a glance: the first few by name, then how many more. */
-function AppNames({ names }: { names: string[] }) {
-  if (names.length === 0) return <p className="mt-1 text-small text-[var(--muted)]">No apps yet.</p>;
-  const shown = names.slice(0, 5);
-  const more = names.length - shown.length;
-  return (
-    <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Its apps">
-      {shown.map((n, i) => (
-        <li
-          key={`${n}-${String(i)}`}
-          className="max-w-48 truncate rounded-full border border-[var(--line)] px-2 text-caption leading-5 text-[var(--muted)]"
-        >
-          {n}
-        </li>
-      ))}
-      {more > 0 ? <li className="px-1 text-caption leading-5 text-[var(--muted)]">+{String(more)}</li> : null}
-    </ul>
-  );
-}
-
 function plural(n: number, one: string, many: string) {
   return `${String(n)} ${n === 1 ? one : many}`;
 }
@@ -108,13 +88,13 @@ function caption(preview: ArrangePreview | null, pointing: Pointing, unread: boo
 export function Home({
   shortcut,
   demo = false,
-  onManage,
+  onEditZones,
 }: {
   /** The shortcut that opens the switcher now. */
   shortcut: string;
   /** Show once what Arrange would do, without being asked (right after the welcome). */
   demo?: boolean;
-  onManage: () => void;
+  onEditZones: (workspace: string) => void;
 }) {
   const say = useSay();
   /** The screen as it is (what Arrange would do, and where the windows are now). */
@@ -125,11 +105,6 @@ export function Home({
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState<Pointing>(null);
   const [undoable, setUndoable] = useState(false);
-  const [list, setList] = useState<WorkspaceSummary[] | null>(null);
-  const [active, setActive] = useState<string | null>(null);
-  const [opening, setOpening] = useState<string | null>(null);
-  /** The workspace whose apps show in full, to change them. */
-  const [appsOf, setAppsOf] = useState<string | null>(null);
 
   const readScreen = useCallback(() => {
     void request({ cmd: 'preview_arrange' }).then((reply) => {
@@ -142,29 +117,17 @@ export function Home({
     });
   }, []);
 
-  const readWorkspaces = useCallback(() => {
-    void request({ cmd: 'workspaces' }).then((reply) => {
-      if (reply.reply === 'workspaces') {
-        setList(reply.workspaces);
-        setActive(reply.active);
-      }
-    });
-  }, []);
-
   useEffect(() => {
     readScreen();
-    readWorkspaces();
-    // Windows move while the page is open: the picture follows when the window comes back.
+    // Windows move while the page is open: the picture follows when the window comes back, and
+    // when a workspace or a set opens.
     window.addEventListener('focus', readScreen);
-    const stop = onWorkspacesChanged(() => {
-      readWorkspaces();
-      readScreen();
-    });
+    const stop = onWorkspacesChanged(readScreen);
     return () => {
       window.removeEventListener('focus', readScreen);
       stop();
     };
-  }, [readScreen, readWorkspaces]);
+  }, [readScreen]);
 
   // Right after the welcome, the picture shows once what Arrange would do with the windows on
   // screen, then the screen as it is again (not for those who ask for less motion).
@@ -218,7 +181,6 @@ export function Home({
         say(errorMessage(reply) ?? 'Your windows could not be arranged.', true);
       }
       readScreen();
-      readWorkspaces();
     });
   };
 
@@ -227,19 +189,6 @@ export function Home({
     void request({ cmd: 'undo_arrange' }).then((reply) => {
       if (reply.reply === 'done') say(reply.message);
       else say(errorMessage(reply) ?? 'Arrange could not be undone.', true);
-      readScreen();
-      readWorkspaces();
-    });
-  };
-
-  const open = (w: WorkspaceSummary) => {
-    setOpening(w.id);
-    void request({ cmd: 'switch', workspace: w.id }).then((reply) => {
-      setOpening(null);
-      if (reply.reply === 'done') say(reply.message);
-      else say(errorMessage(reply) ?? 'It could not be opened.', true);
-      setUndoable(false);
-      readWorkspaces();
       readScreen();
     });
   };
@@ -337,64 +286,14 @@ export function Home({
         </ul>
       </section>
 
-      <section aria-labelledby="home-workspaces-title" className="below-picture mt-8">
-        <div className="flex items-baseline justify-between gap-4">
-          <h2 id="home-workspaces-title" className="font-display text-heading font-semibold tracking-tight">
-            Workspaces
-          </h2>
-          {list?.length ? (
-            <Button tone="quiet" label="Manage workspaces" onClick={onManage}>
-              Manage
-            </Button>
-          ) : null}
-        </div>
-        {list === null ? null : list.length === 0 ? (
-          <p className="mt-1 text-small text-[var(--muted)]">Arranged windows are kept here, one click away.</p>
-        ) : (
-          <ul className="mt-2 flex flex-col divide-y divide-[var(--line)] rounded-xl border border-[var(--line)] bg-[var(--surface)]">
-            {list.slice(0, 6).map((w) => {
-              const showing = appsOf === w.id;
-              return (
-                <li key={w.id} className="px-4 py-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-semibold">{w.name}</span>
-                      {active === w.id ? (
-                        <span className="shrink-0 rounded-full border border-[var(--ok)] px-2 text-caption leading-5 font-semibold text-[var(--ok)]">
-                          Open now
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      <Button
-                        tone="quiet"
-                        label={`Apps of “${w.name}”`}
-                        expanded={showing}
-                        controls={`home-apps-${w.id}`}
-                        onClick={() => {
-                          setAppsOf(showing ? null : w.id);
-                        }}
-                      >
-                        Apps
-                      </Button>
-                      <Button
-                        label={`Open “${w.name}”`}
-                        pending={opening === w.id}
-                        onClick={() => {
-                          open(w);
-                        }}
-                      >
-                        Open
-                      </Button>
-                    </span>
-                  </div>
-                  {showing ? <AppsPanel workspace={w.id} id={`home-apps-${w.id}`} /> : <AppNames names={w.apps} />}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+      <WorkspaceList
+        onEditZones={onEditZones}
+        onOpened={() => {
+          // What Undo would undo is not on screen any more.
+          setUndoable(false);
+          readScreen();
+        }}
+      />
 
       <p className="mt-6 text-small text-[var(--muted)]">
         <Keys shortcut={shortcut} /> switches workspaces from anywhere.

@@ -21,6 +21,15 @@ const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: number }) =
   </svg>
 );
 
+/** A workspace's layout in small: its zones, in their colours, where they are. */
+const LayoutGlyph = ({ windows, size = 16 }: { windows: Win[]; size?: number }) => (
+  <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" className="shrink-0">
+    {windows.map(({ id, slot: [c, r, cw, rh], zone }) => (
+      <rect key={id} x={1 + (c / 12) * 14 + 0.5} y={1 + (r / 8) * 14 + 0.5} width={(cw / 12) * 14 - 1} height={(rh / 8) * 14 - 1} rx="1.2" fill={ZONE[zone].bg} />
+    ))}
+  </svg>
+);
+
 /** Dark wallpaper: a faint field of tiles with two soft pools of colour. */
 const Wallpaper = () => <div className="wallpaper absolute inset-0" />;
 
@@ -210,7 +219,7 @@ export function Stage() {
                 i === sel ? 'border-ink bg-ink text-paper' : 'border-ink/20 text-ink hover:border-ink/60'
               }`}
             >
-              <TileGlyph colors={w.windows.map((x) => ZONE[x.zone].bg)} size={16} />
+              <LayoutGlyph windows={w.windows} />
               {w.label}
             </button>
           ))}

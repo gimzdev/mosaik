@@ -1,10 +1,9 @@
-// Mosaïk's window: welcome on first run, then home (tidy the screen in one click), workspaces,
-// settings and about, with the zone editor for one workspace. Messages from Mosaïk show on top of
-// every page.
+// Mosaïk's window: welcome on first run, then two places: Home (tidy the screen in one click,
+// sets of apps, the saved workspaces) and Settings (with About at the end), and the zone editor
+// for one workspace, opened from its workspace. Messages from Mosaïk show on top of every page.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { About } from './About';
 import { guardClose, onNotices, onZonesToEdit, request, styleTitleBar, takeNotices, takeZonesToEdit } from './engine';
 import { keepTabInside } from './focusLoop';
 import { Notices, type ShownNotice } from './Notices';
@@ -13,22 +12,13 @@ import { errorMessage, type HotkeyState, type Settings } from './protocol';
 import { SettingsPane } from './SettingsPane';
 import { Button, Confirm, Feedback, Mark } from './ui';
 import { Welcome } from './Welcome';
-import { Workspaces } from './Workspaces';
 import { ZoneEditor } from './ZoneEditor';
 
-type View =
-  | { page: 'welcome' }
-  | { page: 'home' }
-  | { page: 'workspaces' }
-  | { page: 'settings' }
-  | { page: 'about' }
-  | { page: 'zones'; workspace: string };
+type View = { page: 'welcome' } | { page: 'home' } | { page: 'settings' } | { page: 'zones'; workspace: string };
 
 const PAGES = [
   { page: 'home', label: 'Home' },
-  { page: 'workspaces', label: 'Workspaces' },
   { page: 'settings', label: 'Settings' },
-  { page: 'about', label: 'About' },
 ] as const;
 
 /** What saving settings came to: the engine's message, and the settings as they now are (the
@@ -79,6 +69,7 @@ export function App() {
   const [closing, setClosing] = useState<((close: boolean) => void) | null>(null);
   const noticeCount = useRef(0);
   const dirty = useRef(false);
+  const scroller = useRef<HTMLElement>(null);
   useEffect(() => {
     dirty.current = editorDirty;
   }, [editorDirty]);
@@ -175,6 +166,12 @@ export function App() {
         };
   }, []);
 
+  // A page opens at its top, not where the last one was scrolled to.
+  const page = view?.page;
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: 0 });
+  }, [page]);
+
   const go = (next: View) => {
     if (view?.page === 'zones' && editorDirty) setLeavingTo(next);
     else setView(next);
@@ -247,19 +244,8 @@ export function App() {
             <Home
               shortcut={shortcut}
               demo={welcomed}
-              onManage={() => {
-                setView({ page: 'workspaces' });
-              }}
-            />
-          );
-        case 'workspaces':
-          return (
-            <Workspaces
               onEditZones={(workspace) => {
                 setView({ page: 'zones', workspace });
-              }}
-              onHome={() => {
-                setView({ page: 'home' });
               }}
             />
           );
@@ -270,15 +256,16 @@ export function App() {
               onDirtyChange={setEditorDirty}
               onClose={() => {
                 setEditorDirty(false);
-                setView({ page: 'workspaces' });
+                setView({ page: 'home' });
               }}
             />
           );
         case 'settings':
-          return <SettingsPane settings={settings} hotkey={hotkey} saveSettings={saveSettings} />;
-        case 'about':
           return (
-            <About
+            <SettingsPane
+              settings={settings}
+              hotkey={hotkey}
+              saveSettings={saveSettings}
               onWelcome={() => {
                 setView({ page: 'welcome' });
               }}
@@ -334,36 +321,36 @@ export function App() {
       );
     }
 
-    const current = view.page === 'zones' ? 'workspaces' : view.page;
+    // The zone editor is opened from a workspace on the home page.
+    const current = view.page === 'zones' ? 'home' : view.page;
     return (
-      <div className="flex h-full">
-        <nav
-          aria-label="Mosaïk"
-          className="flex w-52 shrink-0 flex-col gap-1 border-r border-[var(--line)] bg-[var(--surface)] p-4"
-        >
-          <p className="mb-5 flex items-center gap-2 px-2 pt-1 font-display text-xl font-bold tracking-tight">
-            <Mark />
+      <div className="flex h-full flex-col">
+        <header className="flex shrink-0 items-stretch gap-8 border-b border-[var(--line)] bg-[var(--surface)] px-6">
+          <p className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
+            <Mark size={20} />
             Mosaïk
           </p>
-          {PAGES.map((p) => (
-            <button
-              key={p.page}
-              type="button"
-              aria-current={current === p.page ? 'page' : undefined}
-              onClick={() => {
-                go({ page: p.page });
-              }}
-              className={`relative rounded-lg px-3 py-2 text-left font-semibold transition-colors duration-150 ${
-                current === p.page
-                  ? 'bg-[var(--hover)] text-[var(--text)] before:absolute before:top-2 before:bottom-2 before:left-0 before:w-[3px] before:rounded-full before:bg-[var(--accent)] forced-colors:underline forced-colors:underline-offset-4'
-                  : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </nav>
-        <main className="relative min-w-0 flex-1 overflow-y-auto px-10 py-8">
+          <nav aria-label="Mosaïk" className="flex items-stretch gap-1">
+            {PAGES.map((p) => (
+              <button
+                key={p.page}
+                type="button"
+                aria-current={current === p.page ? 'page' : undefined}
+                onClick={() => {
+                  go({ page: p.page });
+                }}
+                className={`relative px-3 py-3 font-semibold transition-colors duration-150 focus-visible:-outline-offset-2 ${
+                  current === p.page
+                    ? 'text-[var(--text)] after:absolute after:inset-x-3 after:bottom-0 after:h-[3px] after:rounded-t-full after:bg-[var(--accent)] forced-colors:underline forced-colors:underline-offset-4'
+                    : 'text-[var(--muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </nav>
+        </header>
+        <main ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto px-10 py-8">
           <div className="mx-auto max-w-3xl">
             {notes}
             <div className={notices.length ? 'mt-6' : ''}>{content}</div>

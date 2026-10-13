@@ -55,3 +55,11 @@ in the corner farthest from most windows.
 The menu opens 60 ms after the pointer stops on the line, sliding in over 150 ms, and fades out
 over 110 ms (at once without Windows' animations). Its first row, "Mosaïk · <workspace>" with
 "Open", opens Mosaïk's window; Undo arrange is no longer a row (it stays on the home page).
+
+## Amended by ADR 0023 (2026-10-13)
+
+The line goes on the edge chosen when the main screen's edge there stops the pointer, else on the
+other edge when that one does (another screen or the taskbar beyond the edge chosen), which
+Mosaïk says once. While an app hides the pointer or keeps it inside part of the screen, as a game
+does while the mouse turns the view, the line does not open the menu. In Settings, the quick menu
+is one choice: right edge, left edge, or off.

@@ -21,24 +21,22 @@ export const WORKSPACES: Workspace[] = [
     id: 'release',
     label: 'Release',
     name: 'Ship the release',
-    summary: 'Editor, terminal, pull request and team chat, switched as one.',
+    summary: 'Editor, terminal and the pull request, switched as one.',
     windows: [
       w('ed', 'editor', 'Code', 'lapis', [0, 0, 7, 5]),
       w('tm', 'terminal', 'Terminal', 'verdigris', [0, 5, 7, 3]),
-      w('pr', 'browser', 'Review', 'saffron', [7, 0, 5, 5], 'pr'),
-      w('ch', 'chat', 'Team', 'madder', [7, 5, 5, 3], 'team'),
+      w('pr', 'browser', 'Review', 'saffron', [7, 0, 5, 8], 'pr'),
     ],
   },
   {
     id: 'brand',
     label: 'Brand',
     name: 'Brand refresh',
-    summary: 'Canvas, references, the brief and the client thread, side by side.',
+    summary: 'Canvas, references and the client thread, side by side.',
     windows: [
       w('cv', 'design', 'Canvas', 'lapis', [0, 0, 8, 8]),
-      w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 3], 'refs'),
-      w('br', 'notes', 'Brief', 'verdigris', [8, 3, 4, 2], 'brief'),
-      w('cl', 'chat', 'Client', 'madder', [8, 5, 4, 3], 'client'),
+      w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 4], 'refs'),
+      w('cl', 'chat', 'Client', 'madder', [8, 4, 4, 4], 'client'),
     ],
   },
   {
@@ -47,22 +45,20 @@ export const WORKSPACES: Workspace[] = [
     name: 'Thesis, chapter 3',
     summary: 'The paper you are reading, the draft you are writing and the data behind both.',
     windows: [
-      w('pp', 'paper', 'Reading', 'madder', [0, 0, 4, 8]),
-      w('dr', 'notes', 'Draft', 'verdigris', [4, 0, 4, 8], 'draft'),
-      w('dt', 'chart', 'Data', 'lapis', [8, 0, 4, 4], 'sst'),
-      w('sr', 'browser', 'Sources', 'saffron', [8, 4, 4, 4], 'sources'),
+      w('dr', 'notes', 'Draft', 'verdigris', [0, 0, 5, 8]),
+      w('pp', 'paper', 'Reading', 'madder', [5, 0, 7, 5]),
+      w('dt', 'chart', 'Data', 'lapis', [5, 5, 7, 3]),
     ],
   },
   {
     id: 'stream',
     label: 'Stream',
     name: 'Friday stream',
-    summary: 'Broadcast software, live chat and your dashboards, ready before you go live.',
+    summary: 'Broadcast software, live chat and your dashboard, ready before you go live.',
     windows: [
       w('ob', 'stream', 'Broadcast', 'lapis', [0, 0, 8, 5]),
       w('lc', 'chat', 'Chat', 'madder', [8, 0, 4, 8], 'live'),
-      w('st', 'chart', 'Stats', 'verdigris', [0, 5, 4, 3], 'viewers'),
-      w('db', 'browser', 'Dashboard', 'saffron', [4, 5, 4, 3], 'dash'),
+      w('db', 'browser', 'Dashboard', 'saffron', [0, 5, 8, 3], 'dash'),
     ],
   },
 ];
@@ -72,8 +68,10 @@ const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
 const TASKBAR = 40; // the Windows taskbar, along the bottom
-// Zones fill the desktop above the taskbar; as in the app, windows meet edge to edge.
-const [TOP, BOTTOM, SIDE, PAD] = [0, TASKBAR, 0, 0];
+// Zones fill the desktop above the taskbar, three windows to a view at most, as in the app. Windows sit a thin line of
+// desktop apart, as tiles sit apart by their grout, so each reads as its own window (drawn edge to edge, their round
+// corners and shadows looked like overlaps).
+const [TOP, BOTTOM, SIDE, PAD] = [4, TASKBAR + 4, 4, 8];
 
 /** The shortcut that opens Mosaïk's switcher (the app's default). */
 export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];
@@ -83,7 +81,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
-  // Windows fill their zones (each wears its tag in its own title bar), edge to edge.
+  // Windows fill their zones (each wears its tag in its own title bar), a thin line apart.
   return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + PAD / 2), width: r1(cols * colW - PAD), height: r1(rows * rowH - PAD) };
 }
 
@@ -107,7 +105,7 @@ export interface DeskLayout {
   /** how far each window moves for the messy desktop */
   poses: { x: number; y: number }[];
   z: number[];
-  /** the window people keep maximised without Mosaïk: the biggest one */
+  /** the window people keep maximised without Mosaïk: the workspace's first, the one the work is done in */
   main: number;
   full: Rect;
 }
@@ -121,15 +119,17 @@ export function deskLayout(index: number, deskH: number): DeskLayout {
   const rnd = mulberry32((index + 1) * 7919 + 13);
   const jit = (n: number) => Math.round((rnd() - 0.5) * 2 * n);
   const rects = WORKSPACES[index].windows.map((win) => slotBox(win.slot, deskH));
-  const order = rects.map((_, i) => i).sort((a, b) => rects[b].width * rects[b].height - rects[a].width * rects[a].height);
+  // The first window is the one the work is done in, kept maximised without Mosaïk; the others lie over it, the biggest lowest.
+  const area = (i: number) => rects[i].width * rects[i].height;
+  const order = [0, ...rects.map((_, i) => i).slice(1).sort((a, b) => area(b) - area(a))];
   const placed = rects.map((r) => ({ left: r.left, top: r.top }));
   const maxB = deskH - TASKBAR - 12;
   // Each desktop is messy in its own way. Fractions place a window inside the free range: [across, down].
   const WHERE: Record<string, [number, number]> = {
-    tm: [1, 1], pr: [0.5, 0.1], ch: [0.02, 0.8], // developer: terminal bottom right, review mid-screen, chat tucked bottom left
-    rf: [0.62, 0.02], br: [0.1, 0.55], cl: [1, 1], // designer: palettes floating around the canvas
-    dr: [0, 0.3], dt: [0.88, 0], sr: [0.55, 1], // researcher: tall draft on the left, data up top, sources low
-    lc: [1, 0.35], st: [0.03, 1], db: [0.3, 0.18], // streamer: chat down the right, dashboards on the left
+    tm: [1, 1], pr: [0.5, 0.1], // developer: terminal bottom right, review mid-screen
+    rf: [0.62, 0.02], cl: [1, 1], // designer: references and the client floating over the canvas
+    pp: [0.9, 0.12], dt: [0.12, 1], // researcher: the paper up on the right, the data low on the left
+    lc: [1, 0.35], db: [0.3, 0.18], // streamer: chat down the right, the dashboard on the left
   };
   order.slice(1).forEach((i) => {
     const r = rects[i];

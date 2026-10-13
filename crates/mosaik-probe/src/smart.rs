@@ -1587,8 +1587,9 @@ fn quick_menu(
     let px = |v: f64| (v * scale).round() as i32;
     let mut out = serde_json::Map::new();
 
-    // 4a. The handle: on the work area's right edge, 30% of the way down; 8 px wide where the
-    // pointer stops at that edge, 12 px where it goes on (another monitor, the taskbar).
+    // 4a. The handle: on the right edge as set, 30% of the way down, unless the pointer runs
+    // past that edge (another monitor, the taskbar) and stops at the left one: then on the left
+    // (mosaik_core::edge). 8 px wide where the pointer stops at its edge, 12 px where it runs on.
     let st = state(engine)?;
     let q = st
         .quick_menu
@@ -1597,14 +1598,26 @@ fn quick_menu(
     let wanted = work.top + work.height() * 300 / 1000;
     let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
     let main = topology.primary();
-    let through = work.right != main.bounds.right
-        || topology
-            .monitors()
-            .iter()
-            .any(|m| m.id != main.id && m.bounds.contains(Point::new(work.right, wanted)));
+    let others: Vec<Rect> = topology
+        .monitors()
+        .iter()
+        .filter(|m| m.id != main.id)
+        .map(|m| m.bounds)
+        .collect();
+    let (side, through) = mosaik_core::edge::handle_edge(
+        mosaik_core::settings::EdgeSide::Right,
+        main.bounds,
+        work,
+        &others,
+        wanted,
+    );
     let strip = if through { 12.0 } else { 8.0 };
+    let on_its_edge = match side {
+        mosaik_core::settings::EdgeSide::Right => q.rect.right == work.right,
+        mosaik_core::settings::EdgeSide::Left => q.rect.left == work.left,
+    };
     let place_ok = !q.open
-        && q.rect.right == work.right
+        && on_its_edge
         && q.rect.width() == px(strip)
         && q.rect.height() == px(76.0)
         && (q.rect.center().y - wanted).abs() <= 1;
@@ -1613,6 +1626,7 @@ fn quick_menu(
         json!({
             "rect": [q.rect.left, q.rect.top, q.rect.right, q.rect.bottom],
             "middle_wanted": wanted,
+            "edge": format!("{side:?}"),
             "pointer_goes_past_the_edge": through,
             "ok": place_ok,
         }),

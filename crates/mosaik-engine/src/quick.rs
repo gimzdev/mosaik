@@ -92,24 +92,20 @@ impl Engine {
         let monitor = topology.primary().clone();
         let work = monitor.work_area;
         let middle = work.top + work.height() * edge.position.clamp(0, 1000) / 1000;
-        let side = match edge.side {
+        // The edge chosen when the pointer stops there, else the other one when it stops there
+        // (another monitor or the taskbar beyond the chosen one): a handle the pointer runs past
+        // has to be hit to the pixel.
+        let others: Vec<Rect> = topology
+            .monitors()
+            .iter()
+            .filter(|m| m.id != monitor.id)
+            .map(|m| m.bounds)
+            .collect();
+        let (on, through) = mosaik_core::edge::handle_edge(edge.side, monitor.bounds, work, &others, middle);
+        let side = match on {
             EdgeSide::Left => Side::Left,
             EdgeSide::Right => Side::Right,
         };
-        // The pointer goes on past the edge when the taskbar is there, or another monitor.
-        let (edge_x, beyond) = match side {
-            Side::Left => (monitor.bounds.left, work.left - 1),
-            Side::Right => (monitor.bounds.right, work.right),
-        };
-        let at_bounds = match side {
-            Side::Left => work.left == edge_x,
-            Side::Right => work.right == edge_x,
-        };
-        let through = !at_bounds
-            || topology
-                .monitors()
-                .iter()
-                .any(|m| m.id != monitor.id && m.bounds.contains(Point::new(beyond, middle)));
         let place = Place {
             work,
             side,
@@ -137,6 +133,23 @@ impl Engine {
             return;
         };
         self.quick.place = Some(place);
+        let chosen = match self.settings.edge.side {
+            EdgeSide::Left => Side::Left,
+            EdgeSide::Right => Side::Right,
+        };
+        if place.side != chosen {
+            let (there, here) = match chosen {
+                Side::Right => ("right", "left"),
+                Side::Left => ("left", "right"),
+            };
+            self.tell_once(
+                "quick-edge-moved",
+                "The quick menu is on the other edge",
+                format!(
+                    "The pointer does not stop at the {there} edge of your main screen (another screen or the taskbar is there), so the quick menu's line is on the {here} edge, where it does."
+                ),
+            );
+        }
         if self.quick.full_screen.is_some() {
             if let Some(e) = &mut self.quick.edge {
                 e.hide();
@@ -393,6 +406,12 @@ impl Engine {
     /// What the mouse did on the handle or the menu.
     pub(crate) fn on_quick_inputs(&mut self, inputs: Vec<EdgeInput>) {
         let Some(place) = self.quick.place else { return };
+        // A game turning its view with the mouse sends the hidden pointer to the edge: the
+        // handle does not answer it.
+        if !self.menu_open() && input::pointer_taken() {
+            self.kill_timer(timer::QUICK_HOVER);
+            return;
+        }
         for input in inputs {
             if !matches!(input, EdgeInput::Move(_)) {
                 tracing::debug!(?input, menu = self.menu_open(), "quick menu");
@@ -517,7 +536,7 @@ impl Engine {
             .as_ref()
             .and_then(Edge::shown_at)
             .is_some_and(|r: Rect| r.contains(input::cursor()));
-        if on_it {
+        if on_it && !input::pointer_taken() {
             tracing::debug!("quick menu opens: the pointer rested on the handle");
             self.open_menu();
         }

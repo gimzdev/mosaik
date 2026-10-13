@@ -1,10 +1,11 @@
 //! Mosaïk's own window, page by page, as a person sees it and as the keyboard and a screen reader
 //! reach it (`mosaik-probe ui-tour`): pictures of the window alone (nothing else of the screen),
 //! the role and name UI Automation gives every control (what a screen reader says), controls
-//! with no name, and the order the Tab key goes through them. In light and dark, at the window's
-//! usual and smallest size, and the switcher. On the home page, the pointer also rests on a
-//! layout, so the picture shows where the windows would go (it never clicks one: no window
-//! moves).
+//! with no name, and the order the Tab key goes through them. Home (with a workspace's ⋯ menu
+//! and its apps), the zone editor and Settings (with More settings and About), in light and
+//! dark, at the window's usual and smallest size, and the switcher. On the home page, the
+//! pointer also rests on a layout, so the picture shows where the windows would go (it never
+//! clicks one: no window moves).
 //!
 //! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Ship",
 //! with three zones and no windows, so nothing of the user's is touched. The home page pictures
@@ -180,8 +181,8 @@ impl Uia {
         }
     }
 
-    /// Every control of the window `hwnd` with a size on screen, in tree order.
-    fn controls(&self, hwnd: HWND) -> Vec<Control> {
+    /// Every control of the window `hwnd` with a size on screen, in tree order, with its element.
+    fn elements(&self, hwnd: HWND) -> Vec<(IUIAutomationElement, Control)> {
         // SAFETY: COM calls on this thread; the results are owned interface pointers.
         let all = unsafe {
             self.0
@@ -194,9 +195,14 @@ impl Uia {
         (0..n)
             // SAFETY: as above; the index is in range.
             .filter_map(|i| unsafe { all.GetElement(i) }.ok())
-            .filter_map(|e| Self::control(&e))
-            .filter(|c| !c.rect.is_empty())
+            .filter_map(|e| Self::control(&e).map(|c| (e, c)))
+            .filter(|(_, c)| !c.rect.is_empty())
             .collect()
+    }
+
+    /// Every control of the window `hwnd` with a size on screen, in tree order.
+    fn controls(&self, hwnd: HWND) -> Vec<Control> {
+        self.elements(hwnd).into_iter().map(|(_, c)| c).collect()
     }
 
     fn focused(&self) -> Option<Control> {
@@ -261,6 +267,46 @@ impl Tour {
             }
             pump_until(250, || false);
         }
+    }
+
+    /// The control with this role and name, brought into view first the way the keyboard brings
+    /// it: given the focus, so the page scrolls to it (below the home page's picture, which stays
+    /// at the top). Controls lower down a page, such as a workspace's ⋯ button, are out of view
+    /// until then.
+    fn reveal(&self, role: &str, name: &str) -> Result<Control, String> {
+        let start = Instant::now();
+        let element = loop {
+            if let Some((e, _)) = self
+                .uia
+                .elements(self.hwnd)
+                .into_iter()
+                .find(|(_, c)| c.role == role && c.name == name)
+            {
+                break e;
+            }
+            if start.elapsed() > Duration::from_secs(5) {
+                return Err(format!("no {role} “{name}” in Mosaïk's window"));
+            }
+            pump_until(250, || false);
+        };
+        // SAFETY: a COM call on this thread, on an element it got from UI Automation.
+        if let Err(e) = unsafe { element.SetFocus() } {
+            return Err(format!("{role} “{name}” could not take the focus: {e}"));
+        }
+        pump_until(400, || false);
+        Uia::control(&element).ok_or_else(|| format!("{role} “{name}” went away"))
+    }
+
+    /// Opens the ⋯ menu of the workspace `name` on the home page.
+    fn open_menu(&self, name: &str) -> Result<(), String> {
+        let more = self.reveal("button", &format!("More for “{name}”"))?;
+        self.click(&more)
+    }
+
+    /// Picks `item` in the menu open now.
+    fn choose(&self, item: &str) -> Result<(), String> {
+        let c = self.find("button", item)?;
+        self.click(&c)
     }
 
     /// Clicks `c` in its middle, as a person does, once sure the point is on Mosaïk's window.
@@ -389,15 +435,16 @@ impl Tour {
         Ok(())
     }
 
+    /// The zone editor of the tour's workspace, from its menu on the home page.
     fn zones(&self) -> Result<(), String> {
-        self.nav("Workspaces")?;
-        let c = self.find("button", &format!("Edit zones of “{WORKSPACE}”"))?;
-        self.click(&c)
+        self.nav("Home")?;
+        self.open_menu(WORKSPACE)?;
+        self.choose("Edit zones")
     }
 
     fn theme(&self, label: &str) -> Result<(), String> {
         self.nav("Settings")?;
-        let c = self.find("radio", label)?;
+        let c = self.reveal("radio", label)?;
         self.click(&c)
     }
 
@@ -513,25 +560,32 @@ impl Tour {
         self.page("home", true)?;
         self.point("Thirds", "home-thirds")?;
 
-        // Each page, in the theme Windows uses, with the keyboard path.
-        self.nav("Workspaces")?;
-        self.page("workspaces", true)?;
-        // A workspace's apps, and the windows on screen it could take: shown, none added.
-        let apps = self.find("button", &format!("Apps of “{WORKSPACE}”"))?;
-        self.click(&apps)?;
-        self.page("workspaces-apps", false)?;
-        if let Ok(add) = self.find("button", &format!("Add a window to “{WORKSPACE}”")) {
+        // The workspace's menu, then its apps and the windows on screen it could take: shown,
+        // none added.
+        self.open_menu(WORKSPACE)?;
+        self.page("home-menu", false)?;
+        self.choose("Change its apps…")?;
+        self.page("home-apps", false)?;
+        if let Ok(add) = self.reveal("button", &format!("Add a window to “{WORKSPACE}”")) {
             self.click(&add)?;
-            self.page("workspaces-apps-add", false)?;
+            self.page("home-apps-add", false)?;
             Self::press(VK_ESCAPE.0);
         }
-        self.click(&apps)?;
+        self.open_menu(WORKSPACE)?;
+        self.choose("Hide its apps")?;
+
+        // Each page, in the theme Windows uses, with the keyboard path.
         self.zones()?;
         self.page("zones", true)?;
         self.nav("Settings")?;
         self.page("settings", true)?;
-        self.nav("About")?;
-        self.page("about", true)?;
+        let more = self.reveal("button", "More settings")?;
+        self.click(&more)?;
+        self.page("settings-more", false)?;
+        let more = self.reveal("button", "More settings")?;
+        self.click(&more)?;
+        self.reveal("button", "Show the welcome again")?;
+        self.page("settings-about", false)?;
         self.switcher("switcher")?;
 
         // Light and dark, chosen in Mosaïk's settings.
@@ -540,12 +594,10 @@ impl Tour {
             self.page(&format!("settings-{theme}"), false)?;
             self.nav("Home")?;
             self.point("Arrange windows", &format!("home-{theme}"))?;
-            self.nav("Workspaces")?;
-            self.page(&format!("workspaces-{theme}"), false)?;
+            self.reveal("button", &format!("More for “{WORKSPACE}”"))?;
+            self.page(&format!("home-workspaces-{theme}"), false)?;
             self.zones()?;
             self.page(&format!("zones-{theme}"), false)?;
-            self.nav("About")?;
-            self.page(&format!("about-{theme}"), false)?;
             self.switcher(&format!("switcher-{theme}"))?;
         }
 
@@ -554,14 +606,13 @@ impl Tour {
         self.shrink()?;
         self.nav("Home")?;
         self.page("home-smallest", false)?;
-        self.nav("Workspaces")?;
-        self.page("workspaces-smallest", false)?;
+        self.open_menu(WORKSPACE)?;
+        self.page("home-menu-smallest", false)?;
+        Self::press(VK_ESCAPE.0);
         self.zones()?;
         self.page("zones-smallest", false)?;
         self.nav("Settings")?;
         self.page("settings-smallest", false)?;
-        self.nav("About")?;
-        self.page("about-smallest", false)?;
         self.resize(before.width(), before.height());
 
         // Back as Windows has it.

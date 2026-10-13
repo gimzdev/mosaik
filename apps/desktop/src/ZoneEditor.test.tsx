@@ -147,7 +147,7 @@ describe('the zone editor', () => {
     });
     const { onClose } = editor();
     expect((await screen.findByText('There is no workspace called “ship”.')).getAttribute('role')).toBe('alert');
-    await userEvent.click(screen.getByRole('button', { name: 'Back to workspaces' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(onClose).toHaveBeenCalled();
   });
 });

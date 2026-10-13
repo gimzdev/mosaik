@@ -36,3 +36,8 @@ drop into a zone, or a window moved by hand. Nothing showed which apps a workspa
 - Two apps with the same name (two Chrome windows) show twice under that name; their zones tell
   them apart.
 - Measured with `mosaik-probe smart` (3g), in `docs/STATUS.md`.
+
+## Amended by ADR 0023 (2026-10-13)
+
+The Workspaces page is part of Home: a workspace's apps open from its ⋯ menu, "Change its
+apps…", and close from the same menu, "Hide its apps".

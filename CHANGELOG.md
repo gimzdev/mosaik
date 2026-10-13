@@ -10,10 +10,16 @@
 - A layout replaces the zones of your main screen; windows more than its zones are minimised.
 - Open the apps for coding, design, writing or games in one click: under Arrange, a button for
   each set of the apps you have that go together, such as your editor, a terminal, a browser,
-  an assistant and File Explorer for coding. It opens them as a workspace laid out for the task
-  and starts the ones that are not open. Nothing shows when Mosaïk finds no set.
-- Your workspaces are a click away below, and the welcome shows Arrange at work before you
-  start.
+  an assistant and File Explorer for coding. It opens them as a workspace laid out for the task,
+  three windows side by side at most and the others as tabs with the app they go with, and
+  starts the ones that are not open: an app already open is used, never started twice, and each
+  one takes its place as soon as its window shows. Nothing shows when Mosaïk finds no set.
+- Your workspaces are a click away below, each with Open; its ⋯ menu changes its apps, edits its
+  zones, gives it a shortcut, renames or deletes it. The welcome shows Arrange at work before
+  you start.
+- Two places only: Home and Settings, in a bar at the top. Settings shows the few choices most
+  people change; the rest are under More settings, and About is at the end.
+- A menu near the bottom of the window opens upward, so all of its items show.
 - The tray menu's and the quick menu's Settings is now Open Mosaïk. A click on the tray icon
   opens it too, and so does opening Mosaïk from the Start menu; started with Windows, it waits
   in the tray.
@@ -52,8 +58,8 @@
 - One click lays out every screen for what you are doing: from the home page, the tray menu, the
   quick menu or `mosaikctl arrange`. Arrange reads the task from your windows (coding, design,
   writing, browsing, chat and mail, games). The window you work in gets the most room, a
-  terminal goes under your editor, and the windows that help sit beside it. The rest are
-  minimised and wait in the taskbar. On an ultrawide screen the main window is in the middle; on
+  terminal goes under your editor, and the windows that help sit beside it, three windows to a
+  screen at most. The rest are minimised and wait in the taskbar. On an ultrawide screen the main window is in the middle; on
   one turned on its side, at the top. The home page says which task it read.
 - The first time you start Mosaïk, the windows you have open are sorted into workspaces, one
   for each task, each laid out for it. No window moves.
@@ -69,10 +75,9 @@
 
 ### Your workspaces' apps
 
-- On the Workspaces page, Apps lists a workspace's apps and the zone each goes in: pick another
-  zone, remove an app, or add a window that is open. In the open workspace, the window moves at
-  once.
-- The home page lists each workspace's apps, with Apps to change them.
+- The home page lists each workspace's apps; Change its apps… in its ⋯ menu shows the zone each
+  goes in: pick another zone, remove an app, or add a window that is open. In the open
+  workspace, the window moves at once.
 - Apps have proper names: a Store app is called by its own name ("Calculator", not
   "ApplicationFrameHost"), and Explorer is "File Explorer".
 
@@ -82,7 +87,15 @@
   your open workspace (click to open Mosaïk), Arrange, the switcher, Save layout, Edit zones,
   snapping on or off. It never takes the keyboard from the app you are typing in, steps aside
   for a game or a video in full screen, and stays where you drag it along the edge. Settings:
-  show it, and on which edge.
+  right edge, left edge, or off.
+- When another screen or the taskbar is beyond the edge you chose, the pointer does not stop
+  there: the line goes on the other edge, where it does, and Mosaïk says so once.
+- It never opens for a game: while a game hides the pointer to turn the view with the mouse, the
+  line does not answer. In the game's menus, with the pointer showing, it does.
+
+### Tabs
+
+- Clicking a tab no longer lets the window shown cover the tab strip: the strip stays on top.
 
 ### Zone editor
 

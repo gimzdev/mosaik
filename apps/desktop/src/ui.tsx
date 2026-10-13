@@ -1,7 +1,17 @@
 // The interface's building blocks: buttons, switches, choices, keys, messages, dialogs, menus.
 // Every one works with the keyboard alone and says what it is to screen readers.
 
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 /** Mosaïk's mark: four tiles of the palette. */
 export function Mark({ size = 22 }: { size?: number }) {
@@ -297,8 +307,24 @@ export function Confirm({
   );
 }
 
-/** A button that shows a short list of actions under it. Esc or a click elsewhere closes it,
- * and focus goes back to the button. */
+/** The part of the window where `el` can be seen: the window, less what the boxes around it that
+ * scroll or clip leave out. */
+function visibleArea(el: HTMLElement): { top: number; bottom: number } {
+  let top = 0;
+  let bottom = window.innerHeight;
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(p).overflowY)) {
+      const r = p.getBoundingClientRect();
+      top = Math.max(top, r.top);
+      bottom = Math.min(bottom, r.bottom);
+    }
+  }
+  return { top, bottom };
+}
+
+/** A button that shows a short list of actions under it, or above it near the bottom of the
+ * window, so its items are always in view. Esc or a click elsewhere closes it, and focus goes
+ * back to the button. */
 export function MenuButton({
   label,
   children,
@@ -325,9 +351,31 @@ export function MenuButton({
   quiet?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  /** Where the list opens: under the button, or above it when only there is it in view. */
+  const [side, setSide] = useState<'bottom' | 'top'>('bottom');
   const id = useId();
   const box = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+
+  // Measured before the list is painted, so it never shows out of view first.
+  useLayoutEffect(() => {
+    const button = trigger.current;
+    const menu = list.current;
+    if (!open || !button || !menu || !box.current) return;
+    const room = visibleArea(box.current);
+    const at = button.getBoundingClientRect();
+    const height = menu.getBoundingClientRect().height + 4;
+    const below = room.bottom - at.bottom;
+    const above = at.top - room.top;
+    if (height <= below) setSide('bottom');
+    else if (height <= above) setSide('top');
+    else {
+      // Room neither way (a very small window): under the button, and the page scrolls to it.
+      setSide('bottom');
+      menu.scrollIntoView({ block: 'nearest' });
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -384,10 +432,12 @@ export function MenuButton({
       </button>
       {open ? (
         <div
+          ref={list}
           id={id}
-          className={`absolute z-20 mt-1 flex max-h-72 w-max max-w-80 min-w-44 flex-col overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--surface)] p-1 shadow-lg ${
+          data-side={side}
+          className={`absolute z-20 flex max-h-72 w-max max-w-80 min-w-44 flex-col overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--surface)] p-1 shadow-lg ${
             align === 'left' ? 'left-0' : 'right-0'
-          }`}
+          } ${side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
           {items.map((item) => (
             <button

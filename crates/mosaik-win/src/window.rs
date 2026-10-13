@@ -6,7 +6,9 @@ use std::ffi::c_void;
 
 use mosaik_core::geometry::{Rect, Size};
 use mosaik_core::window::{Cloak, Elevation, WindowFacts, WindowHandle, is_full_screen};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT, WAIT_OBJECT_0, WPARAM};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_SUCCESS, HANDLE, HWND, LPARAM, RECT, WAIT_OBJECT_0, WPARAM,
+};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CAPTION_COLOR, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TEXT_COLOR, DwmGetWindowAttribute,
     DwmSetWindowAttribute,
@@ -16,6 +18,7 @@ use windows::Win32::Security::{
     TokenIntegrityLevel,
 };
 use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
+use windows::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
 use windows::Win32::System::Threading::{
@@ -31,7 +34,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SendMessageTimeoutW, WM_GETMINMAXINFO, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
-use windows::core::BOOL;
+use windows::core::{BOOL, PWSTR};
 
 use crate::monitors::rect;
 use crate::text::from_wide;
@@ -325,6 +328,9 @@ struct ProcessInfo {
     /// The full path of the program file.
     path: Option<String>,
     elevation: Elevation,
+    /// A packaged app's Application User Model ID, from its process: its windows rarely say it
+    /// themselves (Windows Terminal's do not), and a set or a workspace finds them by it.
+    aumid: Option<String>,
 }
 
 /// A cached process. The handle is kept open so Windows cannot give its id to a new process
@@ -405,6 +411,7 @@ fn process_info(pid: u32, own_integrity: Option<u32>) -> Cached {
                 exe: None,
                 path: None,
                 elevation: Elevation::Unknown,
+                aumid: None,
             },
         };
     };
@@ -431,8 +438,26 @@ fn process_info(pid: u32, own_integrity: Option<u32>) -> Cached {
     };
     Cached {
         handle: Some(h),
-        info: ProcessInfo { exe, path, elevation },
+        info: ProcessInfo {
+            exe,
+            path,
+            elevation,
+            aumid: process_aumid(h),
+        },
     }
+}
+
+/// The Application User Model ID of a packaged app's process; `None` for other programs.
+fn process_aumid(process: HANDLE) -> Option<String> {
+    // An AUMID is at most APPLICATION_USER_MODEL_ID_MAX_LENGTH (130) characters.
+    let mut buf = [0u16; 256];
+    let mut len = 256u32;
+    // SAFETY: a process handle opened with query-limited rights; the buffer holds `len` UTF-16
+    // units and `len` receives the length written, its terminating NUL included.
+    let result = unsafe { GetApplicationUserModelId(process, &mut len, Some(PWSTR(buf.as_mut_ptr()))) };
+    (result == ERROR_SUCCESS)
+        .then(|| from_wide(&buf[..(len as usize).saturating_sub(1).min(buf.len())]))
+        .filter(|id| !id.is_empty())
 }
 
 /// The Application User Model ID a window declares (packaged apps, and apps that set one).
@@ -510,7 +535,7 @@ impl Scanner {
             handle: handle(hwnd),
             pid,
             exe: info.exe,
-            aumid: aumid(hwnd),
+            aumid: aumid(hwnd).or(info.aumid),
             class: class_name(hwnd),
             title: title(hwnd),
             visible,

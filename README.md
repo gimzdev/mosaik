@@ -100,6 +100,9 @@ if Mosaïk stops
 <p>Open Mosaïk from the Start menu or its tray icon and point at <b>Arrange windows</b>, or at a layout:<br>
 the picture of your screen shows where each window would go. Click, and they go; <b>Undo</b> puts them back.</p>
 
+<p>Under it, <b>Open the apps for</b> offers sets of your apps that go together, such as <b>Coding</b>:<br>
+one click opens them side by side, three to a view, and starts the ones that are not open.</p>
+
 <p>Arrange the apps of one project, press <kbd>Win</kbd> <kbd>Alt</kbd> <kbd>Space</kbd>, then <kbd>S</kbd> and a name.<br>
 Each place becomes a zone with its own colour.</p>
 

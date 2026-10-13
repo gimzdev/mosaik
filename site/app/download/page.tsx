@@ -27,7 +27,9 @@ export default function DownloadPage() {
   return (
     <div className="page-x pb-24 pt-32 sm:pt-40">
       <h1 className="h1">Download Mosaïk for Windows.</h1>
-      <p className="mt-5 max-w-xl text-lg text-slate">Free. Installed from the Microsoft Store, which keeps it up to date.</p>
+      <p className="mt-5 max-w-xl text-lg text-slate">
+        Free. The download is Microsoft’s small Store installer: it installs Mosaïk from the Microsoft Store, which keeps it up to date.
+      </p>
       <div className="mt-8 flex flex-wrap gap-3">
         <DownloadButton className="btn btn-lapis" />
         <a href={site.storePage} rel="noopener noreferrer" className="btn btn-line">

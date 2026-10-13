@@ -28,3 +28,4 @@ what it costs. Measurements behind a decision are summarised in the record and i
 | [0020](0020-windows-edge-to-edge.md) | Windows meet edge to edge, without coloured rings by default |
 | [0021](0021-zones-make-room.md) | Zones make room for a window too big for them, as little as it needs; a window is minimised only when the windows cannot all fit |
 | [0022](0022-sets-of-apps.md) | Sets of the apps installed that go together, opened in one click; the windows open sorted into workspaces the first time |
+| [0023](0023-a-simpler-app.md) | A simpler app: Home and Settings only; three windows to a view, a set's other apps as tabs; every app started once and placed as soon as it shows; the quick menu where the pointer stops, and never in a game |

@@ -177,23 +177,80 @@ describe('Mosaïk’s window', () => {
     expect(await screen.findByText('Win+Alt+Space is taken; using Win+Alt+S.')).toBeTruthy();
   });
 
-  it('puts tags in title bars, or in a bar above windows when asked', async () => {
-    let saved: Command | null = null;
+  it('puts zone tags in title bars, above windows, or nowhere', async () => {
+    const saved: Command[] = [];
+    let now: Settings = { ...firstRun, onboarding_done: true };
     engine.request.mockImplementation((c) => {
       if (c.cmd === 'set_settings') {
-        saved = c;
+        saved.push(c);
+        now = c.settings;
         return Promise.resolve({ reply: 'done', message: 'Settings saved.' });
       }
       if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
       if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
+      return Promise.resolve(settingsReply(now));
+    });
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const tags = await screen.findByRole('group', { name: 'Zone tags' });
+    expect(within(tags).getByRole('radio', { name: 'In title bars' })).toHaveProperty('checked', true);
+    await userEvent.click(within(tags).getByRole('radio', { name: 'Above windows' }));
+    expect(saved.at(-1)).toMatchObject({ settings: { frames: { show_tags: true, tags_in_title_bar: false } } });
+    await userEvent.click(within(tags).getByRole('radio', { name: 'Off' }));
+    // Off hides the tags; tabs stay where the tags were.
+    expect(saved.at(-1)).toMatchObject({ settings: { frames: { show_tags: false, tags_in_title_bar: false } } });
+    await waitFor(() => {
+      expect(within(tags).getByRole('radio', { name: 'Off' })).toHaveProperty('checked', true);
+    });
+  });
+
+  it('puts the quick menu on either edge, or turns it off, in one choice', async () => {
+    const saved: Command[] = [];
+    let now: Settings = { ...firstRun, onboarding_done: true };
+    engine.request.mockImplementation((c) => {
+      if (c.cmd === 'set_settings') {
+        saved.push(c);
+        now = c.settings;
+        return Promise.resolve({ reply: 'done', message: 'Settings saved.' });
+      }
+      if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
+      return Promise.resolve(settingsReply(now));
+    });
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const quick = await screen.findByRole('group', { name: 'Quick menu' });
+    expect(within(quick).getByRole('radio', { name: 'Right edge' })).toHaveProperty('checked', true);
+    await userEvent.click(within(quick).getByRole('radio', { name: 'Off' }));
+    expect(saved.at(-1)).toMatchObject({ settings: { edge: { enabled: false } } });
+    await userEvent.click(within(quick).getByRole('radio', { name: 'Left edge' }));
+    expect(saved.at(-1)).toMatchObject({ settings: { edge: { enabled: true, side: 'left' } } });
+  });
+
+  it('keeps the settings few people change behind More settings, and About at the end', async () => {
+    engine.request.mockImplementation((c) => {
+      if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
+      if (c.cmd === 'hello') return Promise.resolve({ reply: 'hello', app_version: '1.6.0', protocol: 6 });
       return Promise.resolve(settingsReply({ ...firstRun, onboarding_done: true }));
     });
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    const place = await screen.findByRole('group', { name: 'Tags and tabs' });
-    expect(within(place).getByRole('radio', { name: 'In each window’s title bar' })).toHaveProperty('checked', true);
-    await userEvent.click(within(place).getByRole('radio', { name: 'In a bar above each window' }));
-    expect(saved).toMatchObject({ cmd: 'set_settings', settings: { frames: { tags_in_title_bar: false } } });
+    expect(await screen.findByText(/^Version 1\.6\.0\. Free forever/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Support on Patreon' })).toBeTruthy();
+    expect(screen.queryByRole('switch', { name: 'Start apps that are not open' })).toBeNull();
+    const more = screen.getByRole('button', { name: 'More settings' });
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    await userEvent.click(more);
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('switch', { name: 'Start apps that are not open' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Hidden tabs' })).toBeTruthy();
+    // Two places: Home and Settings.
+    expect(
+      within(screen.getByRole('navigation', { name: 'Mosaïk' }))
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['Home', 'Settings']);
   });
 
   it('opens the zone editor when the quick menu asks', async () => {
@@ -259,8 +316,8 @@ describe('Mosaïk’s window', () => {
       return Promise.resolve(settingsReply({ ...firstRun, onboarding_done: true }));
     });
     render(<App />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Workspaces' }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit zones of “Ship”' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit zones' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Start from a preset' }));
     await userEvent.click(screen.getByRole('button', { name: 'Thirds' }));
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }));

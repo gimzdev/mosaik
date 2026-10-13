@@ -1,4 +1,12 @@
-// What jsdom lacks, just enough for the components: modal dialogs, media queries, CSS.escape.
+// What jsdom lacks, just enough for the components: modal dialogs, media queries, CSS.escape,
+// scrolling into view.
+
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = () => undefined;
+}
+if (typeof Element.prototype.scrollTo !== 'function') {
+  Element.prototype.scrollTo = () => undefined;
+}
 
 if (typeof HTMLDialogElement !== 'undefined' && !('showModal' in HTMLDialogElement.prototype)) {
   Object.assign(HTMLDialogElement.prototype, {

@@ -8,13 +8,14 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use mosaik_core::arrange::Kind;
-use mosaik_core::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
-use mosaik_core::sets::{AppSet, Installed, Running, groups, new_name, suggest, workspace_of};
+use mosaik_core::layout::{Workspace, WorkspaceId};
+use mosaik_core::sets::{
+    AppSet, Installed, NewApp, Running, build_workspace, groups, new_name, suggest, workspace_of,
+};
 use mosaik_core::task::{self, Task};
 use mosaik_core::topology::Topology;
 use mosaik_core::window::WindowFacts;
 use mosaik_core::workspace::{app_match, same_name, workspace_id};
-use mosaik_core::zone::{Zone, ZoneColor, ZoneId};
 use mosaik_ipc::protocol::{AppSetInfo, ErrorCode, Reply};
 use mosaik_win::apps::{self, StartApp};
 use mosaik_win::window;
@@ -111,23 +112,6 @@ fn listed(names: &[String]) -> String {
     }
 }
 
-/// A zone's name for the app of `kind` called `app`, not one of `taken`.
-fn zone_name(kind: Kind, app: &str, taken: &[String]) -> String {
-    let base = kind
-        .zone_name()
-        .map_or_else(|| app.trim().to_owned(), str::to_owned);
-    (1..)
-        .map(|n| {
-            if n == 1 {
-                base.clone()
-            } else {
-                format!("{base} {n}")
-            }
-        })
-        .find(|c| !taken.iter().any(|t| t.eq_ignore_ascii_case(c)))
-        .unwrap_or(base)
-}
-
 impl Engine {
     /// The apps open now, by what their windows say.
     fn running(&mut self) -> Vec<Running> {
@@ -187,53 +171,28 @@ impl Engine {
         })
     }
 
-    /// A new workspace called `name` with `slots`, each with the zone its placement in `layout`
-    /// gives it on the main monitor.
+    /// A new workspace called `name` for `apps` on the main monitor, laid out by `windows`'
+    /// task: three apps in view at most, the others as tabs with the apps they go with.
     fn new_workspace(
         &self,
         name: &str,
         topology: &Topology,
-        apps: Vec<(
-            Kind,
-            String,
-            mosaik_core::matching::AppMatch,
-            Option<mosaik_core::layout::Launch>,
-        )>,
-        placed: &task::Layout,
+        apps: &[NewApp],
+        windows: &[task::Window],
     ) -> Workspace {
         let main = topology.primary();
-        let mut layout = Layout::default();
-        let monitor = layout.monitor_index(main, topology);
-        let mut taken: Vec<String> = Vec::new();
-        for (k, p) in placed.placed.iter().enumerate() {
-            let Some((kind, label, found, launch)) = apps.get(p.window).cloned() else {
-                continue;
-            };
-            let zone = ZoneId(format!("z{}", k + 1));
-            let zname = zone_name(kind, &label, &taken);
-            taken.push(zname.clone());
-            layout.zones.push(Zone {
-                id: zone.clone(),
-                name: zname,
-                color: ZoneColor::nth(k),
-                monitor,
-                area: p.area,
-            });
-            layout.slots.push(Slot {
-                id: SlotId(format!("s{}", k + 1)),
-                label: Some(label),
-                app: found,
-                launch,
-                place: Place::Zone { zone },
-            });
-        }
+        let work = main.work_area;
+        let placed = task::layout(windows, work.width(), work.height());
+        let tabs = task::tabs_for(windows, &placed, work.width(), work.height());
         let ids: Vec<WorkspaceId> = self.file.workspaces.iter().map(|w| w.id.clone()).collect();
-        Workspace {
-            id: workspace_id(name, &ids),
-            name: name.to_owned(),
-            hotkey: None,
-            layout,
-        }
+        build_workspace(
+            workspace_id(name, &ids),
+            name,
+            main.to_ref(),
+            apps,
+            &placed,
+            &tabs,
+        )
     }
 
     /// Opens set `id`: its workspace, the first with all its apps, or a new one laid out for its
@@ -262,16 +221,19 @@ impl Engine {
             Ok(t) => t,
             Err(reply) => return reply,
         };
-        let work = topology.primary().work_area;
         let windows: Vec<task::Window> = set.apps.iter().map(|a| task::Window::of(a.kind)).collect();
-        let placed = task::layout(&windows, work.width(), work.height());
-        let apps = set
+        let apps: Vec<NewApp> = set
             .apps
             .iter()
-            .map(|a| (a.kind, a.name.clone(), a.app.clone(), Some(a.launch.clone())))
+            .map(|a| NewApp {
+                kind: a.kind,
+                label: a.name.clone(),
+                app: a.app.clone(),
+                launch: Some(a.launch.clone()),
+            })
             .collect();
         let name = new_name(set, &self.file.workspaces);
-        let ws = self.new_workspace(&name, &topology, apps, &placed);
+        let ws = self.new_workspace(&name, &topology, &apps, &windows);
         let wid = ws.id.0.clone();
         tracing::info!(
             set = id,
@@ -298,7 +260,6 @@ impl Engine {
             Ok(t) => t,
             Err(reply) => return reply,
         };
-        let work = topology.primary().work_area;
         let shown: Vec<WindowFacts> = self
             .scan_marked()
             .into_iter()
@@ -332,21 +293,20 @@ impl Engine {
                     }
                 })
                 .collect();
-            let placed = task::layout(&windows, work.width(), work.height());
-            let apps = members
+            let apps: Vec<NewApp> = members
                 .iter()
                 .map(|&i| {
                     let w = &shown[i];
                     let path = self.scanner.process_path(w.pid);
-                    (
-                        kinds[i],
-                        self.apps.label(w, path.as_deref()),
-                        app_match(w),
-                        apps::launch_for(w, path.as_deref()),
-                    )
+                    NewApp {
+                        kind: kinds[i],
+                        label: self.apps.label(w, path.as_deref()),
+                        app: app_match(w),
+                        launch: apps::launch_for(w, path.as_deref()),
+                    }
                 })
                 .collect();
-            let ws = self.new_workspace(name, &topology, apps, &placed);
+            let ws = self.new_workspace(name, &topology, &apps, &windows);
             if ws.layout.slots.len() < 2 {
                 continue;
             }

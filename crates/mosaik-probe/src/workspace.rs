@@ -485,35 +485,54 @@ fn scenario(
         None
     };
 
-    // 5. A window that is closed is started again on the next switch, and goes to its place.
+    // 5. A window that is closed is started again on the next switch, and goes to its place as
+    // soon as it shows: it shows cloaked first, as Chrome, VS Code and Windows Terminal show
+    // theirs (main.rs). Switched to twice before its window shows (a set clicked twice), the app
+    // starts once.
     crate::apps::close(probes[2].hwnd);
     pump_until(800, || false);
     // SAFETY: set once, from this thread, before the engine starts the app (which inherits it);
     // nothing else in this process reads or writes the environment meanwhile.
     unsafe { std::env::set_var(RELAUNCH_TITLE, "Probe Review again") };
-    let (reply, _) = ask(
-        engine,
-        Command::Switch {
-            workspace: "Probe workspace".into(),
-        },
-    );
-    let restarted_reply = done(&reply)?;
-    let mut again = None;
+    let switch = || {
+        ask(
+            engine,
+            Command::Switch {
+                workspace: "Probe workspace".into(),
+            },
+        )
+        .0
+    };
+    let restarted_reply = done(&switch())?;
+    let second_reply = done(&switch())?;
+    let again = |h: &HWND| mosaik_win::window::title(*h) == "Probe Review again";
+    let mut first = None;
     pump_until(10_000, || {
-        again = mosaik_win::window::top_level()
-            .into_iter()
-            .find(|h| mosaik_win::window::title(*h) == "Probe Review again");
-        again.is_some()
+        first = mosaik_win::window::top_level().into_iter().find(again);
+        first.is_some_and(|h| mosaik_win::window::cloak(h) == mosaik_core::window::Cloak::None)
     });
-    pump_until(1500, || false);
-    let restarted = match again {
+    // Time for a second copy to show, had the app been started twice.
+    pump_until(2500, || false);
+    let copies = mosaik_win::window::top_level().into_iter().filter(again).count();
+    let restarted = match first {
         Some(hwnd) => {
             let frame = frame_rect(hwnd).ok_or("the restarted window vanished")?;
             let error = edge_error(frame, styles.area(probes[2].tiled, false));
-            crate::apps::close(hwnd);
-            json!({ "reply": restarted_reply, "started": true, "error_px": error })
+            for h in mosaik_win::window::top_level().into_iter().filter(again) {
+                crate::apps::close(h);
+            }
+            json!({
+                "reply": restarted_reply,
+                "second_switch": second_reply,
+                "started": true,
+                "shown_cloaked_first": true,
+                "copies": copies,
+                "error_px": error,
+            })
         }
-        None => json!({ "reply": restarted_reply, "started": false }),
+        None => {
+            json!({ "reply": restarted_reply, "second_switch": second_reply, "started": false, "copies": copies })
+        }
     };
 
     // 6. Editing from the interface: zones, name, shortcut, deleting.
@@ -1167,6 +1186,16 @@ fn windows_snapping(engine: &Engine, probes: &[Probe], styles: Styles) -> Result
     Ok(json!({ "windows_snapping_on": mosaik_win::os::snapping_on(), "drops": results }))
 }
 
+/// Mosaïk's tab strip is above `window` in the stacking order: `None` when no strip shows.
+fn strip_above(window: HWND) -> Option<bool> {
+    let order = mosaik_win::window::top_level();
+    let strip = order.iter().position(|h| {
+        mosaik_win::window::class_name(*h) == "MosaikTabBar" && mosaik_win::window::is_visible(*h)
+    })?;
+    let shown = order.iter().position(|h| *h == window)?;
+    Some(strip < shown)
+}
+
 /// Tabs with the mouse: the terminal is dropped on the code window's tag (they become tabs), the
 /// code tab is clicked, then the terminal's tab is pulled out into the review zone. Then a
 /// window is dragged back into its own zone.
@@ -1210,7 +1239,9 @@ fn tabs_and_snap(
         "terminal_hidden": hidden(&after_join, terminal.hwnd),
     });
 
-    // 2. Click the code tab.
+    // 2. Click the code tab, then the terminal's and the code's again: each time the strip
+    // stays above the window shown (the owner: "when clicking a different tab, the tabs go
+    // behind the new window").
     let clicked = match strip
         .as_ref()
         .and_then(|st| st.tabs.iter().find(|tb| tb.window == handle(code.hwnd)).cloned())
@@ -1219,8 +1250,24 @@ fn tabs_and_snap(
             let at = tab.chip.center();
             drag(at, at, code.hwnd)?;
             let st = settled(engine)?;
+            pump_until(600, || false);
             shot(shots, "3-code-shown", &[code.hwnd], styles.dpi);
             let code_at = from_right(&st, code.hwnd);
+            let mut above = vec![strip_above(code.hwnd)];
+            for (w, h) in [(terminal, terminal.hwnd), (code, code.hwnd)] {
+                let now = settled(engine)?;
+                let chip = now
+                    .tab_strips
+                    .first()
+                    .and_then(|st| st.tabs.iter().find(|tb| tb.window == handle(w.hwnd)).cloned());
+                if let Some(chip) = chip {
+                    let at = chip.chip.center();
+                    drag(at, at, h)?;
+                    let _ = settled(engine)?;
+                    pump_until(600, || false);
+                    above.push(strip_above(h));
+                }
+            }
             json!({
                 "code_hidden": hidden(&st, code.hwnd),
                 "terminal_hidden": hidden(&st, terminal.hwnd),
@@ -1228,6 +1275,8 @@ fn tabs_and_snap(
                 "strip_with_terminal": joined_at,
                 "strip_with_code": code_at,
                 "strip_same_place": joined_at.is_some() && joined_at == code_at,
+                "strip_above_after_each_click": above,
+                "strip_stays_above": above.iter().all(|a| *a == Some(true)),
             })
         }
         None => json!({ "skipped": "no strip with the code tab" }),

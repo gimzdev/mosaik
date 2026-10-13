@@ -194,7 +194,6 @@ function openSet(id: string): Reply {
     workspaces.push(w);
   }
   active = w.id;
-  changed();
   return done(`Opened “${w.name}”.`);
 }
 
@@ -448,9 +447,28 @@ export const mock = {
         hint: 'Try again in a moment.',
       });
     }
-    return Promise.resolve(answer(command));
+    const reply = answer(command);
+    if (CHANGES_WORKSPACES.has(command.cmd) && reply.reply !== 'error') changed();
+    return Promise.resolve(reply);
   },
 };
+
+/** The commands after which Mosaïk says the workspaces changed (the engine's own list). */
+const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
+  'save',
+  'switch',
+  'set_zones',
+  'rename_workspace',
+  'delete_workspace',
+  'set_workspace_hotkey',
+  'arrange',
+  'undo_arrange',
+  'add_app',
+  'move_app',
+  'remove_app',
+  'open_set',
+  'sort_windows',
+]);
 
 function answer(command: Command): Reply {
   switch (command.cmd) {

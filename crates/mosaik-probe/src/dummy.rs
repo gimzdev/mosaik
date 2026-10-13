@@ -35,17 +35,22 @@ thread_local! {
     static MIN_HEIGHT: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
 }
 
+/// The timer that uncloaks a `--cloaked-first` window.
+const UNCLOAK_TIMER: usize = 1;
+
 /// The app's own title bar in a `--borderless` window, and its buttons at the right of it.
 const OWN_TITLE_BAR: i32 = 32;
 const OWN_BUTTONS: i32 = 138;
 const RESIZE_EDGE: i32 = 6;
 
 /// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost] [--self-move] [--no-title-room]
-/// [--borderless] [--fixed] [--full-screen] [--min-width N] [--min-height N]`: shows the window
-/// and runs until it is closed or the process is killed. `--topmost` keeps it above the user's
-/// windows, so a probe that presses the mouse on its title bar never lands on something else.
-/// `--full-screen` covers the main monitor, taskbar included, borderless, as a game in full
-/// screen.
+/// [--borderless] [--fixed] [--full-screen] [--min-width N] [--min-height N] [--cloaked-first
+/// MS]`: shows the window and runs until it is closed or the process is killed. `--topmost` keeps
+/// it above the user's windows, so a probe that presses the mouse on its title bar never lands on
+/// something else. `--full-screen` covers the main monitor, taskbar included, borderless, as a
+/// game in full screen. `--cloaked-first MS` shows the window cloaked and uncloaks it MS
+/// milliseconds later, as apps built on Chromium (Chrome, VS Code, Claude) and packaged apps
+/// (Windows Terminal) show their first window once it is drawn.
 pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
     let has = |o: &str| args.iter().any(|a| a == o);
     SELF_MOVE.with(|m| m.set(has("--self-move")));
@@ -62,6 +67,7 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
     };
     MIN_WIDTH.with(|m| m.set(number("--min-width")));
     MIN_HEIGHT.with(|m| m.set(number("--min-height")));
+    let cloaked_first = u32::try_from(number("--cloaked-first")).unwrap_or(0);
     let title = args
         .iter()
         .position(|a| a == "--title")
@@ -105,6 +111,13 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
     let hwnd = class
         .create(&title, style, ex, rect, None)
         .map_err(|e| e.to_string())?;
+    if cloaked_first > 0 {
+        mosaik_win::hide::dwm_cloak(hwnd, true).map_err(|e| e.to_string())?;
+        // SAFETY: a timer on our own window; `dummy_proc` uncloaks it and stops the timer.
+        unsafe {
+            windows::Win32::UI::WindowsAndMessaging::SetTimer(Some(hwnd), UNCLOAK_TIMER, cloaked_first, None)
+        };
+    }
     // SAFETY: our own window; standard message loop until WM_QUIT.
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -130,6 +143,14 @@ unsafe extern "system" fn dummy_proc(
     if msg == WM_DESTROY {
         // SAFETY: ends this process's message loop.
         unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0) };
+        return windows::Win32::Foundation::LRESULT(0);
+    }
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_TIMER && wparam.0 == UNCLOAK_TIMER {
+        // SAFETY: stops the timer set on our own window when it was shown cloaked.
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), UNCLOAK_TIMER) };
+        if let Err(e) = mosaik_win::hide::dwm_cloak(hwnd, false) {
+            eprintln!("the probe window could not uncloak: {e}");
+        }
         return windows::Win32::Foundation::LRESULT(0);
     }
     let min_width = MIN_WIDTH.with(std::cell::Cell::get);

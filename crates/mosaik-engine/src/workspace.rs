@@ -588,6 +588,14 @@ impl Engine {
             .as_ref()
             .map(|a| a.windows.values().copied().collect())
             .unwrap_or_default();
+        // Apps started a moment ago whose window has not shown yet: started again they would
+        // open twice (the owner, opening a set twice).
+        let now = Instant::now();
+        let mut earlier: Vec<Launching> = self
+            .active
+            .as_ref()
+            .map(|a| a.launching.iter().filter(|l| l.until > now).cloned().collect())
+            .unwrap_or_default();
         let ws = self.file.workspaces[index].clone();
         let all = self.scan_marked();
         let candidates: Vec<&WindowFacts> = all.iter().filter(|f| self.movable(f)).collect();
@@ -659,6 +667,17 @@ impl Engine {
                 .iter()
                 .any(|f| f.cloak == Cloak::ByShell && app.score(f).is_some())
             {
+                continue;
+            }
+            // Already starting: its window takes this slot when it shows. Each app started
+            // stands for one slot.
+            if let Some(pos) = earlier.iter().position(|l| l.app.same_app(&app)) {
+                let started = earlier.remove(pos);
+                launching.push(Launching {
+                    slot: slot.clone(),
+                    app,
+                    until: started.until,
+                });
                 continue;
             }
             self.start_app(launch.clone(), slot_label(&ws, slot));

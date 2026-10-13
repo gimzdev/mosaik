@@ -96,11 +96,14 @@ fn main() {
     }
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     // Started with no arguments by the engine under test, which starts a workspace's missing
-    // apps by their program file: the workspace probe says which window to show.
+    // apps by their program file: the workspace probe says which window to show. It shows
+    // cloaked for a moment, as Chrome, VS Code and Windows Terminal show theirs.
     if args.is_empty()
         && let Ok(title) = std::env::var(workspace::RELAUNCH_TITLE)
     {
-        args = vec!["dummy".into(), "--title".into(), title, "--topmost".into()];
+        args = ["dummy", "--title", &title, "--topmost", "--cloaked-first", "700"]
+            .map(String::from)
+            .to_vec();
     }
     let Some(command) = args.first().cloned() else {
         eprintln!(

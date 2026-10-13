@@ -260,6 +260,12 @@ pub struct Layout {
 
 /// A window takes a zone only when it belongs to the task at least this much.
 const KEEP: f64 = 0.4;
+/// Windows in a view at most: the main one and two more (the owner: "we should really rarely
+/// use more than 3 windows in a view"). More are picked by hand, with a layout.
+pub const MOST_IN_VIEW: usize = 3;
+/// How much a window's kind counts, against how recently it was used, when windows compete for
+/// the places beside the main one.
+const PRIORITY_FIT: f64 = 0.55;
 /// Four windows beside the main one (a 2 x 2 block) must each belong to the task this much.
 const KEEP_FOURTH: f64 = 0.6;
 /// The main window's share of the width (landscape) or height (portrait), by how many windows
@@ -360,8 +366,9 @@ pub fn layout(windows: &[Window], width: i32, height: i32) -> Layout {
         };
     };
     let shape = shape(width, height);
-    // The others by how much they help, then how recently they were used.
-    let priority = |i: usize| 0.7 * fit(i) + 0.3 * recency(i);
+    // The others by how much they help and how recently they were used: with two places beside
+    // the main window, the windows used last count almost as much as their kind.
+    let priority = |i: usize| PRIORITY_FIT * fit(i) + (1.0 - PRIORITY_FIT) * recency(i);
     let mut rest: Vec<usize> = wanted.iter().copied().filter(|&i| i != main).collect();
     rest.sort_by(|&a, &b| priority(b).total_cmp(&priority(a)).then(a.cmp(&b)));
     // When coding, the terminal used last goes under the editor, where there is the height.
@@ -412,7 +419,9 @@ pub fn layout(windows: &[Window], width: i32, height: i32) -> Layout {
             .filter(|&i| Some(i) != below)
             .take(POOL)
             .collect();
-        let most = room_beside(width, height).min(pool.len());
+        let most = room_beside(width, height)
+            .min(pool.len())
+            .min(MOST_IN_VIEW - 1 - usize::from(below.is_some()));
         for sides in (0..=most).rev() {
             for chosen in combinations(&pool, sides) {
                 if sides == 4 && chosen.iter().any(|&i| fit(i) < KEEP_FOURTH) {
@@ -453,6 +462,70 @@ pub fn layout(windows: &[Window], width: i32, height: i32) -> Layout {
             role: Role::Main,
         }],
     }
+}
+
+/// How well a window of kind `extra` goes as a tab with one of kind `with`: the same kind best,
+/// then the ones used together (an assistant or notes with the browser, File Explorer with the
+/// terminal, chat with mail), then any.
+fn goes_with(extra: Kind, with: Kind) -> u8 {
+    use Kind as K;
+    if extra == with {
+        return 3;
+    }
+    match (extra, with) {
+        (K::Assistant | K::Notes | K::Chat | K::Mail | K::Documents, K::Browser)
+        | (K::Browser, K::Assistant | K::Notes | K::Chat | K::Documents)
+        | (K::Files, K::Terminal)
+        | (K::Terminal, K::Files)
+        | (K::Chat, K::Mail)
+        | (K::Mail, K::Chat)
+        | (K::Media, K::Games | K::Chat)
+        | (K::Games, K::Media)
+        | (K::Notes, K::Documents)
+        | (K::Documents, K::Notes) => 2,
+        _ => 1,
+    }
+}
+
+/// The windows of the task that [`layout`] left out of the view and that go as a tab with one of
+/// its windows instead of waiting in the taskbar, for a set of apps opened together: each with
+/// the window it goes best with ([`goes_with`]), in the order they help most, one tab more per
+/// window at most and never with the main one, and only when it fits there. Pairs of a window
+/// and the index of its placement in `layout.placed`. Arrange makes no tabs (ADR 0017).
+pub fn tabs_for(windows: &[Window], layout: &Layout, width: i32, height: i32) -> Vec<(usize, usize)> {
+    let task = layout.task;
+    let (w, h) = (f64::from(width), f64::from(height));
+    let in_view: Vec<usize> = layout.placed.iter().map(|p| p.window).collect();
+    let mut taken: Vec<bool> = layout.placed.iter().map(|p| p.role == Role::Main).collect();
+    let priority = |i: usize| PRIORITY_FIT * task.fit(windows[i].kind) + (1.0 - PRIORITY_FIT) * recency(i);
+    let mut extras: Vec<usize> = (0..windows.len())
+        .filter(|i| !in_view.contains(i) && windows[*i].resizable && task.fit(windows[*i].kind) >= KEEP)
+        .collect();
+    extras.sort_by(|&a, &b| priority(b).total_cmp(&priority(a)).then(a.cmp(&b)));
+    let mut out = Vec::new();
+    for i in extras {
+        let least = windows[i].least;
+        let best = layout
+            .placed
+            .iter()
+            .enumerate()
+            .filter(|(k, p)| {
+                !taken[*k]
+                    && f64::from(least.width) <= p.area.width() * w + SLACK
+                    && f64::from(least.height) <= p.area.height() * h + SLACK
+            })
+            .max_by(|(ka, a), (kb, b)| {
+                goes_with(windows[i].kind, windows[a.window].kind)
+                    .cmp(&goes_with(windows[i].kind, windows[b.window].kind))
+                    .then(kb.cmp(ka))
+            })
+            .map(|(k, _)| k);
+        if let Some(k) = best {
+            taken[k] = true;
+            out.push((i, k));
+        }
+    }
+    out
 }
 
 /// Every choice of `n` of `items`, in order: the choices with the first items first.
@@ -712,20 +785,13 @@ mod tests {
         let l = layout(&of(&OWNER), 1920, 1032);
         assert_eq!(l.task, Task::Coding);
         // Notepad++ is the main window, MSYS2's terminal (used before Windows Terminal) under
-        // it; beside it Claude, Chrome and Windows Terminal; the games, the Calculators and File
-        // Explorer wait in the taskbar.
+        // it, Claude beside them: three windows in the view. The others wait in the taskbar.
         assert_eq!(
             roles(&l),
-            vec![
-                (3, Role::Main),
-                (7, Role::Below),
-                (0, Role::Side),
-                (1, Role::Side),
-                (8, Role::Side)
-            ]
+            vec![(3, Role::Main), (7, Role::Below), (0, Role::Side)]
         );
-        assert_eq!(l.placed[0].area, r(0.0, 0.0, 0.55, MAIN_OVER_BELOW));
-        assert_eq!(l.placed[1].area, r(0.0, MAIN_OVER_BELOW, 0.55, 1.0));
+        assert_eq!(l.placed[0].area, r(0.0, 0.0, 0.6, MAIN_OVER_BELOW));
+        assert_eq!(l.placed[1].area, r(0.0, MAIN_OVER_BELOW, 0.6, 1.0));
         assert!(tiles(&l.placed), "{:?}", l.placed);
     }
 
@@ -773,26 +839,8 @@ mod tests {
         assert_eq!(l.task, Task::General);
         assert_eq!(l.placed[0].window, 0);
         assert_eq!(l.placed[0].role, Role::Main);
-        // Three beside it; a fourth would take a quarter of what is left, for an unknown app.
-        assert_eq!(
-            roles(&l),
-            vec![(0, Role::Main), (1, Role::Side), (2, Role::Side), (3, Role::Side)]
-        );
-        assert!(tiles(&l.placed));
-        // Four that all belong to the task share the side two by two.
-        let l = layout(
-            &of(&[
-                K::Code,
-                K::Terminal,
-                K::Browser,
-                K::Browser,
-                K::Assistant,
-                K::Terminal,
-            ]),
-            1920,
-            1032,
-        );
-        assert_eq!(l.placed.len(), 6, "{:?}", l.placed);
+        // Two beside it: three windows in the view.
+        assert_eq!(roles(&l), vec![(0, Role::Main), (1, Role::Side), (2, Role::Side)]);
         assert!(tiles(&l.placed));
     }
 
@@ -876,27 +924,26 @@ mod tests {
 
     #[test]
     fn a_window_beside_the_main_one_that_needs_more_height_gets_it_from_its_neighbours() {
-        // Three beside the editor are 344 px tall each; the browser keeps 500 px. Its zone grows
-        // to 500, and the two below it share the rest: none is minimised.
+        // Two beside the editor are 516 px tall each; the browser keeps 700 px. Its zone grows
+        // to 700, and the one below it takes the rest: none is minimised.
         let windows = [
             Window::of(K::Code),
-            least(K::Browser, 400, 500),
+            least(K::Browser, 400, 700),
             Window::of(K::Notes),
-            Window::of(K::Chat),
         ];
         let l = layout(&windows, 1920, 1032);
         assert_eq!(
             roles(&l),
-            vec![(0, Role::Main), (1, Role::Side), (2, Role::Side), (3, Role::Side)],
+            vec![(0, Role::Main), (1, Role::Side), (2, Role::Side)],
             "{:?}",
             l.placed
         );
         let work = crate::geometry::Rect::new(0, 0, 1920, 1032);
         let browser = l.placed[1].area.to_rect(work);
-        assert!((browser.height() - 500).abs() <= 2, "{:?}", l.placed);
+        assert!((browser.height() - 700).abs() <= 2, "{:?}", l.placed);
         assert_eq!(
             l.placed[0].area,
-            r(0.0, 0.0, 0.55, 1.0),
+            r(0.0, 0.0, 0.58, 1.0),
             "the editor's zone stays"
         );
         assert!(tiles(&l.placed) && all_fit(&windows, &l.placed, 1920, 1032));
@@ -933,6 +980,68 @@ mod tests {
             "{big:?}"
         );
         assert!(tiles(&l.placed) && all_fit(&windows, &l.placed, 1920, 1032));
+    }
+
+    #[test]
+    fn a_view_shows_three_windows_at_most() {
+        // The owner, 2026-10-13: "we should really rarely use more than 3 windows in a view".
+        for (w, h) in [
+            (1920, 1032),
+            (2560, 1392),
+            (3840, 2112),
+            (3440, 1392),
+            (1080, 1872),
+        ] {
+            let l = layout(&of(&OWNER), w, h);
+            assert!(l.placed.len() <= MOST_IN_VIEW, "{w}x{h}: {:?}", l.placed);
+            let l = layout(
+                &of(&[K::Code, K::Terminal, K::Browser, K::Assistant, K::Files, K::Notes]),
+                w,
+                h,
+            );
+            assert!(l.placed.len() <= MOST_IN_VIEW, "{w}x{h}: {:?}", l.placed);
+            assert!(tiles(&l.placed), "{w}x{h}: {:?}", l.placed);
+        }
+    }
+
+    #[test]
+    fn apps_beyond_the_view_go_as_tabs_with_the_apps_they_go_with() {
+        // The owner's coding set: the editor, a terminal under it, the browser beside them; Claude
+        // goes as a tab with the browser and File Explorer with the terminal. The editor stays
+        // alone.
+        let windows = of(&[K::Code, K::Terminal, K::Browser, K::Assistant, K::Files]);
+        let l = layout(&windows, 1920, 1032);
+        assert_eq!(
+            roles(&l),
+            vec![(0, Role::Main), (1, Role::Below), (2, Role::Side)]
+        );
+        let tabs = tabs_for(&windows, &l, 1920, 1032);
+        assert_eq!(tabs, vec![(3, 2), (4, 1)], "{tabs:?}");
+        // One tab more per window at most, and never with the main one: a sixth app waits.
+        let windows = of(&[K::Code, K::Terminal, K::Browser, K::Assistant, K::Files, K::Notes]);
+        let l = layout(&windows, 1920, 1032);
+        let tabs = tabs_for(&windows, &l, 1920, 1032);
+        assert_eq!(tabs.len(), 2, "{tabs:?}");
+        assert!(
+            tabs.iter().all(|&(_, p)| l.placed[p].role != Role::Main),
+            "{tabs:?}"
+        );
+        // A window of a fixed size is never a tab; nor is one that has nothing to do with the
+        // task.
+        let fixed = Window {
+            resizable: false,
+            least: Size::new(400, 300),
+            ..Window::of(K::Assistant)
+        };
+        let windows = [
+            Window::of(K::Code),
+            Window::of(K::Terminal),
+            Window::of(K::Browser),
+            fixed,
+            Window::of(K::Games),
+        ];
+        let l = layout(&windows, 1920, 1032);
+        assert!(tabs_for(&windows, &l, 1920, 1032).is_empty());
     }
 
     #[test]

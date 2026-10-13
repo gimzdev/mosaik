@@ -42,7 +42,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.6.0"
+MK_VERSION="1.7.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -328,7 +328,9 @@ export default function DownloadPage() {
   return (
     <div className="page-x pb-24 pt-32 sm:pt-40">
       <h1 className="h1">Download Mosaïk for Windows.</h1>
-      <p className="mt-5 max-w-xl text-lg text-slate">Free. Installed from the Microsoft Store, which keeps it up to date.</p>
+      <p className="mt-5 max-w-xl text-lg text-slate">
+        Free. The download is Microsoft’s small Store installer: it installs Mosaïk from the Microsoft Store, which keeps it up to date.
+      </p>
       <div className="mt-8 flex flex-wrap gap-3">
         <DownloadButton className="btn btn-lapis" />
         <a href={site.storePage} rel="noopener noreferrer" className="btn btn-line">
@@ -529,7 +531,7 @@ const FEATURES = [
     id: 'zones',
     title: 'Zones give every window a home',
     body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it, each zone as big as its window needs. Or pick one of ten layouts, or carve the screen into your own named areas. Before you click, Mosaïk shows where each window would go.',
-    points: ['Zones belong to the project, not the monitor', 'Windows meet edge to edge, so no space is lost', 'Works across multiple displays'],
+    points: ['Zones belong to the project, not the monitor', 'Zones fill the screen, so no space is lost', 'Works across multiple displays'],
     Art: ZonesArt,
   },
   {
@@ -560,11 +562,16 @@ export default function Home() {
     <>
       <section className="pb-20 pt-28 sm:pt-32 md:pb-28">
         <div className="page-x">
-          <h1 className="font-display text-[clamp(2.4rem,4.7vw,4.1rem)] font-bold leading-[1.03] tracking-[-0.035em]">
-            Every window,
-            <br />
-            in its place.
-          </h1>
+          <div className="grid gap-5 lg:grid-cols-12 lg:items-end lg:gap-14">
+            <h1 className="font-display text-[clamp(2.4rem,4.7vw,4.1rem)] font-bold leading-[1.03] tracking-[-0.035em] lg:col-span-7">
+              Every window,
+              <br />
+              in its place.
+            </h1>
+            <p className="max-w-md text-[17px] leading-[1.6] text-slate lg:col-span-5">
+              Mosaïk suggests sets of apps that go together and opens them in tidy views. You can make your own, too.
+            </p>
+          </div>
           <div className="mt-10 md:mt-12">
             <Stage />
           </div>
@@ -909,30 +916,6 @@ const Refs = () => (
   </div>
 );
 
-const RESULTS = [
-  ['Ocean heat content: a regional reassessment', 'journals.example.org › climate › 2024', 'Upper-ocean heat content rose in every basin between 2005 and 2022, with the largest gains in the subtropical Atlantic.'],
-  ['Sea surface temperature records, 1980 to today', 'data.example.gov › sst › monthly', 'Monthly gridded anomalies relative to the 1991 to 2020 mean, with uncertainty estimates for each cell.'],
-  ['Methods for estimating deep-ocean warming', 'arxiv.example.org › abs › 2403.01177', 'We compare three interpolation schemes for sparse float data and quantify the bias each introduces below 700 m.'],
-];
-
-const Sources = () => (
-  <div className="h-full px-6 py-5">
-    <div className="flex h-[38px] items-center gap-2.5 rounded-full border border-[#DADFE6] px-4 text-[13px] shadow-xs">
-      <Icon n="search" s={14} /> ocean heat content trend 0-2000 m
-    </div>
-    <p className="mt-3 text-[11.5px] text-[#8A93A3]">About 1,240,000 results</p>
-    <div className="mt-3 space-y-4">
-      {RESULTS.map(([t, u, s]) => (
-        <div key={t}>
-          <p className="text-[11.5px] text-[#4A5262]">{u}</p>
-          <p className="text-[16px] leading-snug text-[#2B44D9]">{t}</p>
-          <p className="mt-0.5 text-[12.5px] leading-snug text-[#5B6474]">{s}</p>
-        </div>
-      ))}
-    </div>
-  </div>
-);
-
 const Dash = () => (
   <div className="h-full bg-[#F6F7F9] px-5 py-4">
     <p className="text-[16px] font-semibold">Creator dashboard</p>
@@ -956,7 +939,6 @@ const Dash = () => (
 const PAGES: Record<string, [string, string, () => ReactNode]> = {
   pr: ['git.acme.dev/shop/pull/482/files', 'Add one-tap checkout #482', Pull],
   refs: ['pinboard.example/brand-refresh', 'Tessellation, references', Refs],
-  sources: ['search.example/?q=ocean+heat+content', 'ocean heat content trend', Sources],
   dash: ['studio.example/dashboard', 'Creator dashboard', Dash],
 };
 
@@ -1224,63 +1206,32 @@ function DesignApp() {
 }
 
 /* ── notes, reader, charts ─────────────────────────────────────────────── */
-function NotesApp({ variant = 'brief' }: { variant?: string }) {
-  if (variant === 'draft') {
-    const P = ({ children }: { children: ReactNode }) => <p className="mt-2 text-[13.5px] leading-[1.7] text-[#2A303C]">{children}</p>;
-    return (
-      <div className="flex h-full w-full flex-col bg-[#FBFBF8] text-[#1B1F29]">
-        <TitleBar title="Thesis - 3. Results" glyph="#12786A" />
-        <div className="min-h-0 flex-1 overflow-hidden px-9 py-7">
-          <p className="text-[11.5px] text-[#8A93A3]">Chapter 3</p>
-          <p className="font-display text-[28px] font-bold leading-tight tracking-[-0.02em]">Results</p>
-          <p className="mt-5 font-display text-[17px] font-semibold">3.1 Warming of the upper ocean</p>
-          <P>
-            Between 1980 and 2020 the global mean sea surface temperature anomaly rose by 0.87 °C (Figure 3.2). The increase was not uniform: the
-            subtropical Atlantic and the Indian Ocean warmed fastest, while the Southern Ocean showed the weakest trend over the same period.
-          </P>
-          <p className="mt-3 text-[13.5px] leading-[1.7] text-[#2A303C]">
-            Heat content in the top 700 m followed a similar pattern<sup className="text-[#C93450]">12</sup>. We therefore treat the two series as
-            consistent and report regional estimates in Table 3.1, with uncertainty ranges derived from the float coverage described in Section 2.4.
-          </p>
-          <p className="mt-5 font-display text-[17px] font-semibold">3.2 Regional differences</p>
-          <P>
-            Regional trends diverge most strongly after 2005, when the float network reached full global coverage and the sampling bias in the
-            earlier record largely disappears.
-          </P>
-        </div>
-        <div className="flex h-[26px] shrink-0 items-center justify-between border-t border-[#E3E6EB] px-4 text-[11.5px] text-[#8A93A3]">
-          <span>2,418 words</span>
-          <span>Saved</span>
-        </div>
-      </div>
-    );
-  }
+function NotesApp() {
+  const P = ({ children }: { children: ReactNode }) => <p className="mt-2 text-[13.5px] leading-[1.7] text-[#2A303C]">{children}</p>;
   return (
-    <div className="flex h-full w-full flex-col bg-white text-[#1B1F29]">
-      <TitleBar title="Brand refresh brief - Notes" glyph="#12786A" />
-      <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
-        <p className="font-display text-[22px] font-bold leading-tight tracking-[-0.02em]">Brand refresh brief</p>
-        <p className="mt-2 flex gap-4 text-[12px] text-[#5B6474]">
-          <span className="rounded-full bg-[#FFF1D6] px-2.5 py-0.5 font-semibold text-[#8A5A00]">In progress</span>
-          <span>Due Oct 17</span>
-          <span>Owner: you</span>
+    <div className="flex h-full w-full flex-col bg-[#FBFBF8] text-[#1B1F29]">
+      <TitleBar title="Thesis - 3. Results" glyph="#12786A" />
+      <div className="min-h-0 flex-1 overflow-hidden px-9 py-7">
+        <p className="text-[11.5px] text-[#8A93A3]">Chapter 3</p>
+        <p className="font-display text-[28px] font-bold leading-tight tracking-[-0.02em]">Results</p>
+        <p className="mt-5 font-display text-[17px] font-semibold">3.1 Warming of the upper ocean</p>
+        <P>
+          Between 1980 and 2020 the global mean sea surface temperature anomaly rose by 0.87 °C (Figure 3.2). The increase was not uniform: the
+          subtropical Atlantic and the Indian Ocean warmed fastest, while the Southern Ocean showed the weakest trend over the same period.
+        </P>
+        <p className="mt-3 text-[13.5px] leading-[1.7] text-[#2A303C]">
+          Heat content in the top 700 m followed a similar pattern<sup className="text-[#C93450]">12</sup>. We therefore treat the two series as
+          consistent and report regional estimates in Table 3.1, with uncertainty ranges derived from the float coverage described in Section 2.4.
         </p>
-        <p className="mt-3.5 text-[13px] font-semibold">Goals</p>
-        <ul className="mt-1 space-y-1 text-[13px] text-[#2A303C]">
-          <li>• A mark that works at 16 px and on a billboard</li>
-          <li>• Warm, mineral palette, no gradients</li>
-        </ul>
-        <p className="mt-3.5 text-[13px] font-semibold">To do</p>
-        <div className="mt-1.5 space-y-1.5 text-[13px]">
-          {(['Tighten wordmark spacing', 'Export lockups for the deck', 'Colour-blind check'] as const).map((t, i) => (
-            <p key={t} className="flex items-center gap-2">
-              <span className={`grid h-[15px] w-[15px] place-items-center rounded-[4px] border ${i < 2 ? 'border-[#12786A] bg-[#12786A] text-white' : 'border-[#9AA3B2]'}`}>
-                {i < 2 && <Icon n="check" s={11} w={2.2} />}
-              </span>
-              <span className={i < 2 ? 'text-[#8A93A3] line-through' : ''}>{t}</span>
-            </p>
-          ))}
-        </div>
+        <p className="mt-5 font-display text-[17px] font-semibold">3.2 Regional differences</p>
+        <P>
+          Regional trends diverge most strongly after 2005, when the float network reached full global coverage and the sampling bias in the
+          earlier record largely disappears.
+        </P>
+      </div>
+      <div className="flex h-[26px] shrink-0 items-center justify-between border-t border-[#E3E6EB] px-4 text-[11.5px] text-[#8A93A3]">
+        <span>2,418 words</span>
+        <span>Saved</span>
       </div>
     </div>
   );
@@ -1330,14 +1281,14 @@ function PaperApp() {
   );
 }
 
-function LineChart({ data, xLabels, yTicks, color, h, dark }: { data: number[]; xLabels: string[]; yTicks: number[]; color: string; h: number; dark?: boolean }) {
+function LineChart({ data, xLabels, yTicks, color, h }: { data: number[]; xLabels: string[]; yTicks: number[]; color: string; h: number }) {
   const id = useSvgId();
   const [w, padL, padR, padT, padB] = [420, 38, 14, 12, 26];
   const [min, max] = [Math.min(...yTicks), Math.max(...yTicks)];
   const X = (i: number, n = data.length) => padL + (i / (n - 1)) * (w - padL - padR);
   const Y = (v: number) => padT + (1 - (v - min) / (max - min)) * (h - padT - padB);
   const line = data.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
-  const [grid, txt] = dark ? ['#2A2F3B', '#7B8499'] : ['#E4E7EC', '#8A93A3'];
+  const [grid, txt] = ['#E4E7EC', '#8A93A3'];
   const last = data.length - 1;
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="block h-full w-full" aria-hidden="true" fontSize="10" fill={txt}>
@@ -1358,36 +1309,24 @@ function LineChart({ data, xLabels, yTicks, color, h, dark }: { data: number[]; 
       ))}
       <path d={`${line} L${X(last).toFixed(1)} ${h - padB} L${X(0).toFixed(1)} ${h - padB} Z`} fill={`url(#${id})`} />
       <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={X(last)} cy={Y(data[last])} r="4.5" fill={dark ? '#14161B' : '#FFFFFF'} stroke={color} strokeWidth="2" />
+      <circle cx={X(last)} cy={Y(data[last])} r="4.5" fill="#FFFFFF" stroke={color} strokeWidth="2" />
     </svg>
   );
 }
 
 const SST = Array.from({ length: 41 }, (_, i) => 0.02 * i + 0.06 * Math.sin(i * 0.9) + 0.03 * Math.sin(i * 2.3) - 0.05);
-const VIEWERS = Array.from({ length: 36 }, (_, i) => 420 + i * 22 + 90 * Math.sin(i * 0.8) + 60 * Math.sin(i * 2.1) + (i > 24 ? 160 : 0));
 
-function ChartApp({ variant = 'sst' }: { variant?: string }) {
-  const dark = variant === 'viewers';
+function ChartApp() {
   return (
-    <div className={`flex h-full w-full flex-col ${dark ? 'bg-[#14161B] text-[#E6E9F0]' : 'bg-white text-[#1B1F29]'}`}>
-      <TitleBar title={dark ? 'Stats' : 'Sea surface temperature - Data'} dark={dark} glyph={dark ? '#12786A' : '#2B44D9'} />
+    <div className="flex h-full w-full flex-col bg-white text-[#1B1F29]">
+      <TitleBar title="Sea surface temperature - Data" glyph="#2B44D9" />
       <div className="flex min-h-0 flex-1 flex-col px-5 py-4">
-        <p className={`text-[12px] ${dark ? 'text-[#8E97AA]' : 'text-[#8A93A3]'}`}>{dark ? 'Concurrent viewers' : 'Sea surface temperature anomaly, global mean'}</p>
-        {dark ? (
-          <p className="flex items-baseline gap-2 text-[28px] font-semibold leading-tight">
-            1,247 <span className="flex items-center gap-1.5 text-[12px] font-semibold text-[#5FD3B6]"><span className="h-2 w-2 rounded-full bg-[#5FD3B6]" /> Live</span>
-          </p>
-        ) : (
-          <p className="flex items-baseline gap-2 text-[28px] font-semibold leading-tight">
-            +0.87 °C <span className="text-[12px] font-semibold text-[#C93450]">since 1980</span>
-          </p>
-        )}
+        <p className="text-[12px] text-[#8A93A3]">Sea surface temperature anomaly, global mean</p>
+        <p className="flex items-baseline gap-2 text-[28px] font-semibold leading-tight">
+          +0.87 °C <span className="text-[12px] font-semibold text-[#C93450]">since 1980</span>
+        </p>
         <div className="mt-2 min-h-0 flex-1">
-          {dark ? (
-            <LineChart dark color="#5FD3B6" data={VIEWERS} xLabels={['8 pm', '8:30', '9 pm', '9:30', '10 pm']} yTicks={[0, 500, 1000, 1500]} h={170} />
-          ) : (
-            <LineChart color="#2B44D9" data={SST} xLabels={['1980', '1990', '2000', '2010', '2020']} yTicks={[-0.2, 0, 0.4, 0.8]} h={190} />
-          )}
+          <LineChart color="#2B44D9" data={SST} xLabels={['1980', '1990', '2000', '2010', '2020']} yTicks={[-0.2, 0, 0.4, 0.8]} h={190} />
         </div>
       </div>
     </div>
@@ -1478,9 +1417,9 @@ export const AppBody = memo(function AppBody({ win }: { win: Pick<Win, 'kind' | 
     case 'browser': return <BrowserApp variant={v} />;
     case 'chat': return <ChatApp variant={v} />;
     case 'design': return <DesignApp />;
-    case 'notes': return <NotesApp variant={v} />;
+    case 'notes': return <NotesApp />;
     case 'paper': return <PaperApp />;
-    case 'chart': return <ChartApp variant={v} />;
+    case 'chart': return <ChartApp />;
     case 'stream': return <StreamApp />;
   }
 });
@@ -1539,6 +1478,15 @@ const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: number }) =
     <rect x="10.5" y="1" width="4.5" height="4.5" rx="1.2" fill={colors[1]} />
     <rect x="10.5" y="7" width="4.5" height="8" rx="1.2" fill={colors[2]} />
     <rect x="1" y="10.5" width="8" height="4.5" rx="1.2" fill={colors[3]} />
+  </svg>
+);
+
+/** A workspace's layout in small: its zones, in their colours, where they are. */
+const LayoutGlyph = ({ windows, size = 16 }: { windows: Win[]; size?: number }) => (
+  <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" className="shrink-0">
+    {windows.map(({ id, slot: [c, r, cw, rh], zone }) => (
+      <rect key={id} x={1 + (c / 12) * 14 + 0.5} y={1 + (r / 8) * 14 + 0.5} width={(cw / 12) * 14 - 1} height={(rh / 8) * 14 - 1} rx="1.2" fill={ZONE[zone].bg} />
+    ))}
   </svg>
 );
 
@@ -1731,7 +1679,7 @@ export function Stage() {
                 i === sel ? 'border-ink bg-ink text-paper' : 'border-ink/20 text-ink hover:border-ink/60'
               }`}
             >
-              <TileGlyph colors={w.windows.map((x) => ZONE[x.zone].bg)} size={16} />
+              <LayoutGlyph windows={w.windows} />
               {w.label}
             </button>
           ))}
@@ -2110,24 +2058,22 @@ export const WORKSPACES: Workspace[] = [
     id: 'release',
     label: 'Release',
     name: 'Ship the release',
-    summary: 'Editor, terminal, pull request and team chat, switched as one.',
+    summary: 'Editor, terminal and the pull request, switched as one.',
     windows: [
       w('ed', 'editor', 'Code', 'lapis', [0, 0, 7, 5]),
       w('tm', 'terminal', 'Terminal', 'verdigris', [0, 5, 7, 3]),
-      w('pr', 'browser', 'Review', 'saffron', [7, 0, 5, 5], 'pr'),
-      w('ch', 'chat', 'Team', 'madder', [7, 5, 5, 3], 'team'),
+      w('pr', 'browser', 'Review', 'saffron', [7, 0, 5, 8], 'pr'),
     ],
   },
   {
     id: 'brand',
     label: 'Brand',
     name: 'Brand refresh',
-    summary: 'Canvas, references, the brief and the client thread, side by side.',
+    summary: 'Canvas, references and the client thread, side by side.',
     windows: [
       w('cv', 'design', 'Canvas', 'lapis', [0, 0, 8, 8]),
-      w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 3], 'refs'),
-      w('br', 'notes', 'Brief', 'verdigris', [8, 3, 4, 2], 'brief'),
-      w('cl', 'chat', 'Client', 'madder', [8, 5, 4, 3], 'client'),
+      w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 4], 'refs'),
+      w('cl', 'chat', 'Client', 'madder', [8, 4, 4, 4], 'client'),
     ],
   },
   {
@@ -2136,22 +2082,20 @@ export const WORKSPACES: Workspace[] = [
     name: 'Thesis, chapter 3',
     summary: 'The paper you are reading, the draft you are writing and the data behind both.',
     windows: [
-      w('pp', 'paper', 'Reading', 'madder', [0, 0, 4, 8]),
-      w('dr', 'notes', 'Draft', 'verdigris', [4, 0, 4, 8], 'draft'),
-      w('dt', 'chart', 'Data', 'lapis', [8, 0, 4, 4], 'sst'),
-      w('sr', 'browser', 'Sources', 'saffron', [8, 4, 4, 4], 'sources'),
+      w('dr', 'notes', 'Draft', 'verdigris', [0, 0, 5, 8]),
+      w('pp', 'paper', 'Reading', 'madder', [5, 0, 7, 5]),
+      w('dt', 'chart', 'Data', 'lapis', [5, 5, 7, 3]),
     ],
   },
   {
     id: 'stream',
     label: 'Stream',
     name: 'Friday stream',
-    summary: 'Broadcast software, live chat and your dashboards, ready before you go live.',
+    summary: 'Broadcast software, live chat and your dashboard, ready before you go live.',
     windows: [
       w('ob', 'stream', 'Broadcast', 'lapis', [0, 0, 8, 5]),
       w('lc', 'chat', 'Chat', 'madder', [8, 0, 4, 8], 'live'),
-      w('st', 'chart', 'Stats', 'verdigris', [0, 5, 4, 3], 'viewers'),
-      w('db', 'browser', 'Dashboard', 'saffron', [4, 5, 4, 3], 'dash'),
+      w('db', 'browser', 'Dashboard', 'saffron', [0, 5, 8, 3], 'dash'),
     ],
   },
 ];
@@ -2161,8 +2105,10 @@ const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
 const TASKBAR = 40; // the Windows taskbar, along the bottom
-// Zones fill the desktop above the taskbar; as in the app, windows meet edge to edge.
-const [TOP, BOTTOM, SIDE, PAD] = [0, TASKBAR, 0, 0];
+// Zones fill the desktop above the taskbar, three windows to a view at most, as in the app. Windows sit a thin line of
+// desktop apart, as tiles sit apart by their grout, so each reads as its own window (drawn edge to edge, their round
+// corners and shadows looked like overlaps).
+const [TOP, BOTTOM, SIDE, PAD] = [4, TASKBAR + 4, 4, 8];
 
 /** The shortcut that opens Mosaïk's switcher (the app's default). */
 export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];
@@ -2172,7 +2118,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
-  // Windows fill their zones (each wears its tag in its own title bar), edge to edge.
+  // Windows fill their zones (each wears its tag in its own title bar), a thin line apart.
   return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + PAD / 2), width: r1(cols * colW - PAD), height: r1(rows * rowH - PAD) };
 }
 
@@ -2196,7 +2142,7 @@ export interface DeskLayout {
   /** how far each window moves for the messy desktop */
   poses: { x: number; y: number }[];
   z: number[];
-  /** the window people keep maximised without Mosaïk: the biggest one */
+  /** the window people keep maximised without Mosaïk: the workspace's first, the one the work is done in */
   main: number;
   full: Rect;
 }
@@ -2210,15 +2156,17 @@ export function deskLayout(index: number, deskH: number): DeskLayout {
   const rnd = mulberry32((index + 1) * 7919 + 13);
   const jit = (n: number) => Math.round((rnd() - 0.5) * 2 * n);
   const rects = WORKSPACES[index].windows.map((win) => slotBox(win.slot, deskH));
-  const order = rects.map((_, i) => i).sort((a, b) => rects[b].width * rects[b].height - rects[a].width * rects[a].height);
+  // The first window is the one the work is done in, kept maximised without Mosaïk; the others lie over it, the biggest lowest.
+  const area = (i: number) => rects[i].width * rects[i].height;
+  const order = [0, ...rects.map((_, i) => i).slice(1).sort((a, b) => area(b) - area(a))];
   const placed = rects.map((r) => ({ left: r.left, top: r.top }));
   const maxB = deskH - TASKBAR - 12;
   // Each desktop is messy in its own way. Fractions place a window inside the free range: [across, down].
   const WHERE: Record<string, [number, number]> = {
-    tm: [1, 1], pr: [0.5, 0.1], ch: [0.02, 0.8], // developer: terminal bottom right, review mid-screen, chat tucked bottom left
-    rf: [0.62, 0.02], br: [0.1, 0.55], cl: [1, 1], // designer: palettes floating around the canvas
-    dr: [0, 0.3], dt: [0.88, 0], sr: [0.55, 1], // researcher: tall draft on the left, data up top, sources low
-    lc: [1, 0.35], st: [0.03, 1], db: [0.3, 0.18], // streamer: chat down the right, dashboards on the left
+    tm: [1, 1], pr: [0.5, 0.1], // developer: terminal bottom right, review mid-screen
+    rf: [0.62, 0.02], cl: [1, 1], // designer: references and the client floating over the canvas
+    pp: [0.9, 0.12], dt: [0.12, 1], // researcher: the paper up on the right, the data low on the left
+    lc: [1, 0.35], db: [0.3, 0.18], // streamer: chat down the right, the dashboard on the left
   };
   order.slice(1).forEach((i) => {
     const r = rects[i];

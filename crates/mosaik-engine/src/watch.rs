@@ -132,6 +132,8 @@ pub(crate) struct Watch {
     pub(crate) preview: Preview,
     /// Each tab group's strip.
     pub(crate) bars: HashMap<TabGroupId, TabBar>,
+    /// Passes left of putting strips and frames back above their windows (`timer::STACK`).
+    pub(crate) stack_passes: u8,
     /// Groups whose strip could not be drawn: they show all their tabs until it can.
     pub(crate) strip_broken: HashSet<TabGroupId>,
     /// A press on a tab chip.
@@ -295,6 +297,10 @@ impl Engine {
                     sync |= tab(self);
                 }
                 EVENT_SYSTEM_MINIMIZEEND | EVENT_OBJECT_UNCLOAKED => {
+                    // Apps built on Chromium (Chrome, VS Code, Claude) and packaged apps (Windows
+                    // Terminal) show their first window cloaked and uncloak it once drawn: an app
+                    // started for a workspace is placed then.
+                    self.adopt(h);
                     self.refresh_frame(h);
                     sync |= tab(self);
                 }
@@ -343,6 +349,13 @@ impl Engine {
         }
         if sync {
             self.sync_tabs();
+        }
+    }
+
+    /// Every frame right above its window.
+    pub(crate) fn restack_frames(&self) {
+        for (h, f) in &self.watch.frames {
+            f.frame.restack(h.0.cast_signed_isize());
         }
     }
 

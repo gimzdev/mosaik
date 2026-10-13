@@ -95,6 +95,35 @@ pub fn cursor() -> Point {
     Point::new(p.x, p.y)
 }
 
+/// An app has taken the pointer for itself, as a game does while the mouse turns the view: it
+/// hides the pointer, or keeps it inside part of the screen. Menus and edges must not answer
+/// it (the owner: "when playing an FPS, going sideways must never open the side bar").
+pub fn pointer_taken() -> bool {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{CURSOR_SHOWING, CURSORINFO, GetClipCursor, GetCursorInfo};
+    let mut info = CURSORINFO {
+        cbSize: u32::try_from(std::mem::size_of::<CURSORINFO>()).unwrap_or(0),
+        ..Default::default()
+    };
+    // SAFETY: fills a sized structure about the pointer.
+    let hidden = unsafe { GetCursorInfo(&mut info) }.is_ok() && info.flags.0 & CURSOR_SHOWING.0 == 0;
+    let mut clip = RECT::default();
+    // SAFETY: reads the rectangle the pointer is confined to (the whole desktop when none).
+    let clipped = unsafe { GetClipCursor(&mut clip) }.is_ok() && {
+        // SAFETY: reads system metrics.
+        let (x, y, w, h) = unsafe {
+            (
+                GetSystemMetrics(SM_XVIRTUALSCREEN),
+                GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                GetSystemMetrics(SM_CYVIRTUALSCREEN),
+            )
+        };
+        clip.left > x || clip.top > y || clip.right < x + w || clip.bottom < y + h
+    };
+    hidden || clipped
+}
+
 /// The primary mouse button is held down now: the left one, or the right one when the user
 /// swapped them (the state is read from the physical buttons).
 pub fn primary_button_down() -> bool {

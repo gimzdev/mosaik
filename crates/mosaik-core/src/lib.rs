@@ -4,6 +4,7 @@
 
 pub mod arrange;
 pub mod classify;
+pub mod edge;
 pub mod editing;
 pub mod fit;
 pub mod geometry;

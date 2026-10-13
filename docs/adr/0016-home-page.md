@@ -76,3 +76,9 @@ at the bottom.
 One line under Arrange, "Open the apps for", offers the apps installed that go together for a
 task, a button per set ("Coding"); a click opens them as a workspace. Nothing shows when Mosaïk
 finds no set.
+
+## Amended by ADR 0023 (2026-10-13)
+
+Home and Settings are the only places, in a bar along the top. Every saved workspace is on Home,
+with its apps at a glance and Open; its ⋯ menu changes its apps, edits its zones, gives it a
+shortcut, renames or deletes it. There is no Workspaces page.

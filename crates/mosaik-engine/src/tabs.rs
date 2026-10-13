@@ -34,6 +34,10 @@ use crate::thread::{Engine, timer};
 use crate::titles::TitleSpot;
 use crate::watch::{DRAG_TICK_MS, shift_down};
 
+/// After a tab is shown, strips go back above their windows this long after, then again.
+const STACK_FIRST_MS: u32 = 120;
+const STACK_AGAIN_MS: u32 = 400;
+
 /// Windows Mosaïk has hidden, how, and the journal the watchdog reads.
 pub(crate) struct Hiding {
     worker: Option<Worker>,
@@ -886,7 +890,45 @@ impl Engine {
             let hwnd = window::hwnd(w);
             let _ = arrange::raise(hwnd);
             arrange::focus(hwnd);
+            // The raise lands when the window's app gets round to it, often after the strip was
+            // put above the window: put it back once the window is up (the owner: "the tabs go
+            // behind the new window").
+            self.restack_soon();
         }
+    }
+
+    /// Puts strips and frames back above their windows in a moment, twice: soon after a window
+    /// was raised, and again in case its app was slow.
+    pub(crate) fn restack_soon(&mut self) {
+        self.watch.stack_passes = 2;
+        self.set_timer(timer::STACK, STACK_FIRST_MS);
+    }
+
+    /// One of the passes of [`Engine::restack_soon`].
+    pub(crate) fn stack_tick(&mut self) {
+        self.kill_timer(timer::STACK);
+        self.restack_overlays();
+        self.watch.stack_passes = self.watch.stack_passes.saturating_sub(1);
+        if self.watch.stack_passes > 0 {
+            self.set_timer(timer::STACK, STACK_AGAIN_MS);
+        }
+    }
+
+    /// Every shown tab strip and frame right above its window, where a window raised over them
+    /// may have left them behind.
+    pub(crate) fn restack_overlays(&mut self) {
+        for g in self.groups_now() {
+            if let Some((_, w)) = g.visible()
+                && let Some(bar) = self.watch.bars.get(&g.id)
+                && bar.is_shown()
+            {
+                mosaik_overlay::layered::restack_windows(
+                    &[bar.hwnd()],
+                    Stack::Above(w.0.cast_signed_isize()),
+                );
+            }
+        }
+        self.restack_frames();
     }
 
     /// The tab after the one showing (the "+N" chip of a crowded strip).

@@ -921,10 +921,10 @@ mod tests {
         );
         let term = &plan.new_zones[zone_of(&plan, 6)];
         assert!((term.area.top() - plan.new_zones[main].area.bottom()).abs() < 1e-9);
-        // Claude and Chrome beside it; Steam, the Calculator and Battle.net wait in the taskbar.
+        // Claude, used last, beside them: three windows in the view. Chrome, Steam, the
+        // Calculator and Battle.net wait in the taskbar.
         assert!(matches!(plan.goes[0], Goes::Zone(_)));
-        assert!(matches!(plan.goes[1], Goes::Zone(_)));
-        for u in [2, 4, 5] {
+        for u in [1, 2, 4, 5] {
             assert_eq!(plan.goes[u], Goes::Minimize, "unit {u}: {:?}", plan.goes);
         }
     }
@@ -977,7 +977,7 @@ mod tests {
         let first = plan(&units, &[], &[WORK]);
         assert_eq!(
             first.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count(),
-            5,
+            3,
             "{:?}",
             first.goes
         );
@@ -1015,9 +1015,9 @@ mod tests {
     }
 
     #[test]
-    fn unknown_windows_get_one_main_zone_and_three_beside_it() {
-        // Nothing says what the task is: the window used last is the main one, the next three
-        // sit beside it, and the others wait in the taskbar.
+    fn unknown_windows_get_one_main_zone_and_two_beside_it() {
+        // Nothing says what the task is: the window used last is the main one, the next two sit
+        // beside it (three windows in a view), and the others wait in the taskbar.
         for n in [5_i32, 6, 9] {
             let units: Vec<Unit> = (0..n)
                 .map(|i| {
@@ -1029,13 +1029,13 @@ mod tests {
                 })
                 .collect();
             let plan = plan(&units, &[], &[WORK]);
-            assert_eq!(plan.new_zones.len(), 4, "{n} windows");
+            assert_eq!(plan.new_zones.len(), 3, "{n} windows");
             assert!(
-                plan.goes[..4].iter().all(|g| matches!(g, Goes::Zone(_))),
+                plan.goes[..3].iter().all(|g| matches!(g, Goes::Zone(_))),
                 "{:?}",
                 plan.goes
             );
-            assert!(plan.goes[4..].iter().all(|g| *g == Goes::Minimize));
+            assert!(plan.goes[3..].iter().all(|g| *g == Goes::Minimize));
             let main = zone_of(&plan, 0);
             let largest = plan
                 .new_zones
@@ -1051,8 +1051,8 @@ mod tests {
     fn the_task_keeps_its_windows_and_sends_the_others_away() {
         // Job 0105, the owner's screen: ten windows. Claude in front, then Chrome, Steam,
         // Notepad++... The task is coding: an editor takes the most room with the terminal
-        // under it, Claude and the browsers beside them; Steam, the Calculator, File Explorer
-        // and Figma wait in the taskbar.
+        // under it and Claude, used last, beside them: three windows in the view. The others
+        // wait in the taskbar.
         let exes = [
             ("claude.exe", "Claude"),
             ("chrome.exe", "Google Chrome"),
@@ -1077,7 +1077,7 @@ mod tests {
         let placed: Vec<usize> = (0..units.len())
             .filter(|&u| matches!(plan.goes[u], Goes::Zone(_)))
             .collect();
-        assert_eq!(placed, vec![0, 1, 3, 6, 7, 9], "{:?}", plan.goes);
+        assert_eq!(placed, vec![0, 3, 9], "{:?}", plan.goes);
         let main = zone_of(&plan, 3);
         assert_eq!(plan.new_zones[main].name, "Code");
         assert!(plan.new_zones[main].area.left().abs() < 1e-9, "on the left");

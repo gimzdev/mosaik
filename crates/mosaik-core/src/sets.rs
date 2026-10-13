@@ -11,10 +11,12 @@
 //! a set alone, nor takes a second place of a kind (a second chat app).
 
 use crate::arrange::Kind;
-use crate::layout::{Launch, Workspace};
+use crate::layout::{Launch, Layout, Place, Slot, SlotId, TabGroup, TabGroupId, Workspace, WorkspaceId};
 use crate::matching::AppMatch;
-use crate::task::Task;
+use crate::task::{self, Task};
+use crate::topology::MonitorRef;
 use crate::workspace::same_name;
+use crate::zone::{Zone, ZoneColor, ZoneId};
 
 /// An app of the Start menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,23 +77,15 @@ const ROLES: [(Task, &[(Kind, usize)]); 5] = [
             (Kind::Files, 1),
         ],
     ),
+    // No assistant for design or writing: "maybe sometimes, but no way it should be in the
+    // preset" (the owner).
     (
         Task::Design,
-        &[
-            (Kind::Design, 1),
-            (Kind::Browser, 1),
-            (Kind::Files, 1),
-            (Kind::Assistant, 1),
-        ],
+        &[(Kind::Design, 1), (Kind::Browser, 1), (Kind::Files, 1)],
     ),
     (
         Task::Writing,
-        &[
-            (Kind::Documents, 1),
-            (Kind::Notes, 1),
-            (Kind::Browser, 1),
-            (Kind::Assistant, 1),
-        ],
+        &[(Kind::Documents, 1), (Kind::Notes, 1), (Kind::Browser, 1)],
     ),
     (Task::Talking, &[(Kind::Chat, 2), (Kind::Mail, 1)]),
     (
@@ -257,7 +251,7 @@ fn known(app: &Installed) -> Option<(Kind, usize, AppMatch, Launch)> {
 
 fn is_running(found: &AppMatch, running: &[Running]) -> bool {
     running.iter().any(|r| match (&found.aumid, &found.exe) {
-        (Some(aumid), _) => r.aumid.as_deref() == Some(aumid.as_str()),
+        (Some(aumid), _) => r.aumid.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(aumid)),
         (None, Some(exe)) => r.exe.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(exe)),
         (None, None) => false,
     })
@@ -350,18 +344,6 @@ pub fn suggest(installed: &[Installed], running: &[Running]) -> Vec<AppSet> {
     sets.into_iter().take(MOST_SETS).map(|(_, s)| s).collect()
 }
 
-/// A set's app and a workspace's app are the same app: by package, else by program.
-fn same_app(set: &AppMatch, slot: &AppMatch) -> bool {
-    match (&set.aumid, &set.exe) {
-        (Some(aumid), _) => slot
-            .aumid
-            .as_deref()
-            .is_some_and(|a| a.eq_ignore_ascii_case(aumid)),
-        (None, Some(exe)) => slot.exe.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(exe)),
-        (None, None) => false,
-    }
-}
-
 /// The set's workspace: the first of `workspaces` with every app of `set`, whatever its name
 /// (made from the set, or by the user or the welcome with the same apps). A click on the set
 /// opens it; with none, the set makes one.
@@ -369,7 +351,7 @@ pub fn workspace_of<'a>(set: &AppSet, workspaces: &'a [Workspace]) -> Option<&'a
     workspaces.iter().find(|w| {
         set.apps
             .iter()
-            .all(|a| w.layout.slots.iter().any(|s| same_app(&a.app, &s.app)))
+            .all(|a| w.layout.slots.iter().any(|s| a.app.same_app(&s.app)))
     })
 }
 
@@ -387,6 +369,109 @@ pub fn new_name(set: &AppSet, existing: &[Workspace]) -> String {
         })
         .find(|name| !existing.iter().any(|w| same_name(&w.name, name)))
         .unwrap_or_else(|| base.to_owned())
+}
+
+/// An app of a workspace made from a set, or from windows sorted by task.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewApp {
+    pub kind: Kind,
+    /// Its name in lists ("Visual Studio Code").
+    pub label: String,
+    pub app: AppMatch,
+    pub launch: Option<Launch>,
+}
+
+/// A zone's name for an app of `kind` called `label`, not one of `taken`: "Code", "Terminal",
+/// "Code 2"; the app's own name for a kind without one.
+fn zone_name(kind: Kind, label: &str, taken: &[String]) -> String {
+    let base = kind
+        .zone_name()
+        .map_or_else(|| label.trim().to_owned(), str::to_owned);
+    (1..)
+        .map(|n| {
+            if n == 1 {
+                base.clone()
+            } else {
+                format!("{base} {n}")
+            }
+        })
+        .find(|c| !taken.iter().any(|t| t.eq_ignore_ascii_case(c)))
+        .unwrap_or(base)
+}
+
+/// The workspace for `apps` laid out by [`task::layout`] on `monitor`: a zone for each app in
+/// the view (three at most), named after its kind and coloured in turn, and each app of `tabs`
+/// ([`task::tabs_for`]) a tab with the app it goes with, which shows. Apps neither in the view
+/// nor a tab are left out.
+pub fn build_workspace(
+    id: WorkspaceId,
+    name: &str,
+    monitor: MonitorRef,
+    apps: &[NewApp],
+    placed: &task::Layout,
+    tabs: &[(usize, usize)],
+) -> Workspace {
+    let mut layout = Layout {
+        monitors: vec![monitor],
+        ..Layout::default()
+    };
+    let mut taken: Vec<String> = Vec::new();
+    let slot_id = |n: usize| SlotId(format!("s{n}"));
+    let mut next_slot = 1;
+    for (k, p) in placed.placed.iter().enumerate() {
+        let Some(a) = apps.get(p.window) else { continue };
+        let zone = ZoneId(format!("z{}", k + 1));
+        let zname = zone_name(a.kind, &a.label, &taken);
+        taken.push(zname.clone());
+        layout.zones.push(Zone {
+            id: zone.clone(),
+            name: zname,
+            color: ZoneColor::nth(k),
+            monitor: 0,
+            area: p.area,
+        });
+        let shown = slot_id(next_slot);
+        next_slot += 1;
+        let mut slots = vec![Slot {
+            id: shown.clone(),
+            label: Some(a.label.clone()),
+            app: a.app.clone(),
+            launch: a.launch.clone(),
+            place: Place::Zone { zone: zone.clone() },
+        }];
+        let with: Vec<&NewApp> = tabs
+            .iter()
+            .filter(|(_, at)| *at == k)
+            .filter_map(|(w, _)| apps.get(*w))
+            .collect();
+        if !with.is_empty() {
+            let group = TabGroupId(format!("g{}", k + 1));
+            for extra in with {
+                slots.push(Slot {
+                    id: slot_id(next_slot),
+                    label: Some(extra.label.clone()),
+                    app: extra.app.clone(),
+                    launch: extra.launch.clone(),
+                    place: Place::Tab { group: group.clone() },
+                });
+                next_slot += 1;
+            }
+            slots[0].place = Place::Tab { group: group.clone() };
+            layout.tab_groups.push(TabGroup {
+                id: group,
+                tabs: slots.iter().map(|s| s.id.clone()).collect(),
+                active: shown,
+                place: Place::Zone { zone },
+            });
+        }
+        layout.slots.extend(slots);
+    }
+    Workspace {
+        id,
+        name: name.to_owned(),
+        hotkey: None,
+        layout,
+    }
 }
 
 /// A window joins a task it is not done in when it belongs to it at least this much.
@@ -762,6 +847,107 @@ mod tests {
         ));
         assert_eq!(workspace_of(&coding, &all).map(|w| w.name.as_str()), Some("Work"));
         assert_eq!(new_name(&coding, &[]), "Coding");
+    }
+
+    #[test]
+    fn writing_and_design_sets_have_no_assistant() {
+        // The owner: "for writing and design why would someone need Claude, maybe sometimes, but
+        // no way it should be in the preset".
+        let mut installed = owner();
+        installed.extend([
+            app(
+                "Word",
+                "Microsoft.Office.WINWORD.EXE.15",
+                Some("C:\\Office\\WINWORD.EXE"),
+            ),
+            app("Figma", "com.squirrel.figma.Figma", None),
+        ]);
+        let sets = suggest(&installed, &[]);
+        for task in [Task::Writing, Task::Design] {
+            let set = sets.iter().find(|s| s.task == task).unwrap();
+            assert!(
+                !set.apps.iter().any(|a| a.kind == Kind::Assistant),
+                "{task:?}: {:?}",
+                names(set)
+            );
+        }
+        // Coding keeps it: the owner's own set has Claude.
+        let coding = sets.iter().find(|s| s.task == Task::Coding).unwrap();
+        assert!(coding.apps.iter().any(|a| a.name == "Claude"));
+    }
+
+    #[test]
+    fn a_set_opens_in_three_zones_with_the_other_apps_as_tabs() {
+        use crate::geometry::Rect;
+        use crate::layout::{Place, WorkspaceId};
+        use crate::task::{Window, layout, tabs_for};
+        use crate::topology::{MonitorId, MonitorRef};
+        let coding = suggest(&owner(), &[])
+            .into_iter()
+            .find(|s| s.task == Task::Coding)
+            .unwrap();
+        let windows: Vec<Window> = coding.apps.iter().map(|a| Window::of(a.kind)).collect();
+        let placed = layout(&windows, 1920, 1032);
+        let tabs = tabs_for(&windows, &placed, 1920, 1032);
+        let monitor = MonitorRef {
+            id: MonitorId("main".into()),
+            name: "Main".into(),
+            bounds: Rect::new(0, 0, 1920, 1080),
+            work_area: Rect::new(0, 0, 1920, 1032),
+            dpi: 96,
+            primary: true,
+        };
+        let apps: Vec<NewApp> = coding
+            .apps
+            .iter()
+            .map(|a| NewApp {
+                kind: a.kind,
+                label: a.name.clone(),
+                app: a.app.clone(),
+                launch: Some(a.launch.clone()),
+            })
+            .collect();
+        let ws = build_workspace(
+            WorkspaceId("coding".into()),
+            "Coding",
+            monitor,
+            &apps,
+            &placed,
+            &tabs,
+        );
+        assert_eq!(ws.layout.problems(), vec![]);
+        assert_eq!(ws.layout.zones.len(), 3, "{:?}", ws.layout.zones);
+        assert_eq!(ws.layout.slots.len(), 5);
+        let zone_names: Vec<&str> = ws.layout.zones.iter().map(|z| z.name.as_str()).collect();
+        assert_eq!(zone_names, ["Code", "Terminal", "Browser"]);
+        // Claude is a tab with Chrome, File Explorer with the terminal; the editor is alone.
+        let group_of = |label: &str| {
+            let slot = ws
+                .layout
+                .slots
+                .iter()
+                .find(|s| s.label.as_deref() == Some(label))
+                .unwrap();
+            match &slot.place {
+                Place::Tab { group } => Some(ws.layout.tab_group(group).unwrap().clone()),
+                _ => None,
+            }
+        };
+        assert!(group_of("Visual Studio Code").is_none());
+        let browser = group_of("Claude").unwrap();
+        assert_eq!(group_of("Google Chrome").map(|g| g.id), Some(browser.id.clone()));
+        let chrome = ws
+            .layout
+            .slots
+            .iter()
+            .find(|s| s.label.as_deref() == Some("Google Chrome"))
+            .unwrap();
+        assert_eq!(
+            browser.active, chrome.id,
+            "the browser shows, Claude waits as a tab"
+        );
+        let terminal = group_of("File Explorer").unwrap();
+        assert_eq!(group_of("Terminal").map(|g| g.id), Some(terminal.id));
     }
 
     #[test]

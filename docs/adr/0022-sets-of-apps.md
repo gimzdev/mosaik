@@ -66,3 +66,11 @@ sure it's clean, concise, non-invasive and easy to understand."
   apps taken out, the next click makes a new one.
 - Sorting happens once, at the end of the welcome. Later, Arrange lays out what is open, and Save
   layout keeps it.
+
+## Amended by ADR 0023 (2026-10-13)
+
+A set's new workspace shows three windows at most; the set's other apps are tabs with the app
+they go with, so all of them open. The writing and design sets have no assistant. An app of a set
+that is open is used, never started again, packaged apps included (their windows take their
+process's AppUserModelID), and opening a set twice while its apps start starts each once. A
+started app takes its zone as soon as its window shows, also when it shows cloaked first.

@@ -14,6 +14,13 @@ async function windowDoesNotScroll(page: Page) {
   expect(overflow).toBeLessThanOrEqual(0);
 }
 
+/** Opens the zone editor of the mock's first workspace, from its menu on the home page. */
+async function editZones(page: Page) {
+  await page.getByRole('button', { name: 'More for “Ship the release”' }).click();
+  await page.getByRole('button', { name: 'Edit zones' }).click();
+  await expect(page.getByRole('heading', { name: 'Ship the release', level: 1 })).toBeVisible();
+}
+
 /** On the home page, the picture stays at the top while the page scrolls, and every control the
  * keyboard reaches below it, going down and back up, is in view below it, never under it. */
 async function pictureStaysClear(page: Page, height: number) {
@@ -61,7 +68,8 @@ test('the home page shows each workspace’s apps, and opens them to change them
   await page.goto('/');
   const row = page.getByRole('listitem').filter({ hasText: 'Ship the release' });
   await expect(row.getByRole('list', { name: 'Its apps' }).getByRole('listitem')).toHaveCount(4);
-  await row.getByRole('button', { name: 'Apps of “Ship the release”' }).click();
+  await row.getByRole('button', { name: 'More for “Ship the release”' }).click();
+  await page.getByRole('button', { name: 'Change its apps…' }).click();
   await expect(page.getByRole('list', { name: 'Apps of “Ship the release”' }).getByRole('listitem')).toHaveCount(4);
   await accessible(page);
 });
@@ -79,19 +87,32 @@ test('the picture stays in view while the layouts scroll beneath it', async ({ p
   await pictureStaysClear(page, 760);
 });
 
-test('workspaces are listed and the page is accessible', async ({ page }) => {
+test('the workspaces are on the home page, each with Open and a menu for the rest', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Workspaces', level: 1 })).toBeVisible();
-  await expect(page.getByRole('listitem')).toHaveCount(2);
+  const saved = page.getByRole('list', { name: 'Saved workspaces' });
+  await expect(saved.getByRole('button', { name: /^Open “/ })).toHaveCount(2);
+  await expect(saved.getByRole('button', { name: /^More for “/ })).toHaveCount(2);
   await accessible(page);
   await windowDoesNotScroll(page);
 });
 
+test('the last workspace’s menu opens where its items can be seen', async ({ page }) => {
+  await page.goto('/');
+  // The page scrolled to its end: the last workspace is near the bottom of the window.
+  await page.locator('main').evaluate((main) => {
+    main.scrollTop = main.scrollHeight;
+  });
+  await page.getByRole('button', { name: 'More for “Brand refresh”' }).click();
+  for (const name of ['Change its apps…', 'Edit zones', 'Add shortcut…', 'Rename…', 'Delete…']) {
+    await expect(page.getByRole('button', { name })).toBeInViewport({ ratio: 1 });
+  }
+  await accessible(page);
+});
+
 test('a workspace’s apps are listed, and can be moved, removed and added', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-  await page.getByRole('button', { name: 'Apps of “Ship the release”' }).click();
+  await page.getByRole('button', { name: 'More for “Ship the release”' }).click();
+  await page.getByRole('button', { name: 'Change its apps…' }).click();
   const apps = page.getByRole('list', { name: 'Apps of “Ship the release”' });
   await expect(apps.getByRole('listitem')).toHaveCount(4);
   await page.getByRole('combobox', { name: 'Zone of Slack' }).selectOption({ label: 'Browser' });
@@ -99,6 +120,7 @@ test('a workspace’s apps are listed, and can be moved, removed and added', asy
   await page.getByRole('button', { name: 'Remove Slack' }).click();
   await expect(apps.getByRole('listitem')).toHaveCount(3);
   await page.getByRole('button', { name: 'Add a window to “Ship the release”' }).click();
+  await expect(page.getByRole('button', { name: /^Slack/ })).toBeInViewport({ ratio: 1 });
   await page.getByRole('button', { name: /^Slack/ }).click();
   await expect(page.getByText('Slack added.')).toBeVisible();
   await expect(apps.getByRole('listitem')).toHaveCount(4);
@@ -120,22 +142,45 @@ test('a layout shows where the windows would go, then puts them there, and Undo 
   await accessible(page);
 });
 
-test('the keyboard reaches every page, starting from the page title', async ({ page }) => {
+test('the keyboard reaches both places, starting from the page title', async ({ page }) => {
   await page.goto('/');
   const title = page.getByRole('heading', { name: 'Tidy your screen', level: 1 });
   await expect(title).toBeFocused();
   await page.keyboard.press('Shift+Tab');
-  await expect(page.getByRole('button', { name: 'About' })).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
   await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: 'Home' })).toBeFocused();
   await accessible(page);
+});
+
+test('settings show the few most people change, the rest under More settings, and About last', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('group', { name: 'Quick menu' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'About Mosaïk' })).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Start apps that are not open' })).toBeHidden();
+  await page.getByRole('button', { name: 'More settings' }).click();
+  await expect(page.getByRole('switch', { name: 'Start apps that are not open' })).toBeVisible();
+  await accessible(page);
+  await windowDoesNotScroll(page);
+});
+
+test('a page opens at its top, wherever the last one was scrolled to', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('main').evaluate((main) => {
+    main.scrollTop = main.scrollHeight;
+  });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeInViewport();
+  expect(await page.locator('main').evaluate((main) => main.scrollTop)).toBe(0);
 });
 
 test('the Tab key goes round the window and never leaves it', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'About' }).click();
+  await page.getByRole('button', { name: 'Settings' }).click();
   const last = page.getByRole('button', { name: 'Show the welcome again' });
   await last.focus();
   await page.keyboard.press('Tab');
@@ -146,8 +191,7 @@ test('the Tab key goes round the window and never leaves it', async ({ page }) =
 
 test('a dialog keeps the Tab key inside it', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
+  await editZones(page);
   await page.getByRole('button', { name: 'Start from a preset' }).click();
   await page.getByRole('button', { name: 'Thirds' }).click();
   await page.getByRole('button', { name: 'Settings' }).click();
@@ -171,8 +215,7 @@ test('a dark theme can be chosen, and stays accessible', async ({ page }) => {
 
 test('zones can be resized from the keyboard and saved', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
+  await editZones(page);
   const line = page.getByRole('separator', { name: 'Line right of Code, left of Browser and Terminal' });
   await line.focus();
   await page.keyboard.press('ArrowLeft');
@@ -197,8 +240,7 @@ test('Arrange lays the screen out for its task and can be undone', async ({ page
 
 test('the vertical presets: two stacked zones beside a half, and rows', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
+  await editZones(page);
   await page.getByRole('button', { name: 'Start from a preset' }).click();
   await page.getByRole('button', { name: 'Two stacked beside half' }).click();
   await expect(page.getByRole('separator')).toHaveCount(2);
@@ -212,8 +254,7 @@ test('the vertical presets: two stacked zones beside a half, and rows', async ({
 
 test('a zone can be picked and edited, and the page stays accessible', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
+  await editZones(page);
   await page.getByRole('button', { name: /^Code,/ }).click();
   await expect(page.getByRole('textbox', { name: 'Name' })).toHaveValue('Code');
   await accessible(page);
@@ -236,13 +277,21 @@ test.describe('at the smallest window size', () => {
     await expect(page.getByRole('heading', { name: 'Tidy your screen', level: 1 })).toBeVisible();
     await accessible(page);
     await windowDoesNotScroll(page);
-    for (const name of ['Settings', 'About', 'Workspaces']) {
-      await page.getByRole('button', { name, exact: true }).click();
-      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-      await accessible(page);
-      await windowDoesNotScroll(page);
-    }
-    await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
+    await page.getByRole('button', { name: 'More settings' }).click();
+    await accessible(page);
+    await windowDoesNotScroll(page);
+    await page.getByRole('button', { name: 'Home', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Tidy your screen', level: 1 })).toBeVisible();
+    // The last workspace's menu, near the bottom of the small window, shows all its items.
+    await page.locator('main').evaluate((main) => {
+      main.scrollTop = main.scrollHeight;
+    });
+    await page.getByRole('button', { name: 'More for “Brand refresh”' }).click();
+    await expect(page.getByRole('button', { name: 'Delete…' })).toBeInViewport({ ratio: 1 });
+    await page.keyboard.press('Escape');
+    await editZones(page);
     await page.getByRole('button', { name: /Portrait/ }).click();
     await expect(page.getByText('No zones on this monitor. Start from a preset.')).toBeVisible();
     await accessible(page);
@@ -261,8 +310,7 @@ test.describe('in high contrast', () => {
     await accessible(page);
     await page.getByRole('button', { name: 'Thirds' }).hover();
     await accessible(page);
-    await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
-    await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
+    await editZones(page);
     await page.getByRole('button', { name: /^Code,/ }).click();
     await accessible(page);
   });

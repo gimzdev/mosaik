@@ -63,12 +63,12 @@ const workspaces = (names: string[], active: string | null = null): Reply => ({
   active,
 });
 
-const onManage = vi.fn();
+const onEditZones = vi.fn();
 
 function page() {
   return render(
     <Feedback>
-      <Home shortcut="Win+Alt+Space" onManage={onManage} />
+      <Home shortcut="Win+Alt+Space" onEditZones={onEditZones} />
     </Feedback>,
   );
 }
@@ -90,7 +90,7 @@ describe('the home page', () => {
   beforeEach(() => {
     engine.request.mockReset();
     engine.onWorkspacesChanged.mockClear();
-    onManage.mockClear();
+    onEditZones.mockClear();
   });
 
   it('shows the main screen as it is now', async () => {
@@ -206,7 +206,7 @@ describe('the home page', () => {
     expect(screen.queryByText('Reading your screen…')).toBeNull();
   });
 
-  it('opens a saved workspace, and leads to the page that manages them', async () => {
+  it('opens a saved workspace, and everything else about it is in its menu', async () => {
     answer(
       (c) => (c.cmd === 'switch' ? { reply: 'done', message: 'Opened “Brand”.' } : null),
       workspaces(['Ship', 'Brand'], 'w0'),
@@ -218,8 +218,14 @@ describe('the home page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Open “Brand”' }));
     expect(engine.request).toHaveBeenCalledWith({ cmd: 'switch', workspace: 'w1' });
     expect(await screen.findByText('Opened “Brand”.')).toBeTruthy();
-    await userEvent.click(screen.getByRole('button', { name: 'Manage workspaces' }));
-    expect(onManage).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'More for “Brand”' }));
+    expect(
+      ['Change its apps…', 'Edit zones', 'Add shortcut…', 'Rename…', 'Delete…'].map(
+        (name) => screen.getByRole('button', { name }).textContent,
+      ),
+    ).toHaveLength(5);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit zones' }));
+    expect(onEditZones).toHaveBeenCalledWith('w1');
   });
 
   it('says which shortcut switches workspaces, and nothing more', async () => {
@@ -320,12 +326,12 @@ describe('the home page', () => {
         .getAllByRole('listitem')
         .map((li) => li.textContent),
     ).toEqual(['Visual Studio Code', 'Google Chrome']);
-    const toggle = within(row).getByRole('button', { name: 'Apps of “Ship”' });
-    await userEvent.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    await userEvent.click(within(row).getByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Change its apps…' }));
     expect(engine.request).toHaveBeenCalledWith({ cmd: 'apps', workspace: 'w0' });
     expect(await screen.findByRole('combobox', { name: 'Zone of Google Chrome' })).toBeTruthy();
-    await userEvent.click(toggle);
+    await userEvent.click(within(row).getByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Hide its apps' }));
     expect(screen.queryByRole('combobox')).toBeNull();
   });
 });

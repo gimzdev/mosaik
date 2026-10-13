@@ -1,26 +1,43 @@
-// The saved workspaces: open one, see and change its apps, edit its zones, give it a shortcut,
-// rename or delete it. (Arranging the screen, with or without a layout, is the home page's.)
+// The saved workspaces, on the home page: each with its apps at a glance, Open, and the rest in
+// its ⋯ menu (its apps in full, to change them; its zones; a shortcut of its own; rename;
+// delete). Opening one brings its apps back where they were left.
 
 import { type SyntheticEvent, useCallback, useEffect, useId, useState } from 'react';
 
 import { onWorkspacesChanged, request } from './engine';
 import { MAX_NAME, errorMessage, type WorkspaceSummary } from './protocol';
 import { ShortcutRecorder } from './shortcut';
-import { Button, Confirm, Keys, MenuButton, PageTitle, Status, useSay } from './ui';
+import { Button, Confirm, Keys, MenuButton, Status, useSay } from './ui';
 import { AppsPanel } from './WorkspaceApps';
 
 type Panel = { kind: 'rename' | 'shortcut' | 'apps'; id: string } | null;
 
-function plural(n: number, one: string, many: string) {
-  return `${String(n)} ${n === 1 ? one : many}`;
-}
-
-/** Focus for after a row's panel closes or a row goes: its Open button, else the title. */
+/** Focus for after a row's panel closes or a row goes: its Open button, else the list's title. */
 function focusRow(id: string | null) {
   requestAnimationFrame(() => {
     const row = id ? document.querySelector<HTMLElement>(`[data-open="${CSS.escape(id)}"] button`) : null;
-    (row ?? document.querySelector<HTMLElement>('h1[tabindex]'))?.focus();
+    (row ?? document.querySelector<HTMLElement>('#home-workspaces-title'))?.focus();
   });
+}
+
+/** A workspace's apps at a glance: the first few by name, then how many more. */
+function AppNames({ names }: { names: string[] }) {
+  if (names.length === 0) return <p className="mt-1 text-small text-[var(--muted)]">No apps yet.</p>;
+  const shown = names.slice(0, 5);
+  const more = names.length - shown.length;
+  return (
+    <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Its apps">
+      {shown.map((n, i) => (
+        <li
+          key={`${n}-${String(i)}`}
+          className="max-w-48 truncate rounded-full border border-[var(--line)] px-2 text-caption leading-5 text-[var(--muted)]"
+        >
+          {n}
+        </li>
+      ))}
+      {more > 0 ? <li className="px-1 text-caption leading-5 text-[var(--muted)]">+{String(more)}</li> : null}
+    </ul>
+  );
 }
 
 function Rename({
@@ -71,7 +88,7 @@ function Rename({
             setProblem(null);
           }}
           aria-invalid={problem !== null}
-          className="field min-w-64 flex-1"
+          className="field min-w-56 flex-1"
         />
         <Button tone="primary" type="submit" pending={pending} disabled={!name.trim()}>
           Save name
@@ -83,38 +100,13 @@ function Rename({
   );
 }
 
-/** A small picture of zones, for the empty page. */
-function EmptyPicture() {
-  const tile = (color: string, area: string) => (
-    <div
-      className="rounded-[5px] border-2 forced-colors:border-[CanvasText]"
-      style={{
-        gridArea: area,
-        borderColor: `var(--zone-${color})`,
-        background: `color-mix(in srgb, var(--zone-${color}) 14%, transparent)`,
-      }}
-    />
-  );
-  return (
-    <div
-      aria-hidden="true"
-      className="mx-auto grid h-20 w-32 gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--bg)] p-1.5"
-      style={{ gridTemplateAreas: '"a b" "a c"', gridTemplateColumns: '3fr 2fr' }}
-    >
-      {tile('lapis', 'a')}
-      {tile('verdigris', 'b')}
-      {tile('saffron', 'c')}
-    </div>
-  );
-}
-
-export function Workspaces({
+export function WorkspaceList({
   onEditZones,
-  onHome,
+  onOpened,
 }: {
   onEditZones: (workspace: string) => void;
-  /** Goes to the home page, where the screen is arranged. */
-  onHome: () => void;
+  /** A workspace was opened: the home page reads the screen again. */
+  onOpened?: () => void;
 }) {
   const [list, setList] = useState<WorkspaceSummary[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
@@ -136,17 +128,12 @@ export function Workspaces({
     });
   }, []);
 
-  // Read now, and again whenever they change: saved from the switcher, opened with a shortcut…
+  // Read now, and again whenever they change: arranged, saved from the switcher, opened with a
+  // shortcut…
   useEffect(() => {
     load();
     return onWorkspacesChanged(load);
   }, [load]);
-
-  const openSwitcher = () => {
-    void request({ cmd: 'show_switcher' }).then((reply) => {
-      if (reply.reply === 'error') say(errorMessage(reply) ?? 'The switcher did not open.', true);
-    });
-  };
 
   const open = (w: WorkspaceSummary) => {
     setOpening(w.id);
@@ -155,6 +142,7 @@ export function Workspaces({
       if (reply.reply === 'done') say(reply.message);
       else say(errorMessage(reply) ?? 'It could not be opened.', true);
       load();
+      onOpened?.();
     });
   };
 
@@ -164,69 +152,47 @@ export function Workspaces({
   };
 
   return (
-    <article aria-labelledby="workspaces-title">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <PageTitle id="workspaces-title">Workspaces</PageTitle>
-          <p className="mt-1.5 text-[var(--muted)]">Open one to bring its apps back where you left them.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {list?.length ? <Button onClick={openSwitcher}>Open the switcher</Button> : null}
-        </div>
-      </div>
-
+    <section aria-labelledby="home-workspaces-title" className="below-picture mt-8">
+      <h2
+        id="home-workspaces-title"
+        tabIndex={-1}
+        className="font-display text-heading font-semibold tracking-tight outline-none"
+      >
+        Workspaces
+      </h2>
       {problem ? (
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          <p role="alert" className="text-[var(--danger)]">
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <p role="alert" className="text-small text-[var(--danger)]">
             {problem}
           </p>
           <Button onClick={load}>Try again</Button>
         </div>
-      ) : list === null ? (
-        <p className="mt-6 text-[var(--muted)]" aria-busy="true">
-          Reading your workspaces…
-        </p>
-      ) : list.length === 0 ? (
-        <div className="mt-8 rounded-xl border border-dashed border-[var(--control)] px-8 py-10 text-center">
-          <EmptyPicture />
-          <h2 className="mt-5 font-display text-heading font-semibold">No workspaces yet</h2>
-          <p className="mx-auto mt-1 max-w-md text-small text-[var(--muted)]">
-            Arrange your windows: Mosaïk keeps them as a workspace.
-          </p>
-          <div className="mt-5">
-            <Button tone="primary" onClick={onHome}>
-              Arrange windows
-            </Button>
-          </div>
-        </div>
+      ) : list === null ? null : list.length === 0 ? (
+        <p className="mt-1 text-small text-[var(--muted)]">Arranged windows are kept here, one click away.</p>
       ) : (
-        <ul className="mt-6 flex flex-col gap-3" aria-label="Saved workspaces">
+        <ul
+          aria-label="Saved workspaces"
+          className="mt-2 flex flex-col divide-y divide-[var(--line)] rounded-xl border border-[var(--line)] bg-[var(--surface)]"
+        >
           {list.map((w) => (
-            <li key={w.id} className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="flex items-center gap-2 font-display text-heading font-semibold">
-                    <span className="truncate">{w.name}</span>
-                    {active === w.id ? (
-                      <span className="rounded-full border border-[var(--ok)] px-2 font-sans text-caption font-semibold leading-5 text-[var(--ok)]">
-                        Open now
-                      </span>
-                    ) : null}
-                  </h2>
-                  <p className="mt-0.5 text-small text-[var(--muted)]">
-                    {plural(w.windows, 'app', 'apps')} · {plural(w.zones, 'zone', 'zones')}
-                    {w.hotkey ? (
-                      <>
-                        {' · '}
-                        <Keys shortcut={w.hotkey} />
-                      </>
-                    ) : null}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1.5">
+            <li key={w.id} className="px-4 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate font-semibold">{w.name}</span>
+                  {active === w.id ? (
+                    <span className="shrink-0 rounded-full border border-[var(--ok)] px-2 text-caption leading-5 font-semibold text-[var(--ok)]">
+                      Open now
+                    </span>
+                  ) : null}
+                  {w.hotkey ? (
+                    <span className="shrink-0 text-caption text-[var(--muted)]">
+                      <Keys shortcut={w.hotkey} />
+                    </span>
+                  ) : null}
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
                   <span data-open={w.id} className="contents">
                     <Button
-                      tone="primary"
                       label={`Open “${w.name}”`}
                       pending={opening === w.id}
                       onClick={() => {
@@ -236,27 +202,21 @@ export function Workspaces({
                       Open
                     </Button>
                   </span>
-                  <Button
-                    label={`Apps of “${w.name}”`}
-                    expanded={panel?.id === w.id && panel.kind === 'apps'}
-                    controls={`apps-${w.id}`}
-                    onClick={() => {
-                      setPanel((p) => (p?.id === w.id && p.kind === 'apps' ? null : { kind: 'apps', id: w.id }));
-                    }}
-                  >
-                    Apps
-                  </Button>
-                  <Button
-                    label={`Edit zones of “${w.name}”`}
-                    onClick={() => {
-                      onEditZones(w.id);
-                    }}
-                  >
-                    Edit zones
-                  </Button>
                   <MenuButton
                     label={`More for “${w.name}”`}
                     items={[
+                      {
+                        label: panel?.id === w.id && panel.kind === 'apps' ? 'Hide its apps' : 'Change its apps…',
+                        onSelect: () => {
+                          setPanel((p) => (p?.id === w.id && p.kind === 'apps' ? null : { kind: 'apps', id: w.id }));
+                        },
+                      },
+                      {
+                        label: 'Edit zones',
+                        onSelect: () => {
+                          onEditZones(w.id);
+                        },
+                      },
                       {
                         label: w.hotkey ? 'Change shortcut…' : 'Add shortcut…',
                         onSelect: () => {
@@ -282,9 +242,13 @@ export function Workspaces({
                       ⋯
                     </span>
                   </MenuButton>
-                </div>
+                </span>
               </div>
-              {panel?.id === w.id && panel.kind === 'apps' ? <AppsPanel workspace={w.id} id={`apps-${w.id}`} /> : null}
+              {panel?.id === w.id && panel.kind === 'apps' ? (
+                <AppsPanel workspace={w.id} id={`apps-${w.id}`} />
+              ) : (
+                <AppNames names={w.apps} />
+              )}
               {panel?.id === w.id && panel.kind === 'rename' ? (
                 <Rename
                   workspace={w}
@@ -357,6 +321,6 @@ export function Workspaces({
           });
         }}
       />
-    </article>
+    </section>
   );
 }
