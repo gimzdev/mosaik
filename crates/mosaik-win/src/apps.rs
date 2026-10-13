@@ -218,6 +218,24 @@ fn file_description(path: &str) -> Option<String> {
     (!d.is_empty() && !d.to_lowercase().ends_with(".exe")).then_some(d)
 }
 
+/// The folder an app starts in: the one asked for; else a program's own folder, as when it is
+/// opened from File Explorer; else (a Start menu entry, whose shortcut may name its own) the
+/// user's folder. Never Mosaïk's current folder, which the app would otherwise inherit (Steam
+/// started by a workspace wrote its logs there).
+fn working_folder(path: &str, asked: Option<&str>, profile: Option<&str>) -> Option<String> {
+    if let Some(dir) = asked {
+        return Some(dir.to_owned());
+    }
+    let program = std::path::Path::new(path);
+    if !path.to_lowercase().starts_with("shell:")
+        && program.is_absolute()
+        && let Some(folder) = program.parent()
+    {
+        return Some(folder.to_string_lossy().into_owned());
+    }
+    profile.map(str::to_owned)
+}
+
 /// Starts an app for a workspace. Returns the new process id when Windows reports one (a
 /// program that hands over to an already running copy, like most browsers, exits at once).
 /// Needs COM initialised on the calling thread for packaged apps.
@@ -243,7 +261,8 @@ pub fn start(launch: &Launch) -> Result<Option<u32>> {
         } => {
             let file = wide(path);
             let params = wide(&join_args(args));
-            let dir = working_dir.as_deref().map(wide);
+            let profile = std::env::var("USERPROFILE").ok();
+            let dir = working_folder(path, working_dir.as_deref(), profile.as_deref()).map(|d| wide(&d));
             let verb = wide("open");
             let mut info = SHELLEXECUTEINFOW {
                 cbSize: u32::try_from(std::mem::size_of::<SHELLEXECUTEINFOW>()).unwrap_or(0),
@@ -337,6 +356,29 @@ fn join_args(args: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_app_starts_in_its_own_folder_never_in_mosaiks() {
+        // Steam started by a workspace from a job's folder wrote its logs there (logs/webhelper.txt).
+        assert_eq!(
+            working_folder(
+                r"C:\Program Files (x86)\Steam\steam.exe",
+                None,
+                Some(r"C:\Users\a")
+            ),
+            Some(r"C:\Program Files (x86)\Steam".to_owned())
+        );
+        assert_eq!(
+            working_folder(r"C:\Apps\code.exe", Some(r"D:\work"), Some(r"C:\Users\a")),
+            Some(r"D:\work".to_owned())
+        );
+        // A Start menu entry: its own folder is the shortcut's; else the user's.
+        assert_eq!(
+            working_folder(r"shell:AppsFolder\Valve.Steam", None, Some(r"C:\Users\a")),
+            Some(r"C:\Users\a".to_owned())
+        );
+        assert_eq!(working_folder("notepad.exe", None, None), None);
+    }
 
     #[test]
     fn arguments_are_quoted_for_argv() {

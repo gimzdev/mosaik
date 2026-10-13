@@ -78,6 +78,8 @@
 - The home page lists each workspace's apps; Change its apps… in its ⋯ menu shows the zone each
   goes in: pick another zone, remove an app, or add a window that is open. In the open
   workspace, the window moves at once.
+- An app a workspace or a set starts opens in its own folder, as from File Explorer, never in
+  the folder Mosaïk was started from (Steam wrote its logs there).
 - Apps have proper names: a Store app is called by its own name ("Calculator", not
   "ApplicationFrameHost"), and Explorer is "File Explorer".
 
