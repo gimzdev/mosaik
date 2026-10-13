@@ -8,10 +8,10 @@
   or at one of ten layouts (halves, thirds, main and side, quarters, rows...), and the windows
   glide to where they would go; click, and they do. Undo puts everything back.
 - A layout replaces the zones of your main screen; windows more than its zones are minimised.
-- Sets of apps: below Arrange, the apps you have that go together, such as your editor, a
-  terminal, a browser, an assistant and File Explorer for coding, or your launchers and chat for
-  games. One click opens a set as a workspace laid out for it, and starts the apps that are not
-  open. Nothing shows when Mosaïk finds no set.
+- Open the apps for coding, design, writing or games in one click: under Arrange, a button for
+  each set of the apps you have that go together, such as your editor, a terminal, a browser,
+  an assistant and File Explorer for coding. It opens them as a workspace laid out for the task
+  and starts the ones that are not open. Nothing shows when Mosaïk finds no set.
 - Your workspaces are a click away below, and the welcome shows Arrange at work before you
   start.
 - The tray menu's and the quick menu's Settings is now Open Mosaïk. A click on the tray icon

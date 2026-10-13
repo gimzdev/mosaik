@@ -73,5 +73,6 @@ at the bottom.
 
 ## Amended by ADR 0022 (2026-10-13)
 
-Below Arrange, "Sets of apps" offers the apps installed that go together for a task, one small
-card per set; a click opens the set as a workspace. Nothing shows when Mosaïk finds no set.
+One line under Arrange, "Open the apps for", offers the apps installed that go together for a
+task, a button per set ("Coding"); a click opens them as a workspace. Nothing shows when Mosaïk
+finds no set.

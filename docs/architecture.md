@@ -131,9 +131,9 @@ the engine gathers windows and applies the result.
   each workspace lists its apps.
 - **Sets of apps** (ADR 0022): the apps of the Start menu (read from the shell's Apps folder on a
   thread of their own, kept ten minutes) that go together for a task, chosen by
-  `mosaik_core::sets`, are offered on the home page. A click makes the set a workspace laid out
-  for its task, once, then opens it, starting the apps that are not open. At the end of the
-  welcome, the windows open are sorted into a workspace per task, without moving any.
+  `mosaik_core::sets`, are offered on the home page. A click opens the workspace that has the
+  set's apps, or makes one laid out for its task, starting the apps that are not open. At the
+  end of the welcome, the windows open are sorted into a workspace per task, without moving any.
 - **The quick menu** (ADR 0015, 0017): a thin line on an edge of the main monitor slides open
   as soon as the pointer stops on it, onto Mosaïk's window and the open workspace, Arrange, the
   switcher, saving, the zone editor and snapping, without taking the keyboard. It hides while a game or a video fills the main monitor.

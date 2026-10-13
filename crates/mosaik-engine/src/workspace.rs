@@ -25,7 +25,6 @@ use mosaik_core::workspace::{
 use mosaik_core::zone::{FrameStyle, ZoneColor, ZoneId};
 use mosaik_ipc::protocol::{ErrorCode, Reply};
 use mosaik_win::{apps, arrange, window};
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 
 use crate::UiEvent;
 use crate::mover::{self, To};
@@ -714,19 +713,15 @@ impl Engine {
     /// user in plain words.
     fn start_app(&self, launch: mosaik_core::layout::Launch, label: String) {
         let ui = Arc::clone(&self.ui);
-        let spawned = std::thread::Builder::new()
-            .name("mosaik-launch".into())
-            .spawn(move || {
-                // SAFETY: COM for this short-lived thread (packaged apps are started through COM).
-                let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-                if let Err(e) = apps::start(&launch) {
-                    tracing::warn!(error = %e, "app not started");
-                    ui(UiEvent::Notice {
-                        title: "An app did not start".into(),
-                        body: format!("{label} did not start: {e}"),
-                    });
-                }
-            });
+        let spawned = apps::start_on_its_own_thread(launch, move |outcome| {
+            if let Err(e) = outcome {
+                tracing::warn!(error = %e, "app not started");
+                ui(UiEvent::Notice {
+                    title: "An app did not start".into(),
+                    body: format!("{label} did not start: {e}"),
+                });
+            }
+        });
         if let Err(e) = spawned {
             tracing::error!(error = %e, "launch thread not started");
         }

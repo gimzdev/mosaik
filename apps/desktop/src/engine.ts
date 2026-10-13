@@ -54,7 +54,15 @@ export async function takeNotices(): Promise<Notice[]> {
 }
 
 function on(event: string, callback: () => void): () => void {
-  if (!inMosaik) return () => undefined;
+  if (!inMosaik) {
+    // The stand-in engine of the development server tells its changes with window events.
+    if (!import.meta.env.DEV || typeof window === 'undefined') return () => undefined;
+    const name = `mosaik:${event}`;
+    window.addEventListener(name, callback);
+    return () => {
+      window.removeEventListener(name, callback);
+    };
+  }
   const stop = listen(event, callback);
   return () => {
     void stop.then((f) => {

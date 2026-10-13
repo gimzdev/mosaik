@@ -13,9 +13,8 @@
 //!                         that follow a resized window, Arrange and Undo, the quick menu
 //!                         (moves the mouse; --only follow, arrange or quick for one part)
 //! mosaik-probe sets       the Start menu as Mosaïk reads it against Windows' own list, and the
-//!                         sets of apps it makes (--start: File Explorer started through its
-//!                         Start menu entry, as a set starts an app: a new window, closed
-//!                         again, or a new tab in a window already open, left open)
+//!                         sets of apps it makes (--start: Character Map started through its
+//!                         Start menu entry, as a set starts an app, and closed again)
 //! mosaik-probe workspace  save, switch and reopen with the real engine (--drag: drag to snap;
 //!                         --browser edge|chrome: browser tabs dragged out into a workspace;
 //!                         --apps: real apps into zones and tabs; --soak N: N switches,

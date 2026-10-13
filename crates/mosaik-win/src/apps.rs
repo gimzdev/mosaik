@@ -8,7 +8,10 @@ use mosaik_core::window::WindowFacts;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, PROPERTYKEY};
 use windows::Win32::Storage::EnhancedStorage::{PKEY_AppUserModel_ID, PKEY_Link_TargetParsingPath};
 use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
-use windows::Win32::System::Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance, CoTaskMemFree, IBindCtx};
+use windows::Win32::System::Com::{
+    CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx,
+    CoTaskMemFree, CoUninitialize, IBindCtx,
+};
 use windows::Win32::System::Threading::GetProcessId;
 use windows::Win32::UI::Shell::{
     AO_NOERRORUI, ApplicationActivationManager, BHID_EnumItems, FOLDERID_AppsFolder,
@@ -274,6 +277,29 @@ pub fn start(launch: &Launch) -> Result<Option<u32>> {
             Ok((pid != 0).then_some(pid))
         }
     }
+}
+
+/// Starts `launch` on a thread of its own and calls `done` there with the outcome: starting an
+/// app can take seconds, and the caller does not wait. The thread has COM in a single-threaded
+/// apartment without OLE1 DDE, as Windows asks of `ShellExecuteEx` (a Start menu entry,
+/// `shell:AppsFolder\<id>`, is started through the shell's own handlers).
+pub fn start_on_its_own_thread(
+    launch: Launch,
+    done: impl FnOnce(Result<Option<u32>>) + Send + 'static,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("mosaik-launch".into())
+        .spawn(move || {
+            // SAFETY: COM for this short-lived thread; undone below when it was done here.
+            let com =
+                unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.is_ok();
+            done(start(&launch));
+            if com {
+                // SAFETY: pairs the successful initialisation above, on the same thread.
+                unsafe { CoUninitialize() };
+            }
+        })
+        .map(|_| ())
 }
 
 /// Quotes arguments for a command line the way programs parse them back (CommandLineToArgvW).

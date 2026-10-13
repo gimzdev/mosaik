@@ -18,7 +18,7 @@ re-run before each release.
 | 6. Product UI | done: every page reviewed, tested in a browser and toured on Windows (names, Tab key, light and dark, smallest size); a Windows contrast theme and Narrator by ear are in the release checks | [Step 6](#step-6-product-ui) |
 | 7. Hardening | in progress: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
-| 1.1 | built, tested and packaged on Windows (jobs 0094 to 0108: every test, the Store package); zones that follow a resize, Arrange laid out for the task with every window fitting its zone, and its undo, the home page with each workspace's apps, a workspace's apps, windows edge to edge without rings, tab strips in one place, no window moved when brought forward, the quick menu, all measured with the mouse | [1.1](#11) |
+| 1.1 | built, tested and packaged on Windows (jobs 0094 to 0113: every test, the Store package); zones that follow a resize, Arrange laid out for the task, zones that make room for a window too big for them, and its undo, the home page with each workspace's apps, a workspace's apps, windows edge to edge without rings, tab strips in one place, no window moved when brought forward, the quick menu, all measured with the mouse; sets of apps read from the owner's Start menu and the windows open sorted into workspaces, measured; opening a set on the owner's screen not yet run (it starts apps) | [1.1](#11) |
 
 ## Step 1: verify assumptions
 
@@ -872,6 +872,54 @@ process, its own windows, a scratch folder).
     settings moved to format 5), `pack` (247 files, verified), `mosaik.ps1` and `mosaik1.sh`
     beside the repository dated that day, the site folder made again (1.5.0); Mosaïk left
     running in the tray.
+
+- **Asked 2026-10-13, 00:42 to 00:51** (ADRs 0021 and 0022): "instead of letting it overlap or
+  minimising the app, reorganise the size of the zones", "not becoming the main zone, just
+  taking the minimal space"; on the site, the header's Download button alone; sets of the apps
+  on the PC that go together ("terminal, Chrome, Claude, VS Code and File Explorer"), secondary
+  but visible early, and the windows open the first time sorted into workspaces; "clean,
+  concise, non-invasive, easy to understand". Jobs 0110 to 0113 (commits 647f225 to the one
+  these lines came with):
+  - `mosaik.ps1 test`: every test passed in 57 to 59 s (core 221, among them zones that make
+    room in every preset, the owner's sets and the data folder; the interface's 68).
+  - `smart`, every check passing (job 0111): 3h, a window told to go no smaller than 1152 x 619
+    (read from another process as 1138 x 612, its frame, 0 px off): in Quarters its quarter
+    grew to 1138 x 612 and the others gave up the room; it was not minimised, the zones still
+    filled the screen, and of five windows for four quarters one other was minimised
+    ("Arranged 4 windows in the “Quarters” layout; 1 window minimized."); Undo 0 px. 3i, a window
+    that will not get shorter than 567 px (560 px of frame) dragged with the mouse into the
+    smallest zone (864 x 344): its zone grew to 864 x 560 and the two below gave up the room
+    (236 px each); every window fit its zone (0 px), the one of a fixed size kept its size,
+    centred across its zone and at its top (0 px). Job 0110 ran 3i with a check that compared
+    the zone with the window's outer height and measured the fixed window as if it filled its
+    zone: the probe was wrong, the zones the same. The rest as in job 0108.
+  - On the owner's screen, asked only (Claude, Notepad++, two File Explorer windows): Arrange
+    read coding; Notepad++ in the main zone (1056 x 1032), and beside it Claude's zone made
+    392 px tall for it, the two File Explorer zones 320 px each, rather than three of 344 (12 to
+    17 ms). Thirds put three in thirds and minimised one; Quarters fit all four.
+  - `mosaik-probe sets`: Mosaïk reads the same Start menu as Windows' own `Get-StartApps` (139
+    apps, 35 packaged, 104 with their program; 163 to 171 ms). Job 0110's choices took "Windows
+    Software Development Kit" (explorer.exe opening a folder) for File Explorer, offered both
+    Teams and Calendar as chat and mail, and Notepad++ open would have taken VS Code's place;
+    after the fixes, tests first (jobs 0111 and 0112): Coding, "Visual Studio Code, Terminal,
+    Google Chrome, Claude, File Explorer"; Design, "Canva, Google Chrome, File Explorer, Claude";
+    Writing, "Word, OneNote, Google Chrome, Claude". File Explorer started through its Start menu
+    entry by Mosaïk's own code showed a new window in 5.4 s in job 0110 and none in jobs 0111
+    and 0112 (30 s); the probe now starts Character Map instead, on a thread like the engine's.
+  - The windows open sorted into workspaces as at the end of the welcome, in the scratch data
+    (job 0110): "Your open windows make 1 workspace: Coding." (Notepad++, Claude and the two File
+    Explorer windows, each in a zone named for it); 0 of 30 windows moved.
+  - A program started with `APPDATA` and `LOCALAPPDATA` changed, as the jobs started Mosaïk on
+    the scratch data, sees only the Start menu's packaged apps: 35 of 139, for `Get-StartApps`
+    too (job 0111), so that Mosaïk offered "Chat and mail" alone. Since job 0112 it gets its
+    folder from `MOSAIK_DATA`: its log says "Start menu read apps=139 packaged=35
+    with_program=104", and it offers the three sets above. The tour then stopped at Thirds: the
+    sets, as cards, took two rows and pushed the layouts out of view in Mosaïk's window
+    (980 x 720); they are now one line under Arrange, "Open the apps for" and a button per set.
+  - Release build (131 to 136 s), Store package (2.84 MB), opened by hand (window in 0.3 to
+    1.0 s), `--background` (no window; protocol 6, watchdog, Win+Alt+Space registered), `pack`
+    (255 files, verified), both files beside the repository dated that day, the site folder made
+    again (1.6.0, job 0110).
 
 ## Owner decisions
 

@@ -194,7 +194,16 @@ function openSet(id: string): Reply {
     workspaces.push(w);
   }
   active = w.id;
+  changed();
   return done(`Opened “${w.name}”.`);
+}
+
+/** Tells the page the workspaces changed, as Mosaïk does with its own event, once the reply
+ *  is in. */
+function changed() {
+  setTimeout(() => {
+    window.dispatchEvent(new Event('mosaik:workspaces:changed'));
+  }, 0);
 }
 
 /** The windows on the main screen, front to back, as `preview_arrange` reports them. */

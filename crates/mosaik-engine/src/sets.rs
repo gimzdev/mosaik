@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use mosaik_core::arrange::Kind;
 use mosaik_core::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
-use mosaik_core::sets::{AppSet, Installed, Running, groups, suggest};
+use mosaik_core::sets::{AppSet, Installed, Running, groups, new_name, suggest, workspace_of};
 use mosaik_core::task::{self, Task};
 use mosaik_core::topology::Topology;
 use mosaik_core::window::WindowFacts;
@@ -170,7 +170,7 @@ impl Engine {
                     name: s.name().to_owned(),
                     apps: s.apps.iter().map(|a| a.name.clone()).collect(),
                     open: u32::try_from(s.apps.iter().filter(|a| a.running).count()).unwrap_or(u32::MAX),
-                    workspace: self.workspace_named(s.name()).map(|w| w.id.clone()),
+                    workspace: workspace_of(s, &self.file.workspaces).map(|w| w.id.clone()),
                 })
                 .collect(),
         }
@@ -236,8 +236,9 @@ impl Engine {
         }
     }
 
-    /// Opens set `id`: its workspace (made the first time, laid out for its task on the main
-    /// monitor), starting the apps that are not open.
+    /// Opens set `id`: its workspace, the first with all its apps, or a new one laid out for its
+    /// task on the main monitor ("Coding", or "Coding 2" when that name is taken), starting the
+    /// apps that are not open.
     pub(crate) fn open_set(&mut self, id: &str) -> Reply {
         let sets = self.suggested();
         let Some(set) = sets.iter().find(|s| s.task.id() == id.trim()) else {
@@ -247,7 +248,7 @@ impl Engine {
                 Some("The sets are listed by `mosaikctl sets`."),
             );
         };
-        if let Some(existing) = self.workspace_named(set.name()).map(|w| w.id.0.clone()) {
+        if let Some(existing) = workspace_of(set, &self.file.workspaces).map(|w| w.id.0.clone()) {
             return self.switch(&existing);
         }
         if let Some(problem) = &self.file_problem {
@@ -269,7 +270,8 @@ impl Engine {
             .iter()
             .map(|a| (a.kind, a.name.clone(), a.app.clone(), Some(a.launch.clone())))
             .collect();
-        let ws = self.new_workspace(set.name(), &topology, apps, &placed);
+        let name = new_name(set, &self.file.workspaces);
+        let ws = self.new_workspace(&name, &topology, apps, &placed);
         let wid = ws.id.0.clone();
         tracing::info!(
             set = id,

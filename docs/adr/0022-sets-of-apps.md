@@ -33,13 +33,17 @@ sure it's clean, concise, non-invasive and easy to understand."
   folder is not File Explorer, Calendar is not a mail app, and a launcher's entry (Battle.net
   Launcher.exe) is known by the program whose window it opens (Battle.net.exe). Three sets at
   most, one row, the ones with the most apps open first.
-- **The home page shows them, under "Sets of apps", right below Arrange**: one small card per
-  set, its name and its apps. Nothing shows when Mosaïk finds no set.
-- **A click opens the set as a workspace named after its task** ("Coding"): made the first time
-  from Arrange's layout for that task on the main monitor (ADR 0019, 0021), then opened like any
-  workspace, the apps that are not open started (a desktop app through
-  `shell:AppsFolder\<its id>`, a packaged app by its id). Afterwards, the same click opens that
-  workspace as the user left it.
+- **The home page shows them in one line under Arrange**: "Open the apps for", then a button
+  per set named after its task ("Coding"), which names the set's apps to screen readers and, on
+  hover, to the pointer. One line, so the layouts below stay in view in Mosaïk's window (980 x
+  720); cards with the apps written out took two rows there and pushed the layouts out of view
+  (job 0112's tour). Nothing shows when Mosaïk finds no set.
+- **A click opens the set's workspace** (`sets::workspace_of`): the first workspace with all of
+  the set's apps, whatever its name, as the user left it; else a new one, laid out by Arrange's
+  planner for the task on the main monitor (ADR 0019, 0021) and named after it ("Coding", or
+  "Coding 2" when a workspace has that name with other apps, as the welcome's sorting can make).
+  It opens like any workspace: the apps that are not open start (a desktop app through
+  `shell:AppsFolder\<its id>`, a packaged app by its id).
 - **The first time, the windows open are sorted into workspaces** (`sets::groups`): when the
   user clicks Get started, each task whose own kind of window is open takes those windows, every
   other window joins the task it belongs to most (at least 0.45 by Arrange's table), and each
@@ -58,6 +62,7 @@ sure it's clean, concise, non-invasive and easy to understand."
   because it was open: the rules above come from that run.
 - Only apps in the Start menu and of a kind Mosaïk knows (`arrange::Kind`) are offered: a
   portable app, or one Mosaïk has no kind for, is not.
-- A set finds its workspace by name: renamed, the set makes a new one on the next click.
+- A set finds its workspace by its apps: renamed, it is still the set's; with one of the set's
+  apps taken out, the next click makes a new one.
 - Sorting happens once, at the end of the welcome. Later, Arrange lays out what is open, and Save
   layout keeps it.

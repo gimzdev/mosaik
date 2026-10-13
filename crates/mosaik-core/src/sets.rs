@@ -11,9 +11,10 @@
 //! a set alone, nor takes a second place of a kind (a second chat app).
 
 use crate::arrange::Kind;
-use crate::layout::Launch;
+use crate::layout::{Launch, Workspace};
 use crate::matching::AppMatch;
 use crate::task::Task;
+use crate::workspace::same_name;
 
 /// An app of the Start menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -349,6 +350,45 @@ pub fn suggest(installed: &[Installed], running: &[Running]) -> Vec<AppSet> {
     sets.into_iter().take(MOST_SETS).map(|(_, s)| s).collect()
 }
 
+/// A set's app and a workspace's app are the same app: by package, else by program.
+fn same_app(set: &AppMatch, slot: &AppMatch) -> bool {
+    match (&set.aumid, &set.exe) {
+        (Some(aumid), _) => slot
+            .aumid
+            .as_deref()
+            .is_some_and(|a| a.eq_ignore_ascii_case(aumid)),
+        (None, Some(exe)) => slot.exe.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(exe)),
+        (None, None) => false,
+    }
+}
+
+/// The set's workspace: the first of `workspaces` with every app of `set`, whatever its name
+/// (made from the set, or by the user or the welcome with the same apps). A click on the set
+/// opens it; with none, the set makes one.
+pub fn workspace_of<'a>(set: &AppSet, workspaces: &'a [Workspace]) -> Option<&'a Workspace> {
+    workspaces.iter().find(|w| {
+        set.apps
+            .iter()
+            .all(|a| w.layout.slots.iter().any(|s| same_app(&a.app, &s.app)))
+    })
+}
+
+/// The name of a new workspace made from `set`: its task's ("Coding"), else "Coding 2"... the
+/// first one free.
+pub fn new_name(set: &AppSet, existing: &[Workspace]) -> String {
+    let base = set.name();
+    (1..)
+        .map(|n| {
+            if n == 1 {
+                base.to_owned()
+            } else {
+                format!("{base} {n}")
+            }
+        })
+        .find(|name| !existing.iter().any(|w| same_name(&w.name, name)))
+        .unwrap_or_else(|| base.to_owned())
+}
+
 /// A window joins a task it is not done in when it belongs to it at least this much.
 const JOIN: f64 = 0.45;
 
@@ -660,6 +700,68 @@ mod tests {
         let sets = suggest(&installed, &running);
         assert_eq!(sets.len(), 3, "{sets:?}");
         assert_eq!(sets[0].task, Task::Writing, "{sets:?}");
+    }
+
+    #[test]
+    fn a_set_opens_the_workspace_that_has_its_apps_whatever_its_name() {
+        use crate::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
+        let coding = suggest(&owner(), &[])
+            .into_iter()
+            .find(|s| s.task == Task::Coding)
+            .unwrap();
+        let slot = |n: usize, exe: &str, aumid: Option<&str>| Slot {
+            id: SlotId(format!("s{n}")),
+            label: None,
+            app: AppMatch {
+                exe: Some(exe.into()),
+                aumid: aumid.map(str::to_owned),
+                class: None,
+                title: None,
+            },
+            launch: None,
+            place: Place::Zone {
+                zone: crate::zone::ZoneId::new("z1"),
+            },
+        };
+        let workspace = |id: &str, name: &str, slots: Vec<Slot>| Workspace {
+            id: WorkspaceId(id.into()),
+            name: name.into(),
+            hotkey: None,
+            layout: Layout {
+                slots,
+                ..Layout::default()
+            },
+        };
+        // The welcome sorted the windows open then into "Coding": Notepad++, Claude and File
+        // Explorer. Not the set's apps: the set makes a workspace of its own, "Coding 2".
+        let sorted = workspace(
+            "coding",
+            "Coding",
+            vec![
+                slot(1, "notepad++.exe", None),
+                slot(2, "claude.exe", None),
+                slot(3, "explorer.exe", None),
+            ],
+        );
+        let mut all = vec![sorted];
+        assert_eq!(workspace_of(&coding, &all), None);
+        assert_eq!(new_name(&coding, &all), "Coding 2");
+        // A workspace with every app of the set, by program or package, is the set's.
+        let terminal = "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App";
+        all.push(workspace(
+            "work",
+            "Work",
+            vec![
+                slot(1, "Code.exe", None),
+                slot(2, "windowsterminal.exe", Some(terminal)),
+                slot(3, "chrome.exe", None),
+                slot(4, "claude.exe", None),
+                slot(5, "explorer.exe", None),
+                slot(6, "notepad++.exe", None),
+            ],
+        ));
+        assert_eq!(workspace_of(&coding, &all).map(|w| w.name.as_str()), Some("Work"));
+        assert_eq!(new_name(&coding, &[]), "Coding");
     }
 
     #[test]

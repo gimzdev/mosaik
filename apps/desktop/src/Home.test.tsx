@@ -273,9 +273,11 @@ describe('the home page', () => {
     });
     page();
     const set = await screen.findByRole('button', {
-      name: 'Open Coding: Visual Studio Code, Terminal, Google Chrome, Claude, File Explorer',
+      name: 'Coding: Visual Studio Code, Terminal, Google Chrome, Claude, File Explorer',
     });
-    expect(screen.getByRole('heading', { name: 'Sets of apps' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Open the apps for' })).toBeTruthy();
+    // The pointer sees the apps too, on hover.
+    expect(set.getAttribute('title')).toBe('Visual Studio Code, Terminal, Google Chrome, Claude, File Explorer');
     await userEvent.click(set);
     expect(engine.request).toHaveBeenCalledWith({ cmd: 'open_set', set: 'coding' });
     expect(await screen.findByText('Opened “Coding”.')).toBeTruthy();
@@ -285,7 +287,7 @@ describe('the home page', () => {
     answer((c) => (c.cmd === 'sets' ? { reply: 'sets', sets: [] } : null));
     page();
     await screen.findByText('Your main screen now: 2 windows');
-    expect(screen.queryByRole('heading', { name: 'Sets of apps' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Open the apps for' })).toBeNull();
   });
 
   it('shows each workspace’s apps, and the full list to change them', async () => {

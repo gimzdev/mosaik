@@ -32,6 +32,7 @@ export function Button({
   disabled = false,
   pending = false,
   label,
+  hint,
   type = 'button',
   expanded,
   controls,
@@ -44,6 +45,8 @@ export function Button({
   pending?: boolean;
   /** A fuller name for screen readers, starting with the visible text ("Open “Brand”"). */
   label?: string;
+  /** More about it for the pointer, shown on hover (what `label` says to screen readers). */
+  hint?: string;
   type?: 'button' | 'submit';
   /** For a button that shows or hides something. */
   expanded?: boolean;
@@ -55,6 +58,7 @@ export function Button({
       disabled={disabled || pending}
       aria-busy={pending || undefined}
       aria-label={label}
+      title={hint}
       aria-expanded={expanded}
       aria-controls={controls}
       onClick={onClick}
