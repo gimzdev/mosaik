@@ -145,7 +145,8 @@ the engine gathers windows and applies the result.
   open as soon as the pointer stops on it, onto Mosaïk's window and the open workspace, Arrange,
   the switcher, saving, the zone editor and snapping, without taking the keyboard. It sits on the
   edge chosen if the pointer stops there, else on the other (`mosaik_core::edge`), and does not
-  answer while an app hides or confines the pointer, as games do (`input::pointer_taken`). It hides while a game or a video fills the main monitor.
+  answer while an app confines the pointer, or while the window in front, covering the main
+  monitor, hid it the last time it was seen over it, as games do (`Engine::pointer_tick`). It hides while a game or a video fills the main monitor.
   Dragged along its edge, it stays there. Apps that drag their window themselves, without Windows' move loop, are followed
   too: a window that took the mouse and moves at the same size is being dragged. A window Mosaïk must not move (an app running as administrator, or one Windows
   protects) gets no zones, and the user is told why once, when the drag ends.

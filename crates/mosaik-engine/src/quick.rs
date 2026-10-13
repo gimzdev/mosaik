@@ -69,7 +69,17 @@ pub(crate) struct Quick {
     /// Where the pointer last moved on the handle or the menu. Windows also says the pointer
     /// moved when the window under it moves (the menu sliding away): those say nothing new.
     moved_at: Option<Point>,
+    /// The window in front covers the main monitor's work area (an app maximised, a game in a
+    /// window): while it does, the pointer is looked at a few times a second ([`Engine::pointer_tick`]).
+    covering: Option<WindowHandle>,
+    /// The pointer was hidden the last time it was seen over a window of another program than
+    /// Mosaïk (a game turning its view with the mouse hides it): the handle does not answer it.
+    /// Over the handle, the pointer is Mosaïk's own and shows, whatever the game did with it.
+    pointer_hidden: bool,
 }
+
+/// How often the pointer is looked at while a window covering the main monitor is in front.
+const POINTER_MS: u32 = 200;
 
 impl Engine {
     fn quick_palette(&self) -> Palette {
@@ -407,9 +417,9 @@ impl Engine {
     /// What the mouse did on the handle or the menu.
     pub(crate) fn on_quick_inputs(&mut self, inputs: Vec<EdgeInput>) {
         let Some(place) = self.quick.place else { return };
-        // A game turning its view with the mouse sends the hidden pointer to the edge: the
+        // A game turning its view with the mouse sends its hidden pointer to the edge: the
         // handle does not answer it.
-        if !self.menu_open() && input::pointer_taken() {
+        if !self.menu_open() && self.pointer_taken() {
             self.kill_timer(timer::QUICK_HOVER);
             return;
         }
@@ -537,7 +547,7 @@ impl Engine {
             .as_ref()
             .and_then(Edge::shown_at)
             .is_some_and(|r: Rect| r.contains(input::cursor()));
-        if on_it && !input::pointer_taken() {
+        if on_it && !self.pointer_taken() {
             tracing::debug!("quick menu opens: the pointer rested on the handle");
             self.open_menu();
         }
@@ -571,15 +581,56 @@ impl Engine {
         self.place_quick();
     }
 
+    /// An app has the pointer for itself: it keeps it inside part of the screens, or it hid it
+    /// over its window in front (seen by [`Engine::pointer_tick`]), as games do while the mouse
+    /// turns the view.
+    fn pointer_taken(&self) -> bool {
+        self.quick.pointer_hidden || input::pointer_confined()
+    }
+
+    /// While a window covering the main monitor is in front: whether the pointer is hidden over
+    /// it. Over the handle or the menu the pointer is Mosaïk's: what was seen over the window
+    /// stands.
+    pub(crate) fn pointer_tick(&mut self) {
+        if self.quick.covering.is_none() {
+            self.kill_timer(timer::POINTER);
+            return;
+        }
+        let at = input::cursor();
+        let on_ours = self
+            .quick
+            .edge
+            .as_ref()
+            .and_then(Edge::shown_at)
+            .is_some_and(|r: Rect| r.contains(at));
+        if !on_ours {
+            self.quick.pointer_hidden = input::pointer_hidden();
+        }
+    }
+
     /// A window came to the front: a game or a video filling the main monitor hides the
-    /// handle while it stays in front and in full screen.
+    /// handle while it stays in front and in full screen; one that covers the main monitor's
+    /// work area has its pointer looked at.
     pub(crate) fn quick_follow_foreground(&mut self, h: WindowHandle) {
         let Some(place) = self.quick.place else { return };
         let middle = Point::new(
             place.work.left + place.work.width() / 2,
             place.work.top + place.work.height() / 2,
         );
-        let full = window::geometry(window::hwnd(h))
+        let geometry = window::geometry(window::hwnd(h));
+        let covering = geometry
+            .is_some_and(|g| !g.full_screen && !g.minimized && covers(g.frame, place.work))
+            .then_some(h);
+        if covering != self.quick.covering {
+            self.quick.covering = covering;
+            self.quick.pointer_hidden = false;
+            if covering.is_some() {
+                self.set_timer(timer::POINTER, POINTER_MS);
+            } else {
+                self.kill_timer(timer::POINTER);
+            }
+        }
+        let full = geometry
             .is_some_and(|g| g.full_screen && g.frame.contains(middle))
             .then_some(h);
         if full == self.quick.full_screen {
@@ -652,4 +703,14 @@ impl Engine {
             );
         }
     }
+}
+
+/// Whether a window's frame covers `work`, give or take the few pixels apps' maximised frames
+/// differ by.
+fn covers(frame: Rect, work: Rect) -> bool {
+    const SLACK: i32 = 8;
+    frame.left <= work.left + SLACK
+        && frame.top <= work.top + SLACK
+        && frame.right >= work.right - SLACK
+        && frame.bottom >= work.bottom - SLACK
 }

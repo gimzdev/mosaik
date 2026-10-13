@@ -69,6 +69,8 @@ pub(crate) mod timer {
     /// Tab strips and frames go back above their windows, once a window raised a moment ago
     /// has come up (its app raises it when it gets round to it).
     pub const STACK: usize = 10;
+    /// The pointer looked at, while a window covering the main monitor is in front.
+    pub const POINTER: usize = 11;
 }
 
 /// Shift a timer id into the `Pending::timers` bit set.
@@ -489,6 +491,9 @@ impl Engine {
         }
         if todo.timers & timer_bit(timer::STACK) != 0 {
             self.stack_tick();
+        }
+        if todo.timers & timer_bit(timer::POINTER) != 0 {
+            self.pointer_tick();
         }
         if todo.displays {
             // Windows sends several of these for one change; act once it is done.

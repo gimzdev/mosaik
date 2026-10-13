@@ -951,11 +951,11 @@ fn to_front(engine: &Engine, w: &[HWND]) -> Result<Value, String> {
     }))
 }
 
-/// 3h. A window that will not get as small as a third of the screen (as Battle.net keeps about
-/// 1280 x 720): Mosaïk reads how small it goes from its app, and Thirds makes room for it: its
-/// third grows just enough, the others give up the room, and it is not minimised (the window
-/// used longest ago is, four windows for three thirds). Undo brings everything back. Then 3i:
-/// a window too tall for the zone it is dropped in: the zones there make room for it.
+/// 3h. A window that will not get as small as a quarter of the screen (as Battle.net keeps about
+/// 1280 x 720): Mosaïk reads how small it goes from its app, and Quarters makes room for it: its
+/// quarter grows just enough, the others give up the room, and no window is minimised (four
+/// windows for four quarters). Undo brings everything back. Then 3i: a window too tall for the
+/// zone it is dropped in: the zones there make room for it.
 fn least(
     engine: &Engine,
     styles: Styles,
@@ -987,7 +987,7 @@ fn least(
             .abs()
             .max((l.height - (min_h - bh)).abs())
     });
-    let shown = preview(engine, Some("thirds"))?;
+    let shown = preview(engine, Some("quarters"))?;
     let pictured = shown
         .windows
         .iter()
@@ -997,7 +997,7 @@ fn least(
         &ask(
             engine,
             Command::Arrange {
-                preset: Some("thirds".into()),
+                preset: Some("quarters".into()),
             },
         )
         .0,
@@ -1030,7 +1030,7 @@ fn least(
     let big_back = frame_rect(big).map(|f| edge_error(f, big_before));
     crate::apps::close(big);
     pump_until(500, || false);
-    let thirds = json!({
+    let quarters = json!({
         "told": [min_w, min_h],
         "read": read.map(|(l, _)| [l.width, l.height]),
         "read_off_px": read_off,
@@ -1046,13 +1046,13 @@ fn least(
         "back_px": back,
         "big_back_px": big_back,
         "ok": read_off.is_some_and(|d| d <= SLACK) && pictured.is_some_and(|(m, _)| !m) && !big_minimized
-            && all_fit(&big_fit) && made_room && tiled && minimized_others == 1
-            && message.contains("1 window minimized") && back <= SLACK
+            && all_fit(&big_fit) && made_room && tiled && minimized_others == 0
+            && !message.contains("minimized") && back <= SLACK
             && big_back.is_some_and(|d| d <= SLACK),
     });
     let dropped = drop_tall(engine, styles, work, opened, w)?;
-    let ok = thirds["ok"] == json!(true) && dropped["ok"] == json!(true);
-    Ok(json!({ "thirds": thirds, "dropped": dropped, "ok": ok }))
+    let ok = quarters["ok"] == json!(true) && dropped["ok"] == json!(true);
+    Ok(json!({ "quarters": quarters, "dropped": dropped, "ok": ok }))
 }
 
 /// 3i. A window that will not get shorter than 55% of the screen, dropped with the mouse into the
@@ -1857,9 +1857,9 @@ fn quick_menu(
     );
 
     // 4g. A game in a window over the work area, in front, that hides the pointer while the mouse
-    // turns its view: the pointer, gone from it onto the handle, stays hidden and the menu does
-    // not open (the owner: "when playing an FPS, going sideways must never open the side bar").
-    // Once the game is closed, the pointer resting on the handle opens it again.
+    // turns its view: the pointer, gone from it onto the handle, does not open the menu (the
+    // owner: "when playing an FPS, going sideways must never open the side bar"). Once the game
+    // is closed, the pointer resting on the handle opens it again.
     input::move_to(away);
     let (_, _) = wait_menu(engine, 2000, is_handle)?;
     let h = state(engine)?
@@ -1867,6 +1867,10 @@ fn quick_menu(
         .ok_or("the handle is not on screen")?
         .rect;
     let game = open(opened, "Probe game hiding the pointer", work, " --hide-pointer")?;
+    // Its frame over the whole work area, as a game maximised in its window, before it comes to
+    // the front.
+    move_frame(game, work).map_err(|e| e.to_string())?;
+    pump_until(300, || false);
     let in_front = mosaik_win::arrange::focus(game) || {
         let middle = Point::new(work.left + work.width() / 2, work.top + work.height() / 2);
         input::move_to(middle);
@@ -1886,11 +1890,10 @@ fn quick_menu(
     );
     input::move_to(inside);
     pump_until(300, || false);
-    let hidden_in_game = input::pointer_taken();
+    let hidden_in_game = input::pointer_hidden();
     glide(inside, h.center());
     let (in_game, _) = wait_menu(engine, 1500, is_open)?;
     let opened_in_game = is_open(in_game.as_ref());
-    let hidden_on_handle = input::pointer_taken();
     crate::apps::close(game);
     pump_until(500, || false);
     glide(h.center(), away);
@@ -1905,7 +1908,6 @@ fn quick_menu(
         json!({
             "game_in_front": in_front,
             "pointer_hidden_in_the_game": hidden_in_game,
-            "pointer_hidden_on_the_handle": hidden_on_handle,
             "menu_opened": opened_in_game,
             "opens_once_the_game_closes": opens_after,
             "ok": in_front && hidden_in_game && !opened_in_game && opens_after,

@@ -62,11 +62,13 @@ workspace was looked for when it showed, while still cloaked, and never placed.
   when that one does, which Mosaïk says once, ever, in its window the next time it is opened (a
   note, `UiEvent::Note`: it does not open the window, since Mosaïk starts with Windows); with
   screens on both sides, on the edge chosen.
-  **It never answers a game**: while an app hides the pointer or keeps it inside part of the
-  screen (`mosaik_win::input::pointer_taken`), as a game does while the mouse turns the view,
-  the line does not open the menu: a pointer an app gave no shape stays shapeless over the line
-  (`WM_SETCURSOR`), and a pointer kept inside a rectangle smaller than the screens is seen as
-  taken. In a game's menus, with the pointer showing, the line answers.
+  **It never answers a game**: the line does not open the menu while an app keeps the pointer
+  inside part of the screens (`input::pointer_confined`), or while the window in front, covering
+  the main monitor's work area (a game in a window, maximised), hid the pointer the last time it
+  was seen over it: the pointer is looked at five times a second while such a window is in front
+  (`Engine::pointer_tick`), never otherwise. Over the line itself the pointer is Mosaïk's own and
+  shows, whatever the game did with it (Windows keeps a pointer per program), so it is not
+  looked at there. In a game's menus, with the pointer showing, the line answers.
 - **The site** says the same: a line beside the title (Mosaïk suggests sets of apps that go
   together and opens them in tidy views; you can make your own), three windows to a view in the
   hero's desktops, a thin line of desktop between windows so each reads as its own, and on the
@@ -83,9 +85,9 @@ workspace was looked for when it showed, while still cloaked, and never placed.
   (`mosaik-probe smart`, 4g). Both run against the engine without these changes first.
   The tour reaches a workspace's ⋯ menu by focusing it, as the keyboard does, since the list is
   below the fold.
-- A game that hides the pointer with `ShowCursor` and lets it roam the screens is not seen as
-  taking it (over another program's window, Windows shows that program's pointer). Games that
-  turn the view with the mouse usually confine the pointer too, and a game in full screen hides
-  the line anyway (ADR 0015).
+- A game in a window that does not cover the main monitor's work area, or that is made to cover
+  it after it came to the front, is looked at only from the next time it comes to the front.
+  Games that turn the view with the mouse usually confine the pointer too, and a game in full
+  screen hides the line anyway (ADR 0015).
 - A workspace saved with more windows side by side keeps them: three to a view is how Mosaïk
   lays out, not a limit on what the user makes (a layout such as Quarters has four zones).

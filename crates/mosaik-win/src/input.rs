@@ -106,23 +106,21 @@ fn cursor_info() -> Option<windows::Win32::UI::WindowsAndMessaging::CURSORINFO> 
     unsafe { GetCursorInfo(&raw mut info) }.ok().map(|()| info)
 }
 
-/// The pointer has no shape now: an app hid it by giving it none, as games built on SDL or GLFW
-/// do while the mouse turns the view. (An app that hides it with `ShowCursor` hides it over its
-/// own windows only.)
-pub fn pointer_shape_hidden() -> bool {
-    cursor_info().is_some_and(|i| i.hCursor.is_invalid())
+/// The pointer is hidden now, over the window it is on: the app hid it (`ShowCursor`), or gave
+/// it no shape (`SetCursor(NULL)`), as games do while the mouse turns the view.
+pub fn pointer_hidden() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::CURSOR_SHOWING;
+    cursor_info().is_some_and(|i| i.flags.0 & CURSOR_SHOWING.0 == 0 || i.hCursor.is_invalid())
 }
 
-/// An app has taken the pointer for itself, as a game does while the mouse turns the view: it
-/// hides the pointer, or keeps it inside part of the screen. Menus and edges must not answer
-/// it (the owner: "when playing an FPS, going sideways must never open the side bar").
-pub fn pointer_taken() -> bool {
+/// An app keeps the pointer inside part of the screens, as a game does while the mouse turns
+/// the view.
+pub fn pointer_confined() -> bool {
     use windows::Win32::Foundation::RECT;
-    use windows::Win32::UI::WindowsAndMessaging::{CURSOR_SHOWING, GetClipCursor};
-    let hidden = cursor_info().is_some_and(|i| i.flags.0 & CURSOR_SHOWING.0 == 0 || i.hCursor.is_invalid());
+    use windows::Win32::UI::WindowsAndMessaging::GetClipCursor;
     let mut clip = RECT::default();
     // SAFETY: reads the rectangle the pointer is confined to (the whole desktop when none).
-    let clipped = unsafe { GetClipCursor(&raw mut clip) }.is_ok() && {
+    unsafe { GetClipCursor(&raw mut clip) }.is_ok() && {
         // SAFETY: reads system metrics.
         let (x, y, w, h) = unsafe {
             (
@@ -133,8 +131,7 @@ pub fn pointer_taken() -> bool {
             )
         };
         clip.left > x || clip.top > y || clip.right < x + w || clip.bottom < y + h
-    };
-    hidden || clipped
+    }
 }
 
 /// The primary mouse button is held down now: the left one, or the right one when the user
