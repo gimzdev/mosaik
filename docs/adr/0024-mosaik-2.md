@@ -49,7 +49,10 @@ interrupted with a dialog or a banner.
 - **Apps by their icons**: the engine names each app's icon (`app:<AppUserModelID>` or
   `exe:<path>`, protocol 7) and reads it on a thread of its own, once per app, as a 48 px PNG
   (Windows' shell image factory, `mosaik_win::icons`); the window asks for the icons it shows
-  in one batch (`app_icons`). An app without one shows no picture: never a made-up one.
+  in one batch (`app_icons`). A desktop app's window is known by its program (the id its windows
+  give, such as Chrome's "Chrome", may not be the Start menu's), a packaged app by its id, and an
+  app a suggested set starts through its Start menu entry by that entry. An app without one
+  shows no picture: never a made-up one.
 - **No alerts**: what Mosaïk has to say while it works (another arranger, a window it cannot
   move, a shortcut taken) shows in a **toast**, a small native panel by the corner of the screen
   the pointer is on, that fades by itself and never takes the keyboard; it stays among the
@@ -57,10 +60,12 @@ interrupted with a dialog or a banner.
   did is said next to it, in its words. Settings saved by a newer Mosaïk are read as well as
   they can be and shown, unchangeable, with one line saying so: never a dialog, and nothing is
   saved over them.
-- **The side menu** (the quick menu of ADR 0015, named as the owner calls it): Arrange, a strip
-  of five layouts drawn in small (the one pointed at is named above it), the workspaces with
-  their layout in small and the one open marked, Save layout, Edit zones and Snap while
-  dragging. It, the switcher and the toasts share the window's dark colours.
+- **The side menu** (the quick menu of ADR 0015, named as the owner calls it): Mosaïk on its
+  first line (a click opens the window; the workspace open is marked in the list below rather
+  than named twice), Arrange, a strip of five layouts drawn in small (the one pointed at is
+  named above it), the workspaces with their layout in small and the one open marked, Save
+  layout, Edit zones and Snap while dragging. It, the switcher and the toasts share the window's
+  dark colours.
 - **The site** goes back to the home page of its first version, which the owner preferred: "Every
   project gets its own workspace: your apps and windows arranged and ready in one click", desktops
   of two to four windows (Mosaïk lays out three to a view at most; a site shows the idea), each
