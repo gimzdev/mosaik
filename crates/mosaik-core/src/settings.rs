@@ -10,8 +10,8 @@ use crate::zone::FrameStyle;
 
 /// 1: 1.0. 2 to 4: development builds of 1.1 only (tags in a bar above every window by default,
 /// then zones 4 px apart, then tags back in title bars). 5: 1.1, windows edge to edge and no
-/// coloured rings by default (`crate::store` moves older files forward).
-pub const SETTINGS_VERSION: u32 = 5;
+/// coloured rings by default. 6: dark by default (`crate::store` moves older files forward).
+pub const SETTINGS_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -45,7 +45,7 @@ impl Default for Settings {
             tab_hiding: None,
             switching: SwitchSettings::default(),
             edge: EdgeSettings::default(),
-            theme: Theme::System,
+            theme: Theme::Dark,
             start_with_windows: false,
             onboarding_done: false,
             rules: Rules::default(),
@@ -71,6 +71,8 @@ const RANGES: [(&str, i32, i32); 5] = [
 pub enum OnDisk {
     Readable,
     Unreadable,
+    /// Saved by a newer Mosaïk: read as far as this version understands it, never written over.
+    Newer,
 }
 
 impl Settings {

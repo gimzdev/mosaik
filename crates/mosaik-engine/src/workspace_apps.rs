@@ -112,6 +112,7 @@ impl Engine {
                     window: f.handle,
                     label: self.apps.label(f, path.as_deref()),
                     title: f.title.trim().to_owned(),
+                    icon: mosaik_core::icons::key(f.aumid.as_deref(), path.as_deref()),
                 }
             })
             .collect();
@@ -123,6 +124,7 @@ impl Engine {
             .map(|s| WorkspaceApp {
                 id: s.id.clone(),
                 label: self.app_name(s, filled.get(&s.id).copied()),
+                icon: mosaik_core::icons::of_slot(s),
                 zone: match ws.layout.effective_place(s) {
                     Some(Place::Zone { zone }) => Some(zone.clone()),
                     _ => None,

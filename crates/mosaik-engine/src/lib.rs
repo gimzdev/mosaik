@@ -25,6 +25,7 @@ mod switcher;
 mod tabs;
 mod thread;
 mod titles;
+mod toasts;
 mod watch;
 pub mod watchdog;
 mod workspace;
@@ -132,6 +133,11 @@ enum Message {
         command: Command,
         reply: mpsc::Sender<Reply>,
     },
+    /// Show this in a toast (said by the app rather than the engine).
+    Toast {
+        title: String,
+        body: String,
+    },
     Stop,
 }
 
@@ -208,6 +214,18 @@ impl Engine {
                         .into(),
                 ),
             },
+        }
+    }
+
+    /// Shows `title` and `body` in a toast by the corner of the screen, as the engine's own
+    /// notices are (the app's notes keep them too).
+    pub fn toast(&self, title: &str, body: &str) {
+        let sent = self.inbox.send(Message::Toast {
+            title: title.to_owned(),
+            body: body.to_owned(),
+        });
+        if sent.is_ok() {
+            self.wake();
         }
     }
 

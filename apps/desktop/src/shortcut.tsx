@@ -5,7 +5,7 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { request } from './engine';
 import { errorMessage } from './protocol';
-import { Button, Keys, Status } from './ui';
+import { Button, Keys, Row, Status } from './ui';
 
 /** Keys named by what they do, from `KeyboardEvent.code`. */
 const NAMED: Record<string, string> = {
@@ -104,6 +104,7 @@ function holdShortcuts(hold: boolean) {
 
 export function ShortcutRecorder({
   label,
+  description,
   value,
   workspace = null,
   autoStart = false,
@@ -112,6 +113,8 @@ export function ShortcutRecorder({
   onClose,
 }: {
   label: string;
+  /** One short line under the label. */
+  description?: string;
   /** The shortcut now, or null when there is none. */
   value: string | null;
   /** The workspace the shortcut is for; null for the switcher. */
@@ -233,22 +236,20 @@ export function ShortcutRecorder({
   };
 
   return (
-    <div className="py-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="font-semibold">{label}</p>
-          <div className="mt-1">
-            {value ? <Keys shortcut={value} /> : <span className="text-small text-[var(--muted)]">No shortcut</span>}
-          </div>
+    <div>
+      <Row label={label} description={description}>
+        <div className="flex items-center gap-2">
+          {value ? <Keys shortcut={value} /> : <span className="text-small text-[var(--muted)]">None</span>}
         </div>
         {recording ? null : (
-          <div ref={changeButton} className="flex gap-2">
-            <Button onClick={start} label={`${visible}: ${label}`}>
+          <div ref={changeButton} className="flex gap-1">
+            <Button size="sm" onClick={start} label={`${visible}: ${label}`}>
               {visible}
             </Button>
             {value && onRemove ? (
               <Button
                 tone="quiet"
+                size="sm"
                 label={`Remove: ${label}`}
                 onClick={() => {
                   void onRemove().then(setRemoveProblem);
@@ -259,21 +260,21 @@ export function ShortcutRecorder({
             ) : null}
           </div>
         )}
-      </div>
+      </Row>
       {recording ? (
-        <div className="mt-3 flex flex-col gap-2">
+        <div className="flex flex-col gap-2 pb-4">
           <button
             ref={box}
             type="button"
             aria-describedby={hint}
             aria-label={candidate ? `New shortcut: ${candidate}` : 'Press the new shortcut'}
             onKeyDown={onKeyDown}
-            className="flex min-h-11 items-center justify-center rounded-lg border-2 border-dashed border-[var(--accent)] bg-[var(--bg)] px-3 text-small"
+            className="flex min-h-12 items-center justify-center rounded-xl border-2 border-dashed border-[var(--accent)] bg-[var(--bg)] px-3 text-small text-[var(--muted)]"
           >
             {candidate ? <Keys shortcut={candidate} /> : 'Press the new shortcut…'}
           </button>
           <p id={hint} className="text-caption text-[var(--muted)]">
-            Hold Win, Ctrl or Alt and press a key. Esc cancels; Tab moves on to Save.
+            Hold Win, Ctrl or Alt and press a key. Esc cancels.
           </p>
           {/* One slot for what Mosaïk says about the shortcut, so the buttons do not move
               further down when there is nothing to say. */}
@@ -307,9 +308,11 @@ export function ShortcutRecorder({
             </Button>
           </div>
         </div>
-      ) : (
-        <Status text={removeProblem} error />
-      )}
+      ) : removeProblem ? (
+        <div className="pb-3">
+          <Status text={removeProblem} error />
+        </div>
+      ) : null}
     </div>
   );
 }

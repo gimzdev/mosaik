@@ -67,15 +67,15 @@ impl Preset {
     /// Its name, as the interface shows it (`PRESETS` in apps/desktop/src/editor/model.ts).
     pub const fn label(self) -> &'static str {
         match self {
-            Preset::Full => "Whole screen",
+            Preset::Full => "Full screen",
             Preset::Halves => "Halves",
             Preset::Thirds => "Thirds",
-            Preset::MainSide => "Main and side",
-            Preset::SideMain => "Side and main",
+            Preset::MainSide => "Main + side",
+            Preset::SideMain => "Side + main",
             Preset::Quarters => "Quarters",
-            Preset::HalfAndStack => "Half beside two stacked",
-            Preset::StackAndHalf => "Two stacked beside half",
-            Preset::Rows => "Top and bottom",
+            Preset::HalfAndStack => "Half + stack",
+            Preset::StackAndHalf => "Stack + half",
+            Preset::Rows => "Top + bottom",
             Preset::ThreeRows => "Three rows",
         }
     }

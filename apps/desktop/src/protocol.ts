@@ -22,6 +22,13 @@ export interface RatioRect {
   bottom: number;
 }
 
+/** A zone of a workspace's layout in small: where it is on the workspace's first monitor, and its
+ * colour (the workspace cards and the switcher draw these). */
+export interface MiniZone {
+  area: RatioRect;
+  color: ZoneColor;
+}
+
 /** A zone as the zone editor shows and returns it. */
 export interface ZoneEdit {
   /** null for a zone made in the editor. */
@@ -101,6 +108,10 @@ export interface WorkspaceSummary {
   hotkey: string | null;
   /** Its apps' names, front to back. */
   apps: string[];
+  /** Each app's icon (a key for `appIcons`), in the same order; null when unknown. */
+  icons: (string | null)[];
+  /** Its zones on its first monitor. */
+  layout: MiniZone[];
 }
 
 export interface MonitorState {
@@ -130,6 +141,8 @@ export interface PreviewZone {
 export interface PreviewWindow {
   /** The app's name. */
   label: string;
+  /** Its app's icon (a key for `appIcons`). */
+  icon: string | null;
   now: Rect;
   /** null: it stays where it is, or is minimised. */
   then: Rect | null;
@@ -141,6 +154,7 @@ export interface PreviewWindow {
 export interface WorkspaceApp {
   id: string;
   label: string;
+  icon: string | null;
   /** The zone it goes in (a tab: its group's). */
   zone: string | null;
   /** It is a tab of a group. */
@@ -159,6 +173,7 @@ export interface OpenWindow {
   window: number;
   label: string;
   title: string;
+  icon: string | null;
 }
 
 /** A workspace's apps, its zones, and the windows on screen it could take (`apps`). */
@@ -205,10 +220,19 @@ export interface AppSet {
   /** Its name, and its workspace's ("Coding"). */
   name: string;
   apps: string[];
+  /** Each app's icon (a key for `appIcons`), in the same order. */
+  icons: (string | null)[];
   /** How many of its apps are open now. */
   open: number;
   /** Its workspace, once it has one. */
   workspace: string | null;
+}
+
+/** Where the side menu's line is: on the edge chosen, or on the other one (`moved`) when the
+ * pointer goes on past the chosen edge to another screen. */
+export interface SideMenuState {
+  side: EdgeSide;
+  moved: boolean;
 }
 
 export type Reply =
@@ -228,9 +252,17 @@ export type Reply =
       monitors: MonitorState[];
       hotkey: HotkeyState;
     }
-  /** The settings, and the switcher shortcut as registered (another one when the chosen one
-   * is taken by another app). */
-  | { reply: 'settings'; settings: Settings; hotkey: HotkeyState }
+  /** The settings, the switcher shortcut as registered (another one when the chosen one is
+   * taken by another app), where the side menu is now, whether the settings can be saved, and
+   * whether Mosaïk runs as installed (only then does its first run start it with Windows). */
+  | {
+      reply: 'settings';
+      settings: Settings;
+      hotkey: HotkeyState;
+      side_menu: SideMenuState | null;
+      read_only: boolean;
+      packaged: boolean;
+    }
   | { reply: 'hotkey'; hotkey: string; problem: string | null; warnings: string[] }
   | {
       reply: 'zones';
@@ -285,6 +317,16 @@ function isMonitor(x: unknown): x is MonitorState {
   );
 }
 
+function isRatio(x: unknown): x is RatioRect {
+  return isObject(x) && isNumber(x.left) && isNumber(x.top) && isNumber(x.right) && isNumber(x.bottom);
+}
+
+function isMiniZone(x: unknown): x is MiniZone {
+  return isObject(x) && isRatio(x.area) && isString(x.color) && COLORS.has(x.color);
+}
+
+const isIcons = (x: unknown): x is (string | null)[] => Array.isArray(x) && x.every(isNullableString);
+
 function isZone(x: unknown): x is ZoneEdit {
   return (
     isObject(x) &&
@@ -334,12 +376,24 @@ function isPreviewZone(x: unknown): x is PreviewZone {
 
 function isPreviewWindow(x: unknown): x is PreviewWindow {
   return (
-    isObject(x) && isString(x.label) && isRect(x.now) && (x.then === null || isRect(x.then)) && isBoolean(x.minimized)
+    isObject(x) &&
+    isString(x.label) &&
+    isNullableString(x.icon) &&
+    isRect(x.now) &&
+    (x.then === null || isRect(x.then)) &&
+    isBoolean(x.minimized)
   );
 }
 
 function isWorkspaceApp(x: unknown): x is WorkspaceApp {
-  return isObject(x) && isString(x.id) && isString(x.label) && isNullableString(x.zone) && isBoolean(x.tab);
+  return (
+    isObject(x) &&
+    isString(x.id) &&
+    isString(x.label) &&
+    isNullableString(x.icon) &&
+    isNullableString(x.zone) &&
+    isBoolean(x.tab)
+  );
 }
 
 function isAppZone(x: unknown): x is AppZone {
@@ -347,7 +401,7 @@ function isAppZone(x: unknown): x is AppZone {
 }
 
 function isOpenWindow(x: unknown): x is OpenWindow {
-  return isObject(x) && isNumber(x.window) && isString(x.label) && isString(x.title);
+  return isObject(x) && isNumber(x.window) && isString(x.label) && isString(x.title) && isNullableString(x.icon);
 }
 
 function isHotkeyState(x: unknown): x is HotkeyState {
@@ -363,7 +417,10 @@ function isWorkspace(x: unknown): x is WorkspaceSummary {
     isNumber(x.zones) &&
     isNullableString(x.hotkey) &&
     Array.isArray(x.apps) &&
-    x.apps.every(isString)
+    x.apps.every(isString) &&
+    isIcons(x.icons) &&
+    Array.isArray(x.layout) &&
+    x.layout.every(isMiniZone)
   );
 }
 
@@ -374,9 +431,14 @@ function isAppSet(x: unknown): x is AppSet {
     isString(x.name) &&
     Array.isArray(x.apps) &&
     x.apps.every(isString) &&
+    isIcons(x.icons) &&
     isNumber(x.open) &&
     isNullableString(x.workspace)
   );
+}
+
+function isSideMenu(x: unknown): x is SideMenuState {
+  return isObject(x) && isString(x.side) && EDGE_SIDES.has(x.side) && isBoolean(x.moved);
 }
 
 /** Checks a reply's shape at run time, so a mismatch with the engine shows as an error. */
@@ -396,7 +458,13 @@ export function isReply(x: unknown): x is Reply {
     case 'state':
       return isString(x.app_version) && isBoolean(x.safe_mode) && Array.isArray(x.monitors) && isHotkeyState(x.hotkey);
     case 'settings':
-      return isSettings(x.settings) && isHotkeyState(x.hotkey);
+      return (
+        isSettings(x.settings) &&
+        isHotkeyState(x.hotkey) &&
+        (x.side_menu === null || isSideMenu(x.side_menu)) &&
+        isBoolean(x.read_only) &&
+        isBoolean(x.packaged)
+      );
     case 'hotkey':
       return (
         isString(x.hotkey) && isNullableString(x.problem) && Array.isArray(x.warnings) && x.warnings.every(isString)

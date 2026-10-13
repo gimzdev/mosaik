@@ -25,6 +25,9 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::HDC;
 use windows::core::w;
 
+/// What marks the workspace open now, after its name (as on its card in Mosaïk's window).
+const OPEN: &str = "Open";
+
 /// Layout at 96 DPI; everything is scaled by `dpi / 96`.
 pub(crate) mod size {
     pub const WIDTH: f32 = 480.0;
@@ -92,16 +95,16 @@ impl Rgba {
 }
 
 impl Theme {
-    /// The site's switcher, dark.
+    /// The window's dark colours, as the side menu and the toasts (`Palette::dark`).
     pub const DARK: Theme = Theme {
-        panel: Rgba::hex(0x1B1E26, 1.0),
-        text: Rgba::hex(0xE6E9F0, 1.0),
-        muted: Rgba::hex(0x8E97AA, 1.0),
-        line: Rgba::hex(0xFFFFFF, 0.10),
-        selection: Rgba::hex(0x272B37, 1.0),
+        panel: Rgba::hex(0x1B2130, 1.0),
+        text: Rgba::hex(0xEDEFEA, 1.0),
+        muted: Rgba::hex(0xA0A9B8, 1.0),
+        line: Rgba::hex(0xFFFFFF, 0.11),
+        selection: Rgba::hex(0x262E3F, 1.0),
         selection_text: Rgba::hex(0xFFFFFF, 1.0),
-        accent: Rgba::hex(0x7C93FF, 1.0),
-        thumb: Rgba::hex(0x12151B, 1.0),
+        accent: Rgba::hex(0x8A9BFF, 1.0),
+        thumb: Rgba::hex(0x0D1016, 1.0),
         high_contrast: false,
     };
 
@@ -371,11 +374,24 @@ impl Painter {
             } else {
                 (filter, theme.text)
             };
-            self.text(label, &self.header, rect(16.0 * s, 0.0, w - 140.0 * s, header), color);
+            self.text(
+                label,
+                &self.header,
+                rect(16.0 * s, 0.0, w - 140.0 * s, header),
+                color,
+            );
             if !filter.is_empty() && !naming {
                 // A caret after the typed text, so it reads as a field.
                 let caret_x = 16.0 * s + self.measure(filter, &self.header) + 2.0 * s;
-                self.fill(rect(caret_x, header / 2.0 - 9.0 * s, caret_x + 1.5 * s, header / 2.0 + 9.0 * s), theme.accent);
+                self.fill(
+                    rect(
+                        caret_x,
+                        header / 2.0 - 9.0 * s,
+                        caret_x + 1.5 * s,
+                        header / 2.0 + 9.0 * s,
+                    ),
+                    theme.accent,
+                );
             }
             if !naming {
                 self.keys(shortcut.split('+'), w - 16.0 * s, header / 2.0, theme, false);
@@ -401,14 +417,22 @@ impl Painter {
                 let (title, body) = if model.is_empty() {
                     (
                         "No workspaces yet",
-                        "Arrange your windows the way you like them, then press S to save this layout as a workspace.",
+                        "Arrange your windows, then press S to save the layout: it opens again in one key.",
                     )
                 } else {
-                    ("No workspace matches", "Try another name, or press Esc to clear the filter.")
+                    (
+                        "No workspace matches",
+                        "Try another name, or press Esc to clear the filter.",
+                    )
                 };
                 let top = header + 24.0 * s;
                 self.title_centered(title, rect(24.0 * s, top, w - 24.0 * s, top + 24.0 * s), theme);
-                self.text(body, &self.body, rect(32.0 * s, top + 28.0 * s, w - 32.0 * s, h - footer - 16.0 * s), theme.muted);
+                self.text(
+                    body,
+                    &self.body,
+                    rect(32.0 * s, top + 28.0 * s, w - 32.0 * s, h - footer - 16.0 * s),
+                    theme.muted,
+                );
             }
         })
     }
@@ -462,7 +486,8 @@ impl Painter {
         }
     }
 
-    /// One row of the list: preview, name, counts, key.
+    /// One row of the list: its layout in small, its name (marked when it is open) and its
+    /// apps, and the key that opens it.
     pub fn row(&self, hdc: HDC, area: RECT, theme: &Theme, row: &Row<'_>) -> windows::core::Result<()> {
         let Row {
             entry,
@@ -514,29 +539,42 @@ impl Painter {
                 }
             }
             self.stroke_round(thumb, 6.0 * s, theme.line, s);
-            // Name and counts.
+            // Name, "Open" after it when it is the one open, and its apps.
             let x = tx + tw + 16.0 * s;
             let key_room = if key.is_some() { 56.0 * s } else { 16.0 * s };
-            let name = if current {
-                format!("{}  ·  current", entry.name)
+            let open_room = if current {
+                self.measure(OPEN, &self.small) + 14.0 * s
             } else {
-                entry.name.clone()
+                0.0
             };
+            let name_right =
+                (x + self.measure(&entry.name, &self.title) + 2.0 * s).min(w - key_room - open_room);
             self.text(
-                &name,
+                &entry.name,
                 &self.title,
-                rect(x, h / 2.0 - 20.0 * s, w - key_room, h / 2.0 + 2.0 * s),
+                rect(x, h / 2.0 - 20.0 * s, name_right, h / 2.0 + 2.0 * s),
                 text,
             );
-            let counts = format!(
-                "{} {} · {} {}",
-                entry.windows,
-                if entry.windows == 1 { "window" } else { "windows" },
-                entry.zones,
-                if entry.zones == 1 { "zone" } else { "zones" }
-            );
+            if current {
+                let accent = if selected && theme.high_contrast {
+                    theme.selection_text
+                } else {
+                    theme.accent
+                };
+                self.text(
+                    OPEN,
+                    &self.small,
+                    rect(
+                        name_right + 8.0 * s,
+                        h / 2.0 - 20.0 * s,
+                        name_right + open_room,
+                        h / 2.0 + 2.0 * s,
+                    ),
+                    accent,
+                );
+            }
             self.text(
-                &counts,
+                &entry.apps_line(),
                 &self.subtitle,
                 rect(x, h / 2.0 + 2.0 * s, w - key_room, h / 2.0 + 20.0 * s),
                 if selected && theme.high_contrast {

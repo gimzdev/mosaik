@@ -376,7 +376,7 @@ fn refill() {
             .filter_map(|i| s.model.spoken(i))
             .collect();
         let name = if s.model.is_empty() {
-            "No workspaces yet. Arrange your windows, then press S to save this layout as a workspace."
+            "No workspaces yet. Arrange your windows, then press S to save the layout as a workspace."
                 .to_owned()
         } else if s.model.shown().is_empty() {
             format!(

@@ -45,6 +45,8 @@ use crate::{Config, Message, UiEvent, UiSink, WM_WAKE, switcher};
 
 /// Posted by the window-event hooks when events are waiting.
 pub(crate) const WM_EVENTS: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
+/// The toast was clicked (`mosaik_overlay::toast`).
+pub(crate) const WM_TOAST: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 8;
 
 /// Timers on the engine's window.
 pub(crate) mod timer {
@@ -71,6 +73,8 @@ pub(crate) mod timer {
     pub const STACK: usize = 10;
     /// The pointer looked at, while a window covering the main monitor is in front.
     pub const POINTER: usize = 11;
+    /// A frame of a toast fading in or away, or the end of its time on screen.
+    pub const TOAST: usize = 12;
 }
 
 /// Shift a timer id into the `Pending::timers` bit set.
@@ -99,6 +103,8 @@ struct Pending {
     close: bool,
     /// Esc during a press on a tab strip or a window's band.
     drag_esc: bool,
+    /// The toast was clicked.
+    toast: bool,
 }
 
 impl Pending {
@@ -112,6 +118,7 @@ impl Pending {
             || self.ending
             || self.close
             || self.drag_esc
+            || self.toast
     }
 
     fn merge(&mut self, o: Pending) {
@@ -126,6 +133,7 @@ impl Pending {
         self.ending |= o.ending;
         self.close |= o.close;
         self.drag_esc |= o.drag_esc;
+        self.toast |= o.toast;
     }
 }
 
@@ -141,6 +149,7 @@ thread_local! {
         ending: false,
         close: false,
         drag_esc: false,
+        toast: false,
     }) };
 }
 
@@ -185,6 +194,7 @@ pub(crate) struct Engine {
     pub(crate) undo: Option<crate::arranging::Undo>,
     /// The quick menu at the screen's edge.
     pub(crate) quick: crate::quick::Quick,
+    pub(crate) toasts: crate::toasts::Toasts,
     /// The apps of the Start menu, for sets.
     pub(crate) start_apps: crate::sets::StartApps,
 }
@@ -222,6 +232,18 @@ pub(crate) fn run(
             notices.extend(loaded.notes);
             (loaded.value, OnDisk::Readable)
         }
+        // A newer Mosaïk's settings (an older copy started after a newer one): used for what
+        // this version knows, never written over; Settings says so, quietly.
+        Err(e @ mosaik_core::store::StoreError::Newer { .. }) => match store.load_newer::<Settings>() {
+            Some(read) => {
+                tracing::info!(problem = %e, "settings of a newer Mosaïk, read as far as understood");
+                (read, OnDisk::Newer)
+            }
+            None => {
+                notices.push(format!("{e} Mosaïk is using its default settings for now."));
+                (Settings::default(), OnDisk::Unreadable)
+            }
+        },
         Err(e) => {
             notices.push(format!("{e} Mosaïk is using its default settings for now."));
             (Settings::default(), OnDisk::Unreadable)
@@ -278,6 +300,7 @@ pub(crate) fn run(
         told: HashSet::new(),
         undo: None,
         quick: crate::quick::Quick::default(),
+        toasts: crate::toasts::Toasts::default(),
         start_apps: crate::sets::StartApps::default(),
     };
     // Read early: the home page asks for sets as soon as it opens.
@@ -374,6 +397,10 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         },
         WM_EVENTS => Pending {
             events: true,
+            ..Pending::default()
+        },
+        WM_TOAST => Pending {
+            toast: true,
             ..Pending::default()
         },
         WM_HOTKEY if i32::try_from(wparam.0) == Ok(hotkeys::SWITCHER) => Pending {
@@ -495,6 +522,12 @@ impl Engine {
         if todo.timers & timer_bit(timer::POINTER) != 0 {
             self.pointer_tick();
         }
+        if todo.timers & timer_bit(timer::TOAST) != 0 {
+            self.toast_tick();
+        }
+        if todo.toast {
+            self.toast_clicked();
+        }
         if todo.displays {
             // Windows sends several of these for one change; act once it is done.
             self.set_timer(timer::TOPOLOGY, 400);
@@ -526,6 +559,7 @@ impl Engine {
                         };
                         let _ = reply.send(answer);
                     }
+                    Message::Toast { title, body } => self.queue_toast(title, body),
                     Message::Stop => {
                         if !self.stopped {
                             self.shut_down();
@@ -546,6 +580,7 @@ impl Engine {
                 Message::Request { reply, .. } => {
                     let _ = reply.send(crate::stopped());
                 }
+                Message::Toast { .. } => {}
                 // SAFETY: ends this thread's message loop.
                 Message::Stop => unsafe { PostQuitMessage(0) },
             }
@@ -562,12 +597,12 @@ impl Engine {
         let _ = unsafe { KillTimer(Some(self.window), id) };
     }
 
-    /// Tells the user something once, plainly.
+    /// Tells the user something once, plainly: in a toast at once, and with the window's
+    /// notes. Mosaïk's window does not open over what the user is doing.
     pub(crate) fn notice(&self, title: impl Into<String>, body: impl Into<String>) {
-        (self.ui)(UiEvent::Notice {
-            title: title.into(),
-            body: body.into(),
-        });
+        let (title, body) = (title.into(), body.into());
+        self.queue_toast(title.clone(), body.clone());
+        (self.ui)(UiEvent::Note { title, body });
     }
 
     /// Like [`Engine::notice`], for what can wait until the user opens Mosaïk.
@@ -827,6 +862,13 @@ impl Engine {
                     zones: w.layout.zones.len(),
                     hotkey: w.hotkey.map(|h| h.to_string()),
                     apps: w.layout.slots.iter().map(Slot::name).collect(),
+                    icons: w.layout.slots.iter().map(mosaik_core::icons::of_slot).collect(),
+                    layout: mosaik_core::switcher::Entry::from_workspace(w)
+                        .preview
+                        .zones
+                        .into_iter()
+                        .map(|(area, color)| mosaik_ipc::protocol::MiniZone { area, color })
+                        .collect(),
                 })
                 .collect(),
             active: self.active.as_ref().map(|a| a.id.clone()),

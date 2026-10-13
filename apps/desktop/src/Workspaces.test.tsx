@@ -1,243 +1,193 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Command, Reply, WorkspaceApps } from './protocol';
-import { Feedback } from './ui';
-import { WorkspaceList } from './Workspaces';
+import type { AppSet, Command, Reply, WorkspaceSummary } from './protocol';
+import { done, failed, set, setsReply, shown, workspace, workspacesReply } from './test-fixtures';
+import { Announcer } from './ui';
+import { Workspaces } from './Workspaces';
 
 const engine = vi.hoisted(() => ({
   request: vi.fn<(c: Command) => Promise<Reply>>(),
-  onWorkspacesChanged: vi.fn<(f: () => void) => () => void>(() => () => undefined),
+  appIcons: vi.fn((keys: string[]) =>
+    Promise.resolve(Object.fromEntries(keys.map((k) => [k, k === 'app:Chrome' ? 'data:image/png;base64,AA==' : null]))),
+  ),
+  onWorkspacesChanged: vi.fn<(callback: () => void) => () => void>(() => () => undefined),
 }));
 vi.mock('./engine', () => engine);
 
 afterEach(cleanup);
-
-const list = (names: string[]): Reply => ({
-  reply: 'workspaces',
-  workspaces: names.map((name, i) => ({
-    id: `w${String(i)}`,
-    name,
-    windows: 3,
-    zones: 1,
-    hotkey: i === 0 ? 'Win+Alt+J' : null,
-    apps: ['Visual Studio Code', 'Google Chrome', 'Windows Terminal'],
-  })),
-  active: 'w0',
+beforeEach(() => {
+  engine.request.mockReset();
 });
 
-const onEditZones = vi.fn();
-const onOpened = vi.fn();
+const ship = workspace({ id: 'ship', name: 'Ship', hotkey: 'Win+Alt+J' });
+const brand = workspace({ id: 'brand', name: 'Brand', apps: ['Figma'], icons: [null] });
+const coding = set({
+  id: 'coding',
+  name: 'Coding',
+  apps: ['Visual Studio Code', 'Terminal', 'Google Chrome'],
+});
 
-function page() {
-  return render(
-    <Feedback>
-      <WorkspaceList onEditZones={onEditZones} onOpened={onOpened} />
-    </Feedback>,
+function answer(
+  list: WorkspaceSummary[] = [ship, brand],
+  sets: AppSet[] = [coding],
+  extra: (c: Command) => Reply | null = () => null,
+  active: string | null = 'ship',
+) {
+  const asked: Command[] = [];
+  engine.request.mockImplementation((c) => {
+    asked.push(c);
+    const special = extra(c);
+    if (special) return Promise.resolve(special);
+    switch (c.cmd) {
+      case 'workspaces':
+        return Promise.resolve(workspacesReply(list, active));
+      case 'sets':
+        return Promise.resolve(setsReply(sets));
+      case 'switch':
+        return Promise.resolve(done(`Opened “${c.workspace}”.`));
+      case 'open_set':
+        return Promise.resolve(done('Opened “Coding”: 2 apps started.'));
+      case 'save':
+        return Promise.resolve(done(`Saved “${c.workspace ?? 'Ship'}”.`));
+      default:
+        return Promise.resolve(done('Done.'));
+    }
+  });
+  return asked;
+}
+
+function render_(onEdit = vi.fn(), onEditZones = vi.fn(), onOpened = vi.fn()) {
+  render(
+    <Announcer>
+      <Workspaces onEdit={onEdit} onEditZones={onEditZones} onOpened={onOpened} />
+    </Announcer>,
   );
+  return { onEdit, onEditZones, onOpened };
 }
 
-/** The rows of the list, one per workspace (each row's apps are a list of their own). */
-async function rows() {
-  const saved = await screen.findByRole('list', { name: 'Saved workspaces' });
-  return Array.from(saved.children).filter((row) => row instanceof HTMLElement);
-}
+const list = () => screen.getByRole('list', { name: 'Workspaces' });
 
-/** Picks `item` in the ⋯ menu of the workspace `name`. */
-async function more(name: string, item: string) {
-  await userEvent.click(await screen.findByRole('button', { name: `More for “${name}”` }));
-  await userEvent.click(screen.getByRole('button', { name: item }));
-}
-
-describe('the saved workspaces', () => {
-  beforeEach(() => {
-    engine.request.mockReset();
-    engine.onWorkspacesChanged.mockClear();
-    onEditZones.mockClear();
-    onOpened.mockClear();
+describe('the workspaces', () => {
+  it('shows each with its apps and shortcut, the one open marked', async () => {
+    answer();
+    render_();
+    const open = await screen.findByRole('button', { name: 'Open “Ship” (open now)' });
+    expect(within(open).getByText('Open')).toBeInTheDocument();
+    expect(within(open).getByText('Win + Alt + J')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open “Brand”' })).toBeInTheDocument();
+    // Apps show by their icons, read once for every app on the page.
+    await waitFor(() => {
+      expect(open.querySelector('img[src="data:image/png;base64,AA=="]')).not.toBeNull();
+    });
+    expect(engine.appIcons).toHaveBeenCalled();
   });
 
-  it('says what they are when there is none yet', async () => {
-    engine.request.mockResolvedValue(list([]));
-    page();
-    expect(await screen.findByText('Arranged windows are kept here, one click away.')).toBeTruthy();
-    expect(screen.queryByRole('list', { name: 'Saved workspaces' })).toBeNull();
-  });
-
-  it('lists workspaces with their apps and shortcut, and opens one', async () => {
-    engine.request.mockImplementation((c) =>
-      Promise.resolve(c.cmd === 'switch' ? { reply: 'done', message: 'Opened “Brand”.' } : list(['Ship', 'Brand'])),
-    );
-    page();
-    const all = await rows();
-    expect(all).toHaveLength(2);
-    const first = all[0];
-    if (!first) throw new Error('no rows');
-    expect(within(first).getByText('Open now')).toBeTruthy();
-    expect(within(first).getByText('Win')).toBeTruthy();
-    expect(
-      within(within(first).getByRole('list', { name: 'Its apps' }))
-        .getAllByRole('listitem')
-        .map((li) => li.textContent),
-    ).toEqual(['Visual Studio Code', 'Google Chrome', 'Windows Terminal']);
-    await userEvent.click(screen.getByRole('button', { name: 'Open “Brand”' }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'switch', workspace: 'w1' });
-    expect(await screen.findByText('Opened “Brand”.')).toBeTruthy();
+  it('opens one in a click, and says so where it was opened', async () => {
+    const asked = answer();
+    const { onOpened } = render_();
+    await userEvent.click(await screen.findByRole('button', { name: 'Open “Brand”' }));
+    expect(asked).toContainEqual({ cmd: 'switch', workspace: 'brand' });
+    expect(await shown('Opened “brand”.')).toBeInTheDocument();
     expect(onOpened).toHaveBeenCalled();
   });
 
-  it('opens the zone editor from a workspace’s menu', async () => {
-    engine.request.mockResolvedValue(list(['Ship', 'Brand']));
-    page();
-    await more('Brand', 'Edit zones');
-    expect(onEditZones).toHaveBeenCalledWith('w1');
+  it('says why one could not be opened', async () => {
+    answer([ship, brand], [], (c) => (c.cmd === 'switch' ? failed('Its monitor is gone.', 'Edit its zones.') : null));
+    render_();
+    await userEvent.click(await screen.findByRole('button', { name: 'Open “Brand”' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Its monitor is gone. Edit its zones.');
+  });
+
+  it('suggests workspaces from the apps installed, and opens one in a click', async () => {
+    const asked = answer();
+    render_();
+    const suggested = await screen.findByRole('button', {
+      name: 'Open the suggested workspace “Coding”: Visual Studio Code, Terminal, Google Chrome',
+    });
+    expect(within(suggested).getByText('3 apps that go together')).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Suggested workspaces' })).toContainElement(suggested);
+    await userEvent.click(suggested);
+    expect(asked).toContainEqual({ cmd: 'open_set', set: 'coding' });
+    expect(await shown('Opened “Coding”: 2 apps started.')).toBeInTheDocument();
+  });
+
+  it('does not suggest a set that is a workspace already', async () => {
+    answer([ship], [{ ...coding, workspace: 'ship' }]);
+    render_();
+    await screen.findByRole('button', { name: 'Open “Ship” (open now)' });
+    expect(screen.queryByRole('button', { name: /suggested workspace/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps what is on screen as a new workspace, under a name that is free', async () => {
+    const asked = answer();
+    render_();
+    await userEvent.click(await screen.findByRole('button', { name: 'Save layout' }));
+    const name = screen.getByRole('textbox', { name: 'Name the new workspace' });
+    expect(name).toHaveValue('Workspace 1');
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Ship');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    // A name in use would replace that workspace: refused, nothing sent.
+    expect(screen.getByRole('alert')).toHaveTextContent('“Ship” already exists.');
+    expect(asked.some((c) => c.cmd === 'save')).toBe(false);
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Review{Enter}');
+    expect(asked).toContainEqual({ cmd: 'save', workspace: 'Review' });
+    expect(await shown('Saved “Review”.')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Name the new workspace' })).not.toBeInTheDocument();
+  });
+
+  it('leaves saving with Escape', async () => {
+    answer();
+    render_();
+    await userEvent.click(await screen.findByRole('button', { name: 'Save layout' }));
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('textbox', { name: 'Name the new workspace' })).not.toBeInTheDocument();
+  });
+
+  it('has the rest in each one’s menu: saving the open one again, its page, its zones', async () => {
+    const asked = answer();
+    const { onEdit, onEditZones } = render_();
+    await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save current layout here' }));
+    expect(asked).toContainEqual({ cmd: 'save', workspace: null });
+    await userEvent.click(screen.getByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(onEdit).toHaveBeenCalledWith('ship');
+    await userEvent.click(screen.getByRole('button', { name: 'More for “Brand”' }));
+    // Only the open workspace can take what is on screen.
+    expect(screen.queryByRole('button', { name: 'Save current layout here' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Edit zones' }));
+    expect(onEditZones).toHaveBeenCalledWith('brand');
   });
 
   it('reads them again when they change elsewhere', async () => {
-    engine.request.mockResolvedValue(list(['Ship']));
-    page();
-    await rows();
-    const changed = engine.onWorkspacesChanged.mock.calls[0]?.[0];
-    if (!changed) throw new Error('the page does not listen for changes');
-    engine.request.mockResolvedValue(list(['Ship', 'Saved from the switcher']));
+    let changed: () => void = () => undefined;
+    engine.onWorkspacesChanged.mockImplementation((callback) => {
+      changed = callback;
+      return () => undefined;
+    });
+    let names = [ship];
+    engine.request.mockImplementation((c) => {
+      if (c.cmd === 'workspaces') return Promise.resolve(workspacesReply(names));
+      if (c.cmd === 'sets') return Promise.resolve(setsReply([]));
+      return Promise.resolve(done('Done.'));
+    });
+    render_();
+    await screen.findByRole('button', { name: 'Open “Ship”' });
+    names = [ship, brand];
     changed();
-    expect(await screen.findByText('Saved from the switcher')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Open “Brand”' })).toBeInTheDocument();
   });
 
-  it('asks before deleting', async () => {
-    engine.request.mockImplementation((c) =>
-      Promise.resolve(c.cmd === 'delete_workspace' ? { reply: 'done', message: 'Deleted “Ship”.' } : list(['Ship'])),
-    );
-    page();
-    await more('Ship', 'Delete…');
-    expect(engine.request).not.toHaveBeenCalledWith({ cmd: 'delete_workspace', workspace: 'w0' });
-    await userEvent.click(screen.getByRole('button', { name: 'Delete workspace', hidden: true }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'delete_workspace', workspace: 'w0' });
-  });
-
-  it('shows why a rename was refused', async () => {
-    engine.request.mockImplementation((c) =>
-      Promise.resolve(
-        c.cmd === 'rename_workspace'
-          ? { reply: 'error', code: 'bad_request', message: 'Another workspace is called “Brand”.', hint: null }
-          : list(['Ship', 'Brand']),
-      ),
-    );
-    page();
-    await more('Ship', 'Rename…');
-    const field = screen.getByRole('textbox', { name: 'New name' });
-    expect(document.activeElement).toBe(field);
-    await userEvent.clear(field);
-    await userEvent.type(field, 'brand');
-    await userEvent.click(screen.getByRole('button', { name: 'Save name' }));
-    expect((await screen.findAllByRole('alert')).map((a) => a.textContent)).toContain(
-      'Another workspace is called “Brand”.',
-    );
-  });
-
-  it('records a shortcut for a workspace with Mosaïk’s own shortcuts held', async () => {
-    engine.request.mockImplementation((c) =>
-      Promise.resolve(c.cmd === 'workspaces' ? list(['Ship']) : { reply: 'done', message: 'ok' }),
-    );
-    page();
-    await more('Ship', 'Change shortcut…');
-    expect(await screen.findByRole('button', { name: 'Press the new shortcut' })).toBeTruthy();
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'hold_hotkeys', hold: true });
-    await userEvent.keyboard('{Escape}');
-    expect(screen.queryByRole('button', { name: 'Press the new shortcut' })).toBeNull();
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'hold_hotkeys', hold: false });
-  });
-  it('shows a workspace’s apps in their zones, and moves, removes and adds them', async () => {
-    let apps: WorkspaceApps = {
-      workspace: 'w0',
-      name: 'Ship',
-      apps: [
-        { id: 's1', label: 'Visual Studio Code', zone: 'z1', tab: false },
-        { id: 's2', label: 'Windows Terminal', zone: 'z2', tab: false },
-      ],
-      zones: [
-        { id: 'z1', name: 'Code', color: 'lapis' },
-        { id: 'z2', name: 'Terminal', color: 'verdigris' },
-      ],
-      windows: [{ window: 0x204f2, label: 'Google Chrome', title: 'Release notes - Google Chrome' }],
-    };
-    engine.request.mockImplementation((c) => {
-      if (c.cmd === 'workspaces') return Promise.resolve(list(['Ship']));
-      if (c.cmd === 'move_app') {
-        apps = { ...apps, apps: apps.apps.map((a) => (a.id === c.app ? { ...a, zone: c.zone } : a)) };
-      } else if (c.cmd === 'remove_app') {
-        apps = { ...apps, apps: apps.apps.filter((a) => a.id !== c.app) };
-      } else if (c.cmd === 'add_app') {
-        apps = {
-          ...apps,
-          apps: [...apps.apps, { id: 's3', label: 'Google Chrome', zone: null, tab: false }],
-          windows: [],
-        };
-      } else if (c.cmd !== 'apps') {
-        return Promise.resolve({ reply: 'done', message: 'ok' });
-      }
-      return Promise.resolve({ reply: 'apps', ...apps });
-    });
-    page();
-    await more('Ship', 'Change its apps…');
-    const listed = await screen.findByRole('list', { name: 'Apps of “Ship”' });
+  it('says what workspaces are when there is none and nothing to suggest', async () => {
+    answer([], []);
+    render_();
     expect(
-      within(listed)
-        .getAllByRole('listitem')
-        .map((li) => li.textContent),
-    ).toEqual([expect.stringContaining('Visual Studio Code'), expect.stringContaining('Windows Terminal')]);
-    const zone = screen.getByRole('combobox', { name: 'Zone of Windows Terminal' });
-    expect((zone as HTMLSelectElement).value).toBe('z2');
-
-    await userEvent.selectOptions(zone, 'Code');
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'move_app', workspace: 'w0', app: 's2', zone: 'z1' });
-    expect(await screen.findByText('Windows Terminal goes in Code.')).toBeTruthy();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Remove Visual Studio Code' }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'remove_app', workspace: 'w0', app: 's1' });
-    expect(await screen.findByText('Visual Studio Code removed.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Remove Visual Studio Code' })).toBeNull();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Add a window to “Ship”' }));
-    await userEvent.click(screen.getByRole('button', { name: /^Google Chrome/ }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'add_app', workspace: 'w0', window: 0x204f2, zone: null });
-    expect(await screen.findByText('Google Chrome added.')).toBeTruthy();
-    // Without a zone yet, it says so; with no other window open, it says how to add one.
-    const chrome = screen.getByRole('combobox', { name: 'Zone of Google Chrome' });
-    expect((chrome as HTMLSelectElement).value).toBe('');
-    expect(screen.getByText('Open a window to add it here.')).toBeTruthy();
-    // The same menu hides them again, and the apps show at a glance.
-    await more('Ship', 'Hide its apps');
-    expect(screen.queryByRole('combobox')).toBeNull();
-    expect(screen.getByRole('list', { name: 'Its apps' })).toBeTruthy();
-  });
-
-  it('says why an app could not be changed', async () => {
-    engine.request.mockImplementation((c) => {
-      if (c.cmd === 'workspaces') return Promise.resolve(list(['Ship']));
-      if (c.cmd === 'remove_app') {
-        return Promise.resolve({
-          reply: 'error',
-          code: 'bad_request',
-          message: 'This app is not in the workspace any more.',
-          hint: 'Look at the list again.',
-        });
-      }
-      return Promise.resolve({
-        reply: 'apps',
-        workspace: 'w0',
-        name: 'Ship',
-        apps: [{ id: 's1', label: 'Notepad', zone: null, tab: false }],
-        zones: [],
-        windows: [],
-      });
-    });
-    page();
-    await more('Ship', 'Change its apps…');
-    await userEvent.click(await screen.findByRole('button', { name: 'Remove Notepad' }));
-    expect(await screen.findByText('This app is not in the workspace any more. Look at the list again.')).toBeTruthy();
-    // No zones: no list of zones to pick from.
-    expect(screen.queryByRole('combobox')).toBeNull();
+      await screen.findByText('Arrange your windows, then save the layout: it opens again in one click.'),
+    ).toBeInTheDocument();
+    expect(list()).toBeInTheDocument();
   });
 });

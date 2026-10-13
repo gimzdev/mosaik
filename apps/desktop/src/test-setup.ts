@@ -1,5 +1,8 @@
-// What jsdom lacks, just enough for the components: modal dialogs, media queries, CSS.escape,
-// scrolling into view.
+// The DOM matchers the tests read with (toBeInTheDocument, toHaveTextContent…), then what jsdom
+// lacks, just enough for the components: modal dialogs, media queries, CSS.escape, scrolling into
+// view.
+
+import '@testing-library/jest-dom/vitest';
 
 if (typeof Element.prototype.scrollIntoView !== 'function') {
   Element.prototype.scrollIntoView = () => undefined;

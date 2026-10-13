@@ -224,16 +224,18 @@ impl Palette {
         }
     }
 
+    /// The window's dark colours (a menu there is `--raised` on `--line`): the side menu, the
+    /// toasts and the switcher look like the window they come from.
     pub fn dark() -> Self {
         Self {
-            panel: hex(0x1B1E26, 1.0),
-            text: hex(0xE6E9F0, 1.0),
-            muted: hex(0x8E97AA, 1.0),
-            line: hex(0xFFFFFF, 0.12),
-            hover: hex(0x272B37, 1.0),
+            panel: hex(0x1B2130, 1.0),
+            text: hex(0xEDEFEA, 1.0),
+            muted: hex(0xA0A9B8, 1.0),
+            line: hex(0xFFFFFF, 0.11),
+            hover: hex(0x262E3F, 1.0),
             hover_text: hex(0xFFFFFF, 1.0),
-            accent: hex(0x7C93FF, 1.0),
-            handle: hex(0x7C93FF, 0.95),
+            accent: hex(0x8A9BFF, 1.0),
+            handle: hex(0x8A9BFF, 0.95),
             handle_edge: hex(0x000000, 0.55),
             shadow: true,
         }
@@ -264,8 +266,22 @@ impl Palette {
     }
 }
 
+/// A layout in small: its zones as fractions (left, top, right, bottom) of a box, each in its
+/// colour.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Mini {
+    pub zones: Vec<([f32; 4], Rgba)>,
+}
+
+/// One layout of a strip of them: drawn in small, named when the pointer is on it.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Tile {
+    pub label: String,
+    pub mini: Mini,
+}
+
 /// One line of the menu.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Row {
     pub label: String,
     /// A short note at the right end: a shortcut, "On" or "Off", "Open".
@@ -279,6 +295,19 @@ pub struct Row {
     /// open workspace).
     pub header: bool,
     pub prefix: Option<String>,
+    /// A quiet title over the rows that follow ("Layouts", "Workspaces"): not a button.
+    pub caption: bool,
+    /// A workspace's layout in small, before its name.
+    pub mini: Option<Mini>,
+    /// Layouts side by side, each a button of its own: the row is a strip of them.
+    pub tiles: Vec<Tile>,
+}
+
+/// What the pointer is on in the open menu: a row, and in a strip of layouts, which one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hot {
+    pub row: usize,
+    pub tile: Option<usize>,
 }
 
 /// Sizes at 96 DPI.
@@ -292,9 +321,14 @@ mod size {
     pub const STRIP: f32 = 8.0;
     pub const STRIP_THROUGH: f32 = 12.0;
     pub const STRIP_LENGTH: f32 = 76.0;
-    pub const PANEL: f32 = 256.0;
+    pub const PANEL: f32 = 284.0;
     pub const HEADER_ROW: f32 = 42.0;
     pub const ROW: f32 = 34.0;
+    pub const CAPTION_ROW: f32 = 24.0;
+    pub const TILES_ROW: f32 = 42.0;
+    /// A workspace's layout in small, before its name.
+    pub const MINI_W: f32 = 24.0;
+    pub const MINI_H: f32 = 15.0;
     /// How far the menu slides in from its edge as it opens.
     pub const SLIDE: f32 = 14.0;
     pub const RULE: f32 = 9.0;
@@ -333,7 +367,7 @@ enum Shown {
     Menu {
         place: Place,
         rows: Vec<Row>,
-        hot: Option<usize>,
+        hot: Option<Hot>,
         palette: Palette,
     },
 }
@@ -341,10 +375,34 @@ enum Shown {
 pub struct Edge {
     window: LayeredWindow,
     shown: Option<Shown>,
-    /// The menu's rows on screen, for [`Edge::row_at`].
-    rows: Vec<Rect>,
+    /// The menu's rows on screen, and each one's tiles (in a strip of layouts), for
+    /// [`Edge::row_at`].
+    rows: Vec<(Rect, Vec<Rect>)>,
     /// Where the open menu sits once in place.
     menu_at: Option<Rect>,
+}
+
+/// Draws `mini` in `box_`, its zones `gap` apart; `neutral` instead of their colours.
+fn draw_mini(
+    pen: &crate::canvas::Pen<'_>,
+    mini: &Mini,
+    box_: Area,
+    gap: f32,
+    radius: f32,
+    neutral: Option<Rgba>,
+) {
+    let (w, h) = (box_.right - box_.left, box_.bottom - box_.top);
+    for ([l, t, r, b], color) in &mini.zones {
+        let a = Area::new(
+            box_.left + l * w + gap / 2.0,
+            box_.top + t * h + gap / 2.0,
+            box_.left + r * w - gap / 2.0,
+            box_.top + b * h - gap / 2.0,
+        );
+        if a.right > a.left && a.bottom > a.top {
+            pen.fill_round(a, radius, neutral.unwrap_or(*color));
+        }
+    }
 }
 
 /// How far in a slide or fade of `OPEN_MS` is after `t` (0 to 1) of it: fast, then settling.
@@ -489,7 +547,7 @@ impl Edge {
         canvas: &mut Canvas,
         place: Place,
         rows: &[Row],
-        hot: Option<usize>,
+        hot: Option<Hot>,
         palette: Palette,
         t: f32,
     ) -> Result<()> {
@@ -505,7 +563,17 @@ impl Edge {
         let s = scale(place.dpi);
         let shadow = size::SHADOW * s;
         let panel_w = size::PANEL * s;
-        let height = |r: &Row| if r.header { size::HEADER_ROW } else { size::ROW } * s;
+        let height = |r: &Row| {
+            s * if r.header {
+                size::HEADER_ROW
+            } else if r.caption {
+                size::CAPTION_ROW
+            } else if !r.tiles.is_empty() {
+                size::TILES_ROW
+            } else {
+                size::ROW
+            }
+        };
         let mut panel_h = 2.0 * size::PAD * s;
         for r in rows {
             if r.rule_before {
@@ -522,8 +590,8 @@ impl Edge {
             Side::Right => place.work.right - w,
         };
         let at = Rect::from_origin_size(left, top, w, h);
-        // Rows, and where each lands on screen.
-        let mut placed: Vec<(Area, &Row, bool)> = Vec::new();
+        // Rows, and where each lands on screen; in a strip of layouts, each tile too.
+        let mut placed: Vec<(Area, &Row, bool, Vec<Area>)> = Vec::new();
         let mut y = shadow + size::PAD * s;
         for (i, r) in rows.iter().enumerate() {
             if r.rule_before {
@@ -535,7 +603,21 @@ impl Edge {
                 shadow + panel_w - size::PAD * s,
                 y + height(r),
             );
-            placed.push((a, r, hot == Some(i) && r.enabled));
+            let tiles = if r.tiles.is_empty() {
+                Vec::new()
+            } else {
+                let gap = 4.0 * s;
+                let n = f(i32::try_from(r.tiles.len()).unwrap_or(1));
+                let w = (a.right - a.left - gap * (n - 1.0)) / n;
+                (0..r.tiles.len())
+                    .map(|k| {
+                        let x = a.left + f(i32::try_from(k).unwrap_or(0)) * (w + gap);
+                        Area::new(x, a.top + 2.0 * s, x + w, a.bottom - 2.0 * s)
+                    })
+                    .collect()
+            };
+            let lit = hot.is_some_and(|h| h.row == i && h.tile.is_none()) && r.enabled && !r.caption;
+            placed.push((a, r, lit, tiles));
             y += height(r);
         }
         // Details are right-aligned: measured first; so is the header's prefix.
@@ -584,7 +666,7 @@ impl Edge {
             }
             pen.fill_round(panel, radius, palette.panel);
             pen.stroke_round(panel, radius, s.max(1.0), palette.line);
-            for (i, (a, r, lit)) in placed.iter().enumerate() {
+            for (i, (a, r, lit, tiles)) in placed.iter().enumerate() {
                 if r.rule_before {
                     let y = a.top - size::RULE * s / 2.0;
                     pen.fill_round(
@@ -598,6 +680,58 @@ impl Edge {
                         palette.line,
                     );
                 }
+                if r.caption {
+                    let detail_w = widths.get(i).copied().unwrap_or(0.0);
+                    let quiet = Rgba(palette.muted.0, palette.muted.1, palette.muted.2, 0.9);
+                    pen.text(
+                        &r.label,
+                        Area::new(
+                            a.left + 10.0 * s,
+                            a.top + 4.0 * s,
+                            a.right - detail_w - 18.0 * s,
+                            a.bottom,
+                        ),
+                        11.5 * s,
+                        Weight::SemiBold,
+                        Align::Leading,
+                        quiet,
+                    )?;
+                    if let Some(d) = &r.detail {
+                        pen.text(
+                            d,
+                            Area::new(
+                                a.right - 10.0 * s - detail_w,
+                                a.top + 4.0 * s,
+                                a.right - 10.0 * s,
+                                a.bottom,
+                            ),
+                            detail_size,
+                            Weight::SemiBold,
+                            Align::Leading,
+                            palette.accent,
+                        )?;
+                    }
+                    continue;
+                }
+                if !tiles.is_empty() {
+                    for (k, (tile, area)) in r.tiles.iter().zip(tiles.iter()).enumerate() {
+                        let on =
+                            hot == Some(Hot {
+                                row: i,
+                                tile: Some(k),
+                            }) && r.enabled;
+                        if on {
+                            pen.fill_round(*area, 7.0 * s, palette.hover);
+                        }
+                        let (gw, gh) = (30.0 * s, 18.0 * s);
+                        let cx = (area.left + area.right) / 2.0;
+                        let cy = (area.top + area.bottom) / 2.0;
+                        let glyph = Area::new(cx - gw / 2.0, cy - gh / 2.0, cx + gw / 2.0, cy + gh / 2.0);
+                        let quiet = Rgba(palette.muted.0, palette.muted.1, palette.muted.2, 0.55);
+                        draw_mini(pen, &tile.mini, glyph, 2.0 * s, 2.0 * s, (!on).then_some(quiet));
+                    }
+                    continue;
+                }
                 if *lit {
                     pen.fill_round(*a, 6.0 * s, palette.hover);
                 }
@@ -610,6 +744,18 @@ impl Edge {
                 let detail_w = widths.get(i).copied().unwrap_or(0.0);
                 let label_right = a.right - 10.0 * s - if detail_w > 0.0 { detail_w + 8.0 * s } else { 0.0 };
                 let mut label_left = a.left + 10.0 * s;
+                if let Some(mini) = &r.mini {
+                    let cy = (a.top + a.bottom) / 2.0;
+                    let box_ = Area::new(
+                        label_left,
+                        cy - size::MINI_H * s / 2.0,
+                        label_left + size::MINI_W * s,
+                        cy + size::MINI_H * s / 2.0,
+                    );
+                    pen.fill_round(box_, 3.0 * s, Rgba(0.0, 0.0, 0.0, 0.35));
+                    draw_mini(pen, mini, box_.inset(1.5 * s), 1.5 * s, 1.5 * s, None);
+                    label_left += size::MINI_W * s + 9.0 * s;
+                }
                 if let Some(p) = &r.prefix {
                     let w = prefix_w.get(i).copied().unwrap_or(0.0);
                     pen.text(
@@ -651,34 +797,59 @@ impl Edge {
         self.shown = Some(want);
         self.menu_frame(t)?;
         crate::layered::restack(&[&self.window], crate::layered::Stack::Topmost);
+        let on_screen = |a: &Area| {
+            Rect::new(
+                at.left + px(a.left),
+                at.top + px(a.top),
+                at.left + px(a.right),
+                at.top + px(a.bottom),
+            )
+        };
         self.rows = placed
             .iter()
-            .map(|(a, _, _)| {
-                Rect::new(
-                    at.left + px(a.left),
-                    at.top + px(a.top),
-                    at.left + px(a.right),
-                    at.top + px(a.bottom),
-                )
-            })
+            .map(|(a, _, _, tiles)| (on_screen(a), tiles.iter().map(on_screen).collect()))
             .collect();
         Ok(())
     }
 
-    /// The open menu's rows, and where each is on screen.
-    pub fn menu_rows(&self) -> Vec<(&Row, Rect)> {
-        match &self.shown {
-            Some(Shown::Menu { rows, .. }) => rows.iter().zip(self.rows.iter().copied()).collect(),
-            _ => Vec::new(),
-        }
+    /// What the open menu offers and where on screen: each row by its label, and in a strip of
+    /// layouts each layout by its name; whether it can be used.
+    pub fn menu_rows(&self) -> Vec<(String, Rect, bool)> {
+        let Some(Shown::Menu { rows, .. }) = &self.shown else {
+            return Vec::new();
+        };
+        rows.iter()
+            .zip(self.rows.iter())
+            .flat_map(|(row, (rect, tiles))| {
+                if row.tiles.is_empty() {
+                    vec![(row.label.clone(), *rect, row.enabled && !row.caption)]
+                } else {
+                    row.tiles
+                        .iter()
+                        .zip(tiles.iter())
+                        .map(|(t, r)| (t.label.clone(), *r, row.enabled))
+                        .collect()
+                }
+            })
+            .collect()
     }
 
-    /// The row of the open menu under `p` (screen coordinates).
-    pub fn row_at(&self, p: Point) -> Option<usize> {
+    /// What of the open menu is under `p` (screen coordinates): a row, and in a strip of layouts
+    /// the one under it.
+    pub fn row_at(&self, p: Point) -> Option<Hot> {
         if !self.menu_open() {
             return None;
         }
-        self.rows.iter().position(|r| r.contains(p))
+        let row = self.rows.iter().position(|(r, _)| r.contains(p))?;
+        let tiles = &self.rows[row].1;
+        if tiles.is_empty() {
+            return Some(Hot { row, tile: None });
+        }
+        // Between two layouts is on neither.
+        tiles
+            .iter()
+            .position(|t| t.contains(p))
+            .map(|k| Hot { row, tile: Some(k) })
     }
 }
 

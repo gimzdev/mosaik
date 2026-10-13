@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Command, Reply, ZoneEdit } from './protocol';
-import { Feedback } from './ui';
+import { shown } from './test-fixtures';
+import { Announcer } from './ui';
 import { ZoneEditor } from './ZoneEditor';
 
 const engine = vi.hoisted(() => ({ request: vi.fn<(c: Command) => Promise<Reply>>() }));
@@ -60,9 +61,9 @@ function engineWithZones() {
 
 function editor(onDirtyChange = vi.fn(), onClose = vi.fn()) {
   render(
-    <Feedback>
+    <Announcer>
       <ZoneEditor workspace="ship" onClose={onClose} onDirtyChange={onDirtyChange} />
-    </Feedback>,
+    </Announcer>,
   );
   return { onDirtyChange, onClose };
 }
@@ -91,7 +92,7 @@ describe('the zone editor', () => {
         { id: 'z2', area: { left: 28 / 48 } },
       ],
     });
-    expect(await screen.findByText('Zones saved.')).toBeTruthy();
+    expect(await shown('Zones saved.')).toBeTruthy();
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
 
@@ -101,7 +102,7 @@ describe('the zone editor', () => {
     await userEvent.click(await screen.findByRole('button', { name: /^Code,/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Split side by side' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save zones' }));
-    await screen.findByText('Zones saved.');
+    await shown('Zones saved.');
     const line = screen.getByRole('separator', { name: 'Line between Code and Zone 1' });
     fireEvent.keyDown(line, { key: 'ArrowLeft' });
     await userEvent.click(screen.getByRole('button', { name: 'Save zones' }));
@@ -130,7 +131,7 @@ describe('the zone editor', () => {
   it('asks before leaving with changes', async () => {
     engine.request.mockResolvedValue(reply(two));
     const { onClose } = editor();
-    await userEvent.click(await screen.findByRole('button', { name: 'Start from a preset' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Start from a layout' }));
     await userEvent.click(screen.getByRole('button', { name: 'Thirds' }));
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onClose).not.toHaveBeenCalled();

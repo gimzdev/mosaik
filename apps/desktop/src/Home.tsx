@@ -1,18 +1,18 @@
-// The home page: tidy the screen in one click. A picture of the main screen shows where each
-// window would go while the pointer (or the keyboard) is on Arrange or a layout; a click does it,
-// and Undo puts everything back. Below, sets of the apps installed that go together, and the
-// saved workspaces, each opened in a click, with the rest in its ⋯ menu. Words are few: the
-// picture shows what each button does.
+// Home: the main screen as the chosen layout would leave it, with Arrange beside it, and the
+// workspaces in a column of their own. The smart layout is chosen first (Arrange reads what the
+// windows are for); any of the ten layouts can be chosen instead, and the picture shows it before
+// anything moves. Arrange does it; Undo puts everything back.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 
 import { PRESETS, type Preset, presetShape } from './editor/model';
 import { onWorkspacesChanged, request } from './engine';
-import { type ArrangePreview, TASK_WORDS, type ZoneColor, errorMessage } from './protocol';
-import { Sets } from './Sets';
-import { Stage } from './Stage';
-import { Button, Keys, PageTitle, useSay } from './ui';
-import { WorkspaceList } from './Workspaces';
+import { Glyph } from './icons';
+import { LayoutGlyph } from './Layouts';
+import { type ArrangePreview, TASK_WORDS, errorMessage } from './protocol';
+import { Screen, settled } from './Screen';
+import { Button, PageTitle, Status, useAnnounce } from './ui';
+import { Workspaces } from './Workspaces';
 
 /** The layouts, the most used first (landscape screens), then rows and the whole screen. */
 const ORDER: readonly Preset[] = [
@@ -28,276 +28,235 @@ const ORDER: readonly Preset[] = [
   'full',
 ];
 const LAYOUTS = ORDER.map((id) => PRESETS.find((p) => p.id === id)).filter((p) => p !== undefined);
-const TILE_COLORS: readonly ZoneColor[] = ['lapis', 'verdigris', 'saffron', 'madder'];
 
-/** What the picture shows: the screen now, or what Arrange (`auto`) or a layout would do. */
-type Pointing = Preset | 'auto' | null;
+/** What Arrange will do: lay the windows out by itself (`smart`), or in a layout. */
+type Choice = Preset | 'smart';
 
-/** A layout as a small mosaic of its zones. */
-function Tile({ preset }: { preset: Preset }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="relative block aspect-[16/9] w-full rounded-md bg-[var(--bg)] forced-colors:border forced-colors:border-[CanvasText]"
-    >
-      {presetShape(preset).map((a, i) => (
-        <span
-          key={`${String(a.left)}-${String(a.top)}`}
-          className="absolute rounded-[3px] forced-colors:border forced-colors:border-[CanvasText]"
-          style={{
-            left: `calc(${String(a.left * 100)}% + 2px)`,
-            top: `calc(${String(a.top * 100)}% + 2px)`,
-            width: `calc(${String((a.right - a.left) * 100)}% - 4px)`,
-            height: `calc(${String((a.bottom - a.top) * 100)}% - 4px)`,
-            background: `var(--zone-${TILE_COLORS[i % TILE_COLORS.length] ?? 'slate'})`,
-          }}
-        />
-      ))}
-    </span>
-  );
+/** "Slack", "Slack and Teams", "Slack, Teams and Mail". */
+function names(list: string[]): string {
+  if (list.length <= 1) return list.join('');
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1] ?? ''}`;
 }
 
-function plural(n: number, one: string, many: string) {
-  return `${String(n)} ${n === 1 ? one : many}`;
-}
-
-/** The caption under the picture (`unread`: Mosaïk could not read the screen). */
-function caption(preview: ArrangePreview | null, pointing: Pointing, unread: boolean): string {
-  if (!preview) return unread ? 'Your main screen' : 'Reading your screen…';
-  const n = preview.windows.length;
-  const elsewhere = preview.elsewhere ? ` (+${String(preview.elsewhere)} on other screens)` : '';
-  if (pointing === null)
-    return n === 0 ? 'Your main screen now' : `Your main screen now: ${plural(n, 'window', 'windows')}${elsewhere}`;
-  const words = preview.task ? TASK_WORDS[preview.task] : null;
-  const name =
-    pointing === 'auto'
-      ? words
-        ? `Arrange, for ${words}`
-        : 'Arrange'
-      : (PRESETS.find((p) => p.id === pointing)?.label ?? pointing);
-  const gone = preview.windows.filter((w) => w.minimized).length;
-  const what =
-    n === 0
-      ? 'its zones, ready for your windows'
-      : gone
-        ? `${plural(gone, 'window', 'windows')} minimized`
-        : 'every window in its own zone';
-  return `With ${name}: ${what}`;
+/** What the picture shows, in a sentence under it: what will be minimised, or that nothing moves. */
+function note(preview: ArrangePreview | null, choice: Choice): string | null {
+  if (!preview || preview.windows.length === 0) return null;
+  if (settled(preview)) return 'Your windows are already like this.';
+  const gone = preview.windows.filter((w) => w.minimized).map((w) => w.label);
+  const parts: string[] = [];
+  if (gone.length) parts.push(`${names(gone)} will be minimized.`);
+  const elsewhere = preview.elsewhere;
+  if (choice === 'smart' && elsewhere) {
+    parts.push(
+      elsewhere === 1
+        ? 'The window on your other screen is arranged there too.'
+        : `The ${String(elsewhere)} windows on your other screens are arranged there too.`,
+    );
+  }
+  return parts.length ? parts.join(' ') : null;
 }
 
 export function Home({
-  shortcut,
-  demo = false,
+  onEditWorkspace,
   onEditZones,
 }: {
-  /** The shortcut that opens the switcher now. */
-  shortcut: string;
-  /** Show once what Arrange would do, without being asked (right after the welcome). */
-  demo?: boolean;
+  onEditWorkspace: (workspace: string) => void;
   onEditZones: (workspace: string) => void;
 }) {
-  const say = useSay();
-  /** The screen as it is (what Arrange would do, and where the windows are now). */
-  const [base, setBase] = useState<ArrangePreview | null>(null);
-  /** What the user points at (the mouse or the keyboard), and what that would do. */
-  const [want, setWant] = useState<Pointing>(null);
-  const [shown, setShown] = useState<{ pointing: Exclude<Pointing, null>; preview: ArrangePreview } | null>(null);
+  const announce = useAnnounce();
+  const group = useId();
+  const [choice, setChoice] = useState<Choice>('smart');
+  /** The smart layout: what Arrange would do by itself (and whether anything is open). */
+  const [smart, setSmart] = useState<ArrangePreview | null>(null);
+  /** The layout chosen, once Mosaïk has said where it would put the windows. */
+  const [chosen, setChosen] = useState<{ choice: Preset; preview: ArrangePreview } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [busy, setBusy] = useState<Pointing>(null);
+  const [busy, setBusy] = useState(false);
+  /** What the last Arrange or Undo did, said under the picture. */
+  const [outcome, setOutcome] = useState<{ text: string; error: boolean } | null>(null);
   const [undoable, setUndoable] = useState(false);
+  /** Counts the times the screen is read again: windows moved, a workspace opened… */
+  const [reads, setReads] = useState(0);
+  const readAgain = useCallback(() => {
+    setReads((n) => n + 1);
+  }, []);
 
-  const readScreen = useCallback(() => {
+  // Windows move while the page is open: the picture follows when the window comes back, and
+  // when a workspace or a set opens.
+  useEffect(() => {
+    window.addEventListener('focus', readAgain);
+    const stop = onWorkspacesChanged(readAgain);
+    return () => {
+      window.removeEventListener('focus', readAgain);
+      stop();
+    };
+  }, [readAgain]);
+
+  useEffect(() => {
+    let live = true;
     void request({ cmd: 'preview_arrange' }).then((reply) => {
+      if (!live) return;
       if (reply.reply === 'preview') {
-        setBase(reply);
+        setSmart(reply);
         setProblem(null);
       } else {
         setProblem(errorMessage(reply) ?? 'Mosaïk could not read your screen.');
       }
     });
-  }, []);
-
-  useEffect(() => {
-    readScreen();
-    // Windows move while the page is open: the picture follows when the window comes back, and
-    // when a workspace or a set opens.
-    window.addEventListener('focus', readScreen);
-    const stop = onWorkspacesChanged(readScreen);
     return () => {
-      window.removeEventListener('focus', readScreen);
-      stop();
+      live = false;
     };
-  }, [readScreen]);
+  }, [reads]);
 
-  // Right after the welcome, the picture shows once what Arrange would do with the windows on
-  // screen, then the screen as it is again (not for those who ask for less motion).
-  const [demoing, setDemoing] = useState(false);
-  const [demoDone, setDemoDone] = useState(!demo);
-  const hasWindows = (base?.windows.length ?? 0) > 0;
+  // The layout chosen is asked for; an answer for one chosen before is dropped.
   useEffect(() => {
-    if (demoDone || !hasWindows) return;
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setTimeout(() => {
-        setDemoDone(true);
-      });
-      return;
-    }
-    const start = setTimeout(() => {
-      setDemoing(true);
-    }, 700);
-    const end = setTimeout(() => {
-      setDemoing(false);
-      setDemoDone(true);
-    }, 3100);
+    if (choice === 'smart') return;
+    let live = true;
+    void request({ cmd: 'preview_arrange', preset: choice }).then((reply) => {
+      if (live && reply.reply === 'preview') setChosen({ choice, preview: reply });
+    });
     return () => {
-      clearTimeout(start);
-      clearTimeout(end);
+      live = false;
     };
-  }, [demoDone, hasWindows]);
+  }, [choice, reads]);
 
-  // What the user points at is asked for; an answer for something pointed at before is dropped.
-  useEffect(() => {
-    if (want === null) return;
-    let current = true;
-    void request(want === 'auto' ? { cmd: 'preview_arrange' } : { cmd: 'preview_arrange', preset: want }).then(
-      (reply) => {
-        if (current && reply.reply === 'preview') setShown({ pointing: want, preview: reply });
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [want]);
-
-  const arrange = (at: Exclude<Pointing, null>) => {
-    setBusy(at);
-    void request(at === 'auto' ? { cmd: 'arrange' } : { cmd: 'arrange', preset: at }).then((reply) => {
-      setBusy(null);
-      setWant(null);
+  const arrange = () => {
+    setBusy(true);
+    setOutcome(null);
+    void request(choice === 'smart' ? { cmd: 'arrange' } : { cmd: 'arrange', preset: choice }).then((reply) => {
+      setBusy(false);
       if (reply.reply === 'done') {
-        say(reply.message);
+        setOutcome({ text: reply.message, error: false });
         setUndoable(true);
+        announce(reply.message);
       } else {
-        say(errorMessage(reply) ?? 'Your windows could not be arranged.', true);
+        setOutcome({ text: errorMessage(reply) ?? 'Your windows could not be arranged.', error: true });
       }
-      readScreen();
+      readAgain();
     });
   };
 
   const undo = () => {
     setUndoable(false);
     void request({ cmd: 'undo_arrange' }).then((reply) => {
-      if (reply.reply === 'done') say(reply.message);
-      else say(errorMessage(reply) ?? 'Arrange could not be undone.', true);
-      readScreen();
+      if (reply.reply === 'done') {
+        setOutcome({ text: reply.message, error: false });
+        announce(reply.message);
+      } else {
+        setOutcome({ text: errorMessage(reply) ?? 'Arrange could not be undone.', error: true });
+      }
+      readAgain();
     });
   };
 
-  /** Pointing and focus both show the preview: a mouse and a keyboard get the same. */
-  const previewOn = (at: Exclude<Pointing, null>) => {
-    const leave = () => {
-      setWant((w) => (w === at ? null : w));
-    };
-    const enter = () => {
-      setWant(at);
-    };
-    return { onPointerEnter: enter, onPointerLeave: leave, onFocus: enter, onBlur: leave };
-  };
-
-  // The answer for what is pointed at now, once it has come; the screen as it is otherwise.
-  const pointed = want !== null && shown?.pointing === want ? shown : null;
-  const picture = pointed?.preview ?? base;
-  const showing = pointed?.pointing ?? (demoing ? 'auto' : null);
+  // While a layout's answer is on its way, the last picture stays.
+  const picture =
+    choice === 'smart' ? smart : chosen?.choice === choice ? chosen.preview : (chosen?.preview ?? smart);
+  const hasWindows = (smart?.windows.length ?? 0) > 0;
+  const words = smart?.task ? TASK_WORDS[smart.task] : null;
+  const title =
+    choice === 'smart'
+      ? words
+        ? `Smart layout for ${words}`
+        : 'Smart layout'
+      : (PRESETS.find((p) => p.id === choice)?.label ?? 'Layout');
+  const said = note(picture, choice);
 
   return (
     <article aria-labelledby="home-title">
-      <div className="text-center">
-        <PageTitle id="home-title">Tidy your screen</PageTitle>
-        <p className="mt-1.5 text-[var(--muted)]">Point to preview. Click to arrange.</p>
-      </div>
+      <PageTitle id="home-title" className="sr-only">
+        Home
+      </PageTitle>
+      <div className="grid gap-x-8 gap-y-8 min-[880px]:grid-cols-[minmax(0,1fr)_19rem]">
+        <section aria-labelledby="arrange-title" className="flex min-w-0 flex-col">
+          <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+            <div className="min-w-0">
+              <h2 id="arrange-title" className="font-display text-title font-bold tracking-tight">
+                Your screen
+              </h2>
+              <p className="mt-0.5 truncate text-small text-[var(--muted)]">
+                {problem ? 'Your screen could not be read' : hasWindows || !smart ? title : 'Open some apps first'}
+              </p>
+            </div>
+            <Button tone="primary" size="lg" pending={busy} disabled={!hasWindows || busy} onClick={arrange}>
+              {busy ? null : <Glyph name="spark" />}
+              Arrange
+            </Button>
+          </div>
 
-      {/* The picture stays in view while the page scrolls, so pointing at a layout lower down
-          still shows what it would do. It sticks to the very top of the page's scrolling area:
-          `-top-8` undoes the page's own top padding (py-8 in App), which would show the tiles
-          scrolling by above it. */}
-      <div className="sticky -top-8 z-10 -mx-3 mt-1 bg-[var(--bg)] px-3 pt-4 pb-2">
-        <Stage
-          preview={picture}
-          unread={problem !== null}
-          mode={showing ? 'then' : 'now'}
-          caption={caption(picture, showing, problem !== null)}
+          <div className="mt-4">
+            <Screen preview={picture} unread={problem !== null} />
+          </div>
+
+          {/* The layouts, drawn: the one chosen is named; the others say their name when pointed at,
+              and to screen readers. */}
+          <fieldset className="mt-3 min-w-0">
+            <legend className="sr-only">Layout</legend>
+            <div className="flex flex-wrap items-center gap-1">
+              {[{ id: 'smart' as const, label: 'Smart' }, ...LAYOUTS].map((option) => {
+                const on = choice === option.id;
+                return (
+                  <label
+                    key={option.id}
+                    title={option.label}
+                    className={`relative inline-flex h-9 items-center gap-2 rounded-full px-2.5 text-small font-semibold transition-colors duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus)] has-[:disabled]:opacity-50 ${
+                      on
+                        ? 'bg-[var(--raised)] pr-3.5 text-[var(--text)] ring-1 ring-[var(--accent)] forced-colors:ring-[Highlight]'
+                        : 'text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name={group}
+                      value={option.id}
+                      checked={on}
+                      disabled={!hasWindows}
+                      onChange={() => {
+                        setChoice(option.id);
+                        setOutcome(null);
+                      }}
+                      // Over the whole chip, unseen: a click anywhere on it chooses it.
+                      className="absolute inset-0 m-0 cursor-pointer appearance-none rounded-full opacity-0 disabled:cursor-default"
+                    />
+                    {option.id === 'smart' ? (
+                      <Glyph name="spark" size={15} className={on ? 'text-[var(--accent)]' : ''} />
+                    ) : (
+                      <LayoutGlyph shape={presetShape(option.id)} width={24} height={15} colored={on} />
+                    )}
+                    <span className={on || option.id === 'smart' ? '' : 'sr-only'}>{option.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1">
+            {problem ? <Status text={problem} error /> : null}
+            {outcome ? (
+              <Status text={outcome.text} error={outcome.error} />
+            ) : said ? (
+              <p className="text-small text-[var(--muted)]">{said}</p>
+            ) : null}
+            {undoable ? (
+              <Button tone="quiet" size="sm" onClick={undo}>
+                <Glyph name="undo" size={14} />
+                Undo
+              </Button>
+            ) : null}
+          </div>
+        </section>
+
+        <Workspaces
+          onEdit={onEditWorkspace}
+          onEditZones={onEditZones}
+          onOpened={() => {
+            // What Undo would undo is not on screen any more.
+            setUndoable(false);
+            setOutcome(null);
+            readAgain();
+          }}
         />
       </div>
-      {problem ? (
-        <p role="alert" className="mt-2 text-center text-small text-[var(--danger)]">
-          {problem}
-        </p>
-      ) : null}
-
-      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-        <span {...previewOn('auto')} className="contents">
-          <Button
-            tone="primary"
-            pending={busy === 'auto'}
-            disabled={busy !== null && busy !== 'auto'}
-            onClick={() => {
-              arrange('auto');
-            }}
-          >
-            Arrange windows
-          </Button>
-        </span>
-        {undoable ? <Button onClick={undo}>Undo</Button> : null}
-      </div>
-      {base !== null && !hasWindows ? (
-        <p className="mt-1.5 text-center text-small text-[var(--muted)]">
-          Open the apps you work with, then come back here.
-        </p>
-      ) : null}
-
-      <Sets />
-
-      <section aria-labelledby="layouts-title" className="below-picture mt-8">
-        <h2 id="layouts-title" className="font-display text-heading font-semibold tracking-tight">
-          Layouts
-        </h2>
-        <ul className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(7.25rem,1fr))] gap-2.5">
-          {LAYOUTS.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                {...previewOn(p.id)}
-                onClick={() => {
-                  arrange(p.id);
-                }}
-                disabled={busy !== null}
-                aria-busy={busy === p.id || undefined}
-                className={`group flex w-full flex-col gap-1.5 rounded-xl border p-2 text-left transition-colors duration-150 disabled:opacity-60 ${
-                  showing === p.id
-                    ? 'border-[var(--accent)] bg-[var(--hover)]'
-                    : 'border-[var(--line)] bg-[var(--surface)] hover:border-[var(--control)]'
-                }`}
-              >
-                <Tile preset={p.id} />
-                <span className="text-small leading-tight font-semibold text-balance">{p.label}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <WorkspaceList
-        onEditZones={onEditZones}
-        onOpened={() => {
-          // What Undo would undo is not on screen any more.
-          setUndoable(false);
-          readScreen();
-        }}
-      />
-
-      <p className="mt-6 text-small text-[var(--muted)]">
-        <Keys shortcut={shortcut} /> switches workspaces from anywhere.
-      </p>
     </article>
   );
 }

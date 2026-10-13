@@ -1,6 +1,8 @@
-//! Startup, the tray icon, the web windows (settings, editor, welcome) and the bridge between them
-//! and the engine. The switcher is native and lives on the engine thread (ADR 0002).
+//! Startup, the tray icon, Mosaïk's window and the bridge between it and the engine: commands,
+//! notes, apps' icons. The switcher and the side menu are native and live on the engine thread
+//! (ADR 0002).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -35,6 +37,10 @@ const TRAY: &str = "mosaik";
 const TRAY_WORKSPACE: &str = "workspace:";
 /// At most this many workspaces in the tray menu; the switcher has them all.
 const TRAY_WORKSPACES: usize = 20;
+/// Apps' icons for the window, in pixels: sharp at twice their size on the page, read once each.
+const ICON_PX: u32 = 48;
+/// How long the window waits for a batch of icons.
+const ICON_TIMEOUT: Duration = Duration::from_secs(10);
 
 // The interface is built into mosaik.exe. Without Tauri's `custom-protocol` feature a plain
 // `cargo build` makes a development build whose windows load a local dev server, which shows a
@@ -49,9 +55,11 @@ struct AppState {
     pipe: Mutex<Option<(std::thread::JoinHandle<()>, Stopper)>>,
     /// Notices not yet shown, oldest first.
     notices: Mutex<Vec<Notice>>,
-    /// The workspace whose zones the quick menu asked to edit, until the window takes it.
+    /// The workspace whose zones the side menu asked to edit, until the window takes it.
     edit_zones: Mutex<Option<String>>,
     data_dir: PathBuf,
+    /// Reads apps' icons for the window (`None`: it could not start; apps show their initial).
+    icons: Option<mosaik_win::icons::IconReader>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -187,6 +195,7 @@ pub fn run(args: Vec<String>) -> i32 {
             engine_request,
             take_notices,
             take_zones_to_edit,
+            app_icons,
             open_link,
             open_logs,
             open_licences,
@@ -255,12 +264,16 @@ fn setup(
         None => None,
     };
     build_tray(app, &engine).map_err(|e| format!("the tray icon could not be created: {e}"))?;
+    let icons = mosaik_win::icons::IconReader::start(ICON_PX)
+        .inspect_err(|e| tracing::warn!(error = %e, "apps' icons will not show"))
+        .ok();
     app.manage(AppState {
         engine,
         pipe: Mutex::new(pipe),
         notices: Mutex::new(Vec::new()),
         edit_zones: Mutex::new(None),
         data_dir,
+        icons,
     });
     let settings = app
         .try_state::<AppState>()
@@ -278,7 +291,7 @@ fn setup(
         tracing::warn!(error = %e, "the Run entry was not refreshed");
     }
     for n in startup_notices {
-        show_notice(app, n);
+        tell(app, n);
     }
     // The welcome, once; then the window, on its home page, whenever Mosaïk is opened by hand.
     if first_run || !background {
@@ -385,7 +398,9 @@ fn on_ui_event(handle: &AppHandle, event: UiEvent) {
             show_settings(&h);
             let _ = h.emit("zones:edit", ());
         }
-        UiEvent::Notice { title, body } => show_notice(&h, Notice { title, body }),
+        // Said from another thread (an app that did not start): shown in a toast here.
+        UiEvent::Notice { title, body } => tell(&h, Notice { title, body }),
+        // The engine showed it in a toast already, if it needed one: the window keeps it.
         UiEvent::Note { title, body } => queue_notice(&h, Notice { title, body }),
         UiEvent::WorkspacesChanged => {
             let _ = h.emit("workspaces:changed", ());
@@ -398,10 +413,13 @@ fn on_ui_event(handle: &AppHandle, event: UiEvent) {
     }
 }
 
-/// Queues a notice for the interface and makes sure the user sees it.
-fn show_notice(app: &AppHandle, notice: Notice) {
+/// Tells the user something from here (not the engine): in a toast at once, and with the
+/// window's notes. The window does not open over what the user is doing.
+fn tell(app: &AppHandle, notice: Notice) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.engine.toast(&notice.title, &notice.body);
+    }
     queue_notice(app, notice);
-    show_settings(app);
 }
 
 /// Queues a notice for the interface: it shows the next time the window is open (now, if it is).
@@ -609,7 +627,8 @@ fn ask_engine(app: &AppHandle, command: Command) {
             }
         };
         if let Some((title, body)) = notice {
-            on_ui_event(&handle, UiEvent::Notice { title, body });
+            let h = handle.clone();
+            let _ = handle.run_on_main_thread(move || tell(&h, Notice { title, body }));
         }
     });
 }
@@ -637,7 +656,28 @@ async fn engine_request(state: tauri::State<'_, AppState>, command: Command) -> 
         .map_err(|e| e.to_string())
 }
 
-/// The workspace whose zones to open in the editor, asked for from the quick menu, if any.
+/// Apps' icons for these keys (from the engine's replies), as `data:` URLs; `None` for an app
+/// whose icon Windows does not have. Read on the icon reader's thread, each once.
+#[tauri::command]
+async fn app_icons(
+    state: tauri::State<'_, AppState>,
+    keys: Vec<String>,
+) -> Result<HashMap<String, Option<String>>, String> {
+    let Some(reader) = state.icons.clone() else {
+        return Ok(keys.into_iter().map(|k| (k, None)).collect());
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        reader
+            .read(keys, ICON_TIMEOUT)
+            .into_iter()
+            .map(|(k, png)| (k, png.map(|p| mosaik_core::icons::png_data_url(&p))))
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// The workspace whose zones to open in the editor, asked for from the side menu, if any.
 #[tauri::command]
 fn take_zones_to_edit(state: tauri::State<'_, AppState>) -> Option<String> {
     state.edit_zones.lock().ok().and_then(|mut e| e.take())

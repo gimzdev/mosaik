@@ -92,13 +92,23 @@ impl Saved for Settings {
     ) -> Result<(serde_json::Value, Option<String>), String> {
         // 1 is 1.0's format. 2 to 4 were only saved by development builds of 1.1: 2 put tags in
         // a bar above every window, which left a band of empty space above each one, 3 also put
-        // zones 4 px apart, and 4 put tags back in title bars.
+        // zones 4 px apart, and 4 put tags back in title bars. 5 is 1.1's; 6 is dark by default.
         if !(1..SETTINGS_VERSION).contains(&from) {
             return Err(format!("no migration from version {from}"));
         }
-        let frames = value
+        let settings = value
             .as_object_mut()
-            .ok_or_else(|| "settings are not an object".to_owned())?
+            .ok_or_else(|| "settings are not an object".to_owned())?;
+        // Dark is the default from 6. 1.x followed Windows by default, so a theme left as it
+        // came takes the new default; a theme picked (light, or dark) stays.
+        let theme = settings.get("theme").and_then(serde_json::Value::as_str);
+        if theme.is_none_or(|t| t == "system") {
+            settings.insert("theme".to_owned(), serde_json::Value::from("dark"));
+        }
+        if from >= 5 {
+            return Ok((value, None));
+        }
+        let frames = settings
             .entry("frames")
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
             .as_object_mut()
@@ -260,6 +270,22 @@ impl Store {
 
     fn last_good(&self, file: &str) -> PathBuf {
         self.dir.join(file.replace(".json", ".last-good.json"))
+    }
+
+    /// A file saved by a newer Mosaïk, read for what this version knows (what it does not know
+    /// is left out; nothing is written). `None` when there is no such file, or it cannot be read
+    /// even so.
+    pub fn load_newer<T: Saved>(&self) -> Option<T> {
+        let bytes = fs::read(self.path(T::FILE)).ok()?;
+        let mut value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        let found = value.get("version").and_then(serde_json::Value::as_u64)?;
+        if found <= u64::from(T::VERSION) {
+            return None;
+        }
+        if let Some(v) = value.get_mut("version") {
+            *v = serde_json::Value::from(T::VERSION);
+        }
+        serde_json::from_value(value).ok()
     }
 
     pub fn load<T: Saved>(&self) -> Result<Loaded<T>, StoreError> {
@@ -632,6 +658,51 @@ mod tests {
                     ..
                 })
         ));
+    }
+
+    #[test]
+    fn settings_from_before_2_are_dark_unless_light_was_chosen() {
+        // The owner: "the dark theme default was much better". 1.x followed Windows by default,
+        // so a theme left as it came becomes dark, set up or not; a theme picked in Settings
+        // (light, or dark) stays. Nothing is said: Settings shows the theme.
+        let d = TempDir::new("settings-dark");
+        let never = load_settings(&d, br#"{"version":5,"theme":"system","onboarding_done":false}"#);
+        assert_eq!(never.value.theme, crate::settings::Theme::Dark);
+        assert!(never.notes.is_empty(), "{:?}", never.notes);
+        let set_up = load_settings(&d, br#"{"version":5,"theme":"system","onboarding_done":true}"#);
+        assert_eq!(set_up.value.theme, crate::settings::Theme::Dark);
+        let light = load_settings(&d, br#"{"version":5,"theme":"light","onboarding_done":true}"#);
+        assert_eq!(light.value.theme, crate::settings::Theme::Light);
+        // Saved by 2.0: "Like Windows" is the user's choice now, and stays.
+        let follows = load_settings(&d, br#"{"version":6,"theme":"system","onboarding_done":true}"#);
+        assert_eq!(follows.value.theme, crate::settings::Theme::System);
+        // From 1.0's format too, with its own move.
+        let old = load_settings(&d, br#"{"version":1,"theme":"system"}"#);
+        assert_eq!(old.value.theme, crate::settings::Theme::Dark);
+        assert_eq!(old.value.version, SETTINGS_VERSION);
+        // And a Mosaïk with no settings yet starts dark.
+        assert_eq!(Settings::default().theme, crate::settings::Theme::Dark);
+    }
+
+    #[test]
+    fn settings_of_a_newer_mosaik_are_read_as_far_as_understood_and_never_written() {
+        // A newer Mosaïk's settings (a Store copy older than a build, say) are read for what this
+        // version knows; what it does not know is left alone, and the file is never touched.
+        let d = TempDir::new("settings-newer");
+        let newer = br#"{"version":99,"theme":"light","start_with_windows":true,"something_new":{"a":1}}"#;
+        fs::write(d.0.join("settings.json"), newer).unwrap();
+        let store = Store::new(&d.0);
+        assert!(matches!(
+            store.load::<Settings>(),
+            Err(StoreError::Newer { found: 99, .. })
+        ));
+        let read = store.load_newer::<Settings>().unwrap();
+        assert_eq!(read.theme, crate::settings::Theme::Light);
+        assert!(read.start_with_windows);
+        assert_eq!(fs::read(d.0.join("settings.json")).unwrap(), newer);
+        // A file that is not even JSON is not a newer one.
+        fs::write(d.0.join("settings.json"), b"garbage").unwrap();
+        assert!(store.load_newer::<Settings>().is_none());
     }
 
     #[test]

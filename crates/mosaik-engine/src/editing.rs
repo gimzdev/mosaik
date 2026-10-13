@@ -57,6 +57,9 @@ impl Engine {
         Reply::Settings {
             settings: Box::new(self.settings.clone()),
             hotkey: self.hotkey_state(),
+            side_menu: self.side_menu_state(),
+            read_only: self.settings_on_disk == mosaik_core::settings::OnDisk::Newer,
+            packaged: mosaik_win::package::is_packaged(),
         }
     }
 
@@ -139,6 +142,13 @@ impl Engine {
         new.version = SETTINGS_VERSION;
         if let Some(problem) = new.problem() {
             return refused(problem, None);
+        }
+        if self.settings_on_disk == mosaik_core::settings::OnDisk::Newer {
+            return refused(
+                "These settings were saved by a newer Mosaïk, so this one leaves them as they are."
+                    .to_owned(),
+                Some("Update Mosaïk to change them."),
+            );
         }
         let hotkey_changed = new.switcher_hotkey != self.settings.switcher_hotkey;
         if hotkey_changed

@@ -42,7 +42,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.7.0"
+MK_VERSION="1.8.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -522,16 +522,17 @@ export default function NotFound() {
 }
 __MK_EOF__
 put app/page.tsx <<'__MK_EOF__'
-import { Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
+import { DeskThumb, Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
 import { Check, DownloadButton, PlatformList } from '@/components/ui';
+import { WORKSPACES } from '@/lib/data';
 import { site } from '@/lib/site';
 
 const FEATURES = [
   {
     id: 'zones',
     title: 'Zones give every window a home',
-    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it, each zone as big as its window needs. Or pick one of ten layouts, or carve the screen into your own named areas. Before you click, Mosaïk shows where each window would go.',
-    points: ['Zones belong to the project, not the monitor', 'Zones fill the screen, so no space is lost', 'Works across multiple displays'],
+    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it. Or pick one of ten layouts, or carve the screen into your own named areas, like Code, Terminal and Review. Before you click, Mosaïk shows where each window would go.',
+    points: ['Zones belong to the project, not the monitor', 'Every window wears its zone’s colour, so you can tell at a glance', 'Works across multiple displays'],
     Art: ZonesArt,
   },
   {
@@ -562,15 +563,18 @@ export default function Home() {
     <>
       <section className="pb-20 pt-28 sm:pt-32 md:pb-28">
         <div className="page-x">
-          <div className="grid gap-5 lg:grid-cols-12 lg:items-end lg:gap-14">
+          <div className="grid gap-7 lg:grid-cols-12 lg:items-end lg:gap-14">
             <h1 className="font-display text-[clamp(2.4rem,4.7vw,4.1rem)] font-bold leading-[1.03] tracking-[-0.035em] lg:col-span-7">
               Every window,
               <br />
               in its place.
             </h1>
-            <p className="max-w-md text-[17px] leading-[1.6] text-slate lg:col-span-5">
-              Mosaïk suggests sets of apps that go together and opens them in tidy views. You can make your own, too.
-            </p>
+            <div className="lg:col-span-5 lg:pb-2">
+              <p className="max-w-[30rem] text-[18px] leading-[1.45] text-slate sm:text-[19px]">
+                Every project gets its own workspace: your apps and windows arranged and ready in one click.
+              </p>
+              <p className="mt-2 text-[15px] text-slate">Free and open source.</p>
+            </div>
           </div>
           <div className="mt-10 md:mt-12">
             <Stage />
@@ -597,6 +601,26 @@ export default function Home() {
                   <Art />
                 </div>
               </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="people" className="scroll-mt-16 border-t border-grout py-20 md:py-28">
+        <div className="page-x">
+          <Intro title="One desktop, many kinds of work.">A workspace is whatever you need open together. These four are the ones we kept reaching for.</Intro>
+          <div className="mt-12 grid gap-x-8 gap-y-12 sm:grid-cols-2">
+            {WORKSPACES.map((w, i) => (
+              <div key={w.id}>
+                <div className="overflow-hidden rounded-[16px] ring-1 ring-black/10">
+                  <DeskThumb index={i} />
+                </div>
+                <div className="mt-4 flex items-baseline justify-between gap-4">
+                  <h3 className="font-display text-[1.35rem] font-bold tracking-[-0.02em]">{w.name}</h3>
+                  <p className="shrink-0 text-sm font-semibold text-lapis">{w.role}</p>
+                </div>
+                <p className="mt-1.5 max-w-md text-[15.5px] leading-relaxed text-slate">{w.about}</p>
+              </div>
             ))}
           </div>
         </div>
@@ -649,7 +673,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
 __MK_EOF__
 put components/apps.tsx <<'__MK_EOF__'
 /* The pretend apps drawn inside the demo desktops. Plain markup, sized in pixels on a 1280 px canvas. */
-import { memo, useId, type CSSProperties, type ReactNode } from 'react';
+import { memo, useId, type ReactNode } from 'react';
 import { TILES, ZONE, type Win } from '@/lib/data';
 import { Icon, Wordmark } from '@/components/ui';
 
@@ -916,6 +940,30 @@ const Refs = () => (
   </div>
 );
 
+const RESULTS = [
+  ['Ocean heat content: a regional reassessment', 'journals.example.org › climate › 2024', 'Upper-ocean heat content rose in every basin between 2005 and 2022, with the largest gains in the subtropical Atlantic.'],
+  ['Sea surface temperature records, 1980 to today', 'data.example.gov › sst › monthly', 'Monthly gridded anomalies relative to the 1991 to 2020 mean, with uncertainty estimates for each cell.'],
+  ['Methods for estimating deep-ocean warming', 'arxiv.example.org › abs › 2403.01177', 'We compare three interpolation schemes for sparse float data and quantify the bias each introduces below 700 m.'],
+];
+
+const Sources = () => (
+  <div className="h-full px-6 py-5">
+    <div className="flex h-[38px] items-center gap-2.5 rounded-full border border-[#DADFE6] px-4 text-[13px] shadow-xs">
+      <Icon n="search" s={14} /> ocean heat content trend 0-2000 m
+    </div>
+    <p className="mt-3 text-[11.5px] text-[#8A93A3]">About 1,240,000 results</p>
+    <div className="mt-3 space-y-4">
+      {RESULTS.map(([t, u, s]) => (
+        <div key={t}>
+          <p className="text-[11.5px] text-[#4A5262]">{u}</p>
+          <p className="text-[16px] leading-snug text-[#2B44D9]">{t}</p>
+          <p className="mt-0.5 text-[12.5px] leading-snug text-[#5B6474]">{s}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
 const Dash = () => (
   <div className="h-full bg-[#F6F7F9] px-5 py-4">
     <p className="text-[16px] font-semibold">Creator dashboard</p>
@@ -939,6 +987,7 @@ const Dash = () => (
 const PAGES: Record<string, [string, string, () => ReactNode]> = {
   pr: ['git.acme.dev/shop/pull/482/files', 'Add one-tap checkout #482', Pull],
   refs: ['pinboard.example/brand-refresh', 'Tessellation, references', Refs],
+  sources: ['search.example/?q=ocean+heat+content', 'ocean heat content trend', Sources],
   dash: ['studio.example/dashboard', 'Creator dashboard', Dash],
 };
 
@@ -1206,32 +1255,63 @@ function DesignApp() {
 }
 
 /* ── notes, reader, charts ─────────────────────────────────────────────── */
-function NotesApp() {
-  const P = ({ children }: { children: ReactNode }) => <p className="mt-2 text-[13.5px] leading-[1.7] text-[#2A303C]">{children}</p>;
-  return (
-    <div className="flex h-full w-full flex-col bg-[#FBFBF8] text-[#1B1F29]">
-      <TitleBar title="Thesis - 3. Results" glyph="#12786A" />
-      <div className="min-h-0 flex-1 overflow-hidden px-9 py-7">
-        <p className="text-[11.5px] text-[#8A93A3]">Chapter 3</p>
-        <p className="font-display text-[28px] font-bold leading-tight tracking-[-0.02em]">Results</p>
-        <p className="mt-5 font-display text-[17px] font-semibold">3.1 Warming of the upper ocean</p>
-        <P>
-          Between 1980 and 2020 the global mean sea surface temperature anomaly rose by 0.87 °C (Figure 3.2). The increase was not uniform: the
-          subtropical Atlantic and the Indian Ocean warmed fastest, while the Southern Ocean showed the weakest trend over the same period.
-        </P>
-        <p className="mt-3 text-[13.5px] leading-[1.7] text-[#2A303C]">
-          Heat content in the top 700 m followed a similar pattern<sup className="text-[#C93450]">12</sup>. We therefore treat the two series as
-          consistent and report regional estimates in Table 3.1, with uncertainty ranges derived from the float coverage described in Section 2.4.
-        </p>
-        <p className="mt-5 font-display text-[17px] font-semibold">3.2 Regional differences</p>
-        <P>
-          Regional trends diverge most strongly after 2005, when the float network reached full global coverage and the sampling bias in the
-          earlier record largely disappears.
-        </P>
+function NotesApp({ variant = 'brief' }: { variant?: string }) {
+  if (variant === 'draft') {
+    const P = ({ children }: { children: ReactNode }) => <p className="mt-2 text-[13.5px] leading-[1.7] text-[#2A303C]">{children}</p>;
+    return (
+      <div className="flex h-full w-full flex-col bg-[#FBFBF8] text-[#1B1F29]">
+        <TitleBar title="Thesis - 3. Results" glyph="#12786A" />
+        <div className="min-h-0 flex-1 overflow-hidden px-9 py-7">
+          <p className="text-[11.5px] text-[#8A93A3]">Chapter 3</p>
+          <p className="font-display text-[28px] font-bold leading-tight tracking-[-0.02em]">Results</p>
+          <p className="mt-5 font-display text-[17px] font-semibold">3.1 Warming of the upper ocean</p>
+          <P>
+            Between 1980 and 2020 the global mean sea surface temperature anomaly rose by 0.87 °C (Figure 3.2). The increase was not uniform: the
+            subtropical Atlantic and the Indian Ocean warmed fastest, while the Southern Ocean showed the weakest trend over the same period.
+          </P>
+          <p className="mt-3 text-[13.5px] leading-[1.7] text-[#2A303C]">
+            Heat content in the top 700 m followed a similar pattern<sup className="text-[#C93450]">12</sup>. We therefore treat the two series as
+            consistent and report regional estimates in Table 3.1, with uncertainty ranges derived from the float coverage described in Section 2.4.
+          </p>
+          <p className="mt-5 font-display text-[17px] font-semibold">3.2 Regional differences</p>
+          <P>
+            Regional trends diverge most strongly after 2005, when the float network reached full global coverage and the sampling bias in the
+            earlier record largely disappears.
+          </P>
+        </div>
+        <div className="flex h-[26px] shrink-0 items-center justify-between border-t border-[#E3E6EB] px-4 text-[11.5px] text-[#8A93A3]">
+          <span>2,418 words</span>
+          <span>Saved</span>
+        </div>
       </div>
-      <div className="flex h-[26px] shrink-0 items-center justify-between border-t border-[#E3E6EB] px-4 text-[11.5px] text-[#8A93A3]">
-        <span>2,418 words</span>
-        <span>Saved</span>
+    );
+  }
+  return (
+    <div className="flex h-full w-full flex-col bg-white text-[#1B1F29]">
+      <TitleBar title="Brand refresh brief - Notes" glyph="#12786A" />
+      <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
+        <p className="font-display text-[22px] font-bold leading-tight tracking-[-0.02em]">Brand refresh brief</p>
+        <p className="mt-2 flex gap-4 text-[12px] text-[#5B6474]">
+          <span className="rounded-full bg-[#FFF1D6] px-2.5 py-0.5 font-semibold text-[#8A5A00]">In progress</span>
+          <span>Due Oct 17</span>
+          <span>Owner: you</span>
+        </p>
+        <p className="mt-3.5 text-[13px] font-semibold">Goals</p>
+        <ul className="mt-1 space-y-1 text-[13px] text-[#2A303C]">
+          <li>• A mark that works at 16 px and on a billboard</li>
+          <li>• Warm, mineral palette, no gradients</li>
+        </ul>
+        <p className="mt-3.5 text-[13px] font-semibold">To do</p>
+        <div className="mt-1.5 space-y-1.5 text-[13px]">
+          {(['Tighten wordmark spacing', 'Export lockups for the deck', 'Colour-blind check'] as const).map((t, i) => (
+            <p key={t} className="flex items-center gap-2">
+              <span className={`grid h-[15px] w-[15px] place-items-center rounded-[4px] border ${i < 2 ? 'border-[#12786A] bg-[#12786A] text-white' : 'border-[#9AA3B2]'}`}>
+                {i < 2 && <Icon n="check" s={11} w={2.2} />}
+              </span>
+              <span className={i < 2 ? 'text-[#8A93A3] line-through' : ''}>{t}</span>
+            </p>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -1281,14 +1361,14 @@ function PaperApp() {
   );
 }
 
-function LineChart({ data, xLabels, yTicks, color, h }: { data: number[]; xLabels: string[]; yTicks: number[]; color: string; h: number }) {
+function LineChart({ data, xLabels, yTicks, color, h, dark }: { data: number[]; xLabels: string[]; yTicks: number[]; color: string; h: number; dark?: boolean }) {
   const id = useSvgId();
   const [w, padL, padR, padT, padB] = [420, 38, 14, 12, 26];
   const [min, max] = [Math.min(...yTicks), Math.max(...yTicks)];
   const X = (i: number, n = data.length) => padL + (i / (n - 1)) * (w - padL - padR);
   const Y = (v: number) => padT + (1 - (v - min) / (max - min)) * (h - padT - padB);
   const line = data.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
-  const [grid, txt] = ['#E4E7EC', '#8A93A3'];
+  const [grid, txt] = dark ? ['#2A2F3B', '#7B8499'] : ['#E4E7EC', '#8A93A3'];
   const last = data.length - 1;
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="block h-full w-full" aria-hidden="true" fontSize="10" fill={txt}>
@@ -1309,24 +1389,36 @@ function LineChart({ data, xLabels, yTicks, color, h }: { data: number[]; xLabel
       ))}
       <path d={`${line} L${X(last).toFixed(1)} ${h - padB} L${X(0).toFixed(1)} ${h - padB} Z`} fill={`url(#${id})`} />
       <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={X(last)} cy={Y(data[last])} r="4.5" fill="#FFFFFF" stroke={color} strokeWidth="2" />
+      <circle cx={X(last)} cy={Y(data[last])} r="4.5" fill={dark ? '#14161B' : '#FFFFFF'} stroke={color} strokeWidth="2" />
     </svg>
   );
 }
 
 const SST = Array.from({ length: 41 }, (_, i) => 0.02 * i + 0.06 * Math.sin(i * 0.9) + 0.03 * Math.sin(i * 2.3) - 0.05);
+const VIEWERS = Array.from({ length: 36 }, (_, i) => 420 + i * 22 + 90 * Math.sin(i * 0.8) + 60 * Math.sin(i * 2.1) + (i > 24 ? 160 : 0));
 
-function ChartApp() {
+function ChartApp({ variant = 'sst' }: { variant?: string }) {
+  const dark = variant === 'viewers';
   return (
-    <div className="flex h-full w-full flex-col bg-white text-[#1B1F29]">
-      <TitleBar title="Sea surface temperature - Data" glyph="#2B44D9" />
+    <div className={`flex h-full w-full flex-col ${dark ? 'bg-[#14161B] text-[#E6E9F0]' : 'bg-white text-[#1B1F29]'}`}>
+      <TitleBar title={dark ? 'Stats' : 'Sea surface temperature - Data'} dark={dark} glyph={dark ? '#12786A' : '#2B44D9'} />
       <div className="flex min-h-0 flex-1 flex-col px-5 py-4">
-        <p className="text-[12px] text-[#8A93A3]">Sea surface temperature anomaly, global mean</p>
-        <p className="flex items-baseline gap-2 text-[28px] font-semibold leading-tight">
-          +0.87 °C <span className="text-[12px] font-semibold text-[#C93450]">since 1980</span>
-        </p>
+        <p className={`text-[12px] ${dark ? 'text-[#8E97AA]' : 'text-[#8A93A3]'}`}>{dark ? 'Concurrent viewers' : 'Sea surface temperature anomaly, global mean'}</p>
+        {dark ? (
+          <p className="flex items-baseline gap-2 text-[28px] font-semibold leading-tight">
+            1,247 <span className="flex items-center gap-1.5 text-[12px] font-semibold text-[#5FD3B6]"><span className="h-2 w-2 rounded-full bg-[#5FD3B6]" /> Live</span>
+          </p>
+        ) : (
+          <p className="flex items-baseline gap-2 text-[28px] font-semibold leading-tight">
+            +0.87 °C <span className="text-[12px] font-semibold text-[#C93450]">since 1980</span>
+          </p>
+        )}
         <div className="mt-2 min-h-0 flex-1">
-          <LineChart color="#2B44D9" data={SST} xLabels={['1980', '1990', '2000', '2010', '2020']} yTicks={[-0.2, 0, 0.4, 0.8]} h={190} />
+          {dark ? (
+            <LineChart dark color="#5FD3B6" data={VIEWERS} xLabels={['8 pm', '8:30', '9 pm', '9:30', '10 pm']} yTicks={[0, 500, 1000, 1500]} h={170} />
+          ) : (
+            <LineChart color="#2B44D9" data={SST} xLabels={['1980', '1990', '2000', '2010', '2020']} yTicks={[-0.2, 0, 0.4, 0.8]} h={190} />
+          )}
         </div>
       </div>
     </div>
@@ -1417,32 +1509,29 @@ export const AppBody = memo(function AppBody({ win }: { win: Pick<Win, 'kind' | 
     case 'browser': return <BrowserApp variant={v} />;
     case 'chat': return <ChatApp variant={v} />;
     case 'design': return <DesignApp />;
-    case 'notes': return <NotesApp />;
+    case 'notes': return <NotesApp variant={v} />;
     case 'paper': return <PaperApp />;
-    case 'chart': return <ChartApp />;
+    case 'chart': return <ChartApp variant={v} />;
     case 'stream': return <StreamApp />;
   }
 });
 
-/**
- * A window. With Mosaïk it wears its zone tag in its own title bar, next to its buttons (`tagAt` places it
- * elsewhere in that bar); plain, it is just a window; flat, it is maximised.
- */
-export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; tagAt?: CSSProperties; children: ReactNode }) {
+/** A window. With Mosaïk it wears its zone frame and tag; plain, it is just a window; flat, it is maximised. */
+export function ZoneFrame({ tag, zone, plain, flat, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; children: ReactNode }) {
   const z = ZONE[zone];
   return (
     <div className="relative h-full w-full">
       <span
-        className="absolute z-10 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
-        style={{ top: 7, right: 140, ...tagAt, background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
+        className="absolute -top-[25px] left-0 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
+        style={{ background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
       >
         {tag}
       </span>
       <div
-        className="h-full w-full overflow-hidden"
+        className="h-full w-full overflow-hidden transition-[box-shadow] duration-300"
         style={{
           borderRadius: flat ? 0 : 10,
-          boxShadow: flat ? 'none' : '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)',
+          boxShadow: flat ? 'none' : plain ? '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)' : `0 0 0 2px ${z.bg}, 0 22px 44px -12px rgba(0,0,0,0.6)`,
         }}
       >
         {children}
@@ -1463,7 +1552,7 @@ put components/desk.tsx <<'__MK_EOF__'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppBody, AppWindow, EditorApp, ZoneFrame } from '@/components/apps';
 import { Icon } from '@/components/ui';
-import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, type Win, type Zone } from '@/lib/data';
+import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
 const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
@@ -1614,9 +1703,9 @@ export function Stage() {
               : { m: pose, mt: poseT, o: 1, t: `transform .8s ${EASE} ${st}, opacity .24s ease-out ${st}` };
       return [
         <div key={`${ws.id}-${w.id}`} className="win" style={vars(g.a.rects[i], g.b.rects[i], look, z)}>
-          <div className="relative h-full">
+          <div className="relative h-full pt-[28px]">
             <AppWindow win={w} plain={!ordered} />
-            <div className="dim inset-0 rounded-[10px]" style={{ opacity: dim }} />
+            <div className="dim inset-x-0 bottom-0 top-[28px] rounded-[10px]" style={{ opacity: dim }} />
           </div>
         </div>,
       ];
@@ -1644,7 +1733,7 @@ export function Stage() {
             : { m: HOME, mt: HOME, o: 1, t: `transform .8s ${EASE} ${st}, opacity .25s ease-out .18s` };
     return [
       <div key={`${ws.id}-${w.id}`} className="win pointer-events-none" style={vars(g.a.rects[i], g.b.rects[i], tiled, z)}>
-        <div className="h-full">
+        <div className="h-full pt-[28px]">
           <AppWindow win={w} plain={!ordered} />
         </div>
       </div>,
@@ -1739,8 +1828,8 @@ export function ZonesArt() {
         <ZoneBox x={40} y={52} w={720} h={700} zone="lapis" />
         <ZoneBox x={788} y={52} w={452} h={340} zone="verdigris" />
         <ZoneBox x={788} y={410} w={452} h={342} zone="saffron" filled />
-        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={68} w={688} h={668} />
-        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={68} w={420} h={308} />
+        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={96} w={688} h={640} />
+        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={96} w={420} h={280} />
         <p className="absolute text-center text-[18px] font-semibold text-[#F4B13A]" style={{ left: 788, top: 560, width: 452 }}>
           Release to place in Review
         </p>
@@ -1760,10 +1849,9 @@ export function TabsArt() {
       <Scaled className={ART}>
         <Wallpaper />
         <div className="absolute" style={{ left: 36, top: 52, width: 1090, height: 710 }}>
-          {/* The zone's tag starts the strip, as in the app. */}
-          <ZoneFrame tag="Code" zone="lapis" tagAt={{ top: 17, right: 'auto', left: 14 }}>
+          <ZoneFrame tag="Code" zone="lapis">
             <div className="flex h-full flex-col bg-[#16181D]">
-              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] pl-[80px] pr-3 text-[14px]">
+              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] px-3 text-[14px]">
                 {TABS.map(([name, c], i) => (
                   <div key={name} className={`flex h-[38px] items-center gap-2.5 rounded-t-[10px] px-5 ${i ? 'text-[#8E97AA]' : 'bg-[#1E2027] font-semibold text-white'}`} style={i ? undefined : { boxShadow: `inset 0 3px 0 ${c}` }}>
                     <span className="h-3 w-3 rounded-[4px]" style={{ background: c }} />
@@ -1792,11 +1880,24 @@ const Key = ({ children, dim }: { children: ReactNode; dim?: boolean }) => (
 );
 
 /** Saved layouts: Mosaïk's switcher as the app draws it (Win+Alt+Space opens it; 1 to 9 pick). */
+/** What the switcher calls each kind of app, under a workspace's name. */
+const APP_WORDS: Record<Win['kind'], string> = {
+  editor: 'Code editor',
+  terminal: 'Terminal',
+  browser: 'Browser',
+  chat: 'Chat',
+  design: 'Design app',
+  notes: 'Notes',
+  paper: 'PDF reader',
+  chart: 'Charts',
+  stream: 'Broadcast',
+};
+
 export function SwitcherArt() {
   return (
     <div className="switcher-bg relative overflow-hidden rounded-[20px] bg-ink px-5 py-10 ring-1 ring-black/10 sm:px-10 sm:py-14">
-      <div className="mx-auto w-full max-w-[470px] overflow-hidden rounded-[16px] border border-white/10 bg-[#1B1E26] text-[#E6E9F0] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)]" role="img" aria-label="Mosaïk's switcher, opened with Windows, Alt and Space: four saved workspaces with a preview of each layout, each picked with its number. Brand refresh is selected.">
-        <div className="flex h-[52px] items-center gap-3 border-b border-white/10 pl-5 pr-4 text-[15px] text-[#8E97AA]">
+      <div className="mx-auto w-full max-w-[470px] overflow-hidden rounded-[16px] border border-white/10 bg-[#1B2130] text-[#EDEFEA] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)]" role="img" aria-label="Mosaïk's switcher, opened with Windows, Alt and Space: four saved workspaces, each with its layout in small and its apps, each picked with its number. Brand refresh is selected.">
+        <div className="flex h-[52px] items-center gap-3 border-b border-white/10 pl-5 pr-4 text-[15px] text-[#A0A9B8]">
           <span className="flex-1">Switch workspace</span>
           <span className="flex gap-1.5">
             {SWITCHER_KEYS.map((k) => (
@@ -1806,9 +1907,9 @@ export function SwitcherArt() {
         </div>
         <div className="p-2">
           {WORKSPACES.map((w, i) => (
-            <div key={w.id} className={`relative flex items-center gap-4 rounded-[10px] px-3 py-2.5 ${w.id === 'brand' ? 'bg-[#272B37]' : ''}`}>
-              {w.id === 'brand' && <span className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-[#7C93FF]" />}
-              <div className="relative h-[40px] w-[64px] shrink-0 overflow-hidden rounded-[6px] bg-[#12151B] ring-1 ring-white/10">
+            <div key={w.id} className={`relative flex items-center gap-4 rounded-[10px] px-3 py-2.5 ${w.id === 'brand' ? 'bg-[#262E3F]' : ''}`}>
+              {w.id === 'brand' && <span className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-[#8A9BFF]" />}
+              <div className="relative h-[40px] w-[64px] shrink-0 overflow-hidden rounded-[6px] bg-[#0D1016] ring-1 ring-white/10">
                 {w.windows.map(({ id, slot: [c, r, cw, rh], zone }) => (
                   <span key={id} className="absolute rounded-[2px]" style={{ left: `${(c / 12) * 100 + 2}%`, top: `${(r / 8) * 100 + 4}%`, width: `${(cw / 12) * 100 - 3}%`, height: `${(rh / 8) * 100 - 6}%`, background: ZONE[zone].bg }} />
                 ))}
@@ -1816,23 +1917,39 @@ export function SwitcherArt() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[15px] font-semibold">
                   {w.name}
-                  {i === 0 && <span className="font-normal text-[#8E97AA]"> · current</span>}
+                  {i === 0 && <span className="ml-2 text-[12.5px] text-[#8A9BFF]">Open</span>}
                 </p>
-                <p className="text-[12.5px] text-[#8E97AA]">
-                  {w.windows.length} windows · {new Set(w.windows.map((x) => x.zone)).size} zones
-                </p>
+                <p className="truncate text-[12.5px] text-[#A0A9B8]">{w.windows.map((x) => APP_WORDS[x.kind]).join(', ')}</p>
               </div>
               <Key dim>{i + 1}</Key>
             </div>
           ))}
         </div>
-        <div className="flex items-center gap-5 border-t border-white/10 px-5 py-2.5 text-[12px] text-[#8E97AA]">
-          <span><b className="font-semibold text-[#C9CEDA]">Enter</b> open</span>
-          <span><b className="font-semibold text-[#C9CEDA]">S</b> save current layout</span>
-          <span><b className="font-semibold text-[#C9CEDA]">Esc</b> close</span>
+        <div className="flex items-center gap-5 border-t border-white/10 px-5 py-2.5 text-[12px] text-[#A0A9B8]">
+          <span><b className="font-semibold text-[#EDEFEA]">Enter</b> open</span>
+          <span><b className="font-semibold text-[#EDEFEA]">S</b> save current layout</span>
+          <span><b className="font-semibold text-[#EDEFEA]">Esc</b> close</span>
         </div>
       </div>
     </div>
+  );
+}
+
+/** A whole workspace as a still desktop, for thumbnails. */
+export function DeskThumb({ index }: { index: number }) {
+  return (
+    <Scaled className="bg-ink">
+      <Wallpaper />
+      <Taskbar />
+      {WORKSPACES[index].windows.map((w) => {
+        const b = slotBox(w.slot, DESK_H);
+        return (
+          <div key={w.id} className="absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height }}>
+            <AppWindow win={w} />
+          </div>
+        );
+      })}
+    </Scaled>
   );
 }
 __MK_EOF__
@@ -1844,6 +1961,7 @@ import { DownloadButton, Wordmark } from '@/components/ui';
 
 const NAV = [
   ['/#how', 'How it works'],
+  ['/#people', 'Who it’s for'],
   ['/#platforms', 'Platforms'],
 ];
 
@@ -2040,7 +2158,7 @@ export type Kind = 'editor' | 'terminal' | 'browser' | 'chat' | 'design' | 'note
 /** [column, row, columns, rows] on a 12 x 8 grid */
 export type Slot = [number, number, number, number];
 export interface Win { id: string; kind: Kind; variant?: string; tag: string; zone: Zone; slot: Slot }
-export interface Workspace { id: string; label: string; name: string; summary: string; windows: Win[] }
+export interface Workspace { id: string; label: string; name: string; role: string; summary: string; about: string; windows: Win[] }
 export interface Rect { left: number; top: number; width: number; height: number }
 
 export const ZONE: Record<Zone, { bg: string; fg: string }> = {
@@ -2058,44 +2176,56 @@ export const WORKSPACES: Workspace[] = [
     id: 'release',
     label: 'Release',
     name: 'Ship the release',
-    summary: 'Editor, terminal and the pull request, switched as one.',
+    role: 'Developers',
+    summary: 'Editor, terminal, pull request and team chat, switched as one.',
+    about: 'Editor, terminal, pull request and team chat, all in place the moment you pick up a task.',
     windows: [
       w('ed', 'editor', 'Code', 'lapis', [0, 0, 7, 5]),
       w('tm', 'terminal', 'Terminal', 'verdigris', [0, 5, 7, 3]),
-      w('pr', 'browser', 'Review', 'saffron', [7, 0, 5, 8], 'pr'),
+      w('pr', 'browser', 'Review', 'saffron', [7, 0, 5, 5], 'pr'),
+      w('ch', 'chat', 'Team', 'madder', [7, 5, 5, 3], 'team'),
     ],
   },
   {
     id: 'brand',
     label: 'Brand',
     name: 'Brand refresh',
-    summary: 'Canvas, references and the client thread, side by side.',
+    role: 'Designers',
+    summary: 'Canvas, references, the brief and the client thread, side by side.',
+    about: 'The canvas, your references, the brief and the client thread, side by side instead of buried.',
     windows: [
       w('cv', 'design', 'Canvas', 'lapis', [0, 0, 8, 8]),
-      w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 4], 'refs'),
-      w('cl', 'chat', 'Client', 'madder', [8, 4, 4, 4], 'client'),
+      w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 3], 'refs'),
+      w('br', 'notes', 'Brief', 'verdigris', [8, 3, 4, 2], 'brief'),
+      w('cl', 'chat', 'Client', 'madder', [8, 5, 4, 3], 'client'),
     ],
   },
   {
     id: 'thesis',
     label: 'Thesis',
     name: 'Thesis, chapter 3',
+    role: 'Researchers',
     summary: 'The paper you are reading, the draft you are writing and the data behind both.',
+    about: 'The paper you are reading, the draft you are writing and the data behind both, one switch from the next project.',
     windows: [
-      w('dr', 'notes', 'Draft', 'verdigris', [0, 0, 5, 8]),
-      w('pp', 'paper', 'Reading', 'madder', [5, 0, 7, 5]),
-      w('dt', 'chart', 'Data', 'lapis', [5, 5, 7, 3]),
+      w('pp', 'paper', 'Reading', 'madder', [0, 0, 4, 8]),
+      w('dr', 'notes', 'Draft', 'verdigris', [4, 0, 4, 8], 'draft'),
+      w('dt', 'chart', 'Data', 'lapis', [8, 0, 4, 4], 'sst'),
+      w('sr', 'browser', 'Sources', 'saffron', [8, 4, 4, 4], 'sources'),
     ],
   },
   {
     id: 'stream',
     label: 'Stream',
     name: 'Friday stream',
-    summary: 'Broadcast software, live chat and your dashboard, ready before you go live.',
+    role: 'Streamers',
+    summary: 'Broadcast software, live chat and your dashboards, ready before you go live.',
+    about: 'Broadcast software, live chat and dashboards, arranged before you go live and again for the next show.',
     windows: [
       w('ob', 'stream', 'Broadcast', 'lapis', [0, 0, 8, 5]),
       w('lc', 'chat', 'Chat', 'madder', [8, 0, 4, 8], 'live'),
-      w('db', 'browser', 'Dashboard', 'saffron', [0, 5, 8, 3], 'dash'),
+      w('st', 'chart', 'Stats', 'verdigris', [0, 5, 4, 3], 'viewers'),
+      w('db', 'browser', 'Dashboard', 'saffron', [4, 5, 4, 3], 'dash'),
     ],
   },
 ];
@@ -2104,11 +2234,9 @@ export const WORKSPACES: Workspace[] = [
 const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
+const TAG = 28; // room above a window for its zone tag
 const TASKBAR = 40; // the Windows taskbar, along the bottom
-// Zones fill the desktop above the taskbar, three windows to a view at most, as in the app. Windows sit a thin line of
-// desktop apart, as tiles sit apart by their grout, so each reads as its own window (drawn edge to edge, their round
-// corners and shadows looked like overlaps).
-const [TOP, BOTTOM, SIDE, PAD] = [4, TASKBAR + 4, 4, 8];
+const [TOP, BOTTOM, SIDE, PAD] = [22, TASKBAR + 14, 26, 12];
 
 /** The shortcut that opens Mosaïk's switcher (the app's default). */
 export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];
@@ -2118,8 +2246,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
-  // Windows fill their zones (each wears its tag in its own title bar), a thin line apart.
-  return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + PAD / 2), width: r1(cols * colW - PAD), height: r1(rows * rowH - PAD) };
+  return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + TAG), width: r1(cols * colW - PAD), height: r1(rows * rowH - TAG - PAD / 2) };
 }
 
 /** Where a maximised window sits: everything above the taskbar. */
@@ -2137,12 +2264,12 @@ function mulberry32(seed: number) {
 }
 
 export interface DeskLayout {
-  /** each window's frame */
+  /** each window's frame, including the strip above it for the zone tag */
   rects: Rect[];
   /** how far each window moves for the messy desktop */
   poses: { x: number; y: number }[];
   z: number[];
-  /** the window people keep maximised without Mosaïk: the workspace's first, the one the work is done in */
+  /** the window people keep maximised without Mosaïk: the biggest one */
   main: number;
   full: Rect;
 }
@@ -2155,18 +2282,19 @@ export interface DeskLayout {
 export function deskLayout(index: number, deskH: number): DeskLayout {
   const rnd = mulberry32((index + 1) * 7919 + 13);
   const jit = (n: number) => Math.round((rnd() - 0.5) * 2 * n);
-  const rects = WORKSPACES[index].windows.map((win) => slotBox(win.slot, deskH));
-  // The first window is the one the work is done in, kept maximised without Mosaïk; the others lie over it, the biggest lowest.
-  const area = (i: number) => rects[i].width * rects[i].height;
-  const order = [0, ...rects.map((_, i) => i).slice(1).sort((a, b) => area(b) - area(a))];
+  const rects = WORKSPACES[index].windows.map((win) => {
+    const b = slotBox(win.slot, deskH);
+    return { left: b.left, top: b.top - TAG, width: b.width, height: b.height + TAG };
+  });
+  const order = rects.map((_, i) => i).sort((a, b) => rects[b].width * rects[b].height - rects[a].width * rects[a].height);
   const placed = rects.map((r) => ({ left: r.left, top: r.top }));
   const maxB = deskH - TASKBAR - 12;
   // Each desktop is messy in its own way. Fractions place a window inside the free range: [across, down].
   const WHERE: Record<string, [number, number]> = {
-    tm: [1, 1], pr: [0.5, 0.1], // developer: terminal bottom right, review mid-screen
-    rf: [0.62, 0.02], cl: [1, 1], // designer: references and the client floating over the canvas
-    pp: [0.9, 0.12], dt: [0.12, 1], // researcher: the paper up on the right, the data low on the left
-    lc: [1, 0.35], db: [0.3, 0.18], // streamer: chat down the right, the dashboard on the left
+    tm: [1, 1], pr: [0.5, 0.1], ch: [0.02, 0.8], // developer: terminal bottom right, review mid-screen, chat tucked bottom left
+    rf: [0.62, 0.02], br: [0.1, 0.55], cl: [1, 1], // designer: palettes floating around the canvas
+    dr: [0, 0.3], dt: [0.88, 0], sr: [0.55, 1], // researcher: tall draft on the left, data up top, sources low
+    lc: [1, 0.35], st: [0.03, 1], db: [0.3, 0.18], // streamer: chat down the right, dashboards on the left
   };
   order.slice(1).forEach((i) => {
     const r = rects[i];

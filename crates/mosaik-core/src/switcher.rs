@@ -10,7 +10,7 @@
 
 use crate::editing::MAX_NAME;
 use crate::geometry::RatioRect;
-use crate::layout::{Workspace, WorkspaceId};
+use crate::layout::{Slot, Workspace, WorkspaceId};
 use crate::zone::ZoneColor;
 
 /// A workspace as the switcher lists it.
@@ -18,8 +18,8 @@ use crate::zone::ZoneColor;
 pub struct Entry {
     pub id: WorkspaceId,
     pub name: String,
-    pub windows: usize,
-    pub zones: usize,
+    /// Its apps' names, in the workspace's order: a workspace is known by what is in it.
+    pub apps: Vec<String>,
     pub preview: Preview,
 }
 
@@ -43,8 +43,7 @@ impl Entry {
         Self {
             id: w.id.clone(),
             name: w.name.clone(),
-            windows: w.layout.slots.len(),
-            zones: w.layout.zones.len(),
+            apps: w.layout.slots.iter().map(Slot::name).collect(),
             preview: Preview {
                 aspect,
                 zones: w
@@ -55,6 +54,24 @@ impl Entry {
                     .map(|z| (z.area, z.color))
                     .collect(),
             },
+        }
+    }
+
+    /// Its apps on one line, as the switcher shows them under its name.
+    pub fn apps_line(&self) -> String {
+        if self.apps.is_empty() {
+            "No apps yet".to_owned()
+        } else {
+            self.apps.join(", ")
+        }
+    }
+
+    /// Its apps as a sentence says them: "Figma, Google Chrome and Notes".
+    fn apps_spoken(&self) -> String {
+        match self.apps.as_slice() {
+            [] => "no apps yet".to_owned(),
+            [one] => one.clone(),
+            [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
         }
     }
 }
@@ -253,19 +270,14 @@ impl Model {
     /// What a screen reader says for the n-th shown entry.
     pub fn spoken(&self, index: usize) -> Option<String> {
         let e = *self.shown().get(index)?;
-        let mut s = format!(
-            "{}, {} {}, {} {}",
-            e.name,
-            e.windows,
-            if e.windows == 1 { "window" } else { "windows" },
-            e.zones,
-            if e.zones == 1 { "zone" } else { "zones" }
-        );
-        if self.active.as_ref() == Some(&e.id) {
-            s.push_str(", current");
-        }
+        let open = if self.active.as_ref() == Some(&e.id) {
+            ", open now"
+        } else {
+            ""
+        };
+        let mut s = format!("{}{open}: {}", e.name, e.apps_spoken());
         if let Some(k) = self.key_for(index) {
-            s.push_str(&format!(", press {k}"));
+            s.push_str(&format!(". Press {k}"));
         }
         Some(s)
     }
@@ -330,8 +342,7 @@ mod tests {
         Entry {
             id: WorkspaceId(id.into()),
             name: name.into(),
-            windows: 3,
-            zones: 2,
+            apps: vec!["Figma".into(), "Google Chrome".into(), "Notes".into()],
             preview: Preview::default(),
         }
     }
@@ -459,14 +470,32 @@ mod tests {
         assert_eq!(m.key_for(0).as_deref(), Some("1"));
         assert_eq!(
             m.spoken(1).as_deref(),
-            Some("Brand refresh, 3 windows, 2 zones, current, press 2")
+            Some("Brand refresh, open now: Figma, Google Chrome and Notes. Press 2")
         );
         m.key(Key::Char('b'));
         assert_eq!(m.key_for(0), None);
         assert_eq!(
             m.spoken(0).as_deref(),
-            Some("Brand refresh, 3 windows, 2 zones, current")
+            Some("Brand refresh, open now: Figma, Google Chrome and Notes")
         );
+    }
+
+    #[test]
+    fn a_workspace_is_named_by_its_apps() {
+        let one = Entry {
+            apps: vec!["Visual Studio Code".into()],
+            ..entry("ship", "Ship")
+        };
+        let none = Entry {
+            apps: Vec::new(),
+            ..entry("mail", "Mail")
+        };
+        assert_eq!(one.apps_line(), "Visual Studio Code");
+        assert_eq!(none.apps_line(), "No apps yet");
+        assert_eq!(entry("brand", "Brand").apps_line(), "Figma, Google Chrome, Notes");
+        let m = Model::new(vec![one, none], None);
+        assert_eq!(m.spoken(0).as_deref(), Some("Ship: Visual Studio Code. Press 1"));
+        assert_eq!(m.spoken(1).as_deref(), Some("Mail: no apps yet. Press 2"));
     }
 
     #[test]

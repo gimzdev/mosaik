@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppBody, AppWindow, EditorApp, ZoneFrame } from '@/components/apps';
 import { Icon } from '@/components/ui';
-import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, type Win, type Zone } from '@/lib/data';
+import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
 const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
@@ -154,9 +154,9 @@ export function Stage() {
               : { m: pose, mt: poseT, o: 1, t: `transform .8s ${EASE} ${st}, opacity .24s ease-out ${st}` };
       return [
         <div key={`${ws.id}-${w.id}`} className="win" style={vars(g.a.rects[i], g.b.rects[i], look, z)}>
-          <div className="relative h-full">
+          <div className="relative h-full pt-[28px]">
             <AppWindow win={w} plain={!ordered} />
-            <div className="dim inset-0 rounded-[10px]" style={{ opacity: dim }} />
+            <div className="dim inset-x-0 bottom-0 top-[28px] rounded-[10px]" style={{ opacity: dim }} />
           </div>
         </div>,
       ];
@@ -184,7 +184,7 @@ export function Stage() {
             : { m: HOME, mt: HOME, o: 1, t: `transform .8s ${EASE} ${st}, opacity .25s ease-out .18s` };
     return [
       <div key={`${ws.id}-${w.id}`} className="win pointer-events-none" style={vars(g.a.rects[i], g.b.rects[i], tiled, z)}>
-        <div className="h-full">
+        <div className="h-full pt-[28px]">
           <AppWindow win={w} plain={!ordered} />
         </div>
       </div>,
@@ -279,8 +279,8 @@ export function ZonesArt() {
         <ZoneBox x={40} y={52} w={720} h={700} zone="lapis" />
         <ZoneBox x={788} y={52} w={452} h={340} zone="verdigris" />
         <ZoneBox x={788} y={410} w={452} h={342} zone="saffron" filled />
-        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={68} w={688} h={668} />
-        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={68} w={420} h={308} />
+        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={96} w={688} h={640} />
+        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={96} w={420} h={280} />
         <p className="absolute text-center text-[18px] font-semibold text-[#F4B13A]" style={{ left: 788, top: 560, width: 452 }}>
           Release to place in Review
         </p>
@@ -300,10 +300,9 @@ export function TabsArt() {
       <Scaled className={ART}>
         <Wallpaper />
         <div className="absolute" style={{ left: 36, top: 52, width: 1090, height: 710 }}>
-          {/* The zone's tag starts the strip, as in the app. */}
-          <ZoneFrame tag="Code" zone="lapis" tagAt={{ top: 17, right: 'auto', left: 14 }}>
+          <ZoneFrame tag="Code" zone="lapis">
             <div className="flex h-full flex-col bg-[#16181D]">
-              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] pl-[80px] pr-3 text-[14px]">
+              <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] px-3 text-[14px]">
                 {TABS.map(([name, c], i) => (
                   <div key={name} className={`flex h-[38px] items-center gap-2.5 rounded-t-[10px] px-5 ${i ? 'text-[#8E97AA]' : 'bg-[#1E2027] font-semibold text-white'}`} style={i ? undefined : { boxShadow: `inset 0 3px 0 ${c}` }}>
                     <span className="h-3 w-3 rounded-[4px]" style={{ background: c }} />
@@ -332,11 +331,24 @@ const Key = ({ children, dim }: { children: ReactNode; dim?: boolean }) => (
 );
 
 /** Saved layouts: Mosaïk's switcher as the app draws it (Win+Alt+Space opens it; 1 to 9 pick). */
+/** What the switcher calls each kind of app, under a workspace's name. */
+const APP_WORDS: Record<Win['kind'], string> = {
+  editor: 'Code editor',
+  terminal: 'Terminal',
+  browser: 'Browser',
+  chat: 'Chat',
+  design: 'Design app',
+  notes: 'Notes',
+  paper: 'PDF reader',
+  chart: 'Charts',
+  stream: 'Broadcast',
+};
+
 export function SwitcherArt() {
   return (
     <div className="switcher-bg relative overflow-hidden rounded-[20px] bg-ink px-5 py-10 ring-1 ring-black/10 sm:px-10 sm:py-14">
-      <div className="mx-auto w-full max-w-[470px] overflow-hidden rounded-[16px] border border-white/10 bg-[#1B1E26] text-[#E6E9F0] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)]" role="img" aria-label="Mosaïk's switcher, opened with Windows, Alt and Space: four saved workspaces with a preview of each layout, each picked with its number. Brand refresh is selected.">
-        <div className="flex h-[52px] items-center gap-3 border-b border-white/10 pl-5 pr-4 text-[15px] text-[#8E97AA]">
+      <div className="mx-auto w-full max-w-[470px] overflow-hidden rounded-[16px] border border-white/10 bg-[#1B2130] text-[#EDEFEA] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.7)]" role="img" aria-label="Mosaïk's switcher, opened with Windows, Alt and Space: four saved workspaces, each with its layout in small and its apps, each picked with its number. Brand refresh is selected.">
+        <div className="flex h-[52px] items-center gap-3 border-b border-white/10 pl-5 pr-4 text-[15px] text-[#A0A9B8]">
           <span className="flex-1">Switch workspace</span>
           <span className="flex gap-1.5">
             {SWITCHER_KEYS.map((k) => (
@@ -346,9 +358,9 @@ export function SwitcherArt() {
         </div>
         <div className="p-2">
           {WORKSPACES.map((w, i) => (
-            <div key={w.id} className={`relative flex items-center gap-4 rounded-[10px] px-3 py-2.5 ${w.id === 'brand' ? 'bg-[#272B37]' : ''}`}>
-              {w.id === 'brand' && <span className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-[#7C93FF]" />}
-              <div className="relative h-[40px] w-[64px] shrink-0 overflow-hidden rounded-[6px] bg-[#12151B] ring-1 ring-white/10">
+            <div key={w.id} className={`relative flex items-center gap-4 rounded-[10px] px-3 py-2.5 ${w.id === 'brand' ? 'bg-[#262E3F]' : ''}`}>
+              {w.id === 'brand' && <span className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-[#8A9BFF]" />}
+              <div className="relative h-[40px] w-[64px] shrink-0 overflow-hidden rounded-[6px] bg-[#0D1016] ring-1 ring-white/10">
                 {w.windows.map(({ id, slot: [c, r, cw, rh], zone }) => (
                   <span key={id} className="absolute rounded-[2px]" style={{ left: `${(c / 12) * 100 + 2}%`, top: `${(r / 8) * 100 + 4}%`, width: `${(cw / 12) * 100 - 3}%`, height: `${(rh / 8) * 100 - 6}%`, background: ZONE[zone].bg }} />
                 ))}
@@ -356,22 +368,38 @@ export function SwitcherArt() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[15px] font-semibold">
                   {w.name}
-                  {i === 0 && <span className="font-normal text-[#8E97AA]"> · current</span>}
+                  {i === 0 && <span className="ml-2 text-[12.5px] text-[#8A9BFF]">Open</span>}
                 </p>
-                <p className="text-[12.5px] text-[#8E97AA]">
-                  {w.windows.length} windows · {new Set(w.windows.map((x) => x.zone)).size} zones
-                </p>
+                <p className="truncate text-[12.5px] text-[#A0A9B8]">{w.windows.map((x) => APP_WORDS[x.kind]).join(', ')}</p>
               </div>
               <Key dim>{i + 1}</Key>
             </div>
           ))}
         </div>
-        <div className="flex items-center gap-5 border-t border-white/10 px-5 py-2.5 text-[12px] text-[#8E97AA]">
-          <span><b className="font-semibold text-[#C9CEDA]">Enter</b> open</span>
-          <span><b className="font-semibold text-[#C9CEDA]">S</b> save current layout</span>
-          <span><b className="font-semibold text-[#C9CEDA]">Esc</b> close</span>
+        <div className="flex items-center gap-5 border-t border-white/10 px-5 py-2.5 text-[12px] text-[#A0A9B8]">
+          <span><b className="font-semibold text-[#EDEFEA]">Enter</b> open</span>
+          <span><b className="font-semibold text-[#EDEFEA]">S</b> save current layout</span>
+          <span><b className="font-semibold text-[#EDEFEA]">Esc</b> close</span>
         </div>
       </div>
     </div>
+  );
+}
+
+/** A whole workspace as a still desktop, for thumbnails. */
+export function DeskThumb({ index }: { index: number }) {
+  return (
+    <Scaled className="bg-ink">
+      <Wallpaper />
+      <Taskbar />
+      {WORKSPACES[index].windows.map((w) => {
+        const b = slotBox(w.slot, DESK_H);
+        return (
+          <div key={w.id} className="absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height }}>
+            <AppWindow win={w} />
+          </div>
+        );
+      })}
+    </Scaled>
   );
 }

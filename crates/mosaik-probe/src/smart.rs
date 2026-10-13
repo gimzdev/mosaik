@@ -1704,9 +1704,12 @@ fn quick_menu(
             "front_window_focused_first": focused,
             "front_window_kept_keyboard": kept_keyboard,
             // It opens as soon as the pointer stops on the handle (the owner: "instantly"),
-            // Mosaïk and the workspace on its first line, and no Undo row.
-            "ok": rested && open_ms <= 250 && labels.get(1) == Some(&"Arrange windows")
-                && labels.contains(&"Switch workspace") && !labels.contains(&"Undo arrange")
+            // Mosaïk and the workspace on its first line, Arrange, a strip of layouts, the
+            // workspaces, and no Undo row.
+            "ok": rested && open_ms <= 250 && labels.get(1) == Some(&"Arrange")
+                && ["Halves", "Thirds", "Main + side", "Half + stack", "Quarters"].iter().all(|l| labels.contains(l))
+                && labels.iter().filter(|l| **l == ws_name).count() == 2
+                && !labels.contains(&"Undo arrange")
                 && menu.rows.first().is_some_and(|r| r.label == ws_name)
                 && (!focused || kept_keyboard),
         }),
@@ -1716,7 +1719,7 @@ fn quick_menu(
     let row = menu
         .rows
         .iter()
-        .find(|r| r.label == "Arrange windows")
+        .find(|r| r.label == "Arrange")
         .ok_or("the menu has no Arrange row")?;
     glide(q.rect.center(), row.rect.center());
     pump_until(150, || false);
@@ -1741,8 +1744,48 @@ fn quick_menu(
         }),
     );
 
+    // 4c2. A layout from the menu's strip: Halves lays the main screen out in two halves, the
+    // two windows one in each, and the menu closes.
+    glide(row.rect.center(), q.rect.center());
+    let (again, _) = wait_menu(engine, 2000, is_open)?;
+    let strip = again
+        .filter(|m| m.open)
+        .ok_or("the menu did not open again for a layout")?;
+    let halves = strip
+        .rows
+        .iter()
+        .find(|r| r.label == "Halves")
+        .ok_or("the menu has no Halves")?
+        .rect;
+    glide(q.rect.center(), halves.center());
+    pump_until(150, || false);
+    {
+        let _button = LeftButton::press();
+        pump_until(120, || false);
+    }
+    pump_until(500, || false);
+    let st = settled(engine)?;
+    let ws = st.active_workspace.clone().ok_or("no workspace open")?;
+    let zs = zones(engine, &ws.0, work)?;
+    let halves_fit = fit(&st, &zs, styles, &w[..2]);
+    let half = work.width() / 2;
+    let two_halves = zs.len() == 2
+        && zs
+            .iter()
+            .all(|(_, r)| (r.width() - half).abs() <= 2 && (r.height() - work.height()).abs() <= 2);
+    let closed = is_handle(st.quick_menu.as_ref());
+    out.insert(
+        "layout_from_menu".into(),
+        json!({
+            "zones": rects(&zs),
+            "fit_px": halves_fit,
+            "menu_closed": closed,
+            "ok": two_halves && all_fit(&halves_fit) && closed,
+        }),
+    );
+
     // 4d. Open again, then leave: it closes a moment later, not at once.
-    let row_point = row.rect.center();
+    let row_point = halves.center();
     glide(row_point, q.rect.center());
     let (reopened, _) = wait_menu(engine, 2000, is_open)?;
     let reopened = is_open(reopened.as_ref());

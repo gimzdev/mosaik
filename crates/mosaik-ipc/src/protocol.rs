@@ -2,10 +2,10 @@
 
 use mosaik_core::classify::Verdict;
 use mosaik_core::editing::ZoneEdit;
-use mosaik_core::geometry::Rect;
+use mosaik_core::geometry::{RatioRect, Rect};
 use mosaik_core::journal::{HiddenWindow, HideMethod};
 use mosaik_core::layout::{SlotId, TabGroupId, WorkspaceId};
-use mosaik_core::settings::Settings;
+use mosaik_core::settings::{EdgeSide, Settings};
 use mosaik_core::task::Task;
 use mosaik_core::window::{Elevation, WindowHandle};
 use mosaik_core::zone::{ZoneColor, ZoneId};
@@ -19,7 +19,10 @@ use thiserror::Error;
 /// tabs, and its preview says the task the main monitor is laid out for.
 /// 6: sets of apps (`sets`, `open_set`), and the windows open sorted into workspaces
 /// (`sort_windows`).
-pub const PROTOCOL_VERSION: u32 = 6;
+/// 7: apps' icons (`icon` and `icons`: keys for the window's `app_icons`), a workspace's zones in
+/// small (`layout`), and in `settings` where the side menu is, whether the settings can be saved,
+/// and whether Mosaïk runs as installed (`side_menu`, `read_only`, `packaged`).
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -190,6 +193,17 @@ pub enum Reply {
     Settings {
         settings: Box<Settings>,
         hotkey: HotkeyState,
+        /// Where the side menu's line is now (`None`: it is off, or Mosaïk is in safe mode).
+        #[serde(default)]
+        side_menu: Option<SideMenuState>,
+        /// The settings file was saved by a newer Mosaïk: it is read, and never written over.
+        #[serde(default)]
+        read_only: bool,
+        /// Mosaïk runs as installed (the Store's package), so its first run starts it with
+        /// Windows; a build run from a folder is left as it is (its Run entry would name a folder
+        /// that may go away).
+        #[serde(default)]
+        packaged: bool,
     },
     /// What `check_hotkey` found: the shortcut as Mosaïk writes it, why it cannot be used (if
     /// so), and what is worth knowing about it otherwise.
@@ -218,6 +232,21 @@ pub enum Reply {
     },
 }
 
+/// Where the side menu's line is: on the edge chosen, or on the other one (`moved`) when the
+/// pointer goes on past the chosen edge to another screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SideMenuState {
+    pub side: EdgeSide,
+    pub moved: bool,
+}
+
+/// A zone of a workspace in small: where it is on the workspace's first monitor, and its colour.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MiniZone {
+    pub area: RatioRect,
+    pub color: ZoneColor,
+}
+
 /// A set of apps that go together for a task.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppSetInfo {
@@ -227,6 +256,9 @@ pub struct AppSetInfo {
     pub name: String,
     /// Its apps' names, in the order of their zones.
     pub apps: Vec<String>,
+    /// Each app's icon key, in the same order (`mosaik_core::icons`).
+    #[serde(default)]
+    pub icons: Vec<Option<String>>,
     /// How many of them are open now.
     pub open: u32,
     /// Its workspace, once it has one.
@@ -249,6 +281,9 @@ pub struct WorkspaceApp {
     pub id: SlotId,
     /// What to call it ("Visual Studio Code").
     pub label: String,
+    /// Its icon key (`mosaik_core::icons`).
+    #[serde(default)]
+    pub icon: Option<String>,
     /// The zone it goes in (a tab: its group's), if any.
     pub zone: Option<ZoneId>,
     /// It is a tab of a group.
@@ -269,6 +304,9 @@ pub struct OpenWindow {
     pub window: WindowHandle,
     pub label: String,
     pub title: String,
+    /// Its app's icon key (`mosaik_core::icons`).
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 /// What Arrange would do on the main monitor, in screen pixels.
@@ -299,6 +337,9 @@ pub struct PreviewZone {
 pub struct PreviewWindow {
     /// The app's name ("Visual Studio Code").
     pub label: String,
+    /// Its app's icon key (`mosaik_core::icons`).
+    #[serde(default)]
+    pub icon: Option<String>,
     /// Where its frame is now.
     pub now: Rect,
     /// Where it would go (`None`: it stays where it is, or is minimised).
@@ -436,7 +477,7 @@ pub struct HotkeyState {
     pub problem: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceSummary {
     pub id: WorkspaceId,
     pub name: String,
@@ -446,6 +487,12 @@ pub struct WorkspaceSummary {
     /// Its apps' names, front to back ("Visual Studio Code").
     #[serde(default)]
     pub apps: Vec<String>,
+    /// Each app's icon key, in the same order (`mosaik_core::icons`).
+    #[serde(default)]
+    pub icons: Vec<Option<String>>,
+    /// Its zones on its first monitor.
+    #[serde(default)]
+    pub layout: Vec<MiniZone>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -654,7 +701,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":6,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":7,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -663,13 +710,13 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":6,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":7,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
     }
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":7,"id":1,"cmd":"state"}"#).unwrap_err();
-        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 7, server: 6 });
+        let err = decode_request(br#"{"v":8,"id":1,"cmd":"state"}"#).unwrap_err();
+        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 8, server: 7 });
         // Older clients are understood.
         assert!(decode_request(br#"{"v":1,"id":1,"cmd":"state"}"#).is_ok());
         assert!(err.to_string().contains("update Mosaïk"));
@@ -921,6 +968,24 @@ mod wire {
                         "Windows Terminal".into(),
                         "Slack".into(),
                     ],
+                    icons: vec![
+                        Some(r"exe:C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe".into()),
+                        Some(r"exe:C:\Program Files\Google\Chrome\Application\chrome.exe".into()),
+                        Some("app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App".into()),
+                        None,
+                    ],
+                    layout: vec![
+                        MiniZone {
+                            area: mosaik_core::geometry::RatioRect::new(0.0, 0.0, 0.6, 1.0)
+                                .unwrap_or(mosaik_core::geometry::RatioRect::FULL),
+                            color: ZoneColor::Lapis,
+                        },
+                        MiniZone {
+                            area: mosaik_core::geometry::RatioRect::new(0.6, 0.0, 1.0, 1.0)
+                                .unwrap_or(mosaik_core::geometry::RatioRect::FULL),
+                            color: ZoneColor::Verdigris,
+                        },
+                    ],
                 }],
                 active: Some(WorkspaceId("ship".into())),
             },
@@ -939,6 +1004,12 @@ mod wire {
                     registered: true,
                     problem: None,
                 },
+                side_menu: Some(SideMenuState {
+                    side: mosaik_core::settings::EdgeSide::Left,
+                    moved: true,
+                }),
+                read_only: false,
+                packaged: true,
             },
             Reply::Hotkey {
                 hotkey: "Ctrl+Alt+K".into(),
@@ -977,18 +1048,23 @@ mod wire {
                 windows: vec![
                     PreviewWindow {
                         label: "Visual Studio Code".into(),
+                        icon: Some(
+                            r"exe:C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe".into(),
+                        ),
                         now: Rect::new(120, 80, 1100, 760),
                         then: Some(Rect::new(0, 0, 960, 1032)),
                         minimized: false,
                     },
                     PreviewWindow {
                         label: "Google Chrome".into(),
+                        icon: Some(r"exe:C:\Program Files\Google\Chrome\Application\chrome.exe".into()),
                         now: Rect::new(700, 200, 1800, 980),
                         then: Some(Rect::new(960, 0, 1920, 1032)),
                         minimized: false,
                     },
                     PreviewWindow {
                         label: "Microsoft Edge".into(),
+                        icon: None,
                         now: Rect::new(300, 300, 1200, 900),
                         then: None,
                         minimized: true,
@@ -1004,12 +1080,16 @@ mod wire {
                     WorkspaceApp {
                         id: SlotId("s1".into()),
                         label: "Visual Studio Code".into(),
+                        icon: Some(
+                            r"exe:C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe".into(),
+                        ),
                         zone: Some(ZoneId::new("z1")),
                         tab: false,
                     },
                     WorkspaceApp {
                         id: SlotId("s2".into()),
                         label: "Windows Terminal".into(),
+                        icon: Some("app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App".into()),
                         zone: None,
                         tab: false,
                     },
@@ -1023,6 +1103,7 @@ mod wire {
                     window: WindowHandle(0x2_04F2),
                     label: "Google Chrome".into(),
                     title: "Release notes - Google Chrome".into(),
+                    icon: Some(r"exe:C:\Program Files\Google\Chrome\Application\chrome.exe".into()),
                 }],
             })),
             Reply::Sets {
@@ -1035,6 +1116,13 @@ mod wire {
                         "Google Chrome".into(),
                         "Claude".into(),
                         "File Explorer".into(),
+                    ],
+                    icons: vec![
+                        Some(r"exe:C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe".into()),
+                        Some("app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App".into()),
+                        Some("app:Chrome".into()),
+                        Some("app:Claude".into()),
+                        Some("app:Microsoft.Windows.Explorer".into()),
                     ],
                     open: 2,
                     workspace: None,

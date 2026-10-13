@@ -1,5 +1,5 @@
 /* The pretend apps drawn inside the demo desktops. Plain markup, sized in pixels on a 1280 px canvas. */
-import { memo, useId, type CSSProperties, type ReactNode } from 'react';
+import { memo, useId, type ReactNode } from 'react';
 import { TILES, ZONE, type Win } from '@/lib/data';
 import { Icon, Wordmark } from '@/components/ui';
 
@@ -266,6 +266,30 @@ const Refs = () => (
   </div>
 );
 
+const RESULTS = [
+  ['Ocean heat content: a regional reassessment', 'journals.example.org › climate › 2024', 'Upper-ocean heat content rose in every basin between 2005 and 2022, with the largest gains in the subtropical Atlantic.'],
+  ['Sea surface temperature records, 1980 to today', 'data.example.gov › sst › monthly', 'Monthly gridded anomalies relative to the 1991 to 2020 mean, with uncertainty estimates for each cell.'],
+  ['Methods for estimating deep-ocean warming', 'arxiv.example.org › abs › 2403.01177', 'We compare three interpolation schemes for sparse float data and quantify the bias each introduces below 700 m.'],
+];
+
+const Sources = () => (
+  <div className="h-full px-6 py-5">
+    <div className="flex h-[38px] items-center gap-2.5 rounded-full border border-[#DADFE6] px-4 text-[13px] shadow-xs">
+      <Icon n="search" s={14} /> ocean heat content trend 0-2000 m
+    </div>
+    <p className="mt-3 text-[11.5px] text-[#8A93A3]">About 1,240,000 results</p>
+    <div className="mt-3 space-y-4">
+      {RESULTS.map(([t, u, s]) => (
+        <div key={t}>
+          <p className="text-[11.5px] text-[#4A5262]">{u}</p>
+          <p className="text-[16px] leading-snug text-[#2B44D9]">{t}</p>
+          <p className="mt-0.5 text-[12.5px] leading-snug text-[#5B6474]">{s}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
 const Dash = () => (
   <div className="h-full bg-[#F6F7F9] px-5 py-4">
     <p className="text-[16px] font-semibold">Creator dashboard</p>
@@ -289,6 +313,7 @@ const Dash = () => (
 const PAGES: Record<string, [string, string, () => ReactNode]> = {
   pr: ['git.acme.dev/shop/pull/482/files', 'Add one-tap checkout #482', Pull],
   refs: ['pinboard.example/brand-refresh', 'Tessellation, references', Refs],
+  sources: ['search.example/?q=ocean+heat+content', 'ocean heat content trend', Sources],
   dash: ['studio.example/dashboard', 'Creator dashboard', Dash],
 };
 
@@ -556,32 +581,63 @@ function DesignApp() {
 }
 
 /* ── notes, reader, charts ─────────────────────────────────────────────── */
-function NotesApp() {
-  const P = ({ children }: { children: ReactNode }) => <p className="mt-2 text-[13.5px] leading-[1.7] text-[#2A303C]">{children}</p>;
-  return (
-    <div className="flex h-full w-full flex-col bg-[#FBFBF8] text-[#1B1F29]">
-      <TitleBar title="Thesis - 3. Results" glyph="#12786A" />
-      <div className="min-h-0 flex-1 overflow-hidden px-9 py-7">
-        <p className="text-[11.5px] text-[#8A93A3]">Chapter 3</p>
-        <p className="font-display text-[28px] font-bold leading-tight tracking-[-0.02em]">Results</p>
-        <p className="mt-5 font-display text-[17px] font-semibold">3.1 Warming of the upper ocean</p>
-        <P>
-          Between 1980 and 2020 the global mean sea surface temperature anomaly rose by 0.87 °C (Figure 3.2). The increase was not uniform: the
-          subtropical Atlantic and the Indian Ocean warmed fastest, while the Southern Ocean showed the weakest trend over the same period.
-        </P>
-        <p className="mt-3 text-[13.5px] leading-[1.7] text-[#2A303C]">
-          Heat content in the top 700 m followed a similar pattern<sup className="text-[#C93450]">12</sup>. We therefore treat the two series as
-          consistent and report regional estimates in Table 3.1, with uncertainty ranges derived from the float coverage described in Section 2.4.
-        </p>
-        <p className="mt-5 font-display text-[17px] font-semibold">3.2 Regional differences</p>
-        <P>
-          Regional trends diverge most strongly after 2005, when the float network reached full global coverage and the sampling bias in the
-          earlier record largely disappears.
-        </P>
+function NotesApp({ variant = 'brief' }: { variant?: string }) {
+  if (variant === 'draft') {
+    const P = ({ children }: { children: ReactNode }) => <p className="mt-2 text-[13.5px] leading-[1.7] text-[#2A303C]">{children}</p>;
+    return (
+      <div className="flex h-full w-full flex-col bg-[#FBFBF8] text-[#1B1F29]">
+        <TitleBar title="Thesis - 3. Results" glyph="#12786A" />
+        <div className="min-h-0 flex-1 overflow-hidden px-9 py-7">
+          <p className="text-[11.5px] text-[#8A93A3]">Chapter 3</p>
+          <p className="font-display text-[28px] font-bold leading-tight tracking-[-0.02em]">Results</p>
+          <p className="mt-5 font-display text-[17px] font-semibold">3.1 Warming of the upper ocean</p>
+          <P>
+            Between 1980 and 2020 the global mean sea surface temperature anomaly rose by 0.87 °C (Figure 3.2). The increase was not uniform: the
+            subtropical Atlantic and the Indian Ocean warmed fastest, while the Southern Ocean showed the weakest trend over the same period.
+          </P>
+          <p className="mt-3 text-[13.5px] leading-[1.7] text-[#2A303C]">
+            Heat content in the top 700 m followed a similar pattern<sup className="text-[#C93450]">12</sup>. We therefore treat the two series as
+            consistent and report regional estimates in Table 3.1, with uncertainty ranges derived from the float coverage described in Section 2.4.
+          </p>
+          <p className="mt-5 font-display text-[17px] font-semibold">3.2 Regional differences</p>
+          <P>
+            Regional trends diverge most strongly after 2005, when the float network reached full global coverage and the sampling bias in the
+            earlier record largely disappears.
+          </P>
+        </div>
+        <div className="flex h-[26px] shrink-0 items-center justify-between border-t border-[#E3E6EB] px-4 text-[11.5px] text-[#8A93A3]">
+          <span>2,418 words</span>
+          <span>Saved</span>
+        </div>
       </div>
-      <div className="flex h-[26px] shrink-0 items-center justify-between border-t border-[#E3E6EB] px-4 text-[11.5px] text-[#8A93A3]">
-        <span>2,418 words</span>
-        <span>Saved</span>
+    );
+  }
+  return (
+    <div className="flex h-full w-full flex-col bg-white text-[#1B1F29]">
+      <TitleBar title="Brand refresh brief - Notes" glyph="#12786A" />
+      <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
+        <p className="font-display text-[22px] font-bold leading-tight tracking-[-0.02em]">Brand refresh brief</p>
+        <p className="mt-2 flex gap-4 text-[12px] text-[#5B6474]">
+          <span className="rounded-full bg-[#FFF1D6] px-2.5 py-0.5 font-semibold text-[#8A5A00]">In progress</span>
+          <span>Due Oct 17</span>
+          <span>Owner: you</span>
+        </p>
+        <p className="mt-3.5 text-[13px] font-semibold">Goals</p>
+        <ul className="mt-1 space-y-1 text-[13px] text-[#2A303C]">
+          <li>• A mark that works at 16 px and on a billboard</li>
+          <li>• Warm, mineral palette, no gradients</li>
+        </ul>
+        <p className="mt-3.5 text-[13px] font-semibold">To do</p>
+        <div className="mt-1.5 space-y-1.5 text-[13px]">
+          {(['Tighten wordmark spacing', 'Export lockups for the deck', 'Colour-blind check'] as const).map((t, i) => (
+            <p key={t} className="flex items-center gap-2">
+              <span className={`grid h-[15px] w-[15px] place-items-center rounded-[4px] border ${i < 2 ? 'border-[#12786A] bg-[#12786A] text-white' : 'border-[#9AA3B2]'}`}>
+                {i < 2 && <Icon n="check" s={11} w={2.2} />}
+              </span>
+              <span className={i < 2 ? 'text-[#8A93A3] line-through' : ''}>{t}</span>
+            </p>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -631,14 +687,14 @@ function PaperApp() {
   );
 }
 
-function LineChart({ data, xLabels, yTicks, color, h }: { data: number[]; xLabels: string[]; yTicks: number[]; color: string; h: number }) {
+function LineChart({ data, xLabels, yTicks, color, h, dark }: { data: number[]; xLabels: string[]; yTicks: number[]; color: string; h: number; dark?: boolean }) {
   const id = useSvgId();
   const [w, padL, padR, padT, padB] = [420, 38, 14, 12, 26];
   const [min, max] = [Math.min(...yTicks), Math.max(...yTicks)];
   const X = (i: number, n = data.length) => padL + (i / (n - 1)) * (w - padL - padR);
   const Y = (v: number) => padT + (1 - (v - min) / (max - min)) * (h - padT - padB);
   const line = data.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
-  const [grid, txt] = ['#E4E7EC', '#8A93A3'];
+  const [grid, txt] = dark ? ['#2A2F3B', '#7B8499'] : ['#E4E7EC', '#8A93A3'];
   const last = data.length - 1;
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="block h-full w-full" aria-hidden="true" fontSize="10" fill={txt}>
@@ -659,24 +715,36 @@ function LineChart({ data, xLabels, yTicks, color, h }: { data: number[]; xLabel
       ))}
       <path d={`${line} L${X(last).toFixed(1)} ${h - padB} L${X(0).toFixed(1)} ${h - padB} Z`} fill={`url(#${id})`} />
       <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={X(last)} cy={Y(data[last])} r="4.5" fill="#FFFFFF" stroke={color} strokeWidth="2" />
+      <circle cx={X(last)} cy={Y(data[last])} r="4.5" fill={dark ? '#14161B' : '#FFFFFF'} stroke={color} strokeWidth="2" />
     </svg>
   );
 }
 
 const SST = Array.from({ length: 41 }, (_, i) => 0.02 * i + 0.06 * Math.sin(i * 0.9) + 0.03 * Math.sin(i * 2.3) - 0.05);
+const VIEWERS = Array.from({ length: 36 }, (_, i) => 420 + i * 22 + 90 * Math.sin(i * 0.8) + 60 * Math.sin(i * 2.1) + (i > 24 ? 160 : 0));
 
-function ChartApp() {
+function ChartApp({ variant = 'sst' }: { variant?: string }) {
+  const dark = variant === 'viewers';
   return (
-    <div className="flex h-full w-full flex-col bg-white text-[#1B1F29]">
-      <TitleBar title="Sea surface temperature - Data" glyph="#2B44D9" />
+    <div className={`flex h-full w-full flex-col ${dark ? 'bg-[#14161B] text-[#E6E9F0]' : 'bg-white text-[#1B1F29]'}`}>
+      <TitleBar title={dark ? 'Stats' : 'Sea surface temperature - Data'} dark={dark} glyph={dark ? '#12786A' : '#2B44D9'} />
       <div className="flex min-h-0 flex-1 flex-col px-5 py-4">
-        <p className="text-[12px] text-[#8A93A3]">Sea surface temperature anomaly, global mean</p>
-        <p className="flex items-baseline gap-2 text-[28px] font-semibold leading-tight">
-          +0.87 °C <span className="text-[12px] font-semibold text-[#C93450]">since 1980</span>
-        </p>
+        <p className={`text-[12px] ${dark ? 'text-[#8E97AA]' : 'text-[#8A93A3]'}`}>{dark ? 'Concurrent viewers' : 'Sea surface temperature anomaly, global mean'}</p>
+        {dark ? (
+          <p className="flex items-baseline gap-2 text-[28px] font-semibold leading-tight">
+            1,247 <span className="flex items-center gap-1.5 text-[12px] font-semibold text-[#5FD3B6]"><span className="h-2 w-2 rounded-full bg-[#5FD3B6]" /> Live</span>
+          </p>
+        ) : (
+          <p className="flex items-baseline gap-2 text-[28px] font-semibold leading-tight">
+            +0.87 °C <span className="text-[12px] font-semibold text-[#C93450]">since 1980</span>
+          </p>
+        )}
         <div className="mt-2 min-h-0 flex-1">
-          <LineChart color="#2B44D9" data={SST} xLabels={['1980', '1990', '2000', '2010', '2020']} yTicks={[-0.2, 0, 0.4, 0.8]} h={190} />
+          {dark ? (
+            <LineChart dark color="#5FD3B6" data={VIEWERS} xLabels={['8 pm', '8:30', '9 pm', '9:30', '10 pm']} yTicks={[0, 500, 1000, 1500]} h={170} />
+          ) : (
+            <LineChart color="#2B44D9" data={SST} xLabels={['1980', '1990', '2000', '2010', '2020']} yTicks={[-0.2, 0, 0.4, 0.8]} h={190} />
+          )}
         </div>
       </div>
     </div>
@@ -767,32 +835,29 @@ export const AppBody = memo(function AppBody({ win }: { win: Pick<Win, 'kind' | 
     case 'browser': return <BrowserApp variant={v} />;
     case 'chat': return <ChatApp variant={v} />;
     case 'design': return <DesignApp />;
-    case 'notes': return <NotesApp />;
+    case 'notes': return <NotesApp variant={v} />;
     case 'paper': return <PaperApp />;
-    case 'chart': return <ChartApp />;
+    case 'chart': return <ChartApp variant={v} />;
     case 'stream': return <StreamApp />;
   }
 });
 
-/**
- * A window. With Mosaïk it wears its zone tag in its own title bar, next to its buttons (`tagAt` places it
- * elsewhere in that bar); plain, it is just a window; flat, it is maximised.
- */
-export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; tagAt?: CSSProperties; children: ReactNode }) {
+/** A window. With Mosaïk it wears its zone frame and tag; plain, it is just a window; flat, it is maximised. */
+export function ZoneFrame({ tag, zone, plain, flat, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; children: ReactNode }) {
   const z = ZONE[zone];
   return (
     <div className="relative h-full w-full">
       <span
-        className="absolute z-10 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
-        style={{ top: 7, right: 140, ...tagAt, background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
+        className="absolute -top-[25px] left-0 flex h-[21px] items-center rounded-full px-[11px] text-[11.5px] font-semibold leading-none transition-opacity duration-300"
+        style={{ background: z.bg, color: z.fg, opacity: plain ? 0 : 1 }}
       >
         {tag}
       </span>
       <div
-        className="h-full w-full overflow-hidden"
+        className="h-full w-full overflow-hidden transition-[box-shadow] duration-300"
         style={{
           borderRadius: flat ? 0 : 10,
-          boxShadow: flat ? 'none' : '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)',
+          boxShadow: flat ? 'none' : plain ? '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)' : `0 0 0 2px ${z.bg}, 0 22px 44px -12px rgba(0,0,0,0.6)`,
         }}
       >
         {children}

@@ -87,8 +87,8 @@
           "minimize_others": true
         },
         "tab_hiding": null,
-        "theme": "system",
-        "version": 5
+        "theme": "dark",
+        "version": 6
       }
     },
     {
@@ -172,7 +172,7 @@
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 6,
+      "protocol": 7,
       "reply": "hello"
     },
     {
@@ -187,7 +187,33 @@
             "Slack"
           ],
           "hotkey": null,
+          "icons": [
+            "exe:C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+            "exe:C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
+            null
+          ],
           "id": "ship",
+          "layout": [
+            {
+              "area": {
+                "bottom": 1.0,
+                "left": 0.0,
+                "right": 0.6,
+                "top": 0.0
+              },
+              "color": "lapis"
+            },
+            {
+              "area": {
+                "bottom": 1.0,
+                "left": 0.6,
+                "right": 1.0,
+                "top": 0.0
+              },
+              "color": "verdigris"
+            }
+          ],
           "name": "Ship the release",
           "windows": 4,
           "zones": 3
@@ -210,6 +236,8 @@
         "registered": true,
         "shortcut": "Win+Alt+Space"
       },
+      "packaged": true,
+      "read_only": false,
       "reply": "settings",
       "settings": {
         "edge": {
@@ -246,8 +274,12 @@
           "minimize_others": true
         },
         "tab_hiding": null,
-        "theme": "system",
-        "version": 5
+        "theme": "dark",
+        "version": 6
+      },
+      "side_menu": {
+        "moved": true,
+        "side": "left"
       }
     },
     {
@@ -305,6 +337,7 @@
       "task": "coding",
       "windows": [
         {
+          "icon": "exe:C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
           "label": "Visual Studio Code",
           "minimized": false,
           "now": {
@@ -321,6 +354,7 @@
           }
         },
         {
+          "icon": "exe:C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
           "label": "Google Chrome",
           "minimized": false,
           "now": {
@@ -337,6 +371,7 @@
           }
         },
         {
+          "icon": null,
           "label": "Microsoft Edge",
           "minimized": true,
           "now": {
@@ -380,12 +415,14 @@
     {
       "apps": [
         {
+          "icon": "exe:C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
           "id": "s1",
           "label": "Visual Studio Code",
           "tab": false,
           "zone": "z1"
         },
         {
+          "icon": "app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
           "id": "s2",
           "label": "Windows Terminal",
           "tab": false,
@@ -396,6 +433,7 @@
       "reply": "apps",
       "windows": [
         {
+          "icon": "exe:C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
           "label": "Google Chrome",
           "title": "Release notes - Google Chrome",
           "window": 132338
@@ -420,6 +458,13 @@
             "Google Chrome",
             "Claude",
             "File Explorer"
+          ],
+          "icons": [
+            "exe:C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+            "app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
+            "app:Chrome",
+            "app:Claude",
+            "app:Microsoft.Windows.Explorer"
           ],
           "id": "coding",
           "name": "Coding",

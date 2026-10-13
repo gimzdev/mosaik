@@ -140,13 +140,13 @@ export function Canvas({
     <div className="flex justify-center" data-canvas>
       <div
         ref={area}
-        className="relative overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--bg)] select-none"
+        className="sky relative overflow-hidden rounded-[18px] border border-[var(--line)] select-none"
         // As wide as the page, or less for a tall monitor, so the zone's details stay in view.
         style={{ aspectRatio: `${String(w)} / ${String(h)}`, width: `min(100%, calc(46vh * ${String(w / h)}))` }}
       >
         {here.length === 0 ? (
-          <p className="absolute inset-0 flex items-center justify-center p-6 text-center text-small text-[var(--muted)]">
-            No zones on this monitor. Start from a preset.
+          <p className="absolute inset-0 flex items-center justify-center p-6 text-center text-small text-[var(--desk-label)]">
+            No zones on this monitor. Start from a layout.
           </p>
         ) : null}
         {here.map((z) => {

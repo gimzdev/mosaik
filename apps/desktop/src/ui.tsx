@@ -1,5 +1,6 @@
-// The interface's building blocks: buttons, switches, choices, keys, messages, dialogs, menus.
-// Every one works with the keyboard alone and says what it is to screen readers.
+// The window's building blocks: buttons, switches, choices, keys, menus, dialogs, and a voice for
+// screen readers. Every one works with the keyboard alone and says what it is to screen readers.
+// Nothing here floats over the page to say something: what happened is said where it happened.
 
 import {
   type ReactNode,
@@ -12,6 +13,8 @@ import {
   useRef,
   useState,
 } from 'react';
+
+import { Glyph, Spinner } from './icons';
 
 /** Mosaïk's mark: four tiles of the palette. */
 export function Mark({ size = 22 }: { size?: number }) {
@@ -29,14 +32,21 @@ type Tone = 'primary' | 'secondary' | 'quiet' | 'danger';
 
 const TONES: Record<Tone, string> = {
   primary:
-    'bg-[var(--accent)] text-[var(--on-accent)] hover:brightness-110 forced-colors:border forced-colors:border-[ButtonText]',
-  secondary: 'border border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--hover)]',
+    'bg-[var(--accent-fill)] text-[var(--on-accent)] hover:bg-[var(--accent-fill-hover)] forced-colors:border forced-colors:border-[ButtonText]',
+  secondary: 'border border-[var(--line)] bg-[var(--raised)] text-[var(--text)] hover:bg-[var(--hover)]',
   quiet: 'text-[var(--accent)] hover:bg-[var(--hover)]',
   danger: 'border border-[var(--danger)] text-[var(--danger)] hover:bg-[var(--hover)]',
 };
 
+const SIZES = {
+  sm: 'min-h-8 gap-1.5 rounded-lg px-2.5 text-small',
+  md: 'min-h-9 gap-2 rounded-[10px] px-3.5 text-small',
+  lg: 'min-h-11 gap-2 rounded-xl px-5 text-body',
+} as const;
+
 export function Button({
   tone = 'secondary',
+  size = 'md',
   onClick,
   children,
   disabled = false,
@@ -46,21 +56,25 @@ export function Button({
   type = 'button',
   expanded,
   controls,
+  wide = false,
 }: {
   tone?: Tone;
+  size?: keyof typeof SIZES;
   onClick?: () => void;
   children: ReactNode;
   disabled?: boolean;
-  /** Waiting for Mosaïk: the button cannot be pressed again meanwhile. */
+  /** Waiting for Mosaïk: a ring turns, and the button cannot be pressed again meanwhile. */
   pending?: boolean;
   /** A fuller name for screen readers, starting with the visible text ("Open “Brand”"). */
   label?: string;
-  /** More about it for the pointer, shown on hover (what `label` says to screen readers). */
+  /** More about it for the pointer, shown on hover. */
   hint?: string;
   type?: 'button' | 'submit';
   /** For a button that shows or hides something. */
   expanded?: boolean;
   controls?: string;
+  /** As wide as its box. */
+  wide?: boolean;
 }) {
   return (
     <button
@@ -72,10 +86,49 @@ export function Button({
       aria-expanded={expanded}
       aria-controls={controls}
       onClick={onClick}
-      className={`inline-flex min-h-8 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-small font-semibold whitespace-nowrap transition-[background-color,filter,opacity] duration-150 disabled:opacity-50 forced-colors:disabled:border forced-colors:disabled:border-[GrayText] forced-colors:disabled:bg-[Canvas] forced-colors:disabled:text-[GrayText] forced-colors:disabled:opacity-100 ${pending ? 'cursor-progress' : 'disabled:cursor-not-allowed'} ${TONES[tone]}`}
+      className={`inline-flex items-center justify-center font-semibold whitespace-nowrap transition-[background-color,opacity] duration-150 disabled:opacity-50 forced-colors:disabled:border forced-colors:disabled:border-[GrayText] forced-colors:disabled:text-[GrayText] forced-colors:disabled:opacity-100 ${
+        pending ? 'cursor-progress' : 'disabled:cursor-not-allowed'
+      } ${SIZES[size]} ${TONES[tone]} ${wide ? 'w-full' : ''}`}
     >
+      {pending ? <Spinner /> : null}
       {children}
     </button>
+  );
+}
+
+/** A setting's row: what it is on the left, its control on the right. */
+export function Row({
+  label,
+  description,
+  htmlFor,
+  children,
+  id,
+}: {
+  label: ReactNode;
+  description?: ReactNode;
+  /** The control the label names, when it is a single field. */
+  htmlFor?: string;
+  children: ReactNode;
+  id?: string;
+}) {
+  const own = useId();
+  const labelId = id ?? own;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-3.5">
+      <div className="min-w-0 flex-1 basis-56">
+        {htmlFor ? (
+          <label id={labelId} htmlFor={htmlFor} className="font-semibold">
+            {label}
+          </label>
+        ) : (
+          <p id={labelId} className="font-semibold">
+            {label}
+          </p>
+        )}
+        {description ? <div className="mt-0.5 text-small text-[var(--muted)]">{description}</div> : null}
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>
+    </div>
   );
 }
 
@@ -85,41 +138,29 @@ export function Toggle({
   description,
   checked,
   onChange,
-  leading = false,
+  disabled = false,
 }: {
   label: string;
   description?: string;
   checked: boolean;
   onChange: (on: boolean) => void;
-  /** The switch before its label (on its own, outside a list of settings). */
-  leading?: boolean;
+  disabled?: boolean;
 }) {
   const id = useId();
   return (
-    <div
-      className={`flex items-start py-3 ${leading ? 'flex-row-reverse justify-end gap-3' : 'justify-between gap-6'}`}
-    >
-      <div className="min-w-0">
-        <label htmlFor={id} className="font-semibold">
-          {label}
-        </label>
-        {description ? (
-          <p id={`${id}-d`} className="mt-0.5 text-small text-[var(--muted)]">
-            {description}
-          </p>
-        ) : null}
-      </div>
+    <Row label={label} description={description ? <span id={`${id}-d`}>{description}</span> : undefined} htmlFor={id}>
       <button
         id={id}
         type="button"
         role="switch"
         aria-checked={checked}
         aria-describedby={description ? `${id}-d` : undefined}
+        disabled={disabled}
         onClick={() => {
           onChange(!checked);
         }}
-        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full border transition-colors duration-150 ${
-          checked ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-[var(--control)] bg-transparent'
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors duration-150 disabled:opacity-50 ${
+          checked ? 'border-[var(--accent-fill)] bg-[var(--accent-fill)]' : 'border-[var(--control)] bg-transparent'
         }`}
       >
         <span
@@ -129,72 +170,78 @@ export function Toggle({
           }`}
         />
       </button>
+    </Row>
+  );
+}
+
+/** One choice among a few, as joined segments (radio buttons to screen readers). */
+export function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled = false,
+}: {
+  /** Names the group for screen readers (the row shows it). */
+  label: string;
+  value: T;
+  options: readonly { value: T; label: string }[];
+  onChange: (value: T) => void;
+  disabled?: boolean;
+}) {
+  const name = useId();
+  return (
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="inline-flex rounded-[10px] border border-[var(--line)] bg-[var(--bg)] p-0.5"
+    >
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <label
+            key={o.value}
+            className={`relative flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-small font-semibold transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-[var(--focus)] ${
+              on
+                ? 'bg-[var(--raised)] text-[var(--text)] shadow-[0_1px_0_rgb(255_255_255/0.04),0_1px_6px_-2px_rgb(0_0_0/0.5)] forced-colors:border forced-colors:border-[Highlight]'
+                : 'text-[var(--muted)] hover:text-[var(--text)]'
+            } ${disabled ? 'pointer-events-none opacity-50' : ''}`}
+          >
+            <input
+              type="radio"
+              name={name}
+              value={o.value}
+              checked={on}
+              disabled={disabled}
+              onChange={() => {
+                onChange(o.value);
+              }}
+              // Over the whole segment, unseen: a click anywhere on it is on the radio itself, and
+              // a screen reader's focus box is the segment, not a dot.
+              className="absolute inset-0 m-0 cursor-pointer appearance-none opacity-0 disabled:cursor-default"
+            />
+            {o.label}
+          </label>
+        );
+      })}
     </div>
   );
 }
 
-/** One choice among a few, as radio buttons. */
-export function Choice<T extends string>({
-  label,
-  description,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  description?: string;
-  value: T;
-  options: readonly { value: T; label: string }[];
-  onChange: (value: T) => void;
-}) {
-  const name = useId();
-  return (
-    <fieldset className="py-3" aria-describedby={description ? `${name}-d` : undefined}>
-      {/* Floated so it lays out like any other row, not on the fieldset's border. */}
-      <legend className="float-left w-full font-semibold">{label}</legend>
-      {description ? (
-        <p id={`${name}-d`} className="clear-both mt-0.5 text-small text-[var(--muted)]">
-          {description}
-        </p>
-      ) : null}
-      <div className="clear-both flex flex-wrap gap-2 pt-2">
-        {options.map((o) => {
-          const on = o.value === value;
-          return (
-            <label
-              key={o.value}
-              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-small has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus)] ${
-                on ? 'border-[var(--accent)] font-semibold forced-colors:border-[Highlight]' : 'border-[var(--line)]'
-              }`}
-            >
-              <input
-                type="radio"
-                name={name}
-                value={o.value}
-                checked={on}
-                onChange={() => {
-                  onChange(o.value);
-                }}
-                // The label shows the focus ring; the radio's own would draw a second one inside it.
-                className="accent-[var(--accent)] focus-visible:outline-none"
-              />
-              {o.label}
-            </label>
-          );
-        })}
-      </div>
-    </fieldset>
-  );
-}
-
 /** A shortcut as keys: "Win+Alt+Space" → [Win] [Alt] [Space], read as "Win plus Alt plus Space". */
-export function Keys({ shortcut }: { shortcut: string }) {
+export function Keys({ shortcut, quiet = false }: { shortcut: string; quiet?: boolean }) {
   const keys = shortcut.split('+');
   return (
     <span className="inline-flex items-center gap-1 align-baseline">
       {keys.map((k, i) => (
         <span key={`${k}-${String(i)}`} className="inline-flex items-center">
-          <kbd className="rounded-md border border-b-2 border-[var(--line)] bg-[var(--surface)] px-1.5 font-mono text-caption leading-5 text-[var(--text)]">
+          <kbd
+            className={`rounded-md border border-b-2 px-1.5 font-mono text-caption leading-5 ${
+              quiet
+                ? 'border-[var(--line)] bg-transparent text-[var(--muted)]'
+                : 'border-[var(--line)] bg-[var(--raised)] text-[var(--text)]'
+            }`}
+          >
             {k}
           </kbd>
           {i < keys.length - 1 ? <span className="sr-only"> plus </span> : null}
@@ -204,53 +251,52 @@ export function Keys({ shortcut }: { shortcut: string }) {
   );
 }
 
-/** A short message next to the control it is about, read out by screen readers. Errors are
- * alerts; the element is always there, so a message that appears is announced. */
+/** A short message next to the control it is about. Errors are alerts, read out as they appear;
+ * other messages are said to screen readers by the page's announcer (useAnnounce), so the same
+ * words are not read twice. */
 export function Status({ text, error = false }: { text: string | null; error?: boolean }) {
   return (
     <p
-      role={error ? 'alert' : 'status'}
-      className={`text-small ${error ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}
+      role={error ? 'alert' : undefined}
+      className={`text-small empty:hidden ${error ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}
     >
       {text}
     </p>
   );
 }
 
-export function Section({ title, children, intro }: { title: string; intro?: ReactNode; children: ReactNode }) {
+/** A titled group of settings rows on one tile. */
+export function Section({ title, children, aside }: { title: string; aside?: ReactNode; children: ReactNode }) {
   const id = useId();
   return (
-    <section aria-labelledby={id} className="mt-8 first:mt-0">
-      <h2 id={id} className="font-display text-heading font-semibold tracking-tight">
-        {title}
-      </h2>
-      {intro ? <div className="mt-1 text-small text-[var(--muted)]">{intro}</div> : null}
-      <div className="mt-3 divide-y divide-[var(--line)] rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4">
-        {children}
+    <section aria-labelledby={id} className="mt-7 first:mt-0">
+      <div className="mb-2 flex items-baseline justify-between gap-3 px-1">
+        <h2 id={id} className="font-display text-heading font-semibold tracking-tight">
+          {title}
+        </h2>
+        {aside}
       </div>
+      <div className="tile divide-y divide-[var(--line)] px-5">{children}</div>
     </section>
   );
 }
 
 /** A page's title. It takes focus when the page opens, so keyboard and screen-reader users
  * start at the top of the new page. */
-export function PageTitle({ children, eyebrow, id }: { children: ReactNode; eyebrow?: string; id?: string }) {
+export function PageTitle({ children, id, className = '' }: { children: ReactNode; id?: string; className?: string }) {
   const ref = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     ref.current?.focus({ preventScroll: true });
   }, []);
   return (
-    <div>
-      {eyebrow ? <p className="text-small font-semibold text-[var(--muted)]">{eyebrow}</p> : null}
-      <h1
-        ref={ref}
-        id={id}
-        tabIndex={-1}
-        className="font-display text-title font-bold tracking-tight focus-visible:outline-none"
-      >
-        {children}
-      </h1>
-    </div>
+    <h1
+      ref={ref}
+      id={id}
+      tabIndex={-1}
+      className={`font-display text-title font-bold tracking-tight focus-visible:outline-none ${className}`}
+    >
+      {children}
+    </h1>
   );
 }
 
@@ -289,7 +335,7 @@ export function Confirm({
         e.preventDefault();
         onCancel();
       }}
-      className="m-auto max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 text-[var(--text)] shadow-xl backdrop:bg-black/40"
+      className="m-auto max-w-md rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-6 text-[var(--text)] shadow-[var(--shadow)] backdrop:bg-black/55"
     >
       <h2 id={titleId} className="font-display text-heading font-semibold">
         {title}
@@ -322,6 +368,17 @@ function visibleArea(el: HTMLElement): { top: number; bottom: number } {
   return { top, bottom };
 }
 
+export interface MenuItem {
+  label: string;
+  /** A second line, quieter ("Release notes - Google Chrome"). */
+  detail?: string | undefined;
+  /** Tells items with the same label apart. */
+  key?: string;
+  onSelect: () => void;
+  danger?: boolean;
+  icon?: ReactNode;
+}
+
 /** A button that shows a short list of actions under it, or above it near the bottom of the
  * window, so its items are always in view. Esc or a click elsewhere closes it, and focus goes
  * back to the button. */
@@ -330,25 +387,15 @@ export function MenuButton({
   children,
   items,
   align = 'right',
-  quiet = false,
+  className = '',
 }: {
   /** The button's full name for screen readers ("More for “Brand”"). */
   label: string;
   children: ReactNode;
-  items: readonly {
-    label: string;
-    /** A second line, quieter ("Release notes - Google Chrome"). */
-    detail?: string | undefined;
-    /** Tells items with the same label apart. */
-    key?: string;
-    onSelect: () => void;
-    danger?: boolean;
-    icon?: ReactNode;
-  }[];
+  items: readonly MenuItem[];
   /** Which edge of the button the list lines up with. */
   align?: 'left' | 'right';
-  /** The button in the accent colour, like a quiet button, rather than muted. */
-  quiet?: boolean;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   /** Where the list opens: under the button, or above it when only there is it in view. */
@@ -404,6 +451,7 @@ export function MenuButton({
         const at = all.indexOf(document.activeElement as HTMLButtonElement);
         if (e.key === 'Escape') {
           e.preventDefault();
+          e.stopPropagation();
           close();
         } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
@@ -421,12 +469,14 @@ export function MenuButton({
         aria-label={label}
         aria-expanded={open}
         aria-controls={id}
-        onClick={() => {
+        onClick={(e) => {
+          e.stopPropagation();
           setOpen((o) => !o);
         }}
-        className={`inline-flex min-h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg px-2 text-small font-semibold hover:bg-[var(--hover)] ${
-          quiet ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
-        }`}
+        className={
+          className ||
+          'inline-flex min-h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg px-2 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]'
+        }
       >
         {children}
       </button>
@@ -435,20 +485,21 @@ export function MenuButton({
           ref={list}
           id={id}
           data-side={side}
-          className={`absolute z-20 flex max-h-72 w-max max-w-80 min-w-44 flex-col overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--surface)] p-1 shadow-lg ${
+          className={`absolute z-30 flex max-h-80 w-max max-w-80 min-w-48 flex-col overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--raised)] p-1 shadow-[var(--shadow)] ${
             align === 'left' ? 'left-0' : 'right-0'
-          } ${side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+          } ${side === 'top' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'}`}
         >
           {items.map((item) => (
             <button
               key={item.key ?? item.label}
               type="button"
               data-item
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setOpen(false);
                 item.onSelect();
               }}
-              className={`flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-small font-semibold hover:bg-[var(--hover)] ${
+              className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-small font-semibold hover:bg-[var(--hover)] focus-visible:-outline-offset-2 ${
                 item.danger ? 'text-[var(--danger)]' : ''
               }`}
             >
@@ -469,62 +520,35 @@ export function MenuButton({
   );
 }
 
-/** What happened after an action: a short message at the bottom of the window, whichever page
- * is showing (it survives a page change). A success fades after a few seconds; an error stays
- * until dismissed or replaced. */
-type Say = (text: string, error?: boolean) => void;
-
-const FeedbackContext = createContext<Say>(() => undefined);
-
-export function useSay(): Say {
-  return useContext(FeedbackContext);
+/** The ⋯ of a menu button. */
+export function MoreGlyph() {
+  return <Glyph name="more" />;
 }
 
-export function Feedback({ children }: { children: ReactNode }) {
-  const [message, setMessage] = useState<{ text: string; error: boolean; n: number } | null>(null);
-  const counter = useRef(0);
-  const say = useCallback<Say>((text, error = false) => {
-    counter.current += 1;
-    setMessage({ text, error, n: counter.current });
+/** Says something to screen readers only: what happened is shown where it happened, and this
+ * makes sure it is heard too (a workspace renamed, a shortcut saved). */
+type Announce = (text: string) => void;
+
+const AnnounceContext = createContext<Announce>(() => undefined);
+
+export function useAnnounce(): Announce {
+  return useContext(AnnounceContext);
+}
+
+export function Announcer({ children }: { children: ReactNode }) {
+  const [text, setText] = useState('');
+  const n = useRef(0);
+  const announce = useCallback<Announce>((t) => {
+    n.current += 1;
+    // A repeat of the same words is still announced: the region changes each time.
+    setText(`${t}${n.current % 2 ? '' : '​'}`);
   }, []);
-  useEffect(() => {
-    if (!message || message.error) return;
-    const t = window.setTimeout(() => {
-      setMessage((m) => (m?.n === message.n ? null : m));
-    }, 4000);
-    return () => {
-      window.clearTimeout(t);
-    };
-  }, [message]);
   return (
-    <FeedbackContext.Provider value={say}>
+    <AnnounceContext.Provider value={announce}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center px-6">
-        {/* Both regions are always there so what appears in them is announced. */}
-        <div role="status" className="contents">
-          {message && !message.error ? (
-            <p className="pointer-events-auto rounded-xl bg-[var(--text)] px-4 py-2 text-small font-semibold text-[var(--bg)] shadow-lg">
-              {message.text}
-            </p>
-          ) : null}
-        </div>
-        <div role="alert" className="contents">
-          {message?.error ? (
-            <div className="pointer-events-auto flex max-w-xl items-start gap-3 rounded-xl border border-[var(--danger)] bg-[var(--surface)] px-4 py-2 shadow-lg">
-              <p className="text-small text-[var(--danger)]">{message.text}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setMessage(null);
-                }}
-                className="shrink-0 rounded-md px-2 text-small font-semibold text-[var(--accent)] hover:bg-[var(--hover)]"
-              >
-                Dismiss
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </FeedbackContext.Provider>
+      <p role="status" className="sr-only">
+        {text}
+      </p>
+    </AnnounceContext.Provider>
   );
 }

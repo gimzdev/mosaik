@@ -31,7 +31,7 @@ export function ZonePanel({
   return (
     <section
       aria-label={`Zone ${zone.name.trim() || 'without a name'}`}
-      className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4"
+      className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4"
     >
       <div className="flex flex-col gap-1">
         <label htmlFor={nameId} className="text-small font-semibold">

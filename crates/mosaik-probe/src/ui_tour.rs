@@ -1,16 +1,17 @@
 //! Mosaïk's own window, page by page, as a person sees it and as the keyboard and a screen reader
 //! reach it (`mosaik-probe ui-tour`): pictures of the window alone (nothing else of the screen),
 //! the role and name UI Automation gives every control (what a screen reader says), controls
-//! with no name, and the order the Tab key goes through them. Home (with a workspace's ⋯ menu
-//! and its apps), the zone editor and Settings (with More settings and About), in light and
-//! dark, at the window's usual and smallest size, and the switcher. On the home page, the
-//! pointer also rests on a layout, so the picture shows where the windows would go (it never
-//! clicks one: no window moves).
+//! with no name, and the order the Tab key goes through them. Home (with a workspace's ⋯ menu),
+//! a workspace's page, the zone editor and Settings (with Advanced and About), in dark and
+//! light, at the window's usual and smallest size, and the switcher. On Home, a layout is also
+//! chosen, so the picture shows where the windows would go (Arrange is never clicked: no window
+//! moves).
 //!
 //! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Ship",
-//! with three zones and no windows, so nothing of the user's is touched. The home page pictures
-//! the windows on the main screen as plain boxes with their apps' names. The welcome shows
-//! because the profile has no settings yet.
+//! with three zones and no windows, so nothing of the user's is touched. The profile has no
+//! settings yet, so this is a first run: there is no tour to go through; the windows open are
+//! sorted into workspaces of this profile (none moves), and a build run from a folder is not set
+//! to start with Windows.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -415,22 +416,15 @@ impl Tour {
         self.click(&c)
     }
 
-    /// Rests the pointer on the button `name` without clicking, as a person pointing at it, and
-    /// takes the picture once what it shows has settled. The button is brought into view first
-    /// (a notice at the top of the page pushes the layouts down).
-    fn point(&mut self, name: &str, shot: &str) -> Result<(), String> {
-        let c = self.reveal("button", name)?;
-        let at = c.rect.center();
-        // SAFETY: read-only hit test.
-        let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: at.x, y: at.y }), GA_ROOT) };
-        if under != self.hwnd {
-            return Err(format!("another window covers {}; not pointing at it", c.label()));
-        }
-        input::move_to(at);
-        // The windows glide for about half a second, one after the other.
-        pump_until(1500, || false);
+    /// Chooses the layout `name` on Home, as a person does (a click on it), and takes the
+    /// picture once the windows in it have glided to where the layout would put them. Choosing
+    /// moves no window: only Arrange does.
+    fn choose_layout(&mut self, name: &str, shot: &str) -> Result<(), String> {
+        let c = self.reveal("radio", name)?;
+        self.click(&c)?;
+        pump_until(900, || false);
         let file = self.shot(shot)?;
-        let page = json!({ "page": shot, "shot": file, "pointing_at": name });
+        let page = json!({ "page": shot, "shot": file, "layout": name });
         println!("page {shot}: {page}");
         self.pages.push(page);
         Ok(())
@@ -545,56 +539,48 @@ impl Tour {
     }
 
     fn tour(&mut self) -> Result<Value, String> {
-        // First run: the welcome. The click on its title puts the window in front and starts
+        // First run: no tour. A click on the screen's title puts the window in front and starts
         // the Tab key from there.
         pump_until(1500, || false);
         // (Any role: a heading's, as browsers give it to UI Automation, varies.)
-        let title = self.find("", "Welcome to Mosaïk")?;
+        let title = self.find("", "Your screen")?;
         self.click(&title)?;
-        self.page("welcome", true)?;
-        let start = self.reveal("button", "Get started")?;
-        self.click(&start)?;
-
-        // The home page, where the window opens, once its first showing of Arrange is over; then
-        // with a layout pointed at.
-        pump_until(3500, || false);
+        pump_until(1000, || false);
         self.page("home", true)?;
-        self.point("Thirds", "home-thirds")?;
+        self.choose_layout("Thirds", "home-thirds")?;
+        self.choose_layout("Smart", "home-smart")?;
 
-        // The workspace's menu, then its apps and the windows on screen it could take: shown,
+        // The workspace's menu, then its page, with the windows on screen it could take: shown,
         // none added.
         self.open_menu(WORKSPACE)?;
         self.page("home-menu", false)?;
-        self.choose("Change its apps…")?;
-        self.page("home-apps", false)?;
+        self.choose("Edit")?;
+        self.page("workspace", true)?;
         if let Ok(add) = self.reveal("button", &format!("Add a window to “{WORKSPACE}”")) {
             self.click(&add)?;
-            self.page("home-apps-add", false)?;
+            self.page("workspace-add", false)?;
             Self::press(VK_ESCAPE.0);
         }
-        self.open_menu(WORKSPACE)?;
-        self.choose("Hide its apps")?;
 
-        // Each page, in the theme Windows uses, with the keyboard path.
-        self.zones()?;
+        // The zone editor, from the workspace's page; Settings, then Advanced and About.
+        let zones = self.reveal("button", "Edit zones")?;
+        self.click(&zones)?;
         self.page("zones", true)?;
         self.nav("Settings")?;
         self.page("settings", true)?;
-        let more = self.reveal("button", "More settings")?;
-        self.click(&more)?;
-        self.page("settings-more", false)?;
-        let more = self.reveal("button", "More settings")?;
-        self.click(&more)?;
-        self.reveal("button", "Show the welcome again")?;
+        let advanced = self.reveal("button", "Advanced")?;
+        self.click(&advanced)?;
+        self.page("settings-advanced", false)?;
+        self.reveal("button", "Logs")?;
         self.page("settings-about", false)?;
         self.switcher("switcher")?;
 
-        // Light and dark, chosen in Mosaïk's settings.
+        // Dark (the default) and light, chosen in Mosaïk's settings.
         for (theme, label) in [("dark", "Dark"), ("light", "Light")] {
             self.theme(label)?;
             self.page(&format!("settings-{theme}"), false)?;
             self.nav("Home")?;
-            self.point("Arrange windows", &format!("home-{theme}"))?;
+            self.page(&format!("home-{theme}"), false)?;
             self.reveal("button", &format!("More for “{WORKSPACE}”"))?;
             self.page(&format!("home-workspaces-{theme}"), false)?;
             self.zones()?;
@@ -616,8 +602,8 @@ impl Tour {
         self.page("settings-smallest", false)?;
         self.resize(before.width(), before.height());
 
-        // Back as Windows has it.
-        self.theme("Like Windows")?;
+        // Back to the default.
+        self.theme("Dark")?;
         Ok(json!({ "pages": self.pages }))
     }
 }

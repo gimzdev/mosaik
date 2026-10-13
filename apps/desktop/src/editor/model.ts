@@ -257,15 +257,15 @@ export type Preset =
   | 'three-rows';
 
 export const PRESETS: readonly { id: Preset; label: string }[] = [
-  { id: 'full', label: 'Whole screen' },
+  { id: 'full', label: 'Full screen' },
   { id: 'halves', label: 'Halves' },
   { id: 'thirds', label: 'Thirds' },
-  { id: 'main-side', label: 'Main and side' },
-  { id: 'side-main', label: 'Side and main' },
+  { id: 'main-side', label: 'Main + side' },
+  { id: 'side-main', label: 'Side + main' },
   { id: 'quarters', label: 'Quarters' },
-  { id: 'half-stack', label: 'Half beside two stacked' },
-  { id: 'stack-half', label: 'Two stacked beside half' },
-  { id: 'rows', label: 'Top and bottom' },
+  { id: 'half-stack', label: 'Half + stack' },
+  { id: 'stack-half', label: 'Stack + half' },
+  { id: 'rows', label: 'Top + bottom' },
   { id: 'three-rows', label: 'Three rows' },
 ];
 

@@ -47,9 +47,34 @@ export async function request(command: Command): Promise<Reply> {
   };
 }
 
+/** The pictures of app icons for these keys (from replies: `icon`, `icons`), as `data:` URLs;
+ * null for an app whose icon could not be read. Read once per key and kept by the caller. */
+export async function appIcons(keys: string[]): Promise<Record<string, string | null>> {
+  if (keys.length === 0) return {};
+  // Outside Mosaïk (the stand-in for development) there are no apps' icons to read.
+  if (!inMosaik) return Object.fromEntries(keys.map((k) => [k, null]));
+  try {
+    return await invoke<Record<string, string | null>>('app_icons', { keys });
+  } catch {
+    // An app without its picture still has its name: nothing to tell the user.
+    return Object.fromEntries(keys.map((k) => [k, null]));
+  }
+}
+
+/** Opens the switcher, as its shortcut does. */
+export function showSwitcher(): void {
+  void request({ cmd: 'show_switcher' });
+}
+
 /** Takes the notices waiting to be shown (oldest first). */
 export async function takeNotices(): Promise<Notice[]> {
-  if (!inMosaik) return [];
+  if (!inMosaik) {
+    if (import.meta.env.DEV) {
+      const { mockNotices } = await import('./mock');
+      return mockNotices.splice(0);
+    }
+    return [];
+  }
   return invoke<Notice[]>('take_notices');
 }
 

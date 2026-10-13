@@ -18,9 +18,9 @@
   --font-sans: 'Instrument Sans Variable', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
   /* Page title, section title, body, small print, captions. */
-  --text-title: 1.75rem;
+  --text-title: 1.5rem;
   --text-title--line-height: 1.2;
-  --text-heading: 1.0625rem;
+  --text-heading: 1rem;
   --text-heading--line-height: 1.35;
   --text-body: 0.875rem;
   --text-body--line-height: 1.5;
@@ -30,129 +30,153 @@
   --text-caption--line-height: 1.4;
 }
 
-/* Surfaces and text by theme. Light is the default; dark follows Windows unless the user picks a
-   theme; high contrast uses the system's own colours. Every pair used for text is AA, and every
-   control outline is at least 3:1 against what is around it. */
+/* Dark is the default: a deep ink window, tiles of panels on it with a line of grout between
+   them, text in plaster. Light and high contrast follow. Every pair used for text is AA, and
+   every control outline is at least 3:1 against what is around it. */
 :root {
-  color-scheme: light;
-  /* The small picture of the main screen on the home page: a dark desktop, light windows. */
-  --desk: #2a3242;
-  --desk-window: var(--color-paper);
-  --desk-bar: #e3e7df;
-  --desk-line: #1b2130;
-  --desk-text: var(--color-ink);
-  /* Text on the desktop itself (an empty screen, an empty zone's name). */
-  --desk-label: #e3e7df;
-  --bg: var(--color-plaster);
-  --surface: var(--color-paper);
-  --line: var(--color-grout);
-  /* Outlines of controls (fields, switches): 3.3:1 or more on bg and surface. */
-  --control: #7a8492;
-  --hover: #e3e7df;
-  --text: var(--color-ink);
-  --muted: var(--color-slate);
-  --accent: var(--color-lapis);
+  color-scheme: dark;
+  --bg: #101318;
+  --panel: #171b23;
+  --raised: #1f2430;
+  --hover: #262c39;
+  --line: #262b36;
+  /* Outlines of controls (fields, switches, the tiles of layouts): 3:1 or more on panels. */
+  --control: #6e7a90;
+  --text: #edefea;
+  --muted: #a0a9b8;
+  /* Links, what is chosen, a window's ring: lapis lightened to read on ink (7:1). */
+  --accent: #8a9bff;
+  /* The main button: lapis itself, white on it (6.3:1). */
+  --accent-fill: #2b44d9;
+  --accent-fill-hover: #3a53e6;
   --on-accent: #ffffff;
-  /* Madder darkened for small text (5.1:1 on plaster). */
-  --danger: #b82e48;
-  --ok: var(--color-verdigris);
-  --focus: var(--color-lapis);
+  --danger: #f2849a;
+  --ok: #4fd1bd;
+  --focus: #f4b13a;
+  /* The picture of the screen: an evening sky over soft hills (`.desk`; `.sky` without the hills), the same in every
+     theme, as a desktop is. */
+  --desk-sky-1: #283149;
+  --desk-sky-2: #1a2030;
+  --desk-glow-1: rgb(124 143 255 / 0.16);
   /* Zone colours: outline, and the text drawn on a fill of it (both AA, as on the overlays). */
-  --zone-lapis: var(--color-lapis);
-  --zone-verdigris: var(--color-verdigris);
-  --zone-saffron: var(--color-saffron);
-  --zone-madder: var(--color-madder);
-  --zone-slate: var(--color-slate);
-  --on-zone: #ffffff;
-  --on-zone-saffron: var(--color-ink);
+  --zone-lapis: #7c8fff;
+  --zone-verdigris: #3fc1ad;
+  --zone-saffron: #f4b13a;
+  --zone-madder: #f07892;
+  --zone-slate: #a3acba;
+  --on-zone: #0d1016;
+  --on-zone-saffron: #161b25;
   /* Colour swatches show the zone colours of the theme. */
   --swatch-lapis: var(--zone-lapis);
   --swatch-verdigris: var(--zone-verdigris);
   --swatch-saffron: var(--zone-saffron);
   --swatch-madder: var(--zone-madder);
   --swatch-slate: var(--zone-slate);
-  --on-swatch: #ffffff;
+  --on-swatch: #0d1016;
+  --shadow: 0 18px 40px -18px rgb(0 0 0 / 0.75);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-    --desk: #0a0d12;
-    --desk-window: #1e2532;
-    --desk-bar: #262e3d;
-    --desk-line: #3a4458;
-    --desk-text: #edefea;
-    --desk-label: #c9cfda;
-    --bg: #0f1218;
-    --surface: #161b25;
-    --line: #2a3140;
-    --control: #77819a;
-    --hover: #1e2532;
-    --text: #edefea;
-    --muted: #a3acba;
-    --accent: #7c8fff;
-    --on-accent: #0f1218;
-    --danger: #f07892;
-    --ok: #4fd1bd;
-    --focus: #f4b13a;
-    /* The palette's light tints: the deep colours read too dark on a dark page. */
-    --zone-lapis: #7c8fff;
-    --zone-verdigris: #4fd1bd;
-    --zone-madder: #f07892;
-    --zone-slate: #a3acba;
-    --on-zone: #0f1218;
-    --on-swatch: #0f1218;
+
+/* Light: plaster and paper, ink text, lapis. Chosen in Settings, or "Like Windows" in light. */
+@media (prefers-color-scheme: light) {
+  :root[data-theme='system'] {
+    color-scheme: light;
+    --bg: #e4e7e0;
+    --panel: #f7f8f4;
+    --raised: #edefea;
+    --hover: #e6e9e2;
+    --line: #d3d8cf;
+    --control: #7a8492;
+    --text: #161b25;
+    --muted: #556070;
+    --accent: #2b44d9;
+    --accent-fill: #2b44d9;
+    --accent-fill-hover: #2237b8;
+    --on-accent: #ffffff;
+    --danger: #b82e48;
+    --ok: #12786a;
+    --focus: #2b44d9;
+    --zone-lapis: #2b44d9;
+    --zone-verdigris: #12786a;
+    --zone-saffron: #f4b13a;
+    --zone-madder: #c93450;
+    --zone-slate: #556070;
+    --on-zone: #ffffff;
+    --on-swatch: #ffffff;
+    --shadow: 0 18px 40px -22px rgb(22 27 37 / 0.45);
   }
 }
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --desk: #0a0d12;
-  --desk-window: #1e2532;
-  --desk-bar: #262e3d;
-  --desk-line: #3a4458;
-  --desk-text: #edefea;
-  --desk-label: #c9cfda;
-  --bg: #0f1218;
-  --surface: #161b25;
-  --line: #2a3140;
-  --control: #77819a;
-  --hover: #1e2532;
-  --text: #edefea;
-  --muted: #a3acba;
-  --accent: #7c8fff;
-  --on-accent: #0f1218;
-  --danger: #f07892;
-  --ok: #4fd1bd;
-  --focus: #f4b13a;
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #e4e7e0;
+  --panel: #f7f8f4;
+  --raised: #edefea;
+  --hover: #e6e9e2;
+  --line: #d3d8cf;
+  --control: #7a8492;
+  --text: #161b25;
+  --muted: #556070;
+  --accent: #2b44d9;
+  --accent-fill: #2b44d9;
+  --accent-fill-hover: #2237b8;
+  --on-accent: #ffffff;
+  --danger: #b82e48;
+  --ok: #12786a;
+  --focus: #2b44d9;
+  --zone-lapis: #2b44d9;
+  --zone-verdigris: #12786a;
+  --zone-saffron: #f4b13a;
+  --zone-madder: #c93450;
+  --zone-slate: #556070;
+  --on-zone: #ffffff;
+  --on-swatch: #ffffff;
+  --shadow: 0 18px 40px -22px rgb(22 27 37 / 0.45);
+}
+/* The picture of the screen keeps its dark desktop in every theme, as a desktop is: its
+   zones stay in the dark theme's colours there. */
+.desk,
+.sky {
   --zone-lapis: #7c8fff;
-  --zone-verdigris: #4fd1bd;
+  --zone-verdigris: #3fc1ad;
+  --zone-saffron: #f4b13a;
   --zone-madder: #f07892;
   --zone-slate: #a3acba;
-  --on-zone: #0f1218;
-  --on-swatch: #0f1218;
+  --on-zone: #0d1016;
+  --desk-window: #2a3141;
+  --desk-bar: #333b4e;
+  --desk-line: #46506a;
+  --desk-text: #f1f2ee;
+  --desk-label: #d3d8e2;
 }
 /* High contrast: the system's own colours everywhere, and outlines or marks wherever colour alone
    would carry meaning. `:root:root` is as specific as the theme rules above and comes after them,
    so it wins over a theme the user picked too. */
 @media (forced-colors: active) {
-  :root:root {
-    --desk: Canvas;
+  :root:root,
+  :root:root .desk,
+  :root:root .sky {
+    --bg: Canvas;
+    --panel: Canvas;
+    --raised: Canvas;
+    --hover: Canvas;
+    --line: CanvasText;
+    --control: CanvasText;
+    --text: CanvasText;
+    --muted: CanvasText;
+    --accent: Highlight;
+    --accent-fill: Highlight;
+    --accent-fill-hover: Highlight;
+    --on-accent: HighlightText;
+    --danger: CanvasText;
+    --ok: CanvasText;
+    --focus: Highlight;
+    --desk-sky-1: Canvas;
+    --desk-sky-2: Canvas;
+    --desk-glow-1: transparent;
     --desk-window: Canvas;
     --desk-bar: Canvas;
     --desk-line: CanvasText;
     --desk-text: CanvasText;
     --desk-label: CanvasText;
-    --bg: Canvas;
-    --surface: Canvas;
-    --line: CanvasText;
-    --control: CanvasText;
-    --hover: Canvas;
-    --text: CanvasText;
-    --muted: CanvasText;
-    --accent: Highlight;
-    --on-accent: HighlightText;
-    --danger: CanvasText;
-    --ok: CanvasText;
-    --focus: Highlight;
     --zone-lapis: CanvasText;
     --zone-verdigris: CanvasText;
     --zone-saffron: CanvasText;
@@ -167,6 +191,10 @@
     --swatch-madder: #c93450;
     --swatch-slate: #556070;
     --on-swatch: #ffffff;
+    --shadow: none;
+  }
+  .tile {
+    border-color: CanvasText;
   }
   /* A zone's label: plain text in a frame, in the system's colours. */
   .zone-chip {
@@ -210,14 +238,20 @@
 }
 
 @layer components {
+  /* A tile of the window: a soft panel on the page, its edge drawn only in high contrast. */
+  .tile {
+    background: var(--panel);
+    border: 1px solid transparent;
+    border-radius: 18px;
+  }
   /* A text field: its outline is a control's, so it reads as one. */
   .field {
     border: 1px solid var(--control);
     border-radius: 0.5rem;
-    background: var(--surface);
+    background: var(--raised);
     color: var(--text);
     padding: 0.375rem 0.75rem;
-    min-height: 2rem;
+    min-height: 2.25rem;
   }
   .field[aria-invalid='true'] {
     border-color: var(--danger);
@@ -227,22 +261,35 @@
     background: var(--chip);
     color: var(--on-chip);
   }
-  /* The home page's picture of the screen: windows glide to where Arrange would put them, and
-     the zones they would fill fade in (no motion when the user asks for less). */
-  .stage-window {
-    transition-property: left, top, width, height, opacity, box-shadow;
-    transition-duration: 460ms;
-    transition-timing-function: cubic-bezier(0.2, 0.75, 0.25, 1);
+  /* The desktop behind the picture of the screen: a calm evening sky over soft hills, as a
+     wallpaper is, behind the windows rather than competing with them. */
+  .desk {
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 300' preserveAspectRatio='none'%3E%3Cpath d='M0 150C190 96 370 108 540 146S840 196 1000 128V300H0Z' fill='%23fff' fill-opacity='.035'/%3E%3Cpath d='M0 214C230 164 430 226 650 210S910 166 1000 196V300H0Z' fill='%233fc1ad' fill-opacity='.07'/%3E%3Cpath d='M0 262C250 234 480 282 720 262S930 240 1000 254V300H0Z' fill='%23fff' fill-opacity='.04'/%3E%3C/svg%3E")
+        bottom / 100% 58% no-repeat,
+      radial-gradient(80% 70% at 22% 0%, var(--desk-glow-1), transparent 72%),
+      linear-gradient(180deg, var(--desk-sky-1), var(--desk-sky-2));
   }
-  .stage-zone {
-    transition: opacity 260ms ease-out;
+  /* The same sky without the hills: behind a workspace's layout in small, and the zone editor. */
+  .sky {
+    background: linear-gradient(180deg, var(--desk-sky-1), var(--desk-sky-2));
+  }
+  /* Windows glide to where the layout chosen would put them (no motion when the user asks for
+     less). */
+  .stage-window {
+    transition-property: left, top, width, height;
+    transition-duration: 480ms;
+    transition-timing-function: cubic-bezier(0.2, 0.75, 0.25, 1);
   }
 }
 
-/* Home: what the keyboard reaches below the picture comes into view below it, never under it
-   (the picture sticks to the top of the page; its height is Stage's, plus its caption). */
-main:has(.below-picture) {
-  scroll-padding-top: calc(min(260px, 36vh) + 4.5rem);
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 0.9s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -252,7 +299,7 @@ main:has(.below-picture) {
     animation-duration: 0.01ms !important;
     animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
-    /* The home page's windows move one after the other: at once here. */
+    /* The picture's windows move one after the other: at once here. */
     transition-delay: 0s !important;
   }
 }

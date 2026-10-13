@@ -1,20 +1,35 @@
-// Mosaïk's window: welcome on first run, then two places: Home (tidy the screen in one click,
-// sets of apps, the saved workspaces) and Settings (with About at the end), and the zone editor
-// for one workspace, opened from its workspace. Messages from Mosaïk show on top of every page.
+// Mosaïk's window: a bar with its two places, Home (the screen, Arrange, the layouts, the
+// workspaces) and Settings (with About at the end), and Mosaïk's notes; under it, the page. A
+// workspace's own page and the zone editor open from Home. The first time Mosaïk opens, it sorts
+// the windows open into workspaces: there is no tour to sit through, Home shows what Arrange will
+// do.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { guardClose, onNotices, onZonesToEdit, request, styleTitleBar, takeNotices, takeZonesToEdit } from './engine';
+import {
+  guardClose,
+  onNotices,
+  onZonesToEdit,
+  request,
+  showSwitcher,
+  styleTitleBar,
+  takeNotices,
+  takeZonesToEdit,
+} from './engine';
 import { keepTabInside } from './focusLoop';
-import { Notices, type ShownNotice } from './Notices';
 import { Home } from './Home';
-import { errorMessage, type HotkeyState, type Settings } from './protocol';
-import { SettingsPane } from './SettingsPane';
-import { Button, Confirm, Feedback, Mark } from './ui';
-import { Welcome } from './Welcome';
+import { type Note, Notes } from './Notes';
+import { type HotkeyState, type Settings, type SideMenuState, errorMessage } from './protocol';
+import { SettingsPage } from './SettingsPage';
+import { Announcer, Button, Confirm, Keys, Mark } from './ui';
+import { WorkspacePage } from './WorkspacePage';
 import { ZoneEditor } from './ZoneEditor';
 
-type View = { page: 'welcome' } | { page: 'home' } | { page: 'settings' } | { page: 'zones'; workspace: string };
+type View =
+  | { page: 'home' }
+  | { page: 'settings' }
+  | { page: 'workspace'; workspace: string }
+  | { page: 'zones'; workspace: string; from: 'home' | 'workspace' };
 
 const PAGES = [
   { page: 'home', label: 'Home' },
@@ -42,7 +57,7 @@ function useTitleBar(theme: Settings['theme'] | undefined) {
       const css = getComputedStyle(document.documentElement);
       styleTitleBar({
         dark: css.colorScheme === 'dark',
-        caption: css.getPropertyValue('--surface').trim(),
+        caption: css.getPropertyValue('--panel').trim(),
         text: css.getPropertyValue('--text').trim(),
       });
     };
@@ -57,17 +72,21 @@ function useTitleBar(theme: Settings['theme'] | undefined) {
 export function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [hotkey, setHotkey] = useState<HotkeyState | null>(null);
+  const [sideMenu, setSideMenu] = useState<SideMenuState | null>(null);
+  const [readOnly, setReadOnly] = useState(false);
+  /** Installed from the Store, rather than a build run from a folder. */
+  const [packaged, setPackaged] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [view, setView] = useState<View | null>(null);
-  const [notices, setNotices] = useState<ShownNotice[]>([]);
+  const [view, setView] = useState<View>({ page: 'home' });
+  const [notes, setNotes] = useState<Note[]>([]);
   const [editorDirty, setEditorDirty] = useState(false);
-  /** The welcome was just finished: the home page shows once what Arrange does. */
-  const [welcomed, setWelcomed] = useState(false);
+  /** The first run's work is under way (once per window). */
+  const firstRunStarted = useRef(false);
   /** Where the user asked to go while the zone editor has unsaved changes. */
   const [leavingTo, setLeavingTo] = useState<View | null>(null);
   /** The window is closing with unsaved zone edits: resolves the question. */
   const [closing, setClosing] = useState<((close: boolean) => void) | null>(null);
-  const noticeCount = useRef(0);
+  const noteCount = useRef(0);
   const dirty = useRef(false);
   const scroller = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -79,7 +98,9 @@ export function App() {
       if (reply.reply === 'settings') {
         setSettings(reply.settings);
         setHotkey(reply.hotkey);
-        setView((v) => v ?? (reply.settings.onboarding_done ? { page: 'home' } : { page: 'welcome' }));
+        setSideMenu(reply.side_menu);
+        setReadOnly(reply.read_only);
+        setPackaged(reply.packaged);
       } else {
         setProblem(errorMessage(reply) ?? 'Mosaïk did not answer.');
       }
@@ -88,28 +109,28 @@ export function App() {
 
   useEffect(() => {
     load();
-    // Notices wait in the app until a window takes them: now, and whenever more arrive.
+    // Notes wait in the app until a window takes them: now, and whenever more arrive.
     const collect = () => {
       void takeNotices().then((fresh) => {
         if (fresh.length === 0) return;
         const shown = fresh.map((n) => {
-          noticeCount.current += 1;
-          return { ...n, id: noticeCount.current };
+          noteCount.current += 1;
+          return { ...n, id: noteCount.current };
         });
-        setNotices((n) => [...n, ...shown]);
+        setNotes((n) => [...shown.reverse(), ...n]);
       });
     };
     collect();
     return onNotices(collect);
   }, [load]);
 
-  // The quick menu's "Edit zones" opens the editor for the open workspace (asking first when
-  // the editor has unsaved changes).
+  // The side menu's "Edit zones" opens the editor for the open workspace (asking first when the
+  // editor has unsaved changes).
   useEffect(() => {
     const take = () => {
       void takeZonesToEdit().then((workspace) => {
         if (!workspace) return;
-        const next: View = { page: 'zones', workspace };
+        const next: View = { page: 'zones', workspace, from: 'home' };
         if (dirty.current) setLeavingTo(next);
         else setView(next);
       });
@@ -118,12 +139,11 @@ export function App() {
     return onZonesToEdit(take);
   }, []);
 
-  // The theme the user picked; "system" follows Windows (and its high-contrast themes).
+  // The theme the user picked: dark unless they chose otherwise; "Like Windows" follows Windows
+  // (and its high-contrast themes).
   const theme = settings?.theme;
   useEffect(() => {
-    const root = document.documentElement;
-    if (!theme || theme === 'system') delete root.dataset.theme;
-    else root.dataset.theme = theme;
+    document.documentElement.dataset.theme = theme ?? 'dark';
   }, [theme]);
   useTitleBar(theme);
 
@@ -156,6 +176,8 @@ export function App() {
     if (fresh.reply === 'settings') {
       setSettings(fresh.settings);
       setHotkey(fresh.hotkey);
+      setSideMenu(fresh.side_menu);
+      setReadOnly(fresh.read_only);
     }
     return reply.reply === 'done'
       ? { ok: true, message: reply.message, settings: now }
@@ -166,43 +188,48 @@ export function App() {
         };
   }, []);
 
+  // The first run: the windows open now are sorted into a workspace per task (none moves), and
+  // Mosaïk as installed starts with Windows from now on (Settings turns that off; a build run
+  // from a folder is left as it is).
+  useEffect(() => {
+    if (!settings || settings.onboarding_done || readOnly || firstRunStarted.current) return;
+    firstRunStarted.current = true;
+    void (async () => {
+      await request({ cmd: 'sort_windows' });
+      await saveSettings({
+        ...settings,
+        onboarding_done: true,
+        start_with_windows: packaged || settings.start_with_windows,
+      });
+    })();
+  }, [settings, readOnly, packaged, saveSettings]);
+
   // A page opens at its top, not where the last one was scrolled to.
-  const page = view?.page;
+  const page = view.page;
   useEffect(() => {
     scroller.current?.scrollTo({ top: 0 });
   }, [page]);
 
   const go = (next: View) => {
-    if (view?.page === 'zones' && editorDirty) setLeavingTo(next);
+    if (view.page === 'zones' && editorDirty) setLeavingTo(next);
     else setView(next);
   };
 
-  const notes = (
-    <Notices
-      notices={notices}
-      onDismiss={(id) => {
-        setNotices((n) => n.filter((x) => x.id !== id));
-      }}
-    />
-  );
-
-  return <Feedback>{body()}</Feedback>;
+  return <Announcer>{body()}</Announcer>;
 
   /** The window's content for where the user is. */
   function body() {
-    if (!settings || !hotkey || !view) {
+    if (!settings || !hotkey) {
       return (
-        <main className="mx-auto max-w-xl p-10">
-          <h1 className="flex items-center gap-2 font-display text-title font-bold">
-            <Mark size={26} />
-            Mosaïk
-          </h1>
-          {problem ? (
-            <div className="mt-4">
-              <p role="alert" className="text-[var(--danger)]">
-                {problem}
-              </p>
-              <div className="mt-4">
+        <main className="grid h-full place-items-center p-10">
+          <div className="flex max-w-md flex-col items-center gap-4 text-center">
+            <Mark size={36} />
+            {problem ? (
+              <>
+                <h1 className="font-display text-title font-bold">Mosaïk isn’t answering</h1>
+                <p role="alert" className="text-[var(--muted)]">
+                  {problem}
+                </p>
                 <Button
                   tone="primary"
                   onClick={() => {
@@ -212,40 +239,39 @@ export function App() {
                 >
                   Try again
                 </Button>
-              </div>
-            </div>
-          ) : (
-            <p className="mt-4 text-[var(--muted)]" aria-busy="true">
-              Starting…
-            </p>
-          )}
-          {notes}
+              </>
+            ) : (
+              <p className="text-[var(--muted)]" aria-busy="true">
+                Starting…
+              </p>
+            )}
+          </div>
         </main>
       );
     }
 
-    const shortcut = hotkey.shortcut;
     const content = (() => {
       switch (view.page) {
-        case 'welcome':
-          return (
-            <Welcome
-              settings={settings}
-              shortcut={shortcut}
-              saveSettings={saveSettings}
-              onDone={() => {
-                setWelcomed(true);
-                setView({ page: 'home' });
-              }}
-            />
-          );
         case 'home':
           return (
             <Home
-              shortcut={shortcut}
-              demo={welcomed}
+              onEditWorkspace={(workspace) => {
+                setView({ page: 'workspace', workspace });
+              }}
               onEditZones={(workspace) => {
-                setView({ page: 'zones', workspace });
+                setView({ page: 'zones', workspace, from: 'home' });
+              }}
+            />
+          );
+        case 'workspace':
+          return (
+            <WorkspacePage
+              workspace={view.workspace}
+              onBack={() => {
+                setView({ page: 'home' });
+              }}
+              onEditZones={(workspace) => {
+                setView({ page: 'zones', workspace, from: 'workspace' });
               }}
             />
           );
@@ -256,26 +282,78 @@ export function App() {
               onDirtyChange={setEditorDirty}
               onClose={() => {
                 setEditorDirty(false);
-                setView({ page: 'home' });
+                setView(
+                  view.from === 'workspace' ? { page: 'workspace', workspace: view.workspace } : { page: 'home' },
+                );
               }}
             />
           );
         case 'settings':
           return (
-            <SettingsPane
+            <SettingsPage
               settings={settings}
               hotkey={hotkey}
+              sideMenu={sideMenu}
+              readOnly={readOnly}
               saveSettings={saveSettings}
-              onWelcome={() => {
-                setView({ page: 'welcome' });
-              }}
             />
           );
       }
     })();
 
-    const dialogs = (
-      <>
+    // A workspace's page and the zone editor belong to Home.
+    const current = view.page === 'settings' ? 'settings' : 'home';
+    return (
+      <div className="flex h-full flex-col">
+        <header className="flex h-12 shrink-0 items-center gap-6 border-b border-[var(--line)] bg-[var(--panel)] px-5">
+          <p className="flex items-center gap-2 font-display text-[1.0625rem] font-bold tracking-tight">
+            <Mark size={20} />
+            Mosaïk
+          </p>
+          <nav aria-label="Mosaïk" className="flex items-center gap-1">
+            {PAGES.map((p) => (
+              <button
+                key={p.page}
+                type="button"
+                aria-current={current === p.page ? 'page' : undefined}
+                onClick={() => {
+                  go({ page: p.page });
+                }}
+                className={`rounded-lg px-3 py-1.5 text-small font-semibold transition-colors duration-150 ${
+                  current === p.page
+                    ? 'bg-[var(--raised)] text-[var(--text)] forced-colors:underline forced-colors:underline-offset-4'
+                    : 'text-[var(--muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </nav>
+          <div className="ml-auto flex items-center gap-2">
+            <Notes
+              notes={notes}
+              onDismiss={(id) => {
+                setNotes((n) => n.filter((x) => x.id !== id));
+              }}
+              onClear={() => {
+                setNotes([]);
+              }}
+            />
+            <button
+              type="button"
+              onClick={showSwitcher}
+              aria-label={`Open the switcher (${hotkey.shortcut.split('+').join(' plus ')})`}
+              title="Open the switcher"
+              className="inline-flex min-h-8 items-center gap-2 rounded-lg px-2 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            >
+              Switcher
+              <Keys shortcut={hotkey.shortcut} quiet />
+            </button>
+          </div>
+        </header>
+        <main ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="mx-auto max-w-[68rem]">{content}</div>
+        </main>
         <Confirm
           open={leavingTo !== null}
           title="Leave without saving?"
@@ -305,58 +383,6 @@ export function App() {
             setClosing(null);
           }}
         />
-      </>
-    );
-
-    // The welcome has the whole window: one thing to read, one thing to do, in the middle of the
-    // window when it has room (auto margins never push it off the top when it does not).
-    if (view.page === 'welcome') {
-      return (
-        <main className="relative flex h-full flex-col overflow-y-auto px-10 py-10">
-          <div className="m-auto w-full max-w-3xl">
-            {notes}
-            <div className={notices.length ? 'mt-6' : ''}>{content}</div>
-          </div>
-        </main>
-      );
-    }
-
-    // The zone editor is opened from a workspace on the home page.
-    const current = view.page === 'zones' ? 'home' : view.page;
-    return (
-      <div className="flex h-full flex-col">
-        <header className="flex shrink-0 items-stretch gap-8 border-b border-[var(--line)] bg-[var(--surface)] px-6">
-          <p className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
-            <Mark size={20} />
-            Mosaïk
-          </p>
-          <nav aria-label="Mosaïk" className="flex items-stretch gap-1">
-            {PAGES.map((p) => (
-              <button
-                key={p.page}
-                type="button"
-                aria-current={current === p.page ? 'page' : undefined}
-                onClick={() => {
-                  go({ page: p.page });
-                }}
-                className={`relative px-3 py-3 font-semibold transition-colors duration-150 focus-visible:-outline-offset-2 ${
-                  current === p.page
-                    ? 'text-[var(--text)] after:absolute after:inset-x-3 after:bottom-0 after:h-[3px] after:rounded-t-full after:bg-[var(--accent)] forced-colors:underline forced-colors:underline-offset-4'
-                    : 'text-[var(--muted)] hover:text-[var(--text)]'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </nav>
-        </header>
-        <main ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto px-10 py-8">
-          <div className="mx-auto max-w-3xl">
-            {notes}
-            <div className={notices.length ? 'mt-6' : ''}>{content}</div>
-          </div>
-        </main>
-        {dialogs}
       </div>
     );
   }

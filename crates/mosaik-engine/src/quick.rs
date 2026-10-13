@@ -1,8 +1,9 @@
-//! The quick menu: a thin handle at an edge of the main monitor (`mosaik_overlay::edge`) that
+//! The side menu: a thin handle at an edge of the main monitor (`mosaik_overlay::edge`) that
 //! opens as soon as the pointer stops on it (or it is clicked), sliding in from the edge, onto
-//! what is done most: Mosaïk and the open workspace (a click opens Mosaïk's window), Arrange, the
-//! switcher, saving the layout, editing the zones, and snapping on or off. Dragging the handle,
-//! or the open menu by its first line, along its edge moves it; the place is kept.
+//! what is done most: Mosaïk and the open workspace (a click opens Mosaïk's window), Arrange and
+//! a strip of layouts, the workspaces (a click opens one), saving the layout, editing the zones,
+//! and snapping on or off. Dragging the handle, or the open menu by its first line, along its
+//! edge moves it; the place is kept.
 //!
 //! It never takes the keyboard: whatever the user was typing in keeps it. The same actions are
 //! in the switcher, the tray menu and the settings window, for the keyboard and screen readers.
@@ -10,10 +11,13 @@
 use std::time::Instant;
 
 use mosaik_core::geometry::{Point, Rect, scale_for_dpi};
+use mosaik_core::presets::Preset;
 use mosaik_core::settings::EdgeSide;
 use mosaik_core::window::WindowHandle;
+use mosaik_core::zone::ZoneColor;
 use mosaik_ipc::protocol::{Command, QuickMenuRow, QuickMenuState, Reply};
-use mosaik_overlay::edge::{self, Edge, EdgeInput, Palette, Place, Row, Side};
+use mosaik_overlay::canvas::Rgba;
+use mosaik_overlay::edge::{self, Edge, EdgeInput, Hot, Mini, Palette, Place, Row, Side, Tile};
 use mosaik_win::{input, window};
 
 use crate::UiEvent;
@@ -27,11 +31,76 @@ const CLOSE_MS: u32 = 400;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
     Arrange,
+    /// The strip of layouts: the one clicked arranges ([`LAYOUTS`]).
+    Layouts,
+    /// Opens the workspace listed at this place in the menu.
+    Workspace(usize),
     Switcher,
     Save,
     EditZones,
     Snapping,
     Open,
+    /// A caption: it does nothing.
+    Nothing,
+}
+
+/// The layouts in the menu's strip: the most used on a landscape screen.
+const LAYOUTS: [Preset; 5] = [
+    Preset::Halves,
+    Preset::Thirds,
+    Preset::MainSide,
+    Preset::HalfAndStack,
+    Preset::Quarters,
+];
+
+/// The most workspaces listed in the menu; the switcher has them all.
+const MOST_WORKSPACES: usize = 6;
+
+/// The palette's colours for the zones of a layout in small, as on the site.
+fn zone_rgba(c: ZoneColor) -> Rgba {
+    let (r, g, b): (u8, u8, u8) = match c {
+        ZoneColor::Lapis => (0x7C, 0x8F, 0xFF),
+        ZoneColor::Verdigris => (0x3F, 0xC1, 0xAD),
+        ZoneColor::Saffron => (0xF4, 0xB1, 0x3A),
+        ZoneColor::Madder => (0xF0, 0x78, 0x92),
+        ZoneColor::Slate => (0xA3, 0xAC, 0xBA),
+    };
+    Rgba(
+        f32::from(r) / 255.0,
+        f32::from(g) / 255.0,
+        f32::from(b) / 255.0,
+        1.0,
+    )
+}
+
+/// A layout preset in small, its zones in the palette's colours in turn.
+fn preset_mini(p: Preset) -> Mini {
+    const COLORS: [ZoneColor; 4] = [
+        ZoneColor::Lapis,
+        ZoneColor::Verdigris,
+        ZoneColor::Saffron,
+        ZoneColor::Madder,
+    ];
+    Mini {
+        zones: p
+            .zones()
+            .into_iter()
+            .enumerate()
+            .map(|(i, z)| (ratio(z), zone_rgba(COLORS[i % COLORS.len()])))
+            .collect(),
+    }
+}
+
+/// A ratio rectangle as the overlay draws it.
+#[allow(clippy::cast_possible_truncation)]
+fn ratio(z: mosaik_core::geometry::RatioRect) -> [f32; 4] {
+    // Fractions of a box a few dozen pixels wide: f32 is plenty.
+    [
+        z.left() as f32,
+        z.top() as f32,
+        z.right() as f32,
+        z.bottom() as f32,
+    ]
 }
 
 /// A press on the handle or on the menu.
@@ -42,8 +111,8 @@ struct Press {
     middle: i32,
     /// The handle (or the menu, by its first line) follows the pointer along its edge.
     dragging: bool,
-    /// The row pressed, in the menu.
-    row: Option<usize>,
+    /// What was pressed, in the menu.
+    row: Option<Hot>,
 }
 
 /// The menu's first line: Mosaïk and the open workspace. A click on it opens Mosaïk's window; a
@@ -56,9 +125,11 @@ pub(crate) struct Quick {
     /// The handle could not be made: said once, not tried again this session.
     failed: bool,
     place: Option<Place>,
-    /// The menu's rows' actions, while it is open, and the row lit.
+    /// The menu's rows' actions, while it is open, and what of it is lit.
     menu: Vec<Action>,
-    hot: Option<usize>,
+    hot: Option<Hot>,
+    /// The workspaces listed in the open menu, in order ([`Action::Workspace`]).
+    listed: Vec<mosaik_core::layout::WorkspaceId>,
     /// The pointer is on the handle: it shows wider.
     over: bool,
     press: Option<Press>,
@@ -82,7 +153,7 @@ pub(crate) struct Quick {
 const POINTER_MS: u32 = 200;
 
 impl Engine {
-    fn quick_palette(&self) -> Palette {
+    pub(crate) fn quick_palette(&self) -> Palette {
         if mosaik_win::os::high_contrast() {
             Palette::high_contrast()
         } else if self.dark_theme() {
@@ -200,8 +271,8 @@ impl Engine {
         self.watch.put_canvas(canvas);
     }
 
-    /// The menu's rows, with what each does: first Mosaïk and the open workspace, which opens
-    /// Mosaïk's window.
+    /// The menu's rows, with what each does: first Mosaïk and the open workspace (which opens
+    /// Mosaïk's window), then Arrange and a strip of layouts, the workspaces, and the rest.
     fn quick_rows(&self) -> Vec<(Action, Row)> {
         let workspace = self
             .active
@@ -214,6 +285,12 @@ impl Engine {
             ..Row::default()
         };
         let moves = !self.config.safe_mode;
+        let hot_tile = self
+            .quick
+            .hot
+            .and_then(|h| h.tile)
+            .and_then(|k| LAYOUTS.get(k))
+            .map(|p| p.label().to_owned());
         let mut rows = vec![
             (
                 Action::Open,
@@ -230,22 +307,82 @@ impl Engine {
                     primary: true,
                     enabled: moves,
                     rule_before: true,
-                    ..row("Arrange windows")
+                    ..row("Arrange")
+                },
+            ),
+            (
+                Action::Nothing,
+                Row {
+                    caption: true,
+                    detail: hot_tile,
+                    ..row("Layouts")
+                },
+            ),
+            (
+                Action::Layouts,
+                Row {
+                    enabled: moves,
+                    tiles: LAYOUTS
+                        .iter()
+                        .map(|p| Tile {
+                            label: p.label().to_owned(),
+                            mini: preset_mini(*p),
+                        })
+                        .collect(),
+                    ..row("Layouts")
                 },
             ),
         ];
-        rows.push((
-            Action::Switcher,
-            Row {
-                detail: Some(self.hotkey_state().shortcut),
-                rule_before: true,
-                ..row("Switch workspace")
-            },
-        ));
+        let active = self.active.as_ref().map(|a| &a.id);
+        let listed = &self.file.workspaces[..self.file.workspaces.len().min(MOST_WORKSPACES)];
+        if !listed.is_empty() {
+            rows.push((
+                Action::Nothing,
+                Row {
+                    caption: true,
+                    rule_before: true,
+                    detail: Some(self.hotkey_state().shortcut),
+                    ..row("Workspaces")
+                },
+            ));
+            for (i, w) in listed.iter().enumerate() {
+                let entry = mosaik_core::switcher::Entry::from_workspace(w);
+                rows.push((
+                    Action::Workspace(i),
+                    Row {
+                        enabled: moves,
+                        detail: if active == Some(&w.id) {
+                            Some("Open".to_owned())
+                        } else {
+                            w.hotkey.map(|h| h.to_string())
+                        },
+                        mini: Some(Mini {
+                            zones: entry
+                                .preview
+                                .zones
+                                .into_iter()
+                                .map(|(z, c)| (ratio(z), zone_rgba(c)))
+                                .collect(),
+                        }),
+                        ..row(&w.name)
+                    },
+                ));
+            }
+            if self.file.workspaces.len() > MOST_WORKSPACES {
+                rows.push((
+                    Action::Switcher,
+                    Row {
+                        detail: Some(format!("{} more", self.file.workspaces.len() - MOST_WORKSPACES)),
+                        ..row("All workspaces")
+                    },
+                ));
+            }
+        }
         rows.push((
             Action::Save,
             Row {
                 enabled: moves,
+                rule_before: true,
                 ..row("Save layout")
             },
         ));
@@ -260,7 +397,6 @@ impl Engine {
             Action::Snapping,
             Row {
                 detail: Some(if self.settings.snap.enabled { "On" } else { "Off" }.to_owned()),
-                rule_before: true,
                 ..row("Snap while dragging")
             },
         ));
@@ -291,6 +427,13 @@ impl Engine {
     fn draw_menu_at(&mut self, place: Place) {
         let rows = self.quick_rows();
         self.quick.menu = rows.iter().map(|(a, _)| *a).collect();
+        self.quick.listed = self
+            .file
+            .workspaces
+            .iter()
+            .take(MOST_WORKSPACES)
+            .map(|w| w.id.clone())
+            .collect();
         let rows: Vec<Row> = rows.into_iter().map(|(_, r)| r).collect();
         let palette = self.quick_palette();
         let hot = self.quick.hot;
@@ -350,6 +493,20 @@ impl Engine {
         self.set_timer(timer::QUICK_ANIM, 10);
     }
 
+    /// Where the side menu's line is, for Settings: its edge, and whether that is the other one
+    /// than chosen (the pointer goes on past the chosen edge). `None` when it is off.
+    pub(crate) fn side_menu_state(&self) -> Option<mosaik_ipc::protocol::SideMenuState> {
+        let place = self.quick.place?;
+        let side = match place.side {
+            Side::Left => EdgeSide::Left,
+            Side::Right => EdgeSide::Right,
+        };
+        Some(mosaik_ipc::protocol::SideMenuState {
+            side,
+            moved: side != self.settings.edge.side,
+        })
+    }
+
     /// The handle or the menu as `mosaikctl state` shows them.
     pub(crate) fn quick_state(&self) -> Option<QuickMenuState> {
         let edge = self.quick.edge.as_ref()?;
@@ -359,11 +516,7 @@ impl Engine {
             rows: edge
                 .menu_rows()
                 .into_iter()
-                .map(|(row, rect)| QuickMenuRow {
-                    label: row.label.clone(),
-                    rect,
-                    enabled: row.enabled,
-                })
+                .map(|(label, rect, enabled)| QuickMenuRow { label, rect, enabled })
                 .collect(),
         })
     }
@@ -448,7 +601,7 @@ impl Engine {
                     if let Some(mut press) = self.quick.press {
                         let threshold = scale_for_dpi(4, place.dpi);
                         // The handle, or the open menu held by its first line.
-                        let by_menu = self.menu_open() && press.row == Some(HEADER);
+                        let by_menu = self.menu_open() && press.row.map(|h| h.row) == Some(HEADER);
                         if (!self.menu_open() || by_menu)
                             && (press.dragging || (p.y - press.at.y).abs() > threshold)
                         {
@@ -515,14 +668,17 @@ impl Engine {
                         }
                     } else if !self.menu_open() || self.menu_closing() {
                         self.open_menu();
-                    } else if let Some(row) = press.row
-                        && self.quick.edge.as_ref().and_then(|e| e.row_at(at)) == Some(row)
-                        && let Some(action) = self.quick.menu.get(row).copied()
+                    } else if let Some(hot) = press.row
+                        && self.quick.edge.as_ref().and_then(|e| e.row_at(at)) == Some(hot)
+                        && let Some(action) = self.quick.menu.get(hot.row).copied()
                     {
-                        let enabled = self.quick_rows().get(row).is_some_and(|(_, r)| r.enabled);
+                        let enabled = self
+                            .quick_rows()
+                            .get(hot.row)
+                            .is_some_and(|(_, r)| r.enabled && !r.caption);
                         if enabled {
                             self.close_menu();
-                            self.run_quick(action);
+                            self.run_quick(action, hot.tile);
                         }
                     }
                 }
@@ -669,10 +825,25 @@ impl Engine {
         }
     }
 
-    fn run_quick(&mut self, action: Action) {
-        tracing::info!(?action, "quick menu");
+    fn run_quick(&mut self, action: Action, tile: Option<usize>) {
+        tracing::info!(?action, ?tile, "side menu");
         let reply = match action {
             Action::Arrange => self.handle(Command::Arrange { preset: None }),
+            Action::Layouts => {
+                let Some(preset) = tile.and_then(|k| LAYOUTS.get(k)) else {
+                    return;
+                };
+                self.handle(Command::Arrange {
+                    preset: Some(preset.id().to_owned()),
+                })
+            }
+            Action::Workspace(i) => {
+                let Some(id) = self.quick.listed.get(i).cloned() else {
+                    return;
+                };
+                self.handle(Command::Switch { workspace: id.0 })
+            }
+            Action::Nothing => return,
             Action::Switcher => {
                 self.show_switcher(Instant::now());
                 return;

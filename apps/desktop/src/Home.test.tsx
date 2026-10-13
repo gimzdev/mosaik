@@ -1,337 +1,205 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Home } from './Home';
 import type { ArrangePreview, Command, Reply } from './protocol';
-import { Feedback } from './ui';
+import {
+  WORK,
+  coding,
+  done,
+  failed,
+  nothingOpen,
+  preview,
+  said,
+  setsReply,
+  shown,
+  workspacesReply,
+} from './test-fixtures';
+import { Announcer } from './ui';
 
 const engine = vi.hoisted(() => ({
   request: vi.fn<(c: Command) => Promise<Reply>>(),
-  onWorkspacesChanged: vi.fn<(f: () => void) => () => void>(() => () => undefined),
+  appIcons: vi.fn((keys: string[]) => Promise.resolve(Object.fromEntries(keys.map((k) => [k, null])))),
+  onWorkspacesChanged: vi.fn(() => () => undefined),
 }));
 vi.mock('./engine', () => engine);
 
 afterEach(cleanup);
-
-const WORK = { left: 0, top: 0, right: 1920, bottom: 1032 };
-
-/** The screen now: two windows, and where Arrange (or a layout) would put them. */
-function preview(layout: 'auto' | 'thirds', windows = 2): Reply & ArrangePreview {
-  const zones =
-    layout === 'thirds'
-      ? [
-          { name: 'Code', color: 'lapis' as const, rect: { left: 0, top: 0, right: 640, bottom: 1032 } },
-          { name: 'Browser', color: 'verdigris' as const, rect: { left: 640, top: 0, right: 1280, bottom: 1032 } },
-          { name: 'Zone', color: 'saffron' as const, rect: { left: 1280, top: 0, right: 1920, bottom: 1032 } },
-        ]
-      : [
-          { name: 'Code', color: 'lapis' as const, rect: { left: 0, top: 0, right: 960, bottom: 1032 } },
-          { name: 'Browser', color: 'verdigris' as const, rect: { left: 960, top: 0, right: 1920, bottom: 1032 } },
-        ];
-  const all = [
-    { label: 'Visual Studio Code', now: { left: 100, top: 100, right: 900, bottom: 800 } },
-    { label: 'Google Chrome', now: { left: 600, top: 200, right: 1600, bottom: 900 } },
-  ].slice(0, windows);
-  return {
-    reply: 'preview',
-    work_area: WORK,
-    zones,
-    windows: all.map((w, i) => {
-      const z = zones[i];
-      return {
-        ...w,
-        then: z ? z.rect : null,
-        minimized: false,
-      };
-    }),
-    elsewhere: 0,
-    task: layout === 'auto' ? 'coding' : null,
-  };
-}
-
-const workspaces = (names: string[], active: string | null = null): Reply => ({
-  reply: 'workspaces',
-  workspaces: names.map((name, i) => ({
-    id: `w${String(i)}`,
-    name,
-    windows: 2,
-    zones: 2,
-    hotkey: null,
-    apps: ['Visual Studio Code', 'Google Chrome'],
-  })),
-  active,
+beforeEach(() => {
+  engine.request.mockReset();
 });
 
-const onEditZones = vi.fn();
+/** Halves: the editor on the left, the browser on the right. */
+const halves: ArrangePreview = {
+  ...coding,
+  task: null,
+  zones: [
+    { name: 'Left', color: 'lapis', rect: { left: 0, top: 0, right: 960, bottom: 1032 } },
+    { name: 'Right', color: 'verdigris', rect: { left: 960, top: 0, right: 1920, bottom: 1032 } },
+  ],
+  windows: coding.windows.map((w, i) => ({
+    ...w,
+    then: i === 0 ? { left: 0, top: 0, right: 960, bottom: 1032 } : { left: 960, top: 0, right: 1920, bottom: 1032 },
+  })),
+};
 
-function page() {
-  return render(
-    <Feedback>
-      <Home shortcut="Win+Alt+Space" onEditZones={onEditZones} />
-    </Feedback>,
+/** Full screen: one window stays, the other is minimised. */
+const full: ArrangePreview = {
+  ...coding,
+  task: null,
+  zones: [{ name: 'Screen', color: 'lapis', rect: WORK }],
+  windows: coding.windows.map((w, i) => (i === 0 ? { ...w, then: WORK } : { ...w, then: null, minimized: true })),
+};
+
+/** The screen as the smart layout would leave it already. */
+const arranged: ArrangePreview = { ...coding, windows: coding.windows.map((w) => ({ ...w, now: w.then ?? w.now })) };
+
+function answer(smart: ArrangePreview = coding, extra: (c: Command) => Reply | null = () => null) {
+  const asked: Command[] = [];
+  engine.request.mockImplementation((c) => {
+    asked.push(c);
+    const special = extra(c);
+    if (special) return Promise.resolve(special);
+    switch (c.cmd) {
+      case 'preview_arrange':
+        if (c.preset === 'full') return Promise.resolve(preview(full));
+        if (c.preset) return Promise.resolve(preview(halves));
+        return Promise.resolve(preview(smart));
+      case 'arrange':
+        return Promise.resolve(done('Arranged 2 windows for coding.'));
+      case 'undo_arrange':
+        return Promise.resolve(done('Windows are back where they were.'));
+      case 'workspaces':
+        return Promise.resolve(workspacesReply([]));
+      case 'sets':
+        return Promise.resolve(setsReply([]));
+      default:
+        return Promise.resolve(done('Done.'));
+    }
+  });
+  return asked;
+}
+
+function home() {
+  render(
+    <Announcer>
+      <Home onEditWorkspace={vi.fn()} onEditZones={vi.fn()} />
+    </Announcer>,
   );
 }
 
-/** The engine as most tests want it: answers every command with these. */
-function answer(extra: (c: Command) => Reply | null = () => null, list: Reply = workspaces([])) {
-  engine.request.mockImplementation((c) => {
-    const special = extra(c);
-    if (special) return Promise.resolve(special);
-    if (c.cmd === 'preview_arrange') return Promise.resolve(preview(c.preset === 'thirds' ? 'thirds' : 'auto'));
-    if (c.cmd === 'workspaces') return Promise.resolve(list);
-    return Promise.resolve({ reply: 'done', message: 'Done.' });
-  });
-}
+const picture = () => screen.getByRole('img', { name: /main screen|Visual Studio Code|Nothing is open/ });
+const arrange = () => screen.getByRole('button', { name: 'Arrange' });
 
-const picture = () => screen.getByRole('img');
-
-describe('the home page', () => {
-  beforeEach(() => {
-    engine.request.mockReset();
-    engine.onWorkspacesChanged.mockClear();
-    onEditZones.mockClear();
-  });
-
-  it('shows the main screen as it is now', async () => {
-    answer();
-    page();
-    expect(await screen.findByText('Your main screen now: 2 windows')).toBeTruthy();
-    expect(picture().getAttribute('aria-label')).toBe('Your main screen now: Visual Studio Code, Google Chrome.');
-    expect(screen.getByRole('heading', { name: 'Tidy your screen', level: 1 })).toBeTruthy();
-  });
-
-  it('shows where the windows would go while a layout is pointed at, and the screen again after', async () => {
-    answer();
-    page();
-    await screen.findByText('Your main screen now: 2 windows');
-    const thirds = screen.getByRole('button', { name: 'Thirds' });
-    fireEvent.pointerEnter(thirds);
-    expect(await screen.findByText('With Thirds: every window in its own zone')).toBeTruthy();
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'preview_arrange', preset: 'thirds' });
-    expect(picture().getAttribute('aria-label')).toBe('Visual Studio Code in Code, Google Chrome in Browser.');
-    expect(picture().dataset.mode).toBe('then');
-    fireEvent.pointerLeave(thirds);
-    expect(await screen.findByText('Your main screen now: 2 windows')).toBeTruthy();
-    expect(picture().dataset.mode).toBe('now');
-  });
-
-  it('shows the same to the keyboard: a layout previews when it has focus', async () => {
-    answer();
-    page();
-    await screen.findByText('Your main screen now: 2 windows');
-    screen.getByRole('button', { name: 'Thirds' }).focus();
-    expect(await screen.findByText('With Thirds: every window in its own zone')).toBeTruthy();
-  });
-
-  it('uses a layout on a click, and undoes it', async () => {
-    answer((c) => {
-      if (c.cmd === 'arrange') return { reply: 'done', message: 'Arranged 2 windows in the “Thirds” layout.' };
-      if (c.cmd === 'undo_arrange') return { reply: 'done', message: 'Windows are back where they were.' };
-      return null;
+describe('Home', () => {
+  it('shows the smart layout for what is open, each window in its zone, before anything moves', async () => {
+    const asked = answer();
+    home();
+    await waitFor(() => {
+      expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in Code, Google Chrome in Browser.');
     });
-    page();
-    await screen.findByText('Your main screen now: 2 windows');
-    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: 'Thirds' }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'arrange', preset: 'thirds' });
-    expect(await screen.findByText('Arranged 2 windows in the “Thirds” layout.')).toBeTruthy();
+    expect(screen.getByText('Smart layout for coding')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Smart' })).toBeChecked();
+    expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
+  });
+
+  it('shows a layout once it is chosen, and moves nothing yet', async () => {
+    const asked = answer();
+    home();
+    await userEvent.click(await screen.findByRole('radio', { name: 'Halves' }));
+    await waitFor(() => {
+      expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in Left, Google Chrome in Right.');
+    });
+    expect(asked).toContainEqual({ cmd: 'preview_arrange', preset: 'halves' });
+    expect(screen.getByRole('radio', { name: 'Halves' })).toBeChecked();
+    expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
+  });
+
+  it('names the windows a layout with fewer zones would minimise', async () => {
+    answer();
+    home();
+    await userEvent.click(await screen.findByRole('radio', { name: 'Full screen' }));
+    expect(await screen.findByText('Google Chrome will be minimized.')).toBeInTheDocument();
+    expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in Screen, Google Chrome minimized.');
+  });
+
+  it('arranges with the smart layout, says what it did, and undoes it', async () => {
+    const asked = answer();
+    home();
+    await waitFor(() => {
+      expect(arrange()).toBeEnabled();
+    });
+    await userEvent.click(arrange());
+    expect(asked).toContainEqual({ cmd: 'arrange' });
+    expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
+    expect(said()).toBe('Arranged 2 windows for coding.');
     await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'undo_arrange' });
-    expect(await screen.findByText('Windows are back where they were.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    expect(asked).toContainEqual({ cmd: 'undo_arrange' });
+    expect(await shown('Windows are back where they were.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
   });
 
-  it('arranges with Mosaïk’s own choice, made for the task its windows say', async () => {
-    answer((c) => (c.cmd === 'arrange' ? { reply: 'done', message: 'Arranged 2 windows for coding.' } : null));
-    page();
-    await screen.findByText('Your main screen now: 2 windows');
-    const arrange = screen.getByRole('button', { name: 'Arrange windows' });
-    fireEvent.pointerEnter(arrange);
-    expect(await screen.findByText('With Arrange, for coding: every window in its own zone')).toBeTruthy();
-    await userEvent.click(arrange);
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'arrange' });
-    expect(await screen.findByText('Arranged 2 windows for coding.')).toBeTruthy();
-  });
-
-  it('names no task when the windows say none', async () => {
-    answer((c) => (c.cmd === 'preview_arrange' && !c.preset ? { ...preview('auto'), task: 'general' } : null));
-    page();
-    await screen.findByText('Your main screen now: 2 windows');
-    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Arrange windows' }));
-    expect(await screen.findByText('With Arrange: every window in its own zone')).toBeTruthy();
+  it('arranges in the layout chosen', async () => {
+    const asked = answer();
+    home();
+    await userEvent.click(await screen.findByRole('radio', { name: 'Thirds' }));
+    await userEvent.click(arrange());
+    expect(asked).toContainEqual({ cmd: 'arrange', preset: 'thirds' });
   });
 
   it('says why the windows could not be arranged, and offers no undo', async () => {
-    answer((c) =>
-      c.cmd === 'arrange'
-        ? {
-            reply: 'error',
-            code: 'failed',
-            message: 'There are no windows on screen to arrange.',
-            hint: 'Open the apps you work with, then arrange them.',
-          }
-        : null,
-    );
-    page();
-    await screen.findByText('Your main screen now: 2 windows');
-    await userEvent.click(screen.getByRole('button', { name: 'Arrange windows' }));
-    expect(
-      await screen.findByText(
-        'There are no windows on screen to arrange. Open the apps you work with, then arrange them.',
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
+    answer(coding, (c) => (c.cmd === 'arrange' ? failed('Two windows are not responding.') : null));
+    home();
+    await waitFor(() => {
+      expect(arrange()).toBeEnabled();
+    });
+    await userEvent.click(arrange());
+    expect(await screen.findByRole('alert')).toHaveTextContent('Two windows are not responding.');
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
   });
 
-  it('says what to do when nothing is open', async () => {
-    answer((c) => (c.cmd === 'preview_arrange' ? { ...preview('auto', 0) } : null));
-    page();
-    expect(await screen.findByText('Open the apps you work with, then come back here.')).toBeTruthy();
-    expect(picture().getAttribute('aria-label')).toBe('No windows are open on your main screen.');
+  it('says when the windows are already where the layout puts them', async () => {
+    answer(arranged);
+    home();
+    expect(await screen.findByText('Your windows are already like this.')).toBeInTheDocument();
+  });
+
+  it('says what to do when nothing is open, and offers nothing to arrange', async () => {
+    answer(nothingOpen);
+    home();
+    expect(await screen.findByText('Open some apps first')).toBeInTheDocument();
+    expect(arrange()).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Halves' })).toBeDisabled();
+    expect(picture()).toHaveAttribute('aria-label', 'Nothing is open on your main screen.');
   });
 
   it('says when Mosaïk cannot read the screen', async () => {
-    answer((c) =>
-      c.cmd === 'preview_arrange'
-        ? { reply: 'error', code: 'failed', message: 'Mosaïk is in safe mode: it does not move windows.', hint: null }
-        : null,
-    );
-    page();
-    const said = await screen.findByText('Mosaïk is in safe mode: it does not move windows.');
-    expect(said.getAttribute('role')).toBe('alert');
-    // The picture does not go on saying the screen is being read.
-    expect(picture().getAttribute('aria-label')).toBe('Your main screen could not be read.');
-    expect(picture().getAttribute('aria-busy')).toBeNull();
-    expect(screen.queryByText('Reading your screen…')).toBeNull();
+    answer(coding, (c) => (c.cmd === 'preview_arrange' ? failed('Safe mode: Mosaïk does not read windows.') : null));
+    home();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Safe mode: Mosaïk does not read windows.');
+    expect(screen.getByRole('img', { name: 'Your main screen could not be read.' })).toBeInTheDocument();
   });
 
-  it('opens a saved workspace, and everything else about it is in its menu', async () => {
-    answer(
-      (c) => (c.cmd === 'switch' ? { reply: 'done', message: 'Opened “Brand”.' } : null),
-      workspaces(['Ship', 'Brand'], 'w0'),
-    );
-    page();
-    const ship = (await screen.findByText('Ship')).closest('li');
-    if (!ship) throw new Error('no row');
-    expect(within(ship).getByText('Open now')).toBeTruthy();
-    await userEvent.click(screen.getByRole('button', { name: 'Open “Brand”' }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'switch', workspace: 'w1' });
-    expect(await screen.findByText('Opened “Brand”.')).toBeTruthy();
-    await userEvent.click(screen.getByRole('button', { name: 'More for “Brand”' }));
-    expect(
-      ['Change its apps…', 'Edit zones', 'Add shortcut…', 'Rename…', 'Delete…'].map(
-        (name) => screen.getByRole('button', { name }).textContent,
-      ),
-    ).toHaveLength(5);
-    await userEvent.click(screen.getByRole('button', { name: 'Edit zones' }));
-    expect(onEditZones).toHaveBeenCalledWith('w1');
-  });
-
-  it('says which shortcut switches workspaces, and nothing more', async () => {
+  it('offers Smart, then the ten layouts by name, beside the workspaces', async () => {
     answer();
-    page();
-    const line = await screen.findByText(/switches workspaces from anywhere\./);
-    expect(line.textContent).toBe('Win plus Alt plus Space switches workspaces from anywhere.');
-    expect(screen.queryByText(/quick menu/)).toBeNull();
-  });
-
-  it('says how many windows a layout with fewer zones would minimise', async () => {
-    answer((c) => {
-      if (c.cmd !== 'preview_arrange' || c.preset !== 'full') return null;
-      const p = preview('auto');
-      const whole: ArrangePreview = {
-        work_area: WORK,
-        zones: [{ name: 'Zone', color: 'lapis', rect: WORK }],
-        windows: p.windows.map((w, i) =>
-          i === 0
-            ? { ...w, then: { left: 2, top: 2, right: 1918, bottom: 1030 } }
-            : { ...w, then: null, minimized: true },
-        ),
-        elsewhere: 0,
-      };
-      return { reply: 'preview', ...whole };
-    });
-    page();
-    await screen.findByText('Your main screen now: 2 windows');
-    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Whole screen' }));
-    expect(await screen.findByText('With Whole screen: 1 window minimized')).toBeTruthy();
-    expect(picture().getAttribute('aria-label')).toBe('Visual Studio Code in Zone, Google Chrome minimized.');
-  });
-  it('offers sets of the apps that go together, and opens one in a click', async () => {
-    answer((c) => {
-      if (c.cmd === 'sets') {
-        return {
-          reply: 'sets',
-          sets: [
-            {
-              id: 'coding',
-              name: 'Coding',
-              apps: ['Visual Studio Code', 'Terminal', 'Google Chrome', 'Claude', 'File Explorer'],
-              open: 1,
-              workspace: null,
-            },
-          ],
-        };
-      }
-      if (c.cmd === 'open_set') return { reply: 'done', message: 'Opened “Coding”.' };
-      return null;
-    });
-    page();
-    const set = await screen.findByRole('button', {
-      name: 'Coding: Visual Studio Code, Terminal, Google Chrome, Claude, File Explorer',
-    });
-    expect(screen.getByRole('group', { name: 'Open the apps for' })).toBeTruthy();
-    // The pointer sees the apps too, on hover.
-    expect(set.getAttribute('title')).toBe('Visual Studio Code, Terminal, Google Chrome, Claude, File Explorer');
-    await userEvent.click(set);
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'open_set', set: 'coding' });
-    expect(await screen.findByText('Opened “Coding”.')).toBeTruthy();
-  });
-
-  it('shows no sets when Mosaïk finds none', async () => {
-    answer((c) => (c.cmd === 'sets' ? { reply: 'sets', sets: [] } : null));
-    page();
-    await screen.findByText('Your main screen now: 2 windows');
-    expect(screen.queryByRole('group', { name: 'Open the apps for' })).toBeNull();
-  });
-
-  it('shows each workspace’s apps, and the full list to change them', async () => {
-    answer(
-      (c) => {
-        if (c.cmd !== 'apps') return null;
-        return {
-          reply: 'apps',
-          workspace: c.workspace,
-          name: 'Ship',
-          apps: [
-            { id: 's1', label: 'Visual Studio Code', zone: 'z1', tab: false },
-            { id: 's2', label: 'Google Chrome', zone: 'z2', tab: false },
-          ],
-          zones: [
-            { id: 'z1', name: 'Code', color: 'lapis' },
-            { id: 'z2', name: 'Browser', color: 'verdigris' },
-          ],
-          windows: [],
-        };
-      },
-      workspaces(['Ship']),
-    );
-    page();
-    const row = (await screen.findByText('Ship')).closest('li');
-    if (!row) throw new Error('no row');
-    const names = within(row).getByRole('list', { name: 'Its apps' });
-    expect(
-      within(names)
-        .getAllByRole('listitem')
-        .map((li) => li.textContent),
-    ).toEqual(['Visual Studio Code', 'Google Chrome']);
-    await userEvent.click(within(row).getByRole('button', { name: 'More for “Ship”' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Change its apps…' }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'apps', workspace: 'w0' });
-    expect(await screen.findByRole('combobox', { name: 'Zone of Google Chrome' })).toBeTruthy();
-    await userEvent.click(within(row).getByRole('button', { name: 'More for “Ship”' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Hide its apps' }));
-    expect(screen.queryByRole('combobox')).toBeNull();
+    home();
+    const area = await screen.findByRole('region', { name: 'Your screen' });
+    const group = within(area).getByRole('group', { name: 'Layout' });
+    expect(within(group).getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual([
+      'smart',
+      'halves',
+      'thirds',
+      'main-side',
+      'side-main',
+      'half-stack',
+      'stack-half',
+      'quarters',
+      'rows',
+      'three-rows',
+      'full',
+    ]);
+    expect(within(group).getByRole('radio', { name: 'Main + side' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Workspaces' })).toBeInTheDocument();
   });
 });

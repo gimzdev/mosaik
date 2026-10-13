@@ -9,6 +9,7 @@ pub mod editing;
 pub mod fit;
 pub mod geometry;
 pub mod hotkey;
+pub mod icons;
 pub mod journal;
 pub mod layout;
 pub mod lines;

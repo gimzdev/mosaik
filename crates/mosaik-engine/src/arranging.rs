@@ -510,8 +510,10 @@ impl Engine {
                 Goes::Minimize => (None, true),
                 Goes::Stay => (None, false),
             };
+            let path = self.scanner.process_path(w.pid);
             windows.push(PreviewWindow {
                 label: p.labels[i].clone(),
+                icon: mosaik_core::icons::key(w.aumid.as_deref(), path.as_deref()),
                 now: w.frame_rect,
                 then: then.map(|r| lands(w, r)),
                 minimized,

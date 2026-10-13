@@ -2,16 +2,21 @@
 // and replies as Mosaïk's engine, on sample data kept in memory. Never part of a release build
 // (engine.ts only loads it when `import.meta.env.DEV`).
 //
-// URL switches for trying states: `?welcome=1` (first run), `?taken=1` (the switcher shortcut is
+// URL switches for trying states: `?first=1` (first run), `?taken=1` (the switcher shortcut is
 // taken by another app), `?empty=1` (no workspaces), `?second=1` (a second, portrait monitor),
-// `?nowindows=1` (nothing open on screen), `?broken=1` (the engine does not answer).
+// `?nowindows=1` (nothing open on screen), `?broken=1` (the engine does not answer), `?moved=1`
+// (the side menu is on the other edge), `?newer=1` (settings from a newer Mosaïk), `?notes=1`
+// (Mosaïk has notes waiting), `?light=1` (the light theme).
 
 import { PRESETS, type Preset, presetShape } from './editor/model';
 import {
+  type AppSet,
   type ArrangePreview,
   type Command,
   type HotkeyState,
+  type MiniZone,
   type MonitorState,
+  type Notice,
   type PreviewWindow,
   type RatioRect,
   type Rect,
@@ -65,9 +70,9 @@ const settings: Settings = {
   tab_hiding: null,
   switching: { minimize_others: true, launch_missing: true },
   edge: { enabled: true, side: 'right', position: 300 },
-  theme: 'system',
+  theme: params.get('light') === '1' ? 'light' : 'dark',
   start_with_windows: false,
-  onboarding_done: params.get('welcome') !== '1',
+  onboarding_done: params.get('first') !== '1',
   rules: { user: [], learned: [] },
   notices_shown: [],
 };
@@ -78,8 +83,9 @@ function hotkey(): HotkeyState {
     : { shortcut: settings.switcher_hotkey, registered: true, problem: null };
 }
 
+
 /** A workspace as the stand-in keeps it: its apps' names come from its list of apps. */
-interface Workspace extends Omit<WorkspaceSummary, 'apps'> {
+interface Workspace extends Omit<WorkspaceSummary, 'apps' | 'icons' | 'layout'> {
   zoneList: ZoneEdit[];
   appList: WorkspaceApp[];
 }
@@ -95,10 +101,10 @@ const workspaces: Workspace[] =
           zones: 3,
           hotkey: 'Win+Alt+J',
           appList: [
-            { id: 's1', label: 'Visual Studio Code', zone: 'z1', tab: false },
-            { id: 's2', label: 'Google Chrome', zone: 'z2', tab: false },
-            { id: 's3', label: 'Windows Terminal', zone: 'z3', tab: true },
-            { id: 's4', label: 'Slack', zone: 'z3', tab: true },
+            { id: 's1', label: 'Visual Studio Code', icon: null, zone: 'z1', tab: false },
+            { id: 's2', label: 'Google Chrome', icon: null, zone: 'z2', tab: false },
+            { id: 's3', label: 'Windows Terminal', icon: null, zone: 'z3', tab: true },
+            { id: 's4', label: 'Slack', icon: null, zone: 'z3', tab: true },
           ],
           zoneList: [
             { id: 'z1', name: 'Code', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.6, bottom: 1 } },
@@ -125,8 +131,8 @@ const workspaces: Workspace[] =
           zones: 2,
           hotkey: null,
           appList: [
-            { id: 's1', label: 'Figma', zone: 'z1', tab: false },
-            { id: 's2', label: 'Notepad', zone: 'z2', tab: false },
+            { id: 's1', label: 'Figma', icon: null, zone: 'z1', tab: false },
+            { id: 's2', label: 'Notepad', icon: null, zone: 'z2', tab: false },
           ],
           zoneList: [
             {
@@ -159,6 +165,7 @@ const SETS: { id: string; name: string; apps: string[] }[] =
           name: 'Coding',
           apps: ['Visual Studio Code', 'Terminal', 'Google Chrome', 'Claude', 'File Explorer'],
         },
+        { id: 'design', name: 'Design', apps: ['Figma', 'Google Chrome', 'File Explorer'] },
         { id: 'playing', name: 'Games', apps: ['Steam', 'Battle.net', 'Discord'] },
       ];
 
@@ -182,7 +189,13 @@ function openSet(id: string): Reply {
       windows: n,
       zones: n,
       hotkey: null,
-      appList: set.apps.map((label, i) => ({ id: `s${String(i + 1)}`, label, zone: `z${String(i + 1)}`, tab: false })),
+      appList: set.apps.map((label, i) => ({
+        id: `s${String(i + 1)}`,
+        label,
+        icon: null,
+        zone: `z${String(i + 1)}`,
+        tab: false,
+      })),
       zoneList: set.apps.map((label, i) => ({
         id: `z${String(i + 1)}`,
         name: label,
@@ -317,8 +330,8 @@ function preview(preset: Preset | undefined): ArrangePreview {
     const zone = takes(n);
     const rect = zone === undefined ? undefined : rects[zone];
     return rect === undefined
-      ? { label: s.label, now: s.now, then: null, minimized: true }
-      : { label: s.label, now: s.now, then: rect, minimized: false };
+      ? { label: s.label, icon: null, now: s.now, then: null, minimized: true }
+      : { label: s.label, icon: null, now: s.now, then: rect, minimized: false };
   });
   return {
     work_area: work,
@@ -389,13 +402,15 @@ const missing = (which: string): Reply => ({
 function summary(): Reply {
   return {
     reply: 'workspaces',
-    workspaces: workspaces.map(({ id, name, zones, hotkey: key, appList }) => ({
+    workspaces: workspaces.map(({ id, name, zones, hotkey: key, appList, zoneList }) => ({
       id,
       name,
       windows: appList.length,
       zones,
       hotkey: key,
       apps: appList.map((a) => a.label),
+      icons: appList.map((a) => a.icon),
+      layout: zoneList.filter((z) => z.monitor === 'm1').map((z): MiniZone => ({ area: z.area, color: z.color })),
     })),
     active,
   };
@@ -422,7 +437,7 @@ function apps(w: Workspace): Reply {
     apps: structuredClone(w.appList),
     zones: w.zoneList.flatMap((z) => (z.id ? [{ id: z.id, name: z.name, color: z.color }] : [])),
     windows: onScreen
-      .map((s, i) => ({ window: 0x10000 + i, label: s.label, title: `${s.label} window` }))
+      .map((s, i) => ({ window: 0x10000 + i, label: s.label, title: `${s.label} window`, icon: null }))
       .filter((o) => !w.appList.some((a) => a.label === o.label)),
   };
 }
@@ -473,11 +488,23 @@ const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.1.0-dev', protocol: 6 };
+      return { reply: 'hello', app_version: '2.0.0-dev', protocol: 7 };
     case 'workspaces':
       return summary();
     case 'settings':
-      return { reply: 'settings', settings: structuredClone(settings), hotkey: hotkey() };
+      return {
+        reply: 'settings',
+        settings: structuredClone(settings),
+        hotkey: hotkey(),
+        side_menu: settings.edge.enabled
+          ? params.get('moved') === '1'
+            ? { side: settings.edge.side === 'right' ? 'left' : 'right', moved: true }
+            : { side: settings.edge.side, moved: false }
+          : null,
+        read_only: params.get('newer') === '1',
+        // The stand-in is Mosaïk as installed from the Store.
+        packaged: true,
+      };
     case 'set_settings':
       Object.assign(settings, structuredClone(command.settings));
       return done('Settings saved.');
@@ -570,7 +597,13 @@ function answer(command: Command): Reply {
       do {
         n += 1;
       } while (w.appList.some((a) => a.id === `s${String(n)}`));
-      w.appList.push({ id: `s${String(n)}`, label: s.label, zone: command.zone ?? empty, tab: false });
+      w.appList.push({
+        id: `s${String(n)}`,
+        label: s.label,
+        icon: null,
+        zone: command.zone ?? empty,
+        tab: false,
+      });
       return apps(w);
     }
     case 'move_app':
@@ -614,8 +647,8 @@ function answer(command: Command): Reply {
     case 'state':
       return {
         reply: 'state',
-        app_version: '1.1.0-dev',
-        protocol: 6,
+        app_version: '2.0.0-dev',
+        protocol: 7,
         safe_mode: false,
         watchdog: true,
         monitors,
@@ -624,16 +657,67 @@ function answer(command: Command): Reply {
     case 'sets':
       return {
         reply: 'sets',
-        sets: SETS.map((set) => ({ ...set, open: 0, workspace: find(set.name)?.id ?? null })),
+        sets: SETS.map((set): AppSet => ({
+          ...set,
+          icons: set.apps.map(() => null),
+          open: 0,
+          workspace: find(set.name)?.id ?? null,
+        })),
       };
     case 'open_set':
       return openSet(command.set);
     case 'sort_windows':
       return done('No windows open now go together as a workspace.');
-    case 'save':
+    case 'save': {
+      const name = command.workspace;
+      if (name === null) {
+        const w = workspaces.find((x) => x.id === active);
+        return w ? done(`Saved “${w.name}”.`) : done('Saved.');
+      }
+      if (find(name)) return done(`Saved “${name}”.`);
+      const n = onScreen.length;
+      workspaces.push({
+        id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        name,
+        windows: n,
+        zones: n,
+        hotkey: null,
+        appList: onScreen.map((o, i) => ({
+          id: `s${String(i + 1)}`,
+          label: o.label,
+          icon: null,
+          zone: `z${String(i + 1)}`,
+          tab: false,
+        })),
+        zoneList: autoLayout().shape.map((area, i) => ({
+          id: `z${String(i + 1)}`,
+          name: onScreen[i]?.zone ?? `Zone ${String(i + 1)}`,
+          color: ZONE_COLORS[i % ZONE_COLORS.length] ?? 'slate',
+          monitor: 'm1',
+          area,
+        })),
+      });
+      active = workspaces[workspaces.length - 1]?.id ?? active;
+      return done(`Saved “${name}”.`);
+    }
     case 'show_switcher':
     case 'show_settings':
     case 'quit':
       return done('Done.');
   }
 }
+
+/** Notes the stand-in has waiting (`?notes=1`). */
+export const mockNotices: Notice[] =
+  params.get('notes') === '1'
+    ? [
+        {
+          title: 'FancyZones is running',
+          body: 'It also moves windows. Turn it off in PowerToys, or Mosaïk and it will keep moving the same windows.',
+        },
+        {
+          title: 'Mosaïk cannot move this window',
+          body: 'Task Manager runs as administrator, so Windows keeps other apps from moving it.',
+        },
+      ]
+    : [];

@@ -153,6 +153,11 @@ impl Engine {
                     id: s.task.id().to_owned(),
                     name: s.name().to_owned(),
                     apps: s.apps.iter().map(|a| a.name.clone()).collect(),
+                    icons: s
+                        .apps
+                        .iter()
+                        .map(|a| mosaik_core::icons::of_app(&a.app, Some(&a.launch)))
+                        .collect(),
                     open: u32::try_from(s.apps.iter().filter(|a| a.running).count()).unwrap_or(u32::MAX),
                     workspace: workspace_of(s, &self.file.workspaces).map(|w| w.id.clone()),
                 })

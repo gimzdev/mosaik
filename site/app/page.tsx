@@ -1,13 +1,14 @@
-import { Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
+import { DeskThumb, Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
 import { Check, DownloadButton, PlatformList } from '@/components/ui';
+import { WORKSPACES } from '@/lib/data';
 import { site } from '@/lib/site';
 
 const FEATURES = [
   {
     id: 'zones',
     title: 'Zones give every window a home',
-    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it, each zone as big as its window needs. Or pick one of ten layouts, or carve the screen into your own named areas. Before you click, Mosaïk shows where each window would go.',
-    points: ['Zones belong to the project, not the monitor', 'Zones fill the screen, so no space is lost', 'Works across multiple displays'],
+    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it. Or pick one of ten layouts, or carve the screen into your own named areas, like Code, Terminal and Review. Before you click, Mosaïk shows where each window would go.',
+    points: ['Zones belong to the project, not the monitor', 'Every window wears its zone’s colour, so you can tell at a glance', 'Works across multiple displays'],
     Art: ZonesArt,
   },
   {
@@ -38,15 +39,18 @@ export default function Home() {
     <>
       <section className="pb-20 pt-28 sm:pt-32 md:pb-28">
         <div className="page-x">
-          <div className="grid gap-5 lg:grid-cols-12 lg:items-end lg:gap-14">
+          <div className="grid gap-7 lg:grid-cols-12 lg:items-end lg:gap-14">
             <h1 className="font-display text-[clamp(2.4rem,4.7vw,4.1rem)] font-bold leading-[1.03] tracking-[-0.035em] lg:col-span-7">
               Every window,
               <br />
               in its place.
             </h1>
-            <p className="max-w-md text-[17px] leading-[1.6] text-slate lg:col-span-5">
-              Mosaïk suggests sets of apps that go together and opens them in tidy views. You can make your own, too.
-            </p>
+            <div className="lg:col-span-5 lg:pb-2">
+              <p className="max-w-[30rem] text-[18px] leading-[1.45] text-slate sm:text-[19px]">
+                Every project gets its own workspace: your apps and windows arranged and ready in one click.
+              </p>
+              <p className="mt-2 text-[15px] text-slate">Free and open source.</p>
+            </div>
           </div>
           <div className="mt-10 md:mt-12">
             <Stage />
@@ -73,6 +77,26 @@ export default function Home() {
                   <Art />
                 </div>
               </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="people" className="scroll-mt-16 border-t border-grout py-20 md:py-28">
+        <div className="page-x">
+          <Intro title="One desktop, many kinds of work.">A workspace is whatever you need open together. These four are the ones we kept reaching for.</Intro>
+          <div className="mt-12 grid gap-x-8 gap-y-12 sm:grid-cols-2">
+            {WORKSPACES.map((w, i) => (
+              <div key={w.id}>
+                <div className="overflow-hidden rounded-[16px] ring-1 ring-black/10">
+                  <DeskThumb index={i} />
+                </div>
+                <div className="mt-4 flex items-baseline justify-between gap-4">
+                  <h3 className="font-display text-[1.35rem] font-bold tracking-[-0.02em]">{w.name}</h3>
+                  <p className="shrink-0 text-sm font-semibold text-lapis">{w.role}</p>
+                </div>
+                <p className="mt-1.5 max-w-md text-[15.5px] leading-relaxed text-slate">{w.about}</p>
+              </div>
             ))}
           </div>
         </div>

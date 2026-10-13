@@ -11,6 +11,7 @@ pub mod error;
 pub mod events;
 pub mod hide;
 pub mod hotkey;
+pub mod icons;
 pub mod input;
 pub mod keyboard;
 pub mod monitors;

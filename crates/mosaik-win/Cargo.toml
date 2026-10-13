@@ -22,6 +22,7 @@ features = [
     "Win32_Globalization",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
     "Win32_Security",
     "Win32_Storage_EnhancedStorage",
     "Win32_Storage_FileSystem",

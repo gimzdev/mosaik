@@ -1,6 +1,6 @@
 // The zone editor: one workspace's zones on each monitor connected now. Drag the lines between
 // zones (or focus one and use the arrow keys) to resize; pick a zone to rename, recolour, split
-// or remove it; start from a preset. Nothing changes until "Save zones".
+// or remove it; start from a layout. Nothing changes until "Save zones".
 
 import { useEffect, useMemo, useState } from 'react';
 
@@ -8,7 +8,6 @@ import { Canvas } from './editor/Canvas';
 import {
   type Draft,
   PRESETS,
-  type Preset,
   applyPreset,
   fromZones,
   presetShape,
@@ -21,7 +20,9 @@ import {
 import { ZonePanel } from './editor/ZonePanel';
 import { request } from './engine';
 import { errorMessage, type MonitorState } from './protocol';
-import { Button, Confirm, MenuButton, PageTitle, Status, useSay } from './ui';
+import { Glyph } from './icons';
+import { LayoutGlyph } from './Layouts';
+import { Button, Confirm, MenuButton, PageTitle, Status, useAnnounce } from './ui';
 
 interface Loaded {
   name: string;
@@ -42,26 +43,6 @@ function sameZone(before: Draft[], next: Draft[], key: string | null): string | 
   return same?.key ?? null;
 }
 
-/** A small drawing of a preset's zones, beside its name in the menu. */
-function PresetPicture({ preset }: { preset: Preset }) {
-  return (
-    <svg aria-hidden="true" width="30" height="20" viewBox="0 0 30 20" className="shrink-0">
-      {presetShape(preset).map((a, i) => (
-        <rect
-          key={i}
-          x={1 + a.left * 28 + 0.75}
-          y={1 + a.top * 18 + 0.75}
-          width={Math.max(1, (a.right - a.left) * 28 - 1.5)}
-          height={Math.max(1, (a.bottom - a.top) * 18 - 1.5)}
-          rx="1.5"
-          className="fill-[var(--hover)] stroke-[var(--muted)] forced-colors:fill-[Canvas] forced-colors:stroke-[CanvasText]"
-          strokeWidth="1"
-        />
-      ))}
-    </svg>
-  );
-}
-
 export function ZoneEditor({
   workspace,
   onClose,
@@ -80,7 +61,8 @@ export function ZoneEditor({
   const [selected, setSelected] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const say = useSay();
+  const [outcome, setOutcome] = useState<{ text: string; error: boolean } | null>(null);
+  const announce = useAnnounce();
 
   useEffect(() => {
     let live = true;
@@ -113,10 +95,11 @@ export function ZoneEditor({
   const save = () => {
     if (!loaded) return;
     setSaving(true);
+    setOutcome(null);
     void request({ cmd: 'set_zones', workspace, zones: toZones(drafts), revision: loaded.revision }).then((reply) => {
       setSaving(false);
       if (reply.reply !== 'zones') {
-        say(errorMessage(reply) ?? 'The zones could not be saved.', true);
+        setOutcome({ text: errorMessage(reply) ?? 'The zones could not be saved.', error: true });
         return;
       }
       // The zones as saved: new ones have their ids now, so saving again keeps them.
@@ -125,16 +108,15 @@ export function ZoneEditor({
       setLoaded({ name: reply.name, monitors: reply.monitors, revision: reply.revision });
       setSaved(next);
       setDrafts(next);
-      say('Zones saved.');
+      setOutcome({ text: 'Zones saved.', error: false });
+      announce('Zones saved.');
     });
   };
 
   if (!loaded) {
     return (
-      <article aria-labelledby="zones-title" aria-busy={loadProblem === null}>
-        <PageTitle id="zones-title" eyebrow="Zones">
-          {loadProblem ? 'The zones could not be read' : 'Reading the zones…'}
-        </PageTitle>
+      <article aria-labelledby="zones-title" aria-busy={loadProblem === null} className="mx-auto w-full max-w-[52rem]">
+        <PageTitle id="zones-title">{loadProblem ? 'The zones could not be read' : 'Reading the zones…'}</PageTitle>
         <div className="mt-3">
           <Status text={loadProblem} error />
         </div>
@@ -146,11 +128,14 @@ export function ZoneEditor({
   }
 
   return (
-    <article aria-labelledby="zones-title">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <PageTitle id="zones-title" eyebrow="Zones of">
-          {loaded.name}
-        </PageTitle>
+    <article aria-labelledby="zones-title" className="mx-auto w-full max-w-[52rem]">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-small font-semibold text-[var(--muted)]">Zones</p>
+          <PageTitle id="zones-title" className="truncate">
+            {loaded.name}
+          </PageTitle>
+        </div>
         <div className="flex gap-2">
           <Button
             onClick={() => {
@@ -166,9 +151,12 @@ export function ZoneEditor({
         </div>
       </div>
       <p className="mt-2 text-small text-[var(--muted)]">
-        Drag a line between zones to resize them, or focus it and use the arrow keys (with Shift for bigger steps).
-        Windows in a zone you remove stay where they are.
+        Drag the line between two zones to resize them, or focus it and use the arrow keys. Windows in a zone you remove
+        stay where they are.
       </p>
+      <div className="mt-1">
+        <Status text={outcome?.text ?? null} error={outcome?.error ?? false} />
+      </div>
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
         {loaded.monitors.length > 1 ? (
@@ -184,7 +172,7 @@ export function ZoneEditor({
                 }}
                 className={`rounded-lg border px-3 py-1.5 text-small font-semibold ${
                   m.id === monitor
-                    ? 'border-[var(--accent)] bg-[var(--surface)] text-[var(--text)] forced-colors:border-[Highlight] forced-colors:underline'
+                    ? 'border-[var(--accent)] bg-[var(--panel)] text-[var(--text)] forced-colors:border-[Highlight] forced-colors:underline'
                     : 'border-[var(--line)] text-[var(--muted)] hover:bg-[var(--hover)]'
                 }`}
               >
@@ -198,17 +186,19 @@ export function ZoneEditor({
         )}
         {current ? (
           <MenuButton
-            label="Start from a preset"
+            label="Start from a layout"
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 text-small font-semibold text-[var(--accent)] hover:bg-[var(--hover)]"
             items={PRESETS.map((p) => ({
               label: p.label,
-              icon: <PresetPicture preset={p.id} />,
+              icon: <LayoutGlyph shape={presetShape(p.id)} width={30} height={18} colored={false} />,
               onSelect: () => {
                 setDrafts(applyPreset(drafts, current.id, p.id));
                 setSelected(null);
               },
             }))}
           >
-            <span className="text-[var(--accent)]">Start from a preset ▾</span>
+            Start from a layout
+            <Glyph name="down" size={14} />
           </MenuButton>
         ) : null}
       </div>
