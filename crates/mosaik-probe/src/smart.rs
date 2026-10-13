@@ -1782,9 +1782,11 @@ fn quick_menu(
     );
 
     // 4c2. A layout from the menu's strip: Halves lays the main screen out in two halves, and
-    // the menu closes. Two zones for three windows: the window in front and the one used next
-    // take them, the one used longest ago is minimised (ADR 0019; jobs 0122 and 0123 expected
-    // the first two windows, whatever their use).
+    // the menu closes. Two zones for three windows: the window in front (here the one of a fixed
+    // size) and the one used next take them, the one used longest ago is minimised (ADR 0019).
+    // A window that can be resized fits its half; the fixed one keeps its size, centred across
+    // its half and at its top. (Jobs 0122 and 0123 expected the first two windows, whatever
+    // their use; job 0127 measured the fixed one as if it filled its half.)
     glide(row.rect.center(), q.rect.center());
     let (again, _) = wait_menu(engine, 2000, is_open)?;
     let strip = again
@@ -1807,16 +1809,37 @@ fn quick_menu(
     let ws = st.active_workspace.clone().ok_or("no workspace open")?;
     let zs = zones(engine, &ws.0, work)?;
     let three = &w[..w.len().min(3)];
-    let halves_fit = fit(&st, &zs, styles, three);
-    let placed = |e: &Option<i32>| e.is_some_and(|e| e <= SLACK);
-    let in_halves = halves_fit.iter().filter(|e| placed(e)).count();
-    let front_in = fit(&st, &zs, styles, &[front]).first().is_some_and(placed);
-    let left_out: Vec<bool> = three
+    let fixed = three.last().copied();
+    // Each window: in a half and placed as it should be, or out and minimised.
+    let windows: Vec<Value> = three
         .iter()
-        .zip(&halves_fit)
-        .filter(|(_, e)| !placed(e))
-        .map(|(h, _)| mosaik_win::window::geometry(*h).is_some_and(|g| g.minimized))
+        .map(|&h| {
+            let minimized = mosaik_win::window::geometry(h).is_some_and(|g| g.minimized);
+            let Some((zone, f)) = zone_of(&st, &zs, h).zip(frame_rect(h)) else {
+                return json!({ "in_a_half": false, "minimized": minimized, "ok": minimized });
+            };
+            if Some(h) == fixed {
+                let area = styles.area(zone, wears_above(&st, h));
+                let (top, across) = (f.top - area.top, f.center().x - area.center().x);
+                json!({
+                    "in_a_half": true,
+                    "fixed_size": true,
+                    "top_px": top,
+                    "centre_px": across,
+                    "ok": top.abs() <= SLACK && across.abs() <= SLACK,
+                })
+            } else {
+                let e = fit(&st, &zs, styles, &[h]).first().copied().flatten();
+                json!({ "in_a_half": true, "fit_px": e, "ok": e.is_some_and(|e| e <= SLACK) })
+            }
+        })
         .collect();
+    let in_halves = windows.iter().filter(|v| v["in_a_half"] == json!(true)).count();
+    let front_in = three
+        .iter()
+        .position(|h| *h == front)
+        .and_then(|i| windows.get(i))
+        .is_some_and(|v| v["in_a_half"] == json!(true));
     let half = work.width() / 2;
     let two_halves = zs.len() == 2
         && zs
@@ -1827,12 +1850,11 @@ fn quick_menu(
         "layout_from_menu".into(),
         json!({
             "zones": rects(&zs),
-            "fit_px": halves_fit,
+            "windows": windows,
             "front_window_in_a_half": front_in,
-            "left_out_minimized": left_out,
             "menu_closed": closed,
             "ok": two_halves && in_halves == 2.min(three.len()) && front_in
-                && left_out.iter().all(|m| *m) && closed,
+                && windows.iter().all(|v| v["ok"] == json!(true)) && closed,
         }),
     );
 
