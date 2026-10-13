@@ -368,30 +368,61 @@ function Invoke-Cargo([string]$In, [string[]]$Arguments) {
   }
 }
 
-# The Mosaik of this folder's build that is running, if one is: Windows keeps its files from being
-# built over. Like any function's, its output is unrolled (none is $null, one is not a list), so
-# callers collect it with @() before reading Count (job 0132).
-function Get-RunningBuild([string]$Source) {
+# The processes called $Name (mosaik, its watchdog) started from this folder's build: Windows
+# keeps their files from being built over. Like any function's, the output is unrolled (none is
+# $null, one is not a list), so callers collect it with @() before reading Count (job 0132).
+function Get-RunningBuild([string]$Source, [string]$Name = 'mosaik') {
   $release = [IO.Path]::GetFullPath((Under $Source 'target' 'release')) + [IO.Path]::DirectorySeparatorChar
-  Get-Process -Name 'mosaik' -ErrorAction SilentlyContinue | Where-Object {
+  Get-Process -Name $Name -ErrorAction SilentlyContinue | Where-Object {
     $path = try { $_.Path } catch { $null }
     $path -and $path.StartsWith($release, [StringComparison]::OrdinalIgnoreCase)
   }
+}
+
+# Asks Mosaik to quit (every window it hid comes back) with the build's own mosaikctl; false
+# when Windows does not run it (Smart App Control refuses a new build's files for a while: job
+# 0133 had mosaikctl.exe refused while mosaik.exe ran).
+function Request-Quit([string]$Ctl) {
+  if (-not (Test-Path $Ctl)) { return $false }
+  # Its own messages go to the console as they are: a line on stderr is no failure here.
+  try {
+    & $Ctl quit | Out-Null
+    $true
+  }
+  catch {
+    Say ("Windows did not run mosaikctl ({0})." -f $_.Exception.Message) Yellow
+    $false
+  }
+}
+
+# Makes way for the build: a Mosaik running from this folder is asked to quit and waited for; one
+# that cannot be asked, or does not quit, is stopped, and its watchdog brings back every window it
+# hid; then its watchdog is waited for. True when Mosaik was running, to start it again after.
+function Stop-RunningBuild([string]$Source) {
+  $running = @(Get-RunningBuild $Source)
+  if ($running.Count -gt 0) {
+    Say 'Mosaik from this folder is running: it quits for the build, and starts again after.' Yellow
+    $asked = Request-Quit (Under $Source 'target' 'release' 'mosaikctl.exe')
+    foreach ($p in $running) {
+      if ($p.WaitForExit($(if ($asked) { 10000 } else { 1000 }))) { continue }
+      Say 'It did not quit: it is stopped, and its watchdog brings back every window it hid.' Yellow
+      try { $p.Kill() } catch { }
+      if (-not $p.WaitForExit(10000)) { Fail 'Mosaik from this folder did not quit. Quit it from its tray icon, then build again.' }
+    }
+  }
+  foreach ($w in @(Get-RunningBuild $Source 'mosaik-watchdog')) {
+    if (-not $w.WaitForExit(15000)) { Fail "Mosaik's watchdog from this folder is still running. Quit Mosaik from its tray icon, then build again." }
+  }
+  $running.Count -gt 0
 }
 
 function Invoke-Build {
   $source = Get-Source
   Use-Cargo
   $ui = Under $source 'apps' 'desktop'
-  # A Mosaik of this build that is running is asked to quit first (every window it hid comes
-  # back), then started again in the tray once the new build is made.
-  $running = @(Get-RunningBuild $source)
-  if ($running.Count -gt 0) {
-    Say 'Mosaik from this folder is running: it quits for the build, and starts again after.' Yellow
-    $ctl = Under $source 'target' 'release' 'mosaikctl.exe'
-    if (Test-Path $ctl) { & $ctl quit | Out-Null }
-    foreach ($p in $running) { if (-not $p.WaitForExit(10000)) { Fail 'Mosaik from this folder did not quit. Quit it from its tray icon, then build again.' } }
-  }
+  # A Mosaik of this build that is running quits first, and starts again in the tray once the new
+  # build is made.
+  $restart = Stop-RunningBuild $source
   Step 'Building the interface'
   Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund')
   Invoke-Tool $ui 'npm' @('run', 'build')
@@ -401,7 +432,7 @@ function Invoke-Build {
   Copy-Item (Under $source 'THIRD-PARTY-NOTICES.txt') (Under $source 'target' 'release')
   $exe = Under $source 'target' 'release' 'mosaik.exe'
   Say ("Done: {0}" -f $exe) Green
-  if ($running.Count -gt 0) {
+  if ($restart) {
     # Windows can refuse a new build for a while (Smart App Control): it is built all the same.
     try {
       Start-Process $exe -ArgumentList '--background'

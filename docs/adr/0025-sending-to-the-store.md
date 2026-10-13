@@ -32,9 +32,13 @@ app built with Cargo is not one. The Store submission API it uses underneath tak
   encrypted with DPAPI (`%APPDATA%\Mosaik\store-publishing.xml`), never in the repository;
   `MOSAIK_STORE_TENANT`, `MOSAIK_STORE_CLIENT` and `MOSAIK_STORE_KEY` serve a build server.
 - **`mosaik.ps1 publish`** runs the tests, the build and the package, then `publish.ps1`, which
-  shows the version and its "What's new" and asks before sending (or `-Yes`). The build first
+  shows the version and its "What's new" and asks before sending (or `-Yes`); a no, or no answer
+  from a script, sends nothing and ends as a failure, so nothing after it runs. The build first
   quits a Mosaïk running from the same folder (Windows keeps its files from being built over) and
-  starts it again after.
+  starts it again after. Smart App Control refuses a new build's files for a while (job 0133:
+  `mosaikctl.exe` refused while `mosaik.exe` ran): when it refuses `mosaikctl.exe`, Mosaïk is
+  stopped instead and its watchdog brings back its windows (ADR 0006); when it refuses the new
+  `mosaik.exe`, the build says so and the publish goes on.
 - **`mosaik1.sh --app`** runs that `publish` with the app beside the site script: the
   repository (`mosaik/`) when it is there, else the one-file `mosaik.ps1`. It goes first: when the
   app is not sent, the site is not deployed either. Alone, `--app` sends only the app. In Git
@@ -48,5 +52,7 @@ app built with Cargo is not one. The Store submission API it uses underneath tak
   Partner Center meanwhile can leave it unable to be committed (then it is deleted and made
   again, which the next run does by itself).
 - The protocol with Microsoft is checked on the owner's PC against a stand-in of the two services
-  that records every request (job 0132); the real submission is the owner's, the first time they
-  send a version.
+  that records every request (`installer/msix/test-publish.ps1`, part of `mosaik.ps1 test`: jobs
+  0132 and 0133), and so are a no and the build around a running Mosaïk
+  (`installer/test-mosaik-ps1.ps1`, which found the build stopping at once in job 0132); the real
+  submission is the owner's, the first time they send a version.

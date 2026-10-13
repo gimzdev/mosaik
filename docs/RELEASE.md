@@ -14,7 +14,10 @@ owner's (the Store submission, the GitHub push, the site deploy). Version 2.0.0 
 ```
 
 A Mosaïk running from the same folder quits for the build (every window it hid comes back) and
-starts again after.
+starts again after. Smart App Control can refuse a new build's files for a while: when it refuses
+`mosaikctl.exe`, which asks Mosaïk to quit, Mosaïk is stopped instead and its watchdog brings back
+its windows; when it refuses the new `mosaik.exe`, the build says so and `.\mosaik.ps1 run`
+starts it later.
 
 ## 2. Check by hand on real machines
 
@@ -43,8 +46,8 @@ From the folder with `mosaik1.sh` and the repository (`mosaik/`) beside it, in G
 
 `--app` runs the app's `.\mosaik.ps1 publish` first: the tests, the build and the package, then,
 after you say yes, the package goes to the Microsoft Store (ADR 0025) with "What's new" from
-`installer/msix/whats-new.txt`; nothing else of the listing changes. If the app is not sent, the
-site is not deployed either. Then `--deploy` puts the site online. The Store checks the new
+`installer/msix/whats-new.txt`; nothing else of the listing changes. If the app is not sent (a
+test fails, or you answer no), the site is not deployed either. Then `--deploy` puts the site online. The Store checks the new
 version, usually within a day or two, and then updates everyone. `./mosaik1.sh --app` sends the
 app alone; `.\mosaik.ps1 publish` does the same from PowerShell.
 
