@@ -60,9 +60,12 @@ export function Stage({
   mode,
   caption,
   maxHeight = 260,
+  unread = false,
 }: {
-  /** null while Mosaïk is asked. */
+  /** null while Mosaïk is asked, or when it could not say (`unread`). */
   preview: ArrangePreview | null;
+  /** Mosaïk could not read the screen (safe mode, say): the picture stays empty, and says so. */
+  unread?: boolean;
   mode: StageMode;
   /** Says what the picture shows: the screen now, or with a layout. */
   caption: ReactNode;
@@ -97,8 +100,14 @@ export function Stage({
           maxWidth: `min(${String(Math.round(maxHeight * ratio))}px, ${String(Math.round(36 * ratio))}vh)`,
         }}
         role="img"
-        aria-label={preview ? describe(preview, mode) : 'Your main screen, being read.'}
-        aria-busy={preview === null || undefined}
+        aria-label={
+          preview
+            ? describe(preview, mode)
+            : unread
+              ? 'Your main screen could not be read.'
+              : 'Your main screen, being read.'
+        }
+        aria-busy={(preview === null && !unread) || undefined}
         data-mode={mode}
       >
         <div className="absolute inset-[5px]">

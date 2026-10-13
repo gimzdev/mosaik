@@ -184,6 +184,10 @@ describe('the home page', () => {
     page();
     const said = await screen.findByText('Mosaïk is in safe mode: it does not move windows.');
     expect(said.getAttribute('role')).toBe('alert');
+    // The picture does not go on saying the screen is being read.
+    expect(picture().getAttribute('aria-label')).toBe('Your main screen could not be read.');
+    expect(picture().getAttribute('aria-busy')).toBeNull();
+    expect(screen.queryByText('Reading your screen…')).toBeNull();
   });
 
   it('opens a saved workspace, and leads to the page that manages them', async () => {

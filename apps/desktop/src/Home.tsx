@@ -57,9 +57,9 @@ function plural(n: number, one: string, many: string) {
   return `${String(n)} ${n === 1 ? one : many}`;
 }
 
-/** The caption under the picture. */
-function caption(preview: ArrangePreview | null, pointing: Pointing): string {
-  if (!preview) return 'Reading your screen…';
+/** The caption under the picture (`unread`: Mosaïk could not read the screen). */
+function caption(preview: ArrangePreview | null, pointing: Pointing, unread: boolean): string {
+  if (!preview) return unread ? 'Your main screen' : 'Reading your screen…';
   const n = preview.windows.length;
   const elsewhere = preview.elsewhere
     ? ` (and ${plural(preview.elsewhere, 'window', 'windows')} on your other screens)`
@@ -243,7 +243,12 @@ export function Home({
       </div>
 
       <div className="mt-5">
-        <Stage preview={picture} mode={showing ? 'then' : 'now'} caption={caption(picture, showing)} />
+        <Stage
+          preview={picture}
+          unread={problem !== null}
+          mode={showing ? 'then' : 'now'}
+          caption={caption(picture, showing, problem !== null)}
+        />
       </div>
       {problem ? (
         <p role="alert" className="mt-2 text-center text-small text-[var(--danger)]">
