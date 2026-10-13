@@ -2,11 +2,14 @@
 //! reach it (`mosaik-probe ui-tour`): pictures of the window alone (nothing else of the screen),
 //! the role and name UI Automation gives every control (what a screen reader says), controls
 //! with no name, and the order the Tab key goes through them. In light and dark, at the window's
-//! usual and smallest size, and the switcher.
+//! usual and smallest size, and the switcher. On the home page, the pointer also rests on a
+//! layout, so the picture shows where the windows would go (it never clicks one: no window
+//! moves).
 //!
 //! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Ship",
-//! with three zones and no windows, so nothing of the user's is touched or shown. The welcome
-//! shows because the profile has no settings yet.
+//! with three zones and no windows, so nothing of the user's is touched. The home page pictures
+//! the windows on the main screen as plain boxes with their apps' names. The welcome shows
+//! because the profile has no settings yet.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -365,6 +368,26 @@ impl Tour {
         self.click(&c)
     }
 
+    /// Rests the pointer on the button `name` without clicking, as a person pointing at it, and
+    /// takes the picture once what it shows has settled.
+    fn point(&mut self, name: &str, shot: &str) -> Result<(), String> {
+        let c = self.find("button", name)?;
+        let at = c.rect.center();
+        // SAFETY: read-only hit test.
+        let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: at.x, y: at.y }), GA_ROOT) };
+        if under != self.hwnd {
+            return Err(format!("another window covers {}; not pointing at it", c.label()));
+        }
+        input::move_to(at);
+        // The windows glide for about half a second, one after the other.
+        pump_until(1500, || false);
+        let file = self.shot(shot)?;
+        let page = json!({ "page": shot, "shot": file, "pointing_at": name });
+        println!("page {shot}: {page}");
+        self.pages.push(page);
+        Ok(())
+    }
+
     fn zones(&self) -> Result<(), String> {
         self.nav("Workspaces")?;
         let c = self.find("button", &format!("Edit zones of “{WORKSPACE}”"))?;
@@ -455,7 +478,14 @@ impl Tour {
         let start = self.find("button", "Get started")?;
         self.click(&start)?;
 
+        // The home page, where the window opens, once its first showing of Arrange is over; then
+        // with a layout pointed at.
+        pump_until(3500, || false);
+        self.page("home", true)?;
+        self.point("Thirds", "home-thirds")?;
+
         // Each page, in the theme Windows uses, with the keyboard path.
+        self.nav("Workspaces")?;
         self.page("workspaces", true)?;
         self.zones()?;
         self.page("zones", true)?;
@@ -469,6 +499,8 @@ impl Tour {
         for (theme, label) in [("dark", "Dark"), ("light", "Light")] {
             self.theme(label)?;
             self.page(&format!("settings-{theme}"), false)?;
+            self.nav("Home")?;
+            self.point("Arrange windows", &format!("home-{theme}"))?;
             self.nav("Workspaces")?;
             self.page(&format!("workspaces-{theme}"), false)?;
             self.zones()?;
@@ -481,6 +513,8 @@ impl Tour {
         // The smallest the window goes.
         let before = window::window_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;
         self.shrink()?;
+        self.nav("Home")?;
+        self.page("home-smallest", false)?;
         self.nav("Workspaces")?;
         self.page("workspaces-smallest", false)?;
         self.zones()?;
