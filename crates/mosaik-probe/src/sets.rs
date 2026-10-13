@@ -1,7 +1,8 @@
 //! Sets of apps (ADR 0022): the Start menu as Mosaïk reads it (the shell's apps folder,
 //! `mosaik_win::apps::start_apps`) against Windows' own list (`Get-StartApps`), the sets Mosaïk
-//! makes of it, and, with `--start`, an app started through its Start menu entry as a set
-//! starts one: Character Map (see [`start_character_map`]).
+//! makes of it with each app's icon as Mosaïk's window shows it, and, with `--start`, an app
+//! started through its Start menu entry as a set starts one: Character Map (see
+//! [`start_character_map`]).
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -73,6 +74,40 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             .collect();
         println!("sets: {}: {}", s.name(), apps.join(", "));
     }
+    // Each app's picture, as Mosaïk's window shows it beside the set (job 0123: only the
+    // Terminal had one).
+    let keys: Vec<Option<String>> = sets
+        .iter()
+        .flat_map(|s| s.apps.iter())
+        .map(|a| mosaik_core::icons::of_app(&a.app, Some(&a.launch)))
+        .collect();
+    let wanted: Vec<String> = keys.iter().flatten().cloned().collect();
+    let pictures: std::collections::HashMap<String, Option<usize>> =
+        match mosaik_win::icons::IconReader::start(48) {
+            Ok(reader) => reader
+                .read(wanted, Duration::from_secs(20))
+                .into_iter()
+                .map(|(k, png)| (k, png.map(|p| p.len())))
+                .collect(),
+            Err(e) => {
+                println!("sets: the icon reader did not start: {e}");
+                std::collections::HashMap::new()
+            }
+        };
+    let icons: Vec<Value> = sets
+        .iter()
+        .flat_map(|s| s.apps.iter())
+        .zip(&keys)
+        .map(|(a, k)| {
+            let bytes = k.as_ref().and_then(|k| pictures.get(k).copied().flatten());
+            json!({ "app": a.name, "key": k, "png_bytes": bytes })
+        })
+        .collect();
+    let with_picture = icons.iter().filter(|i| !i["png_bytes"].is_null()).count();
+    println!("sets: {with_picture} of {} apps with their own icon", icons.len());
+    for i in icons.iter().filter(|i| i["png_bytes"].is_null()) {
+        println!("sets: no icon for {} ({})", i["app"], i["key"]);
+    }
     let started = if args.iter().any(|a| a == "--start") {
         Some(start_character_map(&ours))
     } else {
@@ -80,6 +115,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     };
     let ok = !ours.is_empty()
         && only_windows.is_empty()
+        && with_picture == icons.len()
         && started
             .as_ref()
             .is_none_or(|s| s.is_null() || s["ok"] == json!(true));
@@ -101,6 +137,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
                 "open": s.apps.iter().filter(|a| a.running).count(),
             }))
             .collect::<Vec<_>>(),
+        "icons": icons,
         "started": started,
         "ok": ok,
     }))
