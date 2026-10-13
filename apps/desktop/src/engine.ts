@@ -101,13 +101,13 @@ export function onNotices(callback: () => void): () => void {
   return on('notices:changed', callback);
 }
 
-/** The workspace whose zones the quick menu asked to edit, if any (each ask is taken once). */
+/** The workspace whose zones the side menu asked to edit, if any (each ask is taken once). */
 export async function takeZonesToEdit(): Promise<string | null> {
   if (!inMosaik) return null;
   return invoke<string | null>('take_zones_to_edit');
 }
 
-/** Calls `callback` whenever the quick menu asks to edit a workspace's zones. */
+/** Calls `callback` whenever the side menu asks to edit a workspace's zones. */
 export function onZonesToEdit(callback: () => void): () => void {
   return on('zones:edit', callback);
 }

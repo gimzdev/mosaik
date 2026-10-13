@@ -150,8 +150,7 @@ export function Home({
   };
 
   // While a layout's answer is on its way, the last picture stays.
-  const picture =
-    choice === 'smart' ? smart : chosen?.choice === choice ? chosen.preview : (chosen?.preview ?? smart);
+  const picture = choice === 'smart' ? smart : chosen?.choice === choice ? chosen.preview : (chosen?.preview ?? smart);
   const hasWindows = (smart?.windows.length ?? 0) > 0;
   const words = smart?.task ? TASK_WORDS[smart.task] : null;
   const title =

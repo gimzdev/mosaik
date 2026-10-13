@@ -226,9 +226,9 @@ impl Engine {
             // Once, ever, and without opening Mosaïk's window: Mosaïk starts with Windows.
             self.note_once_ever(
                 format!("quick-edge-moved-{here}"),
-                "The quick menu is on the other edge".to_owned(),
+                "The side menu is on the other edge".to_owned(),
                 format!(
-                    "The pointer does not stop at the {there} edge of your main screen (another screen or the taskbar is there), so the quick menu's line is on the {here} edge, where it does."
+                    "The pointer does not stop at the {there} edge of your main screen (another screen or the taskbar is there), so the side menu's line is on the {here} edge, where it does."
                 ),
             );
         }
@@ -249,8 +249,8 @@ impl Engine {
                     self.quick.failed = true;
                     tracing::error!(error = %e, "quick menu handle not made");
                     self.notice(
-                        "The quick menu is off",
-                        format!("Mosaïk could not show its handle at the screen's edge ({e}). Arrange and the rest stay in the tray menu and the switcher."),
+                        "The side menu is off",
+                        format!("Mosaïk could not show its line at the screen's edge ({e}). Arrange and the rest are in Mosaïk's window, the tray menu and the switcher."),
                     );
                     return;
                 }

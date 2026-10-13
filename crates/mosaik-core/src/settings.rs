@@ -61,7 +61,7 @@ const RANGES: [(&str, i32, i32); 5] = [
     ("The tag band", 0, 64),
     ("The frame width", 0, 16),
     ("The distance zones pull windows from", 0, 400),
-    ("The quick menu's place along the edge", 0, 1000),
+    ("The side menu's place along the edge", 0, 1000),
 ];
 
 /// Whether `settings.json` was read when Mosaïk started. When it was not (written by a newer
@@ -360,7 +360,7 @@ mod tests {
         s.edge.position = 1400;
         assert_eq!(
             s.problem().as_deref(),
-            Some("The quick menu's place along the edge must be from 0 to 1000; it is 1400.")
+            Some("The side menu's place along the edge must be from 0 to 1000; it is 1400.")
         );
         assert_eq!(s.clamped().edge.position, 1000);
         assert_eq!(c.problem(), None);

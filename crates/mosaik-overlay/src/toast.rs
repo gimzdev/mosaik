@@ -325,9 +325,10 @@ mod tests {
             3,
             &mut width,
         );
+        // 20 characters fit (140 px): "Task Manager runs as" exactly.
         assert_eq!(
             lines,
-            ["Task Manager runs", "as administrator,", "so Windows keeps it"]
+            ["Task Manager runs as", "administrator, so", "Windows keeps it"]
         );
         assert!(lines.iter().all(|l| width(l) <= 140.0));
     }

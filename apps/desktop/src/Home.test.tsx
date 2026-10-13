@@ -186,7 +186,11 @@ describe('Home', () => {
     home();
     const area = await screen.findByRole('region', { name: 'Your screen' });
     const group = within(area).getByRole('group', { name: 'Layout' });
-    expect(within(group).getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual([
+    expect(
+      within(group)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('value')),
+    ).toEqual([
       'smart',
       'halves',
       'thirds',

@@ -1,6 +1,40 @@
 # Changelog
 
-## 1.1.0
+## 2.0.0
+
+Mosaïk 2 is a new window on the same engine, with everything the 1.1 builds added since 1.0
+(below).
+
+### A new window
+
+- Dark by default. A theme left as 1.x set it (following Windows) becomes dark once; a theme you
+  picked stays. Light and "Like Windows" are a click away in Settings.
+- Home shows your screen as it will be: each window in its zone, with its app's icon, its name
+  and its zone's tag, a thin line of desktop apart. Smart is chosen first, Arrange's own layout
+  for what you are doing ("Smart layout for coding"); the ten layouts are drawn beside it. Choose
+  one and the picture changes before anything moves, with the windows it would minimise named
+  under it. Arrange does it; Undo puts everything back.
+- Your workspaces sit beside the screen, each with its layout in small, its apps' icons and its
+  shortcut: one click opens one. Suggested sets of the apps you have that go together are under
+  them. Save layout keeps what is on screen as a new workspace.
+- Apps are shown by their own icons, read from Windows. An app without one shows none.
+- No more pop-ups or banners. What Mosaïk has to tell you while it works (another app that moves
+  windows, a window it cannot move, a shortcut taken) shows in a small toast by the corner your
+  pointer is on, and fades; it also waits behind the bell at the top of Mosaïk's window. A
+  problem with something you just did is said next to it.
+- A workspace's own page: its apps and the zone each goes in, its name, its shortcut, its zones,
+  and Delete.
+- Settings: General (the switcher's shortcut, starting with Windows, the theme), Side menu,
+  Windows (snapping, zone tags, coloured borders), Advanced, and About.
+- The quick menu is the side menu: Arrange, five layouts drawn in small, your workspaces with the
+  one open marked, Save layout, Edit zones and Snap while dragging. It, the switcher and the
+  toasts share the window's colours. The switcher names each workspace by its apps.
+- No welcome to click through. The first time, the windows you have open are sorted into
+  workspaces, and Mosaïk installed from the Store starts with Windows (Settings turns that off).
+- Settings saved by a newer Mosaïk are read as well as they can be, shown, and never written
+  over.
+
+## 1.1.0 (development builds, not released on their own)
 
 ### A home page that shows before it moves
 

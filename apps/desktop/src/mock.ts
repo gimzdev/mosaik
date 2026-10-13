@@ -83,7 +83,6 @@ function hotkey(): HotkeyState {
     : { shortcut: settings.switcher_hotkey, registered: true, problem: null };
 }
 
-
 /** A workspace as the stand-in keeps it: its apps' names come from its list of apps. */
 interface Workspace extends Omit<WorkspaceSummary, 'apps' | 'icons' | 'layout'> {
   zoneList: ZoneEdit[];

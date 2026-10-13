@@ -64,7 +64,15 @@ export function useIcon(key: string | null): string | null | undefined {
 /** An app's own icon, as Windows has it, or nothing: never a made-up picture in its place.
  * Decorative: the app's name is always said next to it. `keepSpace` keeps an icon's room while
  * there is none, so names in a list stay in line. */
-export function AppIcon({ icon, size = 20, keepSpace = false }: { icon: string | null; size?: number; keepSpace?: boolean }) {
+export function AppIcon({
+  icon,
+  size = 20,
+  keepSpace = false,
+}: {
+  icon: string | null;
+  size?: number;
+  keepSpace?: boolean;
+}) {
   const url = useIcon(icon);
   if (!url) {
     return keepSpace ? <span aria-hidden="true" className="shrink-0" style={{ width: size, height: size }} /> : null;

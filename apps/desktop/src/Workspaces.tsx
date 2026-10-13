@@ -289,7 +289,9 @@ export function Workspaces({
                       <span className="text-caption text-[var(--muted)]">No apps yet</span>
                     )}
                     {w.hotkey ? (
-                      <span className="shrink-0 text-caption text-[var(--muted)]">{w.hotkey.replaceAll('+', ' + ')}</span>
+                      <span className="shrink-0 text-caption text-[var(--muted)]">
+                        {w.hotkey.replaceAll('+', ' + ')}
+                      </span>
                     ) : null}
                   </span>
                 </span>

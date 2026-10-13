@@ -374,14 +374,22 @@ fn verify_server(pipe: HANDLE, program: &Program) -> Result<()> {
     }
     let image = server_image(pipe).unwrap_or_default();
     if !program.accepts(&image) {
-        let shown = if image.is_empty() {
-            "an unknown program"
-        } else {
-            file_name(&image)
-        };
-        return Err(PipeError::Impostor(format!("it is {shown}, not Mosaïk")));
+        return Err(PipeError::Impostor(impostor(&image)));
     }
     Ok(())
+}
+
+/// Why the program serving the pipe, at `image`, is not the one expected, in words: another
+/// copy of Mosaïk (the Store's, while a build runs from a folder) is named as such, with where it
+/// is, rather than as a stranger with Mosaïk's own file name.
+fn impostor(image: &str) -> String {
+    if image.is_empty() {
+        "it is an unknown program, not Mosaïk".to_owned()
+    } else if file_name(image).eq_ignore_ascii_case("mosaik.exe") {
+        format!("it is another copy of Mosaïk ({image}), not this one")
+    } else {
+        format!("it is {}, not Mosaïk", file_name(image))
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -884,5 +892,21 @@ impl Client {
             ))));
         }
         Ok(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::impostor;
+
+    #[test]
+    fn another_copy_of_mosaik_is_named_as_one() {
+        let store = r"C:\Program Files\WindowsApps\Gimzdev.Mosak_1.0.0.0_x64__yjd3d5zpwkx98\mosaik.exe";
+        assert_eq!(
+            impostor(store),
+            format!("it is another copy of Mosaïk ({store}), not this one")
+        );
+        assert_eq!(impostor(r"C:\Tools\spy.exe"), "it is spy.exe, not Mosaïk");
+        assert_eq!(impostor(""), "it is an unknown program, not Mosaïk");
     }
 }

@@ -58,7 +58,7 @@ export interface Settings {
   };
   tab_hiding: HideMethod | null;
   switching: { minimize_others: boolean; launch_missing: boolean };
-  /** The quick menu's handle: on, which edge of the main monitor, and where along it (percent
+  /** The side menu's line: on, which edge of the main monitor, and where along it (percent
    * of its height from the top). */
   edge: { enabled: boolean; side: EdgeSide; position: number };
   theme: Theme;

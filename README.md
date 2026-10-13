@@ -97,10 +97,10 @@ if Mosaïk stops
 
 <h2>Using it</h2>
 
-<p>Open Mosaïk from the Start menu or its tray icon and point at <b>Arrange windows</b>, or at a layout:<br>
-the picture of your screen shows where each window would go. Click, and they go; <b>Undo</b> puts them back.</p>
+<p>Open Mosaïk from the Start menu or its tray icon: <b>Your screen</b> shows your windows as <b>Smart</b> would lay them out,<br>
+each in its zone. Choose one of ten layouts instead to see it first. <b>Arrange</b> does it; <b>Undo</b> puts them back.</p>
 
-<p>Under it, <b>Open the apps for</b> offers sets of your apps that go together, such as <b>Coding</b>:<br>
+<p>Beside it, your workspaces open in one click, and <b>Suggested</b> offers sets of your apps that go together, such as <b>Coding</b>:<br>
 one click opens them side by side, three to a view, and starts the ones that are not open.</p>
 
 <p>Arrange the apps of one project, press <kbd>Win</kbd> <kbd>Alt</kbd> <kbd>Space</kbd>, then <kbd>S</kbd> and a name.<br>
@@ -116,8 +116,8 @@ Each place becomes a zone with its own colour.</p>
 <tr><td><kbd>Esc</kbd></td><td>closes the switcher</td></tr>
 </table>
 
-<p>Or point at the thin line at the right edge of the screen and pick <b>Arrange windows</b>:<br>
-your screen is laid out for what you are doing, the window you work in the largest.</p>
+<p>Or point at the thin line at the right edge of the screen: the side menu has <b>Arrange</b>, five layouts and your workspaces.<br>
+Arrange lays your screen out for what you are doing, the window you work in the largest.</p>
 
 <p>Resize a window in a zone and the zones beside it follow.<br>
 While dragging or resizing a window, hold <kbd>Shift</kbd> to move it freely.<br>
@@ -170,7 +170,7 @@ or deploys it.<br>
 <table align="center">
 <tr><td><code>crates/mosaik-core</code></td><td>zones, layouts, matching, tabs, settings: pure logic, tested on any OS</td></tr>
 <tr><td><code>crates/mosaik-win</code></td><td>windows, monitors, DPI, hiding, input: everything that talks to Windows</td></tr>
-<tr><td><code>crates/mosaik-overlay</code></td><td>zone frames, tags, tab strips and the quick menu, drawn natively</td></tr>
+<tr><td><code>crates/mosaik-overlay</code></td><td>zone frames, tags, tab strips, the side menu and toasts, drawn natively</td></tr>
 <tr><td><code>crates/mosaik-engine</code></td><td>the engine thread: events, workspaces, the switcher, shortcuts</td></tr>
 <tr><td><code>crates/mosaik-watchdog</code></td><td>brings hidden windows back if Mosaïk stops</td></tr>
 <tr><td><code>crates/mosaik-ipc</code></td><td>the named-pipe protocol and <code>mosaikctl</code></td></tr>

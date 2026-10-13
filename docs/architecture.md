@@ -9,9 +9,10 @@ The owner's first rule, above every other trade-off: **minimal, efficient, elega
   the current account only: no administrator prompt, no extra runtimes (the C runtime is linked
   into the binaries; WebView2 ships with Windows 11), no reboot. Mosaïk starts when it is done,
   and Windows keeps it up to date.
-- **Easy to use.** One global shortcut, a tray icon, a short first-run welcome, and a home page
-  that shows what a click will do to the windows before it does it. Few settings, each with a
-  sensible default.
+- **Easy to use.** One global shortcut, a tray icon, a side menu at the screen's edge, and a home
+  page that shows the screen as a layout will leave it before anything moves. No tour, no
+  pop-ups: what Mosaïk has to say while it works fades in a toast and waits behind a bell. Few
+  settings, each with a sensible default; dark by default.
 - **Light.** Measured idle CPU and memory budgets (`docs/STATUS.md`), and nothing running that the
   user did not ask for.
 - **Trustworthy.** No telemetry, accounts or cloud; Mosaïk makes no network request at all
@@ -26,8 +27,9 @@ mosaik.exe            engine thread: windows, zones, workspaces, tabs, hotkey, t
   ├─ mover threads    one per window being moved, so a hung app never holds up the engine
   ├─ hiding thread    hides and shows background tabs (the shell cloak is a call into Explorer)
   ├─ pipe threads     mosaikctl and second launches (ADR 0007)
-  ├─ main thread      Tauri: the tray icon, and Mosaïk's window (home, workspaces, zone editor,
-  │                   settings, welcome), created when opened and destroyed when closed
+  ├─ main thread      Tauri: the tray icon, and Mosaïk's window (Home, a workspace's page, the
+  │                   zone editor, Settings), created when opened and destroyed when closed
+  ├─ icon thread      reads apps' icons for the window, once per app (`mosaik_win::icons`)
   └─ starts ──────────► mosaik-watchdog.exe   restores hidden windows if mosaik.exe dies (ADR 0006)
 mosaikctl.exe         command line client of the pipe
 ```
@@ -120,17 +122,24 @@ the engine gathers windows and applies the result.
   a workspace, a drop, the zone editor, a resize by hand, a tab clicked, an app added or moved.
   A title bar read again later (a window brought forward) changes no band and moves no window;
   a tab group's strip always sits at the right end of its visible tab's title bar.
-- **A workspace's apps** (ADR 0018, 0023): the home page lists them, and a workspace's ⋯ menu
-  shows them with their zones; adding a window on screen, moving an app to another zone or
-  removing it is a pure edit (`mosaik_core::editing`), saved, then applied at once in the open
-  workspace.
-- **The home page** (ADR 0016): a picture of the main monitor, drawn from `preview_arrange`
-  (the same preparation as Arrange, changing nothing). While the pointer or the keyboard is on
-  Arrange or one of ten layouts, the windows glide to where they would go and the zones appear,
-  and the caption says the task Arrange read; a click does it. A layout replaces the main
-  monitor's zones with its own, for the windows that fit them, and Undo brings them back. Below,
-  every workspace with its apps, Open, and a ⋯ menu for the rest (ADR 0023). Mosaïk's window has
-  two places, Home and Settings (with About at its end).
+- **A workspace's apps** (ADR 0018, 0023, 0024): Home shows them by their icons, and a
+  workspace's page lists them with their zones; adding a window on screen, moving an app to
+  another zone or removing it is a pure edit (`mosaik_core::editing`), saved, then applied at
+  once in the open workspace.
+- **Home** (ADR 0016, 0024): a picture of the main monitor as the layout chosen would leave it,
+  drawn from `preview_arrange` (the same preparation as Arrange, changing nothing): Smart first
+  (Arrange's own layout for the task it reads), or one of ten layouts; the windows it would
+  minimise are named under it. Arrange does it, and Undo brings everything back. Beside it,
+  every workspace with its apps' icons, opened in one click, a ⋯ menu for the rest, and the
+  suggested sets. Mosaïk's window has two places, Home and Settings (with About at its end).
+- **Apps' icons** (ADR 0024): replies name each app's icon by a key (`app:<AppUserModelID>` or
+  `exe:<path>`, `mosaik_core::icons`); the window asks for the ones it shows in one batch
+  (`app_icons`), read once per app as 48 px PNGs by the shell's image factory on a thread of their
+  own. An app without one shows no picture.
+- **Toasts and notes** (ADR 0024): what the engine has to say while it works (`Engine::notice`)
+  shows in a native toast by the corner of the screen the pointer is on (`mosaik_overlay::toast`),
+  one at a time, never taking the keyboard, and goes to the window's notes; Mosaïk's window never
+  opens by itself.
 - **Sets of apps** (ADR 0022): the apps of the Start menu (read from the shell's Apps folder on a
   thread of their own, kept ten minutes) that go together for a task, chosen by
   `mosaik_core::sets`, are offered on the home page. A click opens the workspace that has the
@@ -138,12 +147,13 @@ the engine gathers windows and applies the result.
   the set's other apps as tabs with the app they go with, `task::tabs_for`), starting the apps
   that are not open. An app open is used (packaged apps' windows take their process's
   AppUserModelID, `AppMatch::same_app`); a start still pending when the workspace is opened again
-  stands for its slot; a started app is placed when its window shows or uncloaks (ADR 0023). At
-  the end of the welcome, the windows open are sorted into a workspace per task, without moving
-  any.
-- **The quick menu** (ADR 0015, 0017, 0023): a thin line on an edge of the main monitor slides
-  open as soon as the pointer stops on it, onto Mosaïk's window and the open workspace, Arrange,
-  the switcher, saving, the zone editor and snapping, without taking the keyboard. It sits on the
+  stands for its slot; a started app is placed when its window shows or uncloaks (ADR 0023). The
+  first time Mosaïk's window opens, the windows open are sorted into a workspace per task,
+  without moving any.
+- **The side menu** (ADR 0015, 0017, 0023, 0024): a thin line on an edge of the main monitor
+  slides open as soon as the pointer stops on it, onto Arrange, five layouts drawn in small, the
+  workspaces with the one open marked, saving, the zone editor and snapping, without taking the
+  keyboard. It sits on the
   edge chosen if the pointer stops there, else on the other (`mosaik_core::edge`), and does not
   answer while an app confines the pointer, or while the window in front, covering the main
   monitor, hid it the last time it was seen over it, as games do (`Engine::pointer_tick`). It hides while a game or a video fills the main monitor.
@@ -199,7 +209,7 @@ shell's cloak (ADR 0003).
 | --- | --- |
 | `mosaik-core` | Pure logic, no Win32: geometry, topologies, zones, layouts, matching, classification, snapping, placement maths, Arrange and its tasks, zones making room, sets of apps, tabs, the journal, settings and the store. Tested on every platform. |
 | `mosaik-win` | The Win32 adapter: enumerating and classifying windows, placing them by their visible frame, hiding them, monitors and DPI, hooks, hotkeys, processes, the Start menu's apps, rescue. Decides nothing. |
-| `mosaik-overlay` | Native overlays drawn with Direct2D in software: rings as four thin windows, name tags, the drop-target tint, tab strips, the quick menu. |
+| `mosaik-overlay` | Native overlays drawn with Direct2D in software: rings as four thin windows, name tags, the drop-target tint, tab strips, the side menu, toasts. |
 | `mosaik-engine` | The engine thread, its commands, the pipe server and the watchdog launcher. |
 | `mosaik-ipc` | The versioned protocol, the named pipe and `mosaikctl`. |
 | `mosaik-watchdog` | The watchdog process. |

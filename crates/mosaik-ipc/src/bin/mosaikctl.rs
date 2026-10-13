@@ -277,6 +277,9 @@ A <workspace> is its name or its id.";
             PipeError::TimedOut(_) | PipeError::Closed => format!(
                 "Mosaïk did not answer ({e}); it may be stuck. Run `mosaikctl rescue` to bring hidden windows back, then restart Mosaïk."
             ),
+            PipeError::Impostor(why) if why.contains("another copy of Mosaïk") => format!(
+                "Not talking to it: {e}. Quit that Mosaïk (its tray icon, Quit Mosaïk), then try again."
+            ),
             PipeError::Impostor(_) | PipeError::NameTaken { .. } => format!(
                 "Not talking to it: {e}. Close that program or restart Windows, then start Mosaïk again."
             ),
