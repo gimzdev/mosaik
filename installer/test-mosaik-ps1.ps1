@@ -5,7 +5,8 @@
   running the build goes ahead (job 0132: it stopped at once, "The property 'Count' cannot be
   found on this object"); one running from that folder is asked to quit, waited for, and started
   again in the tray after the build; one from anywhere else is left alone; one that does not quit
-  stops the build with what to do.
+  stops the build with what to do; when Windows does not start the new build, the build is still
+  done and says so.
 
   Invoke-Build and its helpers are read from mosaik.ps1 itself; what it starts (npm, cargo, the
   processes) is stood in for, so nothing is built, quit or started, and it takes a second.
@@ -44,7 +45,12 @@ function Get-Source { $work }
 function Use-Cargo { }
 function Invoke-Tool([string]$In, [string]$Program, [string[]]$Arguments) { $script:Done.Add("$Program $($Arguments -join ' ')") }
 function Invoke-Cargo([string]$In, [string[]]$Arguments) { $script:Done.Add("cargo $($Arguments -join ' ')") }
-function Start-Process([string]$FilePath, [string[]]$ArgumentList) { $script:Done.Add("start $FilePath $($ArgumentList -join ' ')") }
+$script:StartRefused = $false
+function Start-Process([string]$FilePath, [string[]]$ArgumentList) {
+  # As Windows refuses a program it does not trust yet (Smart App Control and a new build).
+  if ($script:StartRefused) { throw 'This program is blocked by group policy.' }
+  $script:Done.Add("start $FilePath $($ArgumentList -join ' ')")
+}
 # As Windows lists them: none, one or several processes called mosaik.
 function Get-Process {
   [CmdletBinding()]
@@ -103,6 +109,13 @@ try {
     if ($mine.WaitedFor -le 0 -or $other.WaitedFor -ne 0) { return 'the wrong one waited for' }
     if (-not $script:Done.Contains($restart)) { return 'not started again' }
   }
+  Check 'one running, not started again after' {
+    $script:Running = @(New-Mosaik (Join-Path $release 'mosaik.exe'))
+    $script:StartRefused = $true
+    try { Invoke-Build } finally { $script:StartRefused = $false }
+    if (-not $script:Done.Contains($built)) { return 'not built' }
+    if (-not ($script:Done | Where-Object { $_ -like 'say *built*not start it again*' })) { return "nothing said ($($script:Done -join ' / '))" }
+  }
   Check 'one that does not quit' {
     $script:Running = @(New-Mosaik (Join-Path $release 'mosaik.exe') $false)
     try { Invoke-Build } catch { $said = $_.Exception.Message }
@@ -116,4 +129,4 @@ finally {
 }
 
 if ($failures.Count -gt 0) { throw ("mosaik.ps1 build: {0}" -f ($failures -join '; ')) }
-Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one from elsewhere (left alone), two, one that does not quit (said): 5 cases passing.' -ForegroundColor Green
+Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one that does not quit (said): 6 cases passing.' -ForegroundColor Green

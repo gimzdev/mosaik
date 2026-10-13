@@ -402,8 +402,14 @@ function Invoke-Build {
   $exe = Under $source 'target' 'release' 'mosaik.exe'
   Say ("Done: {0}" -f $exe) Green
   if ($running.Count -gt 0) {
-    Start-Process $exe -ArgumentList '--background'
-    Say 'Mosaik is running again, in the tray.' Green
+    # Windows can refuse a new build for a while (Smart App Control): it is built all the same.
+    try {
+      Start-Process $exe -ArgumentList '--background'
+      Say 'Mosaik is running again, in the tray.' Green
+    }
+    catch {
+      Say ("Mosaik is built, but Windows did not start it again ({0}). Start it with .\mosaik.ps1 run once Windows allows it." -f $_.Exception.Message) Yellow
+    }
   }
 }
 
