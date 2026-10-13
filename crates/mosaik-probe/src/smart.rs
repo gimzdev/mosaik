@@ -1781,8 +1781,10 @@ fn quick_menu(
         }),
     );
 
-    // 4c2. A layout from the menu's strip: Halves lays the main screen out in two halves, the
-    // two windows one in each, and the menu closes.
+    // 4c2. A layout from the menu's strip: Halves lays the main screen out in two halves, and
+    // the menu closes. Two zones for three windows: the window in front and the one used next
+    // take them, the one used longest ago is minimised (ADR 0019; jobs 0122 and 0123 expected
+    // the first two windows, whatever their use).
     glide(row.rect.center(), q.rect.center());
     let (again, _) = wait_menu(engine, 2000, is_open)?;
     let strip = again
@@ -1804,7 +1806,17 @@ fn quick_menu(
     let st = settled(engine)?;
     let ws = st.active_workspace.clone().ok_or("no workspace open")?;
     let zs = zones(engine, &ws.0, work)?;
-    let halves_fit = fit(&st, &zs, styles, &w[..2]);
+    let three = &w[..w.len().min(3)];
+    let halves_fit = fit(&st, &zs, styles, three);
+    let placed = |e: &Option<i32>| e.is_some_and(|e| e <= SLACK);
+    let in_halves = halves_fit.iter().filter(|e| placed(e)).count();
+    let front_in = fit(&st, &zs, styles, &[front]).first().is_some_and(placed);
+    let left_out: Vec<bool> = three
+        .iter()
+        .zip(&halves_fit)
+        .filter(|(_, e)| !placed(e))
+        .map(|(h, _)| mosaik_win::window::geometry(*h).is_some_and(|g| g.minimized))
+        .collect();
     let half = work.width() / 2;
     let two_halves = zs.len() == 2
         && zs
@@ -1816,8 +1828,11 @@ fn quick_menu(
         json!({
             "zones": rects(&zs),
             "fit_px": halves_fit,
+            "front_window_in_a_half": front_in,
+            "left_out_minimized": left_out,
             "menu_closed": closed,
-            "ok": two_halves && all_fit(&halves_fit) && closed,
+            "ok": two_halves && in_halves == 2.min(three.len()) && front_in
+                && left_out.iter().all(|m| *m) && closed,
         }),
     );
 
