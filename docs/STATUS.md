@@ -18,7 +18,7 @@ re-run before each release.
 | 6. Product UI | done: every page reviewed, tested in a browser and toured on Windows (names, Tab key, light and dark, smallest size); a Windows contrast theme and Narrator by ear are in the release checks | [Step 6](#step-6-product-ui) |
 | 7. Hardening | in progress: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
-| 1.1 | built, tested and packaged on Windows (jobs 0094 to 0106: every test, the Store package); zones that follow a resize, Arrange (minimising what has no zone) and its undo, the home page, a workspace's apps, tab strips in one place, no window moved when brought forward, the quick menu, all measured with the mouse | [1.1](#11) |
+| 1.1 | built, tested and packaged on Windows (jobs 0094 to 0108: every test, the Store package); zones that follow a resize, Arrange laid out for the task with every window fitting its zone, and its undo, the home page with each workspace's apps, a workspace's apps, windows edge to edge without rings, tab strips in one place, no window moved when brought forward, the quick menu, all measured with the mouse | [1.1](#11) |
 
 ## Step 1: verify assumptions
 
@@ -837,6 +837,42 @@ process, its own windows, a scratch folder).
     build (78 s), the package (2.77 MB), `pack` (244 files, verified), both files beside the
     repository; Mosaïk left running in the tray.
 
+- **Asked 2026-10-12, 23:10 to 23:42** (ADRs 0019 and 0020): Arrange should "assess the main
+  window (VS Code is superior to a terminal) and make a split view depending on the task";
+  apps need proper names; the home page should list each workspace's apps; on the site,
+  "Free and open source" and "Requirements" beside the button, on two lines, and a less
+  stacked hero; no coloured borders and no space between windows; Battle.net "too tall" in
+  Quarters. Job 0108 (commit 87f0937):
+  - `mosaik.ps1 test`: every test passed in 59 s (core 207, among them the task layouts on six
+    screen shapes with minimum sizes, the settings moved to format 5, windows edge to edge;
+    the interface's 64).
+  - `smart`, every check passing: with no workspace open, four probe windows of no known kind
+    were laid out for the task "general": the window used last in the main zone (1056 x 1032,
+    55%), three beside it of 344 px each, the window of a fixed size kept at its size, at the
+    top of its zone, centred (0 px); Undo 0 px; arranged twice, the second moved nothing (0 px,
+    and the picture showed nothing moving). A fifth window, opened last, took the main zone,
+    the one used longest ago was minimised, Undo brought every window back (0 px). Thirds, the
+    windows brought forward (8 times, 0 px moved), the apps of a workspace (added, moved,
+    removed, 0 px) and the quick menu (open 51 ms after the pointer stopped, closed after a
+    pick, dragged 120 px, out of the way of a game in full screen) as in job 0106. New, 3h: a
+    window told to go no smaller than 640 x 619 was read from another process as 626 x 612,
+    its frame without its invisible borders (0 px off); Quarters (960 x 516) minimised it, in
+    the picture and on screen, and put the four others in the quarters; Undo 0 px.
+  - `workspace --drag`: three windows saved and switched back 0 px from their zones, edge to
+    edge, without rings (settings format 5: rings off, no space), each zone's tag in its title
+    bar in its colour; tabs, drag to snap and pictures of the strips as before. `kinds` passing.
+  - On the owner's screen, asked only (Claude, Battle.net, MSYS2, File Explorer, Google
+    Chrome): Arrange read no task in particular; Google Chrome took the main zone (1114 x 1032),
+    Claude (568 px high) and MSYS2 (464 px) beside it. Three windows of 344 px beside it did
+    not all fit their apps' minimum sizes, so two were kept and File Explorer was minimised;
+    Battle.net, wider than any zone beside the main one (768 px at most), was minimised too.
+    Quarters and Thirds would minimise Battle.net as well, too big for their zones.
+  - Release build (135 s), Store package (2.79 MB), the tour (33 pictures, the home page with
+    each workspace's apps), opened by hand (window in 0.3 s), `--background` (no window, the
+    settings moved to format 5), `pack` (247 files, verified), `mosaik.ps1` and `mosaik1.sh`
+    beside the repository dated that day, the site folder made again (1.5.0); Mosaïk left
+    running in the tray.
+
 ## Owner decisions
 
 - 2026-10-11: the Patreon link is https://www.patreon.com/gimzdev (About and the tray menu only).
@@ -865,3 +901,6 @@ process, its own windows, a scratch folder).
   follow a resize; Arrange, "very smart", with undo; a quick menu on a line at the screen's right
   edge; at least one vertical preset; no space lost between zones (4 px) and no blank band above
   windows (tags in title bars, a window alone never lowered).
+- 2026-10-12 (1.1): Arrange lays every screen out for the task its windows say, the main window
+  the most room, in place of the open workspace's zones (ADR 0019); no coloured borders and no
+  space between windows (ADR 0020).
