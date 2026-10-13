@@ -1061,8 +1061,10 @@ fn least(
 
 /// 3i. A window that will not get shorter than 55% of the screen, dropped with the mouse into the
 /// smallest zone of the open workspace (a third of the column beside the main window): its zone
-/// grows to fit it, the zones beside it give up the room, every zone still fills the screen and
-/// every window fits its zone.
+/// grows to fit it (its frame's least height, read from its app as in 3h, without the invisible
+/// borders), the zones beside it give up the room, every zone still fills the screen, every
+/// window that can be resized fits its zone, and the one of a fixed size (the last of `w`) keeps
+/// its size, centred across its zone and at its top.
 fn drop_tall(
     engine: &Engine,
     styles: Styles,
@@ -1092,6 +1094,9 @@ fn drop_tall(
     )?;
     pump_until(500, || false);
     let f = frame_rect(tall).ok_or("Probe Tall vanished")?;
+    let least = mosaik_win::window::window_rect(tall)
+        .and_then(|r| mosaik_win::window::least_frame(tall, r, f, styles.dpi))
+        .ok_or("Probe Tall's least size could not be read")?;
     crate::workspace::drag(
         Point::new(f.left + f.width() / 3, f.top + 12),
         small.center(),
@@ -1101,9 +1106,24 @@ fn drop_tall(
     pump_until(600, || false);
     let zs = zones(engine, &ws.0, work)?;
     let zone = zone_of(&st, &zs, tall);
-    let grown = zone.is_some_and(|z| z.height() + SLACK >= min_h);
+    let grown = zone.is_some_and(|z| z.height() > small.height() && z.height() + SLACK >= least.height);
     let tall_fit = fit(&st, &zs, styles, &[tall]);
-    let others_fit = fit(&st, &zs, styles, w);
+    let (resizable, fixed) = w.split_at(w.len().saturating_sub(1));
+    let others_fit = fit(&st, &zs, styles, resizable);
+    let fixed_place: Vec<Value> = fixed
+        .iter()
+        .filter_map(|&h| {
+            let (zone, f) = zone_of(&st, &zs, h).zip(frame_rect(h))?;
+            let area = styles.area(zone, wears_above(&st, h));
+            let (top, across) = (f.top - area.top, f.center().x - area.center().x);
+            Some(json!({
+                "top_px": top,
+                "centre_px": across,
+                "ok": top.abs() <= SLACK && across.abs() <= SLACK,
+            }))
+        })
+        .collect();
+    let fixed_ok = fixed_place.len() == fixed.len() && fixed_place.iter().all(|v| v["ok"] == json!(true));
     let tiled = zs
         .iter()
         .map(|(_, r)| i64::from(r.width()) * i64::from(r.height()))
@@ -1113,13 +1133,15 @@ fn drop_tall(
     pump_until(500, || false);
     Ok(json!({
         "told_height": min_h,
+        "read_least": [least.width, least.height],
         "small_zone": [small.left, small.top, small.right, small.bottom],
         "zone": zone.map(|z| [z.left, z.top, z.right, z.bottom]),
         "zone_grew": grown,
         "fit_px": tall_fit,
         "others_fit_px": others_fit,
+        "fixed": fixed_place,
         "zones_fill_the_screen": tiled,
-        "ok": grown && all_fit(&tall_fit) && others_fit.iter().all(|e| e.is_none_or(|e| e <= SLACK)) && tiled,
+        "ok": grown && all_fit(&tall_fit) && all_fit(&others_fit) && fixed_ok && tiled,
     }))
 }
 
