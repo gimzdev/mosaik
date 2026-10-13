@@ -1180,16 +1180,13 @@ fn tabs_and_snap(
     let after_join = settled(engine)?;
     shot(shots, "2-joined", &[terminal.hwnd], styles.dpi);
     let strip = after_join.tab_strips.first().cloned();
-    // Where the strip sits, from the right end of the visible tab's frame: the same whichever
-    // tab shows (the owner: tab strips sat in different places).
+    // Where the strip sits, from the right end and the top of the visible tab's frame: the same
+    // whichever tab shows (the owner: tab strips sat in different places). Its width follows
+    // the visible tab's title.
     let from_right = |st: &mosaik_ipc::protocol::StateSnapshot, w: HWND| {
         let strip = st.tab_strips.first()?;
         let f = frame_rect(w)?;
-        Some([
-            f.right - strip.rect.right,
-            strip.rect.top - f.top,
-            strip.rect.width(),
-        ])
+        Some([f.right - strip.rect.right, strip.rect.top - f.top])
     };
     let joined_at = from_right(&after_join, terminal.hwnd);
     let joined = json!({
