@@ -1,7 +1,7 @@
 //! Sets of apps (ADR 0022): the Start menu as Mosaïk reads it (the shell's apps folder,
 //! `mosaik_win::apps::start_apps`) against Windows' own list (`Get-StartApps`), the sets Mosaïk
 //! makes of it, and, with `--start`, an app started through its Start menu entry as a set
-//! starts one: File Explorer, whose new window is closed again.
+//! starts one: File Explorer (see [`start_explorer`]).
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -11,6 +11,8 @@ use mosaik_core::layout::Launch;
 use mosaik_core::sets::{Installed, Running, suggest};
 use mosaik_win::window::{Scanner, handle, top_level};
 use serde_json::{Value, json};
+use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance};
+use windows::Win32::UI::Shell::{IShellWindows, ShellWindows};
 
 /// File Explorer's entry in the Start menu.
 const EXPLORER_ID: &str = "Microsoft.Windows.Explorer";
@@ -107,11 +109,23 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     }))
 }
 
+/// How many folder windows and tabs File Explorer has open (on Windows 11, each tab counts).
+fn explorer_views() -> Option<i32> {
+    // SAFETY: the shell's list of its folder views, created on this thread (COM is initialised
+    // in `main`) and asked how many it holds.
+    unsafe {
+        let views: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL).ok()?;
+        views.Count().ok()
+    }
+}
+
 /// Starts File Explorer through its Start menu entry, the way a set starts a desktop app
-/// (`shell:AppsFolder\<id>`, `mosaik_win::apps::start`), waits up to 15 s for its new window,
-/// and closes it.
+/// (`shell:AppsFolder\<id>`, `mosaik_win::apps::start`), and waits up to 30 s for it: a new
+/// window, closed again, or a new tab in a File Explorer window already open (left open:
+/// closing one tab from outside could close the window and the user's other tabs).
 fn start_explorer() -> Value {
     let before: HashSet<u64> = top_level().into_iter().map(|h| handle(h).0).collect();
+    let views_before = explorer_views();
     let watch = Instant::now();
     let launch = Launch::Program {
         path: format!("shell:AppsFolder\\{EXPLORER_ID}"),
@@ -124,11 +138,23 @@ fn start_explorer() -> Value {
     }
     let mut scanner = Scanner::new();
     let mut found = None;
-    while found.is_none() && watch.elapsed() < Duration::from_secs(15) {
+    let mut tab = false;
+    while found.is_none() && !tab && watch.elapsed() < Duration::from_secs(30) {
         mosaik_win::events::pump_until(250, || false);
         found = top_level().into_iter().find(|&h| {
             !before.contains(&handle(h).0) && scanner.facts(h).is_some_and(|f| f.class == "CabinetWClass")
         });
+        if found.is_none() {
+            // A tab shows up in the shell's list a moment before a new window would be seen.
+            tab = views_before.zip(explorer_views()).is_some_and(|(b, n)| n > b) && {
+                mosaik_win::events::pump_until(1500, || false);
+                found = top_level().into_iter().find(|&h| {
+                    !before.contains(&handle(h).0)
+                        && scanner.facts(h).is_some_and(|f| f.class == "CabinetWClass")
+                });
+                found.is_none()
+            };
+        }
     }
     let open_ms = watch.elapsed().as_secs_f64() * 1000.0;
     let closed = found.is_some_and(|h| {
@@ -136,18 +162,19 @@ fn start_explorer() -> Value {
         mosaik_win::events::pump_until(2000, || !mosaik_win::window::exists(h));
         !mosaik_win::window::exists(h)
     });
-    println!(
-        "sets: File Explorer started through its Start menu entry: {}; closed {closed}",
-        if found.is_some() {
-            format!("a new window in {open_ms:.0} ms")
-        } else {
-            "no new window within 15 s".to_owned()
+    let seen = match (found.is_some(), tab) {
+        (true, _) => format!("a new window in {open_ms:.0} ms; closed {closed}"),
+        (false, true) => {
+            format!("a new tab in a File Explorer window already open, in {open_ms:.0} ms (left open)")
         }
-    );
+        (false, false) => "no new window or tab within 30 s".to_owned(),
+    };
+    println!("sets: File Explorer started through its Start menu entry: {seen}");
     json!({
         "window": found.is_some(),
-        "open_ms": found.map(|_| open_ms),
+        "tab": tab,
+        "open_ms": (found.is_some() || tab).then_some(open_ms),
         "closed": closed,
-        "ok": found.is_some() && closed,
+        "ok": (found.is_some() && closed) || tab,
     })
 }

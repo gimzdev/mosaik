@@ -1,6 +1,6 @@
-//! Mosaïk's log: `%LOCALAPPDATA%\Mosaik\logs\mosaik.log`, on this computer only, started afresh
-//! when it passes 1 MB. It records what Mosaïk did and how long it took, never window titles.
-//! `MOSAIK_LOG=debug` makes it more detailed.
+//! Mosaïk's log: `%LOCALAPPDATA%\Mosaik\logs\mosaik.log` (with `MOSAIK_DATA`, in its `logs`
+//! folder), on this computer only, started afresh when it passes 1 MB. It records what Mosaïk did
+//! and how long it took, never window titles. `MOSAIK_LOG=debug` makes it more detailed.
 
 use std::fs::OpenOptions;
 use std::path::PathBuf;
@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use tracing::Level;
 
 pub fn folder() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Mosaik").join("logs"))
+    mosaik_core::store::logs_folder(&|name: &str| std::env::var_os(name))
 }
 
 /// Starts logging to the file. Returns where, or `None` if the log cannot be written (Mosaïk

@@ -2,6 +2,7 @@
 //! a last-good copy to fall back on. A file that cannot be read is never overwritten silently: it
 //! is kept next to the others and the user is told.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,29 @@ use crate::layout::{Workspace, WorkspaceId};
 use crate::settings::{SETTINGS_VERSION, Settings};
 
 pub const WORKSPACES_VERSION: u32 = 1;
+
+/// The environment variable that gives a Mosaïk a folder of its own for its files and its log,
+/// for tests: unlike changing `APPDATA`, it leaves the account's Start menu and apps as they are.
+pub const DATA_VARIABLE: &str = "MOSAIK_DATA";
+
+/// `var` read as a folder, when it is set and not empty.
+fn folder(var: &impl Fn(&str) -> Option<OsString>, name: &str) -> Option<PathBuf> {
+    var(name).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// Where Mosaïk keeps its settings, workspaces and journal: `%APPDATA%\Mosaik`, or the folder
+/// [`DATA_VARIABLE`] names. `var` reads the environment (`std::env::var_os`).
+pub fn data_folder(var: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    folder(var, DATA_VARIABLE).or_else(|| folder(var, "APPDATA").map(|d| d.join("Mosaik")))
+}
+
+/// Where Mosaïk writes its log: `%LOCALAPPDATA%\Mosaik\logs`, or `logs` in the folder
+/// [`DATA_VARIABLE`] names.
+pub fn logs_folder(var: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    folder(var, DATA_VARIABLE)
+        .map(|d| d.join("logs"))
+        .or_else(|| folder(var, "LOCALAPPDATA").map(|d| d.join("Mosaik").join("logs")))
+}
 
 /// `workspaces.json`.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -682,5 +706,43 @@ mod tests {
             "{:?}",
             loaded.notes
         );
+    }
+
+    #[test]
+    fn mosaik_data_gives_a_mosaik_its_own_folder_for_its_files_and_log() {
+        use std::ffi::OsString;
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, v)| OsString::from(*v))
+            }
+        };
+        let usual = env(&[("APPDATA", "C:\\A\\Roaming"), ("LOCALAPPDATA", "C:\\A\\Local")]);
+        assert_eq!(
+            data_folder(&usual),
+            Some(Path::new("C:\\A\\Roaming").join("Mosaik"))
+        );
+        assert_eq!(
+            logs_folder(&usual),
+            Some(Path::new("C:\\A\\Local").join("Mosaik").join("logs"))
+        );
+        // A Mosaïk for tests: its own files, while the Start menu and apps stay the account's.
+        let own = env(&[
+            ("APPDATA", "C:\\A\\Roaming"),
+            ("LOCALAPPDATA", "C:\\A\\Local"),
+            ("MOSAIK_DATA", "C:\\T\\Mosaik"),
+        ]);
+        assert_eq!(data_folder(&own), Some(PathBuf::from("C:\\T\\Mosaik")));
+        assert_eq!(logs_folder(&own), Some(Path::new("C:\\T\\Mosaik").join("logs")));
+        // Empty is not set.
+        let empty = env(&[("APPDATA", "C:\\A\\Roaming"), ("MOSAIK_DATA", "")]);
+        assert_eq!(
+            data_folder(&empty),
+            Some(Path::new("C:\\A\\Roaming").join("Mosaik"))
+        );
+        assert_eq!(logs_folder(&empty), None);
+        assert_eq!(data_folder(&env(&[])), None);
     }
 }

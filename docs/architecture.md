@@ -197,6 +197,15 @@ shell's cloak (ADR 0003).
 The brief's layout lists five crates; `mosaik-engine` is added so the engine can be tested and
 measured without the interface, and the Tauri crate stays a thin shell.
 
+## Files
+
+Settings, workspaces and the journal of hidden windows are in `%APPDATA%\Mosaik`, the log in
+`%LOCALAPPDATA%\Mosaik\logs` (`mosaik_core::store::data_folder`, `logs_folder`). For tests,
+`MOSAIK_DATA` names another folder for both: a Mosaïk with files of its own that still sees the
+account's Start menu. A program started with `APPDATA` and `LOCALAPPDATA` changed sees only its
+packaged apps there (35 of 139 on the owner's PC, for Windows' own `Get-StartApps` too; job
+0111).
+
 ## Two files
 
 The repository travels as two files that each run on their own on another machine:

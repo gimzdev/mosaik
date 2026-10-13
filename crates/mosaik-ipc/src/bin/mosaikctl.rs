@@ -496,10 +496,8 @@ A <workspace> is its name or its id.";
                 windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
             )
         };
-        let outcome = match std::env::var_os("APPDATA") {
-            Some(appdata) => {
-                mosaik_win::rescue::restore_hidden(&Store::new(std::path::Path::new(&appdata).join("Mosaik")))
-            }
+        let outcome = match mosaik_core::store::data_folder(&|name: &str| std::env::var_os(name)) {
+            Some(data) => mosaik_win::rescue::restore_hidden(&Store::new(data)),
             None => mosaik_win::rescue::Outcome {
                 report: mosaik_win::rescue::restore_all(&Journal::default()),
                 problem: Some(

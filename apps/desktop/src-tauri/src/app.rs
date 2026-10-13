@@ -288,7 +288,7 @@ fn setup(
 }
 
 fn data_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("Mosaik"))
+    mosaik_core::store::data_folder(&|name: &str| std::env::var_os(name))
 }
 
 /// Mosaïk is already running: pass the request on, then leave. The running one may still be
