@@ -244,6 +244,9 @@
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+    /* The home page's windows move one after the other: at once here. */
+    transition-delay: 0s !important;
   }
 }
