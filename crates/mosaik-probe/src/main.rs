@@ -99,7 +99,7 @@ fn main() {
     }
     let Some(command) = args.first().cloned() else {
         eprintln!(
-            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace|smart|titlebar|ui-tour> [--out file.json]"
+            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace|smart|menu-shot|titlebar|ui-tour> [--out file.json]"
         );
         std::process::exit(2);
     };
@@ -128,6 +128,7 @@ fn main() {
         "dummy" => dummy::run(&args),
         "workspace" => workspace::run(&args),
         "smart" => smart::run(&args),
+        "menu-shot" => smart::menu_shot(&args),
         "titlebar" => titlebar::run(&args),
         "ui-tour" => ui_tour::run(&args),
         _ => Err(format!("unknown command {command}")),

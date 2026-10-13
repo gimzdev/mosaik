@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 
 use mosaik_core::geometry::{Point, Rect};
 use mosaik_core::presets::Preset;
+use mosaik_core::settings::Theme;
 use mosaik_core::zone::ZoneId;
 use mosaik_engine::{Config, Engine, Scope, UiEvent, UiSink};
 use mosaik_ipc::protocol::{
@@ -46,6 +47,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOSIZE, SetWindowPos, WindowFromPoint,
 };
 
+use crate::capture::save_bmp;
 use crate::dummy;
 use crate::workspace::{Styles, ask, done, drag_path, settled, state, wears_above};
 
@@ -174,6 +176,99 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     }
     value["notices"] = json!(told);
     Ok(value)
+}
+
+/// `mosaik-probe menu-shot --shots DIR`: the quick menu open, pictured in the light and the dark
+/// theme, with a workspace open (two probe windows arranged), for the eye. Moves the mouse.
+pub fn menu_shot(args: &[String]) -> Result<Value, String> {
+    let shots = args
+        .iter()
+        .position(|a| a == "--shots")
+        .and_then(|i| args.get(i + 1))
+        .map(std::path::PathBuf::from)
+        .ok_or("menu-shot needs --shots <folder>")?;
+    std::fs::create_dir_all(&shots).map_err(|e| e.to_string())?;
+    let work = mosaik_win::monitors::topology()
+        .map_err(|e| e.to_string())?
+        .primary()
+        .work_area;
+    let dir = std::env::temp_dir().join(format!("mosaik-probe-menu-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let engine = Engine::start(
+        Config {
+            data_dir: dir.clone(),
+            safe_mode: false,
+            app_version: "probe".into(),
+            own_pids: vec![mosaik_win::process::own_pid()],
+            watchdog: None,
+            manage_only: Some(Scope::programs(["mosaik-probe.exe"])),
+        },
+        Arc::new(|_| {}),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut opened = Vec::new();
+    let original = input::cursor();
+    let result = (|| -> Result<Value, String> {
+        for (i, title) in ["Probe Code", "Probe Notes"].into_iter().enumerate() {
+            let off = i32::try_from(i).unwrap_or(0) * 240;
+            open(
+                &mut opened,
+                title,
+                Rect::from_origin_size(work.left + 120 + off, work.top + 120, 640, 420),
+                " --topmost",
+            )?;
+        }
+        pump_until(400, || false);
+        let arranged = done(&ask(&engine, Command::Arrange { preset: None }).0)?;
+        let _ = settled(&engine)?;
+        let away = Point::new(work.left + work.width() / 2, work.top + work.height() / 2);
+        let mut pictures = Vec::new();
+        for (name, theme) in [("light", Theme::Light), ("dark", Theme::Dark)] {
+            let mut settings = match engine.request(Command::Settings, TIMEOUT) {
+                Reply::Settings { settings, .. } => *settings,
+                other => return Err(format!("settings: {other:?}")),
+            };
+            settings.theme = theme;
+            done(&engine.request(
+                Command::SetSettings {
+                    settings: Box::new(settings),
+                },
+                TIMEOUT,
+            ))?;
+            pump_until(400, || false);
+            let q = state(&engine)?
+                .quick_menu
+                .ok_or("the quick menu's line is not shown")?;
+            input::move_to(away);
+            pump_until(200, || false);
+            glide(away, q.rect.center());
+            let (menu, ms) = wait_menu(&engine, 2000, is_open)?;
+            let menu = menu.filter(|m| m.open).ok_or("the quick menu did not open")?;
+            // Past its slide.
+            pump_until(400, || false);
+            let r = menu.rect;
+            let file = format!("quick-menu-{name}.bmp");
+            save_bmp(
+                &[Rect::new(r.left - 24, r.top - 24, r.right + 4, r.bottom + 24)],
+                &shots.join(&file),
+            )?;
+            pictures.push(json!({
+                "theme": name,
+                "file": file,
+                "opened_after_ms": ms,
+                "rows": menu.rows.iter().map(|r| r.label.clone()).collect::<Vec<_>>(),
+            }));
+            input::move_to(away);
+            let _ = wait_menu(&engine, 2500, |q| !is_open(q))?;
+        }
+        Ok(json!({ "arranged": arranged, "pictures": pictures }))
+    })();
+    input::move_to(original);
+    engine.stop();
+    close_all(&mut opened);
+    let _ = std::fs::remove_dir_all(&dir);
+    result
 }
 
 /// An edge of a window.
