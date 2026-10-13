@@ -823,6 +823,19 @@ process, its own windows, a scratch folder).
     front; the windows used last now keep the zones (a test that failed first).
   - Release build (79 s), Store package (2.76 MB), `pack` (244 files, verified), `mosaik.ps1`
     and `mosaik1.sh` beside the repository dated that day, the site folder made again (1.4.0).
+  - Again after the fixes (job 0106, commit 22cd2b2), every `smart` check passing: the quick
+    menu open 55 ms after the pointer stopped, closed after Arrange was picked from it (the
+    windows 0 px from their zones, the window in front keeping the keyboard), closed 351 ms
+    after the pointer left, dragged 120 px down by its first line (the menu followed, 120 px,
+    and stayed open; the handle then 120 px lower, the place kept: 416 thousandths); out of the
+    way of a game in full screen and back 72 ms after it left. Arrange, Thirds, the fifth
+    window, windows brought forward and the apps as in job 0105 (0 px throughout). On the
+    owner's screen, asked only: Arrange would keep Claude, Google Chrome, Steam, Notepad++ and
+    both Calculators in six zones and minimise the four used longest ago (Battle.net, MSYS2,
+    Windows Terminal, File Explorer); Thirds would keep Claude, Google Chrome and Steam. The
+    tour (33 pictures), opened by hand (window in 0.2 s), `--background` (none), the release
+    build (78 s), the package (2.77 MB), `pack` (244 files, verified), both files beside the
+    repository; Mosaïk left running in the tray.
 
 ## Owner decisions
 

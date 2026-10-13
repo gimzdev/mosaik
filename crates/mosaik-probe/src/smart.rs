@@ -210,13 +210,14 @@ pub fn menu_shot(args: &[String]) -> Result<Value, String> {
     let mut opened = Vec::new();
     let original = input::cursor();
     let result = (|| -> Result<Value, String> {
+        // Not kept on top: the menu must open above them, as above the user's windows.
         for (i, title) in ["Probe Code", "Probe Notes"].into_iter().enumerate() {
             let off = i32::try_from(i).unwrap_or(0) * 240;
             open(
                 &mut opened,
                 title,
                 Rect::from_origin_size(work.left + 120 + off, work.top + 120, 640, 420),
-                " --topmost",
+                "",
             )?;
         }
         pump_until(400, || false);
