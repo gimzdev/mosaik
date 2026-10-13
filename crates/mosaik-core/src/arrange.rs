@@ -811,6 +811,7 @@ pub fn plan_moved(
     }
 
     // 3. The windows the user moved on the picture of the screen.
+    let placed_before = new_zone_window.clone();
     let mut moved = vec![false; monitors.len()];
     for mv in moves {
         let Some(unit) = units.get(mv.unit) else {
@@ -894,13 +895,35 @@ pub fn plan_moved(
     let laid_out = |m: usize| tasks.get(m).is_some_and(Option::is_some) || picked(m);
     let gone: Vec<usize> = (0..zones.len()).filter(|&i| laid_out(zones[i].monitor)).collect();
 
-    // New zones are named after the window in them: its kind, else its app.
+    // New zones are named after the window in them: its kind, else its app. Two of one kind are
+    // told apart in the order of the zones before any move ("Browser", "Browser 2"), so that a
+    // window the user moved keeps its zone's name as it keeps its colour: each zone's place in
+    // that order goes with the window that had it, and the empty zones take the places left.
+    let mut order: Vec<Option<usize>> = placed_before
+        .iter()
+        .map(|u| {
+            u.and_then(|u| match goes[u] {
+                Goes::Zone(r) => Some(r),
+                Goes::Minimize | Goes::Stay => None,
+            })
+        })
+        .collect();
+    let left: Vec<usize> = (0..new_zones.len())
+        .filter(|r| !order.contains(&Some(*r)))
+        .collect();
+    let mut left = left.into_iter();
+    for place in &mut order {
+        if place.is_none() {
+            *place = left.next();
+        }
+    }
     let mut taken: Vec<String> = zones
         .iter()
         .filter(|z| !laid_out(z.monitor))
         .map(|z| z.name.clone())
         .collect();
-    for (i, zone) in new_zones.iter_mut().enumerate() {
+    for i in order.into_iter().flatten() {
+        let zone = &mut new_zones[i];
         let base = new_zone_window[i]
             .map(|u| &units[u])
             .and_then(|u| {
@@ -1515,6 +1538,71 @@ mod tests {
         colors.sort_unstable();
         assert_eq!(colors, vec![0, 1, 2, 3], "every zone a colour of its own");
         assert_eq!(moved.new_zones[empty].color, base.new_zones[used[0]].color);
+    }
+
+    #[test]
+    fn windows_of_one_app_keep_their_own_zone_names_when_moved() {
+        // Two browser windows in halves, "Browser" and "Browser 2": the first dropped on the
+        // second, each keeps its zone's name as it keeps its colour (job 0132: the names stayed
+        // with the places, so "Browser 2" went to the window that was "Browser").
+        let units = [
+            unit("chrome.exe", "Google Chrome", Rect::new(0, 0, 1000, 1000)),
+            unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
+        ];
+        let halves = Chosen {
+            monitor: 0,
+            preset: Preset::Halves,
+        };
+        let base = plan_with(&units, &[], &[WORK], Some(halves));
+        let (a, b) = (zone_of(&base, 0), zone_of(&base, 1));
+        assert_ne!(base.new_zones[a].name, base.new_zones[b].name);
+        let moved = plan_moved(
+            &units,
+            &[],
+            &[WORK],
+            Some(halves),
+            &[Move {
+                unit: 0,
+                monitor: 0,
+                zone: b,
+            }],
+        );
+        assert_eq!((zone_of(&moved, 0), zone_of(&moved, 1)), (b, a));
+        for (now, was) in [(b, a), (a, b)] {
+            assert_eq!(moved.new_zones[now].name, base.new_zones[was].name);
+            assert_eq!(moved.new_zones[now].color, base.new_zones[was].color);
+        }
+
+        // Quarters for three of them, one quarter empty: the first dropped there keeps its name,
+        // and the quarter it left is the empty one's.
+        let three = [
+            units[0].clone(),
+            units[1].clone(),
+            unit("chrome.exe", "Google Chrome", Rect::new(500, 500, 1500, 1000)),
+        ];
+        let quarters = Chosen {
+            monitor: 0,
+            preset: Preset::Quarters,
+        };
+        let base = plan_with(&three, &[], &[WORK], Some(quarters));
+        let used: Vec<usize> = (0..3).map(|u| zone_of(&base, u)).collect();
+        let empty = (0..4).find(|r| !used.contains(r)).unwrap();
+        let moved = plan_moved(
+            &three,
+            &[],
+            &[WORK],
+            Some(quarters),
+            &[Move {
+                unit: 0,
+                monitor: 0,
+                zone: empty,
+            }],
+        );
+        assert_eq!(moved.new_zones[empty].name, base.new_zones[used[0]].name);
+        assert_eq!(moved.new_zones[used[0]].name, base.new_zones[empty].name);
+        for &r in &used[1..] {
+            assert_eq!(moved.new_zones[r].name, base.new_zones[r].name);
+        }
     }
 
     #[test]

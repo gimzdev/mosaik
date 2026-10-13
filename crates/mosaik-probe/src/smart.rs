@@ -1669,7 +1669,7 @@ fn is_handle(q: Option<&QuickMenuState>) -> bool {
 
 /// The top-level windows whose rectangle holds `p`, front to back as Windows stacks them: the
 /// first is the one the pointer reaches.
-fn stack_at(p: Point) -> Vec<String> {
+pub(crate) fn stack_at(p: Point) -> Vec<String> {
     use windows::Win32::UI::WindowsAndMessaging::{
         GWL_EXSTYLE, GetWindowLongW, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     };

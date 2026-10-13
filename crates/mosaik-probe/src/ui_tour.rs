@@ -270,6 +270,61 @@ impl Tour {
         }
     }
 
+    /// The smallest control with this name: a heading rather than the section it names, which
+    /// carries the same name (job 0132 clicked the middle of Home's "Your screen" section).
+    fn heading(&self, name: &str) -> Result<Control, String> {
+        let start = Instant::now();
+        loop {
+            if let Some(c) = self
+                .uia
+                .controls(self.hwnd)
+                .into_iter()
+                .filter(|c| c.name == name && c.rect.area() > 0)
+                .min_by_key(|c| c.rect.area())
+            {
+                return Ok(c);
+            }
+            if start.elapsed() > Duration::from_secs(5) {
+                return Err(format!("no “{name}” in Mosaïk's window"));
+            }
+            pump_until(250, || false);
+        }
+    }
+
+    /// Makes sure the point `at` is on Mosaïk's window before a click or a drag there. Another
+    /// window kept in front of it (job 0132: a Chrome_WidgetWin_1, while Mosaïk's window was kept
+    /// in front too) is waited out a few seconds, Mosaïk's window put back on top each time; then
+    /// it is named, with what else is there and a picture of it (covered.bmp), and nothing is
+    /// clicked.
+    fn uncovered(&self, at: Point, what: &str) -> Result<(), String> {
+        let start = Instant::now();
+        loop {
+            // SAFETY: read-only hit test.
+            let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: at.x, y: at.y }), GA_ROOT) };
+            if under == self.hwnd {
+                return Ok(());
+            }
+            if start.elapsed() > Duration::from_secs(4) {
+                let program = window::Scanner::new()
+                    .process_path(window::pid(under))
+                    .unwrap_or_else(|| "a program Windows does not name".into());
+                let picture = window::window_rect(under)
+                    .and_then(|r| save_bmp(&[r], &self.shots.join("covered.bmp")).ok())
+                    .map_or("", |()| "; picture: covered.bmp");
+                return Err(format!(
+                    "another window covers {what} at {},{}: {} “{}” of {program}; windows there, front to back: {}{picture}; not clicking",
+                    at.x,
+                    at.y,
+                    window::class_name(under),
+                    window::title(under),
+                    crate::smart::stack_at(at).join(", "),
+                ));
+            }
+            self.above_all(true);
+            pump_until(300, || false);
+        }
+    }
+
     /// The control with this role and name, brought into view first the way the keyboard brings
     /// it: given the focus, so the page scrolls to it (below the home page's picture, which stays
     /// at the top). Controls lower down a page, such as a workspace's ⋯ button, are out of view
@@ -313,17 +368,7 @@ impl Tour {
     /// Clicks `c` in its middle, as a person does, once sure the point is on Mosaïk's window.
     fn click(&self, c: &Control) -> Result<(), String> {
         let at = c.rect.center();
-        // SAFETY: read-only hit test.
-        let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: at.x, y: at.y }), GA_ROOT) };
-        if under != self.hwnd {
-            return Err(format!(
-                "another window ({}) covers {} at {},{}; not clicking",
-                window::class_name(under),
-                c.label(),
-                at.x,
-                at.y
-            ));
-        }
+        self.uncovered(at, &c.label())?;
         input::move_to(at);
         pump_until(120, || false);
         {
@@ -435,7 +480,7 @@ impl Tour {
     /// puts them back. Only the picture changes: no window moves until Arrange.
     fn drag_in_picture(&mut self, shot: &str) -> Result<(), String> {
         let smart = self.find("radio", "Smart")?;
-        let title = self.find("", "Your screen")?;
+        let title = self.heading("Your screen")?;
         let tiles = |tour: &Self| -> Vec<Control> {
             tour.uia
                 .controls(tour.hwnd)
@@ -456,11 +501,8 @@ impl Tour {
             return Ok(());
         };
         let (from, to) = (a.rect.center(), b.rect.center());
-        // SAFETY: read-only hit test.
-        let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: from.x, y: from.y }), GA_ROOT) };
-        if under != self.hwnd {
-            return Err(format!("another window covers {}; not dragging", a.label()));
-        }
+        self.uncovered(from, &a.label())?;
+        self.uncovered(to, &b.label())?;
         input::move_to(from);
         pump_until(150, || false);
         {
@@ -618,7 +660,7 @@ impl Tour {
         // the Tab key from there.
         pump_until(1500, || false);
         // (Any role: a heading's, as browsers give it to UI Automation, varies.)
-        let title = self.find("", "Your screen")?;
+        let title = self.heading("Your screen")?;
         self.click(&title)?;
         pump_until(1000, || false);
         self.page("home", true)?;

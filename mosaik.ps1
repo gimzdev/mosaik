@@ -369,13 +369,14 @@ function Invoke-Cargo([string]$In, [string[]]$Arguments) {
 }
 
 # The Mosaik of this folder's build that is running, if one is: Windows keeps its files from being
-# built over.
+# built over. Like any function's, its output is unrolled (none is $null, one is not a list), so
+# callers collect it with @() before reading Count (job 0132).
 function Get-RunningBuild([string]$Source) {
   $release = [IO.Path]::GetFullPath((Under $Source 'target' 'release')) + '\'
-  @(Get-Process -Name 'mosaik' -ErrorAction SilentlyContinue | Where-Object {
-      $path = try { $_.Path } catch { $null }
-      $path -and $path.StartsWith($release, [StringComparison]::OrdinalIgnoreCase)
-    })
+  Get-Process -Name 'mosaik' -ErrorAction SilentlyContinue | Where-Object {
+    $path = try { $_.Path } catch { $null }
+    $path -and $path.StartsWith($release, [StringComparison]::OrdinalIgnoreCase)
+  }
 }
 
 function Invoke-Build {
@@ -384,7 +385,7 @@ function Invoke-Build {
   $ui = Under $source 'apps' 'desktop'
   # A Mosaik of this build that is running is asked to quit first (every window it hid comes
   # back), then started again in the tray once the new build is made.
-  $running = Get-RunningBuild $source
+  $running = @(Get-RunningBuild $source)
   if ($running.Count -gt 0) {
     Say 'Mosaik from this folder is running: it quits for the build, and starts again after.' Yellow
     $ctl = Under $source 'target' 'release' 'mosaikctl.exe'
@@ -419,6 +420,8 @@ function Invoke-Test {
   foreach ($script in 'typecheck', 'lint', 'format:check', 'test') { Invoke-Tool $ui 'npm' @('run', $script) }
   Step 'Sending to the Store, against a stand-in of its services'
   & (Under $source 'installer' 'msix' 'test-publish.ps1')
+  Step 'This script: building with a Mosaik running'
+  & (Under $source 'installer' 'test-mosaik-ps1.ps1') -Script $PSCommandPath
   Say 'Every test passed.' Green
 }
 
