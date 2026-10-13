@@ -158,7 +158,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             out.insert("arrange".into(), arrange);
         }
         if part("quick") {
-            let quick = if arranged.len() == 4 {
+            let quick = if arranged.len() == 3 {
                 quick_menu(&engine, styles, work, dpi, &arranged, &mut opened)
                     .unwrap_or_else(|e| json!({ "failed": e }))
             } else {
@@ -677,7 +677,7 @@ fn arrange(
 ) -> Result<Value, String> {
     let (w4, h4) = (work.width() / 4, work.height() / 4);
     // Scattered and overlapping; then one of a fixed size, small enough for a quarter of the
-    // screen.
+    // screen: three windows, as many as Arrange puts in a view (`task::MOST_IN_VIEW`).
     let specs = [
         (
             "Probe A",
@@ -686,10 +686,6 @@ fn arrange(
         (
             "Probe B",
             Rect::from_origin_size(work.left + w4, work.top + h4, w4 * 2, h4 * 2),
-        ),
-        (
-            "Probe C",
-            Rect::from_origin_size(work.left + w4 * 2 - 60, work.top + 30, w4 + 200, h4 * 3),
         ),
     ];
     let mut w = Vec::new();
@@ -767,12 +763,12 @@ fn arrange(
     let in_zones = ids.len();
     ids.sort();
     ids.dedup();
-    let fits = fit(&st, &zs, styles, &w[..3]);
+    let fits = fit(&st, &zs, styles, &w[..2]);
     // The fixed window keeps its size, centred across its zone and at its top.
     let fixed_place = zone_of(&st, &zs, fixed).zip(frame_rect(fixed)).map(|(zone, f)| {
         let area = styles.area(zone, wears_above(&st, fixed));
         let (top, across) = (f.top - area.top, f.center().x - area.center().x);
-        let kept = f.size() == before[3].size();
+        let kept = f.size() == before[2].size();
         json!({
             "size_kept": kept,
             "top_px": top,
@@ -802,7 +798,7 @@ fn arrange(
             "fit_px": fits,
             "fixed": fixed_place,
             "top_row_tops": top_row,
-            "ok": shaped && in_zones == 4 && ids.len() == 4 && all_fit(&fits)
+            "ok": shaped && in_zones == 3 && ids.len() == 3 && all_fit(&fits)
                 && fixed_place.as_ref().is_some_and(|f| f["ok"] == json!(true)) && one_line,
         }),
     );
@@ -850,13 +846,13 @@ fn arrange(
             "most_moved_px": moved,
             "preview_windows": still.windows.len(),
             "preview_most_moving_px": shown_moving,
-            "ok": moved <= SLACK && still.windows.len() == 4 && shown_moving <= SLACK,
+            "ok": moved <= SLACK && still.windows.len() == 3 && shown_moving <= SLACK,
         }),
     );
 
-    // 3d. A fifth window, opened last: Arrange lays the screen out again for five. The window
-    // used last (the new one) takes the main zone, three sit beside it, and the one used longest
-    // ago is minimised (it stays in the taskbar); Undo brings every window back.
+    // 3d. A fourth window, opened last: Arrange lays the screen out again, three windows to a
+    // view. The window used last (the new one) takes the main zone, two sit beside it, and the
+    // one used longest ago is minimised (it stays in the taskbar); Undo brings every window back.
     let e = open(
         opened,
         "Probe E",
@@ -955,10 +951,10 @@ fn to_front(engine: &Engine, w: &[HWND]) -> Result<Value, String> {
     }))
 }
 
-/// 3h. A window that will not get as small as a quarter of the screen (as Battle.net keeps about
-/// 1280 x 720): Mosaïk reads how small it goes from its app, and Quarters makes room for it: its
-/// quarter grows just enough, the others give up the room, and it is not minimised (the window
-/// used longest ago is, five windows for four quarters). Undo brings everything back. Then 3i:
+/// 3h. A window that will not get as small as a third of the screen (as Battle.net keeps about
+/// 1280 x 720): Mosaïk reads how small it goes from its app, and Thirds makes room for it: its
+/// third grows just enough, the others give up the room, and it is not minimised (the window
+/// used longest ago is, four windows for three thirds). Undo brings everything back. Then 3i:
 /// a window too tall for the zone it is dropped in: the zones there make room for it.
 fn least(
     engine: &Engine,
@@ -991,7 +987,7 @@ fn least(
             .abs()
             .max((l.height - (min_h - bh)).abs())
     });
-    let shown = preview(engine, Some("quarters"))?;
+    let shown = preview(engine, Some("thirds"))?;
     let pictured = shown
         .windows
         .iter()
@@ -1001,7 +997,7 @@ fn least(
         &ask(
             engine,
             Command::Arrange {
-                preset: Some("quarters".into()),
+                preset: Some("thirds".into()),
             },
         )
         .0,
@@ -1034,7 +1030,7 @@ fn least(
     let big_back = frame_rect(big).map(|f| edge_error(f, big_before));
     crate::apps::close(big);
     pump_until(500, || false);
-    let quarters = json!({
+    let thirds = json!({
         "told": [min_w, min_h],
         "read": read.map(|(l, _)| [l.width, l.height]),
         "read_off_px": read_off,
@@ -1055,8 +1051,8 @@ fn least(
             && big_back.is_some_and(|d| d <= SLACK),
     });
     let dropped = drop_tall(engine, styles, work, opened, w)?;
-    let ok = quarters["ok"] == json!(true) && dropped["ok"] == json!(true);
-    Ok(json!({ "quarters": quarters, "dropped": dropped, "ok": ok }))
+    let ok = thirds["ok"] == json!(true) && dropped["ok"] == json!(true);
+    Ok(json!({ "thirds": thirds, "dropped": dropped, "ok": ok }))
 }
 
 /// 3i. A window that will not get shorter than 55% of the screen, dropped with the mouse into the
@@ -1153,7 +1149,7 @@ fn apps_of(engine: &Engine, command: Command) -> Result<WorkspaceApps, String> {
     }
 }
 
-/// 3g. The open workspace's apps, edited as on the Workspaces page: its four windows are listed
+/// 3g. The open workspace's apps, edited as on the home page: its three windows are listed
 /// with their zones and a new window is offered; added to a zone, the window goes into it at
 /// once; moved to another zone, it follows; taken out, it stays where it is. The workspace's
 /// own windows do not move meanwhile.
@@ -1271,7 +1267,7 @@ fn apps(
         "removed": gone,
         "stayed_px": stayed,
         "others_moved_px": others_moved,
-        "ok": listed.apps.len() == 4 && zoned == 4 && offered && !own_offered
+        "ok": listed.apps.len() == 3 && zoned == 3 && offered && !own_offered
             && in_a && all_fit(&fit_a) && in_b && all_fit(&fit_b)
             && gone && stayed.is_some_and(|d| d <= SLACK) && others_moved <= SLACK,
     }))
@@ -1290,10 +1286,9 @@ fn preview(engine: &Engine, preset: Option<&str>) -> Result<ArrangePreview, Stri
     }
 }
 
-/// 3e. A layout picked on the home page, with the four windows arranged in quarters: the
-/// picture shows the main monitor in thirds and where each window would go, changing nothing;
-/// Arrange puts them there (the window left over minimised); Undo puts back the zones and the
-/// windows.
+/// 3e. A layout picked on the home page, with the three windows arranged: the picture shows the
+/// main monitor in halves and where each window would go, changing nothing; Arrange puts them
+/// there (the window left over minimised); Undo puts back the zones and the windows.
 fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
     let st = settled(engine)?;
     let ws = st
@@ -1306,8 +1301,8 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         r.sort_unstable();
         r
     };
-    let thirds = sorted(
-        Preset::Thirds
+    let halves = sorted(
+        Preset::Halves
             .zones()
             .iter()
             .map(|a| {
@@ -1319,7 +1314,7 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
 
     let (shown, preview_ms) = {
         let start = Instant::now();
-        let p = preview(engine, Some("thirds"))?;
+        let p = preview(engine, Some("halves"))?;
         (p, start.elapsed().as_secs_f64() * 1000.0)
     };
     let shown_zones = sorted(
@@ -1344,7 +1339,7 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     let (reply, ms) = ask(
         engine,
         Command::Arrange {
-            preset: Some("thirds".into()),
+            preset: Some("halves".into()),
         },
     );
     let message = done(&reply)?;
@@ -1400,7 +1395,7 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     Ok(json!({
         "preview_ms": preview_ms,
         "preview_zones": shown_zones,
-        "thirds": thirds,
+        "halves": halves,
         "preview_windows": shown.windows.len(),
         "preview_minimized": minimized_shown,
         "elsewhere": shown.elsewhere,
@@ -1413,13 +1408,13 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         "back_px": back,
         "zones_back": zones_back,
         "all_shown": all_shown,
-        "ok": shown_zones == thirds
+        "ok": shown_zones == halves
             && planned.iter().all(Option::is_some)
             && minimized_shown == 1
             && untouched
-            && message.contains("\u{201c}Thirds\u{201d} layout")
+            && message.contains("\u{201c}Halves\u{201d} layout")
             && message.contains("1 window minimized")
-            && got == thirds
+            && got == halves
             && landed.iter().all(|x| x["ok"] == json!(true))
             && back <= SLACK
             && zones_back
@@ -1555,7 +1550,8 @@ fn glide(from: Point, to: Point) {
     }
 }
 
-/// Part 4: the quick menu, with the workspace Arrange made open and its four windows (`w`).
+/// Part 4: the quick menu, with the workspace Arrange made open and its three windows (`w`, the
+/// last of a fixed size).
 fn quick_menu(
     engine: &Engine,
     styles: Styles,
@@ -1732,7 +1728,7 @@ fn quick_menu(
     let st = settled(engine)?;
     let ws = st.active_workspace.clone().ok_or("no workspace open")?;
     let zs = zones(engine, &ws.0, work)?;
-    let fits = fit(&st, &zs, styles, &w[..3]);
+    let fits = fit(&st, &zs, styles, &w[..2]);
     let closed = is_handle(st.quick_menu.as_ref());
     let still_front = mosaik_win::arrange::foreground() == Some(front);
     out.insert(
