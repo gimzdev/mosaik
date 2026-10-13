@@ -25,9 +25,11 @@ title bar depending on each reading, so they moved from window to window.
   zones for its windows: the presets of ADR 0014 up to four windows; for more, a grid with as
   many zones as there are windows, up to what the monitor holds well (columns at least 600 px
   wide, rows at least 420 px tall, at most 4 by 3; the wider zones in the top rows,
-  `presets::zones_for_windows`). Windows left over take an empty zone on their monitor; with
-  every zone taken they are **minimised**, so they stay in the taskbar, and do not join the
-  workspace. Undo restores them where they were.
+  `presets::zones_for_windows`). When such a monitor (or one a layout was picked for) has more
+  windows than zones, **the windows used last take them**, whatever their kind (job 0105: the
+  window in front, Claude, was minimised for editors used long before). Windows left over take
+  an empty zone on their monitor; with every zone taken they are **minimised**, so they stay in
+  the taskbar, and do not join the workspace. Undo restores them where they were.
 - **A window already in its zone scores +100** (was +45): arranging again keeps it there, even
   when another window would suit the zone a little better.
 - **Windows move only on the user's actions**: Arrange or a layout, opening or saving a
@@ -43,7 +45,10 @@ title bar depending on each reading, so they moved from window to window.
 - **The quick menu** opens 60 ms after the pointer stops on its line, sliding in from the edge
   over 150 ms (ease-out) and fading out over 110 ms, at once when Windows shows no animations
   (`SPI_GETCLIENTAREAANIMATION`). Its first row is "Mosaïk · <workspace>" with "Open": a click
-  opens Mosaïk's window. Then Arrange windows; Switch workspace with its shortcut; Save layout;
+  opens Mosaïk's window, a drag moves the menu along its edge (the handle, under the menu that
+  opens at once, can hardly be grabbed any more). A move Windows reports only because the menu
+  moved under a still pointer (its slide) is not the pointer coming back: picking a row closes
+  the menu even when the pointer stays where it was (job 0105). Then Arrange windows; Switch workspace with its shortcut; Save layout;
   Edit zones; Snap while dragging, On or Off. Undo arrange is no longer a row: it is on the home
   page, next to Arrange.
 - **The home page's picture** shows a window Arrange would minimise shrinking to the taskbar,

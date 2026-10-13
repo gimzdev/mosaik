@@ -15,8 +15,9 @@
 //!
 //! A monitor with windows and no zones gets zones for them ([`zones_for_windows`]): the preset
 //! that suits up to four, a grid for more, as many as the monitor holds well, named after the
-//! windows that land in them. Windows left over take the empty zones on their monitor; once
-//! every zone has one, the rest are minimised, so they stay in the taskbar rather than disappear.
+//! windows that land in them; when it holds fewer than its windows, the windows used last take
+//! them. Windows left over take the empty zones on their monitor; once every zone has one, the
+//! rest are minimised, so they stay in the taskbar rather than disappear.
 //! The plan is pure; the engine applies it, and can undo it.
 
 use crate::geometry::{RatioRect, Rect};
@@ -750,13 +751,31 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
         }
     }
 
+    // On a monitor whose zones are all new (it had none, or a layout was picked for it), the
+    // windows used last take them and the others are minimised: the window being worked in
+    // stays, whatever its kind.
+    let mut placed_here = vec![true; units.len()];
+    for m in 0..monitors.len() {
+        let room = candidates.iter().filter(|c| c.monitor == m).count();
+        if room == 0
+            || candidates
+                .iter()
+                .any(|c| c.monitor == m && matches!(c.zone, ZoneRef::Existing(_)))
+        {
+            continue;
+        }
+        for (n, u) in (0..units.len()).filter(|u| units[*u].monitor == m).enumerate() {
+            placed_here[u] = n < room;
+        }
+    }
+
     let importance: Vec<f64> = units
         .iter()
         .enumerate()
         .map(|(rank, u)| importance(u, rank, units.len()))
         .collect();
     let mut pairs: Vec<(f64, usize, usize)> = Vec::with_capacity(units.len() * candidates.len());
-    for (u, unit) in units.iter().enumerate() {
+    for (u, unit) in units.iter().enumerate().filter(|(u, _)| placed_here[*u]) {
         for (c, cand) in candidates.iter().enumerate() {
             pairs.push((score(unit, importance[u], cand), u, c));
         }
@@ -781,8 +800,8 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
         if zone_unit[c].is_some() || !matches!(cand.zone, ZoneRef::New(_)) {
             continue;
         }
-        if let Some(u) =
-            (0..units.len()).find(|u| unit_zone[*u].is_none() && units[*u].monitor == cand.monitor)
+        if let Some(u) = (0..units.len())
+            .find(|u| placed_here[*u] && unit_zone[*u].is_none() && units[*u].monitor == cand.monitor)
         {
             unit_zone[u] = Some(c);
             zone_unit[c] = Some(u);
@@ -791,7 +810,9 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
 
     // Windows left over, the ones used last first: into an empty zone on their monitor, even
     // one named for something else (a window seen beats a name), else minimised.
-    let left_over: Vec<usize> = (0..units.len()).filter(|u| unit_zone[*u].is_none()).collect();
+    let left_over: Vec<usize> = (0..units.len())
+        .filter(|u| placed_here[*u] && unit_zone[*u].is_none())
+        .collect();
     for u in left_over {
         if let Some(&(_, _, c)) = pairs.iter().find(|&&(_, pu, c)| {
             pu == u && zone_unit[c].is_none() && candidates[c].monitor == units[u].monitor
@@ -1094,6 +1115,55 @@ mod tests {
             "{:?}",
             plan.goes
         );
+    }
+
+    #[test]
+    fn the_windows_used_last_keep_the_zones_whatever_their_kind() {
+        // Job 0105, the owner's screen: ten windows, six zones; the one in front (Claude, a
+        // kind that counts little) was minimised for editors and browsers used longer ago.
+        let exes = [
+            ("claude.exe", "Claude"),
+            ("chrome.exe", "Google Chrome"),
+            ("steamwebhelper.exe", "Steam"),
+            ("notepad++.exe", "Notepad++"),
+            ("calculatorapp.exe", "Calculator"),
+            ("explorer.exe", "File Explorer"),
+            ("code.exe", "Visual Studio Code"),
+            ("msedge.exe", "Microsoft Edge"),
+            ("figma.exe", "Figma"),
+            ("windowsterminal.exe", "Windows Terminal"),
+        ];
+        let units: Vec<Unit> = exes
+            .iter()
+            .enumerate()
+            .map(|(i, (exe, label))| {
+                let i = i32::try_from(i).unwrap_or(0);
+                unit(exe, label, Rect::new(i * 40, i * 20, 900 + i * 40, 800 + i * 20))
+            })
+            .collect();
+        let plan = plan(&units, &[], &[WORK]);
+        assert_eq!(plan.new_zones.len(), 6);
+        assert!(
+            plan.goes[..6].iter().all(|g| matches!(g, Goes::Zone(_))),
+            "the six used last are arranged: {:?}",
+            plan.goes
+        );
+        assert!(
+            plan.goes[6..].iter().all(|g| *g == Goes::Minimize),
+            "{:?}",
+            plan.goes
+        );
+        // A layout picked keeps the windows used last too.
+        let thirds = plan_with(
+            &units[..4],
+            &[],
+            &[WORK],
+            Some(Chosen {
+                monitor: 0,
+                preset: Preset::Thirds,
+            }),
+        );
+        assert_eq!(thirds.goes[3], Goes::Minimize, "{:?}", thirds.goes);
     }
 
     #[test]

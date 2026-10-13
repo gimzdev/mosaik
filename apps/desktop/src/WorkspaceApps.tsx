@@ -9,6 +9,10 @@ import { onWorkspacesChanged, request } from './engine';
 import { type Command, type WorkspaceApp, type WorkspaceApps, errorMessage } from './protocol';
 import { Button, MenuButton, useSay } from './ui';
 
+/** Whether a window's title says no more than its app's name ("Battle.net" and "Battle․net"). */
+const same = (title: string, label: string) =>
+  !title.trim() || title.normalize('NFKC').trim().toLowerCase() === label.normalize('NFKC').trim().toLowerCase();
+
 export function AppsPanel({ workspace, id }: { workspace: string; id: string }) {
   const [data, setData] = useState<WorkspaceApps | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -136,7 +140,7 @@ export function AppsPanel({ workspace, id }: { workspace: string; id: string }) 
                 items={data.windows.map((w) => ({
                   key: String(w.window),
                   label: w.label,
-                  detail: w.title && w.title !== w.label ? w.title : undefined,
+                  detail: same(w.title, w.label) ? undefined : w.title,
                   onSelect: () => {
                     change(
                       'add',

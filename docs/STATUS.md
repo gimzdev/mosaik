@@ -18,7 +18,7 @@ re-run before each release.
 | 6. Product UI | done: every page reviewed, tested in a browser and toured on Windows (names, Tab key, light and dark, smallest size); a Windows contrast theme and Narrator by ear are in the release checks | [Step 6](#step-6-product-ui) |
 | 7. Hardening | in progress: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
-| 1.1 | built, tested and packaged on Windows (jobs 0094 and 0095: every test, the Store package); zones that follow a resize, Arrange and its undo, zones 4 px apart measured with the mouse; the quick menu's hover by hand; tags back in title bars measured by tests only so far (the next run with the mouse) | [1.1](#11) |
+| 1.1 | built, tested and packaged on Windows (jobs 0094 to 0106: every test, the Store package); zones that follow a resize, Arrange (minimising what has no zone) and its undo, the home page, a workspace's apps, tab strips in one place, no window moved when brought forward, the quick menu, all measured with the mouse | [1.1](#11) |
 
 ## Step 1: verify assumptions
 
@@ -787,6 +787,42 @@ process, its own windows, a scratch folder).
   Settings and Google Chrome, Claude and File Explorer as tabs; Thirds in 10 ms, zones Browser,
   Files, Chat. `pack`: 240 files, checked against the repository; `mosaik.ps1` (1.09 MB) and
   `mosaik1.sh` (site 1.3.0) beside it. Mosaïk 1.1 left running in the tray.
+- **Arrange minimises, windows move only when asked, a workspace's apps** (ADR 0017 and 0018; the
+  owner: "arrange window (auto) is really fucked up", "it should never resize when opening a
+  window", "the position of tabs", "see and set list of current apps in a workspace"). Job 0104
+  read what Arrange had done on the owner's screen: eleven windows into a workspace of three
+  zones, eight as tabs of one group; and a window brought forward had its band changed by a
+  title bar read again. Locally: core 202 (grids by monitor size, leftovers minimised, the
+  windows used last keep the zones, app edits, names for older apps), IPC 10 (protocol 5), the
+  interface's 62 tests and 18 smoke tests (the apps panel included); clippy clean for Windows.
+  On the PC with the real mouse (job 0105, commit 6ae308f): `mosaik.ps1 test` passed in 62 s
+  (core 201, Win32 9 and 7, IPC 10 and 10, overlays 5, engine, interface 62).
+  - `smart`, Arrange: a new workspace in quarters, 0 px; Undo 0 px; twice moved nothing; a fifth
+    window minimised ("Arranged 4 windows in 4 zones; 1 window minimized.") and back with Undo,
+    no tab; Thirds over four windows: the preview (3.1 ms) said where each goes and that one is
+    minimised, Arrange (42.9 ms) put each 0 px from it, Undo brought zones and windows back.
+  - Brought to the front one after the other, twice (8 times), as Alt+Tab does: the windows
+    moved 0 px.
+  - The apps of the open workspace: 4 listed in their zones, a new window offered (not the
+    workspace's own), added to a zone in 28 ms and 0 px from it, moved to another zone (0 px),
+    taken out (it stayed, 0 px); the workspace's windows moved 0 px meanwhile.
+  - The quick menu: open 70 ms after the pointer stopped on its line, rows "Workspace 1",
+    "Arrange windows", "Switch workspace", "Save layout", "Edit zones", "Snap while dragging",
+    the window in front keeping the keyboard; closed 269 ms after the pointer left. Two
+    failures, fixed for the next run: picked from the menu, Arrange ran but the menu came back
+    (its slide away moved it under the still pointer, which Windows reports as a move: such
+    moves are ignored now); and the handle could not be dragged, the menu now opening before a
+    press (the menu is dragged by its first line now).
+  - `workspace --drag`: tab strips at the same place from the frame's right and top, 157 and
+    9 px, whichever tab shows (pictures of both); zones, tags and tabs with the mouse as before.
+    `kinds` as before.
+  - The tour: 33 pictures, the Workspaces page's apps and the windows it offers among them; the
+    welcome, home, settings and about pages with less text. Opened by hand, Mosaïk showed its
+    window in 0.2 s; with `--background`, none. On the owner's screen, asked only: Arrange
+    would make six zones for ten windows and minimise four, among them Claude, the window in
+    front; the windows used last now keep the zones (a test that failed first).
+  - Release build (79 s), Store package (2.76 MB), `pack` (244 files, verified), `mosaik.ps1`
+    and `mosaik1.sh` beside the repository dated that day, the site folder made again (1.4.0).
 
 ## Owner decisions
 

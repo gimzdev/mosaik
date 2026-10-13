@@ -17,8 +17,8 @@
 //!    goes where it is told.
 //! 4. The quick menu: its handle on the right edge, the menu opening when the pointer rests on
 //!    it without taking the keyboard, Arrange from it, closing a moment after the pointer
-//!    leaves, the handle dragged along its edge and kept there, and out of the way of a game in
-//!    full screen.
+//!    leaves, the menu dragged along its edge by its first line and kept there, and out of the
+//!    way of a game in full screen.
 //!
 //! Everything happens in a scratch folder: the user's workspaces and settings are not read or
 //! written. It moves the mouse. The probe windows are top-most until the quick menu's part, so
@@ -1506,17 +1506,31 @@ fn quick_menu(
         }),
     );
 
-    // 4e. Dragged 120 px down its edge: it stays there, and the place is kept.
+    // 4e. The menu, open as soon as the pointer stops on the handle, dragged 120 px down its
+    // edge by its first line: it follows and stays open there; once closed, the handle is there
+    // too, and the place is kept.
     let h0 = state(engine)?
         .quick_menu
         .ok_or("the handle is not on screen")?
         .rect;
     let down = (h0.center().y + 120).min(work.bottom - h0.height() / 2) - h0.center().y;
-    drag_path(
-        &[h0.center(), Point::new(h0.center().x, h0.center().y + down)],
-        HWND::default(),
-    )?;
-    let (h1, _) = wait_menu(engine, 1000, is_handle)?;
+    glide(away, h0.center());
+    let (opened_for_drag, _) = wait_menu(engine, 2000, is_open)?;
+    let menu0 = opened_for_drag
+        .filter(|m| m.open)
+        .ok_or("the menu did not open to be dragged")?;
+    let header = menu0
+        .rows
+        .first()
+        .ok_or("the menu has no first line")?
+        .rect
+        .center();
+    drag_path(&[header, Point::new(header.x, header.y + down)], HWND::default())?;
+    let (dragged_menu, _) = wait_menu(engine, 1000, is_open)?;
+    let menu_moved = dragged_menu.as_ref().map(|q| q.rect.top - menu0.rect.top);
+    let still_open = is_open(dragged_menu.as_ref());
+    glide(Point::new(header.x, header.y + down), away);
+    let (h1, _) = wait_menu(engine, 2000, is_handle)?;
     let moved = h1.as_ref().map(|q| q.rect.center().y - h0.center().y);
     let position = match engine.request(Command::Settings, TIMEOUT) {
         Reply::Settings { settings, .. } => Some(settings.edge.position),
@@ -1526,11 +1540,15 @@ fn quick_menu(
     out.insert(
         "dragged".into(),
         json!({
+            "menu_moved_px": menu_moved,
+            "menu_still_open": still_open,
             "moved_px": moved,
             "asked_px": down,
             "position": position,
             "position_expected": expected,
-            "ok": moved.is_some_and(|m| (m - down).abs() <= 2)
+            "ok": menu_moved.is_some_and(|m| (m - down).abs() <= 2)
+                && still_open
+                && moved.is_some_and(|m| (m - down).abs() <= 2)
                 && position.is_some_and(|p| (p - expected).abs() <= 2),
         }),
     );

@@ -1,8 +1,8 @@
 //! The quick menu: a thin handle at an edge of the main monitor (`mosaik_overlay::edge`) that
 //! opens as soon as the pointer stops on it (or it is clicked), sliding in from the edge, onto
 //! what is done most: Mosaïk and the open workspace (a click opens Mosaïk's window), Arrange, the
-//! switcher, saving the layout, editing the zones, and snapping on or off. Dragging the handle
-//! along its edge moves it; the place is kept.
+//! switcher, saving the layout, editing the zones, and snapping on or off. Dragging the handle,
+//! or the open menu by its first line, along its edge moves it; the place is kept.
 //!
 //! It never takes the keyboard: whatever the user was typing in keeps it. The same actions are
 //! in the switcher, the tray menu and the settings window, for the keyboard and screen readers.
@@ -40,11 +40,15 @@ struct Press {
     at: Point,
     /// The handle's middle when the button went down.
     middle: i32,
-    /// The handle follows the pointer along its edge.
+    /// The handle (or the menu, by its first line) follows the pointer along its edge.
     dragging: bool,
     /// The row pressed, in the menu.
     row: Option<usize>,
 }
+
+/// The menu's first line: Mosaïk and the open workspace. A click on it opens Mosaïk's window; a
+/// drag moves the menu along its edge.
+const HEADER: usize = 0;
 
 #[derive(Default)]
 pub(crate) struct Quick {
@@ -62,6 +66,9 @@ pub(crate) struct Quick {
     full_screen: Option<WindowHandle>,
     /// The menu sliding in (`true`) or fading away, since when.
     anim: Option<(Instant, bool)>,
+    /// Where the pointer last moved on the handle or the menu. Windows also says the pointer
+    /// moved when the window under it moves (the menu sliding away): those say nothing new.
+    moved_at: Option<Point>,
 }
 
 impl Engine {
@@ -251,7 +258,13 @@ impl Engine {
     }
 
     fn draw_menu(&mut self) {
-        let Some(place) = self.quick.place else { return };
+        if let Some(place) = self.quick.place {
+            self.draw_menu_at(place);
+        }
+    }
+
+    /// The menu by the handle at `place` (where it is, or where it is being dragged).
+    fn draw_menu_at(&mut self, place: Place) {
         let rows = self.quick_rows();
         self.quick.menu = rows.iter().map(|(a, _)| *a).collect();
         let rows: Vec<Row> = rows.into_iter().map(|(_, r)| r).collect();
@@ -386,6 +399,10 @@ impl Engine {
             }
             match input {
                 EdgeInput::Move(p) => {
+                    if self.quick.moved_at == Some(p) {
+                        continue;
+                    }
+                    self.quick.moved_at = Some(p);
                     self.kill_timer(timer::QUICK);
                     // Back on a menu fading away: it comes back.
                     if self.menu_closing() && self.quick.press.is_none() {
@@ -400,11 +417,20 @@ impl Engine {
                     }
                     if let Some(mut press) = self.quick.press {
                         let threshold = scale_for_dpi(4, place.dpi);
-                        if !self.menu_open() && (press.dragging || (p.y - press.at.y).abs() > threshold) {
+                        // The handle, or the open menu held by its first line.
+                        let by_menu = self.menu_open() && press.row == Some(HEADER);
+                        if (!self.menu_open() || by_menu)
+                            && (press.dragging || (p.y - press.at.y).abs() > threshold)
+                        {
                             press.dragging = true;
                             self.quick.press = Some(press);
                             let middle = edge::clamp_middle(place, press.middle + p.y - press.at.y);
-                            self.draw_handle(Place { middle, ..place }, true);
+                            if by_menu {
+                                self.quick.anim = None;
+                                self.draw_menu_at(Place { middle, ..place });
+                            } else {
+                                self.draw_handle(Place { middle, ..place }, true);
+                            }
                             continue;
                         }
                     }
@@ -427,6 +453,7 @@ impl Engine {
                 EdgeInput::Leave => {
                     self.kill_timer(timer::QUICK_HOVER);
                     self.quick.over = false;
+                    self.quick.moved_at = None;
                     if self.menu_open() && !self.menu_closing() {
                         self.set_timer(timer::QUICK, CLOSE_MS);
                     } else if self.quick.press.is_none() {
@@ -449,7 +476,13 @@ impl Engine {
                     };
                     if press.dragging {
                         let middle = edge::clamp_middle(place, press.middle + at.y - press.at.y);
+                        // A menu dragged by its first line stays open where it was let go.
+                        let reopen = self.menu_open();
                         self.keep_quick_place(place, middle);
+                        if reopen {
+                            self.quick.anim = None;
+                            self.draw_menu();
+                        }
                     } else if !self.menu_open() || self.menu_closing() {
                         self.open_menu();
                     } else if let Some(row) = press.row
