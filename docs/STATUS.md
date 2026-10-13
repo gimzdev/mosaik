@@ -758,7 +758,25 @@ process, its own windows, a scratch folder).
     could not give its window the keyboard from the background (the quick menu's keyboard check
     did not run); Mosaïk's window opened behind the app in front, so the tour could not click it.
     Each is fixed for the next run (commit 6c55fc6). Mosaïk was not running when the job
-    started (it had run since 16:45).
+    started: its log shows a clean exit at 17:01 ("windows restored before exit"), Mosaïk quit
+    from its menu, not a crash.
+- **Again with the mouse after the fixes** (job 0100, commit f6a15f6), every check passing:
+  `smart`'s one line (tops on one line, 0 px), the line between zones moved 150 px left, 100 px
+  down and 50 px back up from below, pushed back by an app that keeps 710 px (300 of the 400 px
+  asked), an edge on the screen's border, and Shift (the window alone, 60 px); Arrange, its
+  picture and the Thirds layout as in job 0099 (preview 2.1 ms, Arrange 49.8 ms, 0 px); the
+  quick menu with the window in front given the keyboard first, and keeping it while the menu
+  opened and Arrange ran from it; `workspace --drag` and `kinds` with nothing failing.
+  `mosaik.ps1 test` passed in 88 s (the three new tests of starting with Windows among them),
+  the release build in 100 s, the package. The tour of Mosaïk's window (72 s): 31 pictures of
+  every page in light and dark, at the usual and the smallest size, the switcher, and the home
+  page with Thirds and Arrange pointed at, on the owner's real windows (the preview named
+  "Steam Client WebHelper" and "Windows Terminal Host": apps now have the names people know,
+  `known_app_name`, core 191). Scrolled down to the lower layouts, the picture was out of view:
+  it now stays at the top of the page, and the keyboard never lands under it (two smoke tests
+  that failed first, 17 in all). Opened by hand, Mosaïk's window could not be told from .NET's
+  "main window" (the quick menu's handle, a window with no title, came first); job 0101 looks
+  for it by title. A second copy started with `--background` left at once (exit 0).
 
 ## Owner decisions
 
