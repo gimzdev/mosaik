@@ -407,11 +407,11 @@ fn show_settings(app: &AppHandle) {
         .center()
         .build();
     if let Err(e) = built {
-        tracing::error!(error = %e, "settings window not created");
+        tracing::error!(error = %e, "window not created");
         message(
             "Mosaïk",
             &format!(
-                "The settings window could not open: {e}\n\nMosaïk needs the Microsoft Edge WebView2 Runtime for its settings; Windows 11 includes it."
+                "Mosaïk's window could not open: {e}\n\nIt needs the Microsoft Edge WebView2 Runtime, which Windows 11 includes. On Windows 10, get it from microsoft.com (search for \u{201c}WebView2 Runtime\u{201d}), then open Mosaïk again."
             ),
             MB_ICONERROR,
         );
@@ -452,7 +452,7 @@ fn tray_menu(
     menu.append_items(&[
         &MenuItem::with_id(app, "arrange", "Arrange windows", true, None::<&str>)?,
         &MenuItem::with_id(app, "switcher", "Open the switcher", true, None::<&str>)?,
-        &MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?,
+        &MenuItem::with_id(app, "settings", "Open Mosaïk", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "rescue", "Rescue windows", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
@@ -495,7 +495,7 @@ fn build_tray(app: &AppHandle, engine: &Engine) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "arrange" => ask_engine(app, Command::Arrange),
+            "arrange" => ask_engine(app, Command::Arrange { preset: None }),
             "switcher" => ask_engine(app, Command::ShowSwitcher),
             "settings" => show_settings(app),
             "rescue" => ask_engine(app, Command::Rescue),

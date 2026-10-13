@@ -53,8 +53,8 @@ a window again
 
 <h3>Workspaces</h3>
 
-Arrange every window<br>
-in one click, or save yours<br>
+See where windows will go,<br>
+then arrange them in one click<br>
 Switch from the tray, the<br>
 screen's edge or the keyboard<br>
 Positions, sizes and tabs<br>
@@ -97,6 +97,9 @@ if Mosaïk stops
 
 <h2>Using it</h2>
 
+<p>Open Mosaïk from the tray icon and point at <b>Arrange windows</b>, or at a layout:<br>
+the picture of your screen shows where each window would go. Click, and they go; <b>Undo</b> puts them back.</p>
+
 <p>Arrange the apps of one project, press <kbd>Win</kbd> <kbd>Alt</kbd> <kbd>Space</kbd>, then <kbd>S</kbd> and a name.<br>
 Each place becomes a zone with its own colour.</p>
 
@@ -115,7 +118,7 @@ every window goes into the zone that suits it, and <b>Undo arrange</b> puts them
 
 <p>Resize a window in a zone and the zones beside it follow.<br>
 While dragging or resizing a window, hold <kbd>Shift</kbd> to move it freely.<br>
-Zones, shortcuts and everything else are in the settings, from the tray icon.</p>
+Workspaces, zones, shortcuts and everything else are in Mosaïk's window, from the tray icon.</p>
 
 <hr>
 
@@ -168,7 +171,7 @@ or deploys it.<br>
 <tr><td><code>crates/mosaik-engine</code></td><td>the engine thread: events, workspaces, the switcher, shortcuts</td></tr>
 <tr><td><code>crates/mosaik-watchdog</code></td><td>brings hidden windows back if Mosaïk stops</td></tr>
 <tr><td><code>crates/mosaik-ipc</code></td><td>the named-pipe protocol and <code>mosaikctl</code></td></tr>
-<tr><td><code>apps/desktop</code></td><td>the Tauri shell and the settings window (React, TypeScript)</td></tr>
+<tr><td><code>apps/desktop</code></td><td>the Tauri shell and Mosaïk's window (React, TypeScript)</td></tr>
 <tr><td><code>installer/</code></td><td>the Store package and the third-party notices</td></tr>
 <tr><td><code>docs/</code></td><td><a href="docs/architecture.md">architecture</a>, <a href="docs/STATUS.md">status and measurements</a>, <a href="docs/adr">decisions</a></td></tr>
 </table>

@@ -21,3 +21,4 @@ what it costs. Measurements behind a decision are summarised in the record and i
 | [0013](0013-zones-follow-a-resize.md) | Resizing a window in a zone moves the lines between zones; apps that keep a larger size push back |
 | [0014](0014-arrange.md) | Arrange: a pure planner puts every window in the zone that suits it, with undo |
 | [0015](0015-quick-menu.md) | The quick menu: a native line at the screen's edge that opens on hover and never takes the keyboard |
+| [0016](0016-home-page.md) | A home page that shows what Arrange, or a layout, would do before it does it |

@@ -13,6 +13,7 @@ const COMMANDS = [
   'save',
   'rescue',
   'arrange',
+  'preview_arrange',
   'undo_arrange',
   'show_switcher',
   'show_settings',
@@ -40,7 +41,8 @@ describe('the engine protocol', () => {
 
   it('knows every command the engine accepts, and no other', () => {
     expect(allListed).toBe(true);
-    expect([...COMMANDS].sort()).toEqual(wire.commands.map((c) => c.cmd).sort());
+    // The fixture may show a command more than once (with and without its optional fields).
+    expect([...COMMANDS].sort()).toEqual([...new Set(wire.commands.map((c) => c.cmd))].sort());
   });
 
   it('turns an error reply into one sentence with its hint', () => {

@@ -52,7 +52,11 @@ mod windows_main {
   workspaces [--json]            the saved workspaces
   switch <workspace>             open a workspace
   save [<workspace>]             save the windows on screen
-  arrange                        put every window on screen in the zone that suits it
+  arrange [<layout>]             put every window on screen in the zone that suits it;
+                                 with a layout, the main screen takes it first: full, halves,
+                                 thirds, main-side, side-main, quarters, half-stack,
+                                 stack-half, rows, three-rows
+  preview [<layout>] [--json]    what arrange would do on the main screen, without doing it
   undo-arrange                   put back what the last arrange changed
   rename <workspace> <name>      rename a workspace
   delete <workspace>             delete a workspace (its windows stay)
@@ -107,7 +111,14 @@ A <workspace> is its name or its id.";
             ("zones", [w]) => Command::Zones {
                 workspace: (*w).to_owned(),
             },
-            ("arrange", []) => Command::Arrange,
+            ("arrange", []) => Command::Arrange { preset: None },
+            ("arrange", [layout]) => Command::Arrange {
+                preset: Some((*layout).to_owned()),
+            },
+            ("preview", []) => Command::PreviewArrange { preset: None },
+            ("preview", [layout]) => Command::PreviewArrange {
+                preset: Some((*layout).to_owned()),
+            },
             ("undo-arrange", []) => Command::UndoArrange,
             ("rescue", []) => Command::Rescue,
             ("switcher", []) => Command::ShowSwitcher,
@@ -282,7 +293,7 @@ A <workspace> is its name or its id.";
                 1
             }
             Reply::Settings { settings, .. } => print_json(settings),
-            Reply::Zones { .. } => print_json(reply),
+            Reply::Zones { .. } | Reply::Preview(_) => print_json(reply),
             Reply::Hotkey {
                 hotkey,
                 problem,

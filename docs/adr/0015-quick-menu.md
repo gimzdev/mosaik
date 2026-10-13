@@ -26,8 +26,8 @@ in the corner farthest from most windows.
   `MA_NOACTIVATE` on a click), so whatever the user was typing in keeps the focus.
 - **Rows**: Arrange windows (the main one, ADR 0014); Undo arrange, while Arrange can be undone;
   Switch workspace, with its shortcut; Save layout; Edit zones, with a workspace open (it opens
-  the zone editor); Snap while dragging, On or Off; Settings. Its header names the open
-  workspace.
+  the zone editor); Snap while dragging, On or Off; Open Mosaïk (its window, on the home page,
+  ADR 0016). Its header names the open workspace.
 - **Dragging the handle** along its edge moves it; its place is kept in the settings, in
   thousandths of the edge's height, so it stays within a pixel of where it was let go.
   Settings: "Show the quick menu" (on by default) and "Where" (right or left edge).

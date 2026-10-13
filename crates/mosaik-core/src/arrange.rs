@@ -665,18 +665,39 @@ fn free_name(base: &str, taken: &[String]) -> String {
         .unwrap_or_else(|| base.to_owned())
 }
 
+/// A layout the user picked for one monitor (the home page's layouts): that monitor's zones
+/// make way for the preset's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Chosen {
+    pub monitor: usize,
+    pub preset: Preset,
+}
+
 /// Plans where every unit goes. `units` are front to back (the window used last first);
 /// `zones` are the open workspace's zones on screen (none when no workspace is open);
 /// `monitors` are the work areas of the monitors connected now.
 pub fn plan(units: &[Unit], zones: &[Spot], monitors: &[Rect]) -> Plan {
-    // Monitors with windows and no zones get a preset.
+    plan_with(units, zones, monitors, None)
+}
+
+/// [`plan`], with a layout the user picked for one monitor: its zones are left out and the
+/// preset's made there, whatever windows it has; windows beyond them become tabs.
+pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Option<Chosen>) -> Plan {
+    let replaced = |monitor: usize| chosen.is_some_and(|c| c.monitor == monitor);
+    // The picked layout's monitor gets its preset; other monitors with windows and no zones
+    // get one that suits them.
     let mut new_zones: Vec<NewZone> = Vec::new();
     for (m, work) in monitors.iter().enumerate() {
-        let here = units.iter().filter(|u| u.monitor == m).count();
-        if here == 0 || zones.iter().any(|z| z.monitor == m) {
-            continue;
-        }
-        let preset = Preset::for_windows(here, work.width(), work.height());
+        let preset = match chosen {
+            Some(c) if c.monitor == m => c.preset,
+            _ => {
+                let here = units.iter().filter(|u| u.monitor == m).count();
+                if here == 0 || zones.iter().any(|z| z.monitor == m) {
+                    continue;
+                }
+                Preset::for_windows(here, work.width(), work.height())
+            }
+        };
         for area in preset.zones() {
             new_zones.push(NewZone {
                 monitor: m,
@@ -688,6 +709,7 @@ pub fn plan(units: &[Unit], zones: &[Spot], monitors: &[Rect]) -> Plan {
     let mut candidates: Vec<Candidate> = zones
         .iter()
         .enumerate()
+        .filter(|(_, z)| !replaced(z.monitor))
         .map(|(i, z)| Candidate {
             zone: ZoneRef::Existing(i),
             monitor: z.monitor,
@@ -797,8 +819,13 @@ pub fn plan(units: &[Unit], zones: &[Spot], monitors: &[Rect]) -> Plan {
         })
         .collect();
 
-    // New zones are named after the window in them: its kind, else its app.
-    let mut taken: Vec<String> = zones.iter().map(|z| z.name.clone()).collect();
+    // New zones are named after the window in them: its kind, else its app. The names of zones
+    // that make way for a picked layout are free again.
+    let mut taken: Vec<String> = zones
+        .iter()
+        .filter(|z| !replaced(z.monitor))
+        .map(|z| z.name.clone())
+        .collect();
     for (c, cand) in candidates.iter().enumerate() {
         let ZoneRef::New(i) = cand.zone else { continue };
         let base = zone_unit[c]
@@ -1084,6 +1111,118 @@ mod tests {
             plan.goes
         );
         assert_ne!(plan.goes[0], plan.goes[1]);
+    }
+
+    #[test]
+    fn a_layout_picked_for_a_monitor_replaces_its_zones() {
+        // The home page: the open workspace has two zones on the main screen; the user picks
+        // Thirds for it. Every window goes into a zone of the new shape, none into the old ones,
+        // and each new zone is named for its window.
+        let zones = [
+            spot("Code", Rect::new(0, 0, 960, 1032)),
+            spot("Browser", Rect::new(960, 0, 1920, 1032)),
+        ];
+        let mut code = unit("code.exe", "Visual Studio Code", Rect::new(4, 32, 956, 1028));
+        code.zone = Some(0);
+        let mut chrome = unit("chrome.exe", "Google Chrome", Rect::new(964, 32, 1916, 1028));
+        chrome.zone = Some(1);
+        let units = [
+            code,
+            chrome,
+            unit("windowsterminal.exe", "Terminal", Rect::new(800, 400, 1600, 1000)),
+        ];
+        let chosen = Chosen {
+            monitor: 0,
+            preset: Preset::Thirds,
+        };
+        let plan = plan_with(&units, &zones, &[WORK], Some(chosen));
+        assert_eq!(plan.new_zones.len(), 3);
+        assert!(plan.new_zones.iter().all(|z| z.monitor == 0));
+        let areas: Vec<RatioRect> = plan.new_zones.iter().map(|z| z.area).collect();
+        assert_eq!(areas, Preset::Thirds.zones());
+        let mut used = Vec::new();
+        for u in 0..units.len() {
+            let ZoneRef::New(z) = zone_of(&plan, u) else {
+                panic!("unit {u} went to an old zone: {:?}", plan.goes)
+            };
+            assert!(matches!(plan.goes[u], Goes::Zone(_)), "{:?}", plan.goes);
+            used.push(z);
+        }
+        used.sort_unstable();
+        used.dedup();
+        assert_eq!(used.len(), 3, "one window per zone");
+        let names: Vec<&str> = plan.new_zones.iter().map(|z| z.name.as_str()).collect();
+        for name in ["Code", "Browser", "Terminal"] {
+            assert!(names.contains(&name), "{names:?}");
+        }
+    }
+
+    #[test]
+    fn a_layout_with_fewer_zones_than_windows_makes_tabs_of_the_rest() {
+        let units = [
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
+            unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
+            unit("windowsterminal.exe", "Terminal", Rect::new(800, 400, 1600, 1000)),
+            unit("slack.exe", "Slack", Rect::new(300, 300, 800, 800)),
+        ];
+        let chosen = Chosen {
+            monitor: 0,
+            preset: Preset::Halves,
+        };
+        let plan = plan_with(&units, &[], &[WORK], Some(chosen));
+        assert_eq!(plan.new_zones.len(), 2);
+        assert_eq!(plan.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count(), 2);
+        assert_eq!(
+            plan.goes.iter().filter(|g| matches!(g, Goes::TabOf(_))).count(),
+            2,
+            "{:?}",
+            plan.goes
+        );
+        // The editor, used last, has a zone of its own.
+        assert!(matches!(plan.goes[0], Goes::Zone(ZoneRef::New(_))));
+    }
+
+    #[test]
+    fn a_layout_picked_for_one_monitor_leaves_the_others_to_arrange() {
+        // Thirds picked for the main screen, which has one window; the other screen has a
+        // window and no zones: it gets its own shape, as Arrange gives it.
+        let side = Rect::new(1920, 0, 2720, 552);
+        let mut chat = unit("discord.exe", "Discord", Rect::new(2000, 50, 2600, 500));
+        chat.monitor = 1;
+        let units = [
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
+            chat,
+        ];
+        let chosen = Chosen {
+            monitor: 0,
+            preset: Preset::Thirds,
+        };
+        let plan = plan_with(&units, &[], &[WORK, side], Some(chosen));
+        assert_eq!(plan.new_zones.iter().filter(|z| z.monitor == 0).count(), 3);
+        assert_eq!(plan.new_zones.iter().filter(|z| z.monitor == 1).count(), 1);
+        let ZoneRef::New(c) = zone_of(&plan, 1) else {
+            panic!()
+        };
+        assert_eq!(plan.new_zones[c].monitor, 1);
+        // Zones of the picked layout with no window stay, ready for windows dragged in.
+        assert!(
+            plan.new_zones
+                .iter()
+                .filter(|z| z.monitor == 0)
+                .any(|z| z.name == "Zone"),
+            "{:?}",
+            plan.new_zones
+        );
+    }
+
+    #[test]
+    fn layouts_are_found_by_their_ids_and_have_names() {
+        for p in Preset::ALL {
+            assert_eq!(Preset::from_id(p.id()), Some(p));
+            assert!(!p.label().is_empty());
+        }
+        assert_eq!(Preset::from_id("thirds"), Some(Preset::Thirds));
+        assert_eq!(Preset::from_id("nope"), None);
     }
 
     #[test]

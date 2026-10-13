@@ -9,7 +9,9 @@
 //!    with Shift held the window resizes freely.
 //! 3. Arrange: windows with no workspace open go into a new one (a window of a fixed size keeps
 //!    it, centred across its zone and at its top); Undo puts everything back; arranging again
-//!    moves nothing; a window more than the zones joins another as a tab, and Undo takes it out.
+//!    moves nothing, and the home page's picture shows nothing moving; a window more than the
+//!    zones joins another as a tab, and Undo takes it out; a layout picked (thirds) shows where
+//!    each window would go without moving any, puts them there, and Undo puts back the zones.
 //! 4. The quick menu: its handle on the right edge, the menu opening when the pointer rests on
 //!    it without taking the keyboard, Arrange from it, closing a moment after the pointer
 //!    leaves, the handle dragged along its edge and kept there, and out of the way of a game in
@@ -26,7 +28,7 @@ use mosaik_core::geometry::{Point, Rect};
 use mosaik_core::presets::Preset;
 use mosaik_core::zone::ZoneId;
 use mosaik_engine::{Config, Engine, Scope, UiEvent, UiSink};
-use mosaik_ipc::protocol::{Command, QuickMenuState, Reply, StateSnapshot};
+use mosaik_ipc::protocol::{ArrangePreview, Command, PreviewWindow, QuickMenuState, Reply, StateSnapshot};
 use mosaik_win::events::pump_until;
 use mosaik_win::input::{self, Chord, LeftButton};
 use mosaik_win::place::{edge_error, move_frame};
@@ -600,7 +602,7 @@ fn arrange(
 
     // 3a. No workspace open: a new one, in the shape Arrange gives four windows on this monitor
     // (quarters, but on an ultrawide or a monitor on its side).
-    let (reply, ms) = ask(engine, Command::Arrange);
+    let (reply, ms) = ask(engine, Command::Arrange { preset: None });
     let message = done(&reply)?;
     let st = settled(engine)?;
     let ws = st.active_workspace.clone().ok_or("Arrange opened no workspace")?;
@@ -682,11 +684,19 @@ fn arrange(
         }),
     );
 
-    // 3c. Arrange, then Arrange again: the second moves nothing.
-    let again = done(&ask(engine, Command::Arrange).0)?;
+    // 3c. Arrange, then Arrange again: the second moves nothing, and the home page's picture of
+    // it shows nothing moving (the window of a fixed size included).
+    let again = done(&ask(engine, Command::Arrange { preset: None }).0)?;
     let _ = settled(engine)?;
     let first = frames(&w);
-    let (reply, ms) = ask(engine, Command::Arrange);
+    let still = preview(engine, None)?;
+    let shown_moving = still
+        .windows
+        .iter()
+        .map(|x| x.then.map_or(0, |t| edge_error(t, x.now)))
+        .max()
+        .unwrap_or(0);
+    let (reply, ms) = ask(engine, Command::Arrange { preset: None });
     let twice = done(&reply)?;
     let _ = settled(engine)?;
     let second = frames(&w);
@@ -698,7 +708,9 @@ fn arrange(
             "second": twice,
             "ms": ms,
             "most_moved_px": moved,
-            "ok": moved <= SLACK,
+            "preview_windows": still.windows.len(),
+            "preview_most_moving_px": shown_moving,
+            "ok": moved <= SLACK && still.windows.len() == 4 && shown_moving <= SLACK,
         }),
     );
 
@@ -717,7 +729,7 @@ fn arrange(
     .map_err(|err| err.to_string())?;
     pump_until(400, || false);
     let e_before = frame_rect(e).ok_or("Probe E vanished")?;
-    let fifth = done(&ask(engine, Command::Arrange).0)?;
+    let fifth = done(&ask(engine, Command::Arrange { preset: None }).0)?;
     let st = settled(engine)?;
     let strip = st
         .tab_strips
@@ -748,10 +760,160 @@ fn arrange(
     );
     crate::apps::close(e);
     pump_until(600, || false);
+    out.insert("layout".into(), layout(engine, styles, work, &w)?);
     *arranged = w;
     let ok = out.values().all(|v| v["ok"] == json!(true));
     out.insert("ok".into(), json!(ok));
     Ok(Value::Object(out))
+}
+
+/// What Arrange would do now (`preview_arrange`), with a layout or without.
+fn preview(engine: &Engine, preset: Option<&str>) -> Result<ArrangePreview, String> {
+    match engine.request(
+        Command::PreviewArrange {
+            preset: preset.map(str::to_owned),
+        },
+        TIMEOUT,
+    ) {
+        Reply::Preview(p) => Ok(*p),
+        other => Err(format!("preview: {other:?}")),
+    }
+}
+
+/// 3e. A layout picked on the home page, with the four windows arranged in quarters: the
+/// picture shows the main monitor in thirds and where each window would go, changing nothing;
+/// Arrange puts them there (the window left over as a tab); Undo puts back the zones and the
+/// windows.
+fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
+    let st = settled(engine)?;
+    let ws = st
+        .active_workspace
+        .clone()
+        .ok_or("no workspace open before the layout")?;
+    let zones_before = rects(&zones(engine, &ws.0, work)?);
+    let before = frames(w);
+    let sorted = |mut r: Vec<[i32; 4]>| {
+        r.sort_unstable();
+        r
+    };
+    let thirds = sorted(
+        Preset::Thirds
+            .zones()
+            .iter()
+            .map(|a| {
+                let r = a.to_rect(work);
+                [r.left, r.top, r.right, r.bottom]
+            })
+            .collect(),
+    );
+
+    let (shown, preview_ms) = {
+        let start = Instant::now();
+        let p = preview(engine, Some("thirds"))?;
+        (p, start.elapsed().as_secs_f64() * 1000.0)
+    };
+    let shown_zones = sorted(
+        shown
+            .zones
+            .iter()
+            .map(|z| [z.rect.left, z.rect.top, z.rect.right, z.rect.bottom])
+            .collect(),
+    );
+    // Each window in the picture, found by where it is now.
+    let planned: Vec<Option<&PreviewWindow>> = w
+        .iter()
+        .map(|h| {
+            let f = frame_rect(*h)?;
+            shown.windows.iter().find(|x| edge_error(x.now, f) <= 1)
+        })
+        .collect();
+    let tabs_shown = planned.iter().flatten().filter(|x| x.tab).count();
+    let untouched =
+        most_moved(&frames(w), &before) <= SLACK && rects(&zones(engine, &ws.0, work)?) == zones_before;
+
+    let (reply, ms) = ask(
+        engine,
+        Command::Arrange {
+            preset: Some("thirds".into()),
+        },
+    );
+    let message = done(&reply)?;
+    let st = settled(engine)?;
+    let zs = zones(engine, &ws.0, work)?;
+    let got = sorted(rects(&zs));
+    // Each window against where the picture said it would go. One that wears its group's strip
+    // above it sits below the band, which the picture cannot know beforehand.
+    let landed: Vec<Value> = w
+        .iter()
+        .zip(&planned)
+        .map(|(h, p)| {
+            let Some(p) = p else {
+                return json!({ "in_picture": false, "ok": false });
+            };
+            let state = st.windows.iter().find(|x| x.handle == handle(*h));
+            if p.tab {
+                let grouped = state.is_some_and(|x| x.tab_group.is_some());
+                return json!({ "tab": true, "grouped": grouped, "ok": grouped });
+            }
+            let (Some(then), Some(f)) = (p.then, frame_rect(*h)) else {
+                return json!({ "then": p.then.map(|t| [t.left, t.top, t.right, t.bottom]), "ok": false });
+            };
+            let above = wears_above(&st, *h);
+            let wanted = match zone_of(&st, &zs, *h) {
+                Some(zone) if above => {
+                    Rect::new(then.left, styles.area(zone, true).top, then.right, then.bottom)
+                }
+                _ => then,
+            };
+            let off = edge_error(f, wanted);
+            json!({
+                "frame": [f.left, f.top, f.right, f.bottom],
+                "then": [then.left, then.top, then.right, then.bottom],
+                "below_band": above,
+                "off_px": off,
+                "ok": off <= SLACK,
+            })
+        })
+        .collect();
+
+    let undo = done(&ask(engine, Command::UndoArrange).0)?;
+    let st = settled(engine)?;
+    let back = most_moved(&frames(w), &before);
+    let zones_back = rects(&zones(engine, &ws.0, work)?) == zones_before;
+    let all_shown = w.iter().all(|h| {
+        st.windows
+            .iter()
+            .find(|x| x.handle == handle(*h))
+            .is_some_and(|x| x.hidden.is_none() && x.tab_group.is_none())
+    });
+    Ok(json!({
+        "preview_ms": preview_ms,
+        "preview_zones": shown_zones,
+        "thirds": thirds,
+        "preview_windows": shown.windows.len(),
+        "preview_tabs": tabs_shown,
+        "elsewhere": shown.elsewhere,
+        "preview_changed_nothing": untouched,
+        "message": message,
+        "ms": ms,
+        "zones": got,
+        "windows": landed,
+        "undo": undo,
+        "back_px": back,
+        "zones_back": zones_back,
+        "all_shown": all_shown,
+        "ok": shown_zones == thirds
+            && planned.iter().all(Option::is_some)
+            && tabs_shown == 1
+            && untouched
+            && message.contains("\u{201c}Thirds\u{201d} layout")
+            && message.contains("1 window as a tab")
+            && got == thirds
+            && landed.iter().all(|x| x["ok"] == json!(true))
+            && back <= SLACK
+            && zones_back
+            && all_shown,
+    }))
 }
 
 /// Reads the quick menu's state until `ok` holds or `ms` milliseconds pass; returns it and the

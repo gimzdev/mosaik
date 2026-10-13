@@ -9,8 +9,9 @@ The owner's first rule, above every other trade-off: **minimal, efficient, elega
   the current account only: no administrator prompt, no extra runtimes (the C runtime is linked
   into the binaries; WebView2 ships with Windows 11), no reboot. Mosaïk starts when it is done,
   and Windows keeps it up to date.
-- **Easy to use.** One global shortcut, a tray icon, a short first-run welcome. Few settings, each
-  with a sensible default.
+- **Easy to use.** One global shortcut, a tray icon, a short first-run welcome, and a home page
+  that shows what a click will do to the windows before it does it. Few settings, each with a
+  sensible default.
 - **Light.** Measured idle CPU and memory budgets (`docs/STATUS.md`), and nothing running that the
   user did not ask for.
 - **Trustworthy.** No telemetry, accounts or cloud; Mosaïk makes no network request at all
@@ -25,8 +26,8 @@ mosaik.exe            engine thread: windows, zones, workspaces, tabs, hotkey, t
   ├─ mover threads    one per window being moved, so a hung app never holds up the engine
   ├─ hiding thread    hides and shows background tabs (the shell cloak is a call into Explorer)
   ├─ pipe threads     mosaikctl and second launches (ADR 0007)
-  ├─ main thread      Tauri: the tray icon, and web windows (settings, editor, welcome) created
-  │                   when opened and destroyed when closed
+  ├─ main thread      Tauri: the tray icon, and Mosaïk's window (home, workspaces, zone editor,
+  │                   settings, welcome), created when opened and destroyed when closed
   └─ starts ──────────► mosaik-watchdog.exe   restores hidden windows if mosaik.exe dies (ADR 0006)
 mosaikctl.exe         command line client of the pipe
 ```
@@ -38,8 +39,8 @@ and `mosaikctl` send it the same commands (`mosaik_ipc::protocol`); the interfac
 hands each move to a short-lived thread and keeps handling its messages while it waits, at most
 2.5 s (`mover.rs`).
 
-The settings window is the same app: its commands reach the engine in process, in protocol
-version 3. A save from the zone editor carries the revision of the zones it was opened on, so it
+Mosaïk's window is the same app: its commands reach the engine in process, in protocol
+version 4. A save from the zone editor carries the revision of the zones it was opened on, so it
 is refused, with the reason, when the monitors or the zones changed meanwhile. While the shortcut
 recorder listens, Mosaïk's own shortcuts let go (`hold_hotkeys`, at most a minute), so pressing
 one records it instead of opening the switcher.
@@ -103,9 +104,14 @@ the engine gathers windows and applies the result.
   windows, the windows used most get the largest zones, windows stay where they are when they
   fit, and windows left over become tabs. A monitor without zones gets a preset for its windows;
   with no workspace open, a new one is made. Undo puts everything back, for ten minutes.
+- **The home page** (ADR 0016): a picture of the main monitor, drawn from `preview_arrange`
+  (the same preparation as Arrange, changing nothing). While the pointer or the keyboard is on
+  Arrange or one of ten layouts, the windows glide to where they would go and the zones appear;
+  a click does it. A layout replaces the main monitor's zones with its own, and Undo brings
+  them back.
 - **The quick menu** (ADR 0015): a thin line on an edge of the main monitor opens, when the
-  pointer rests on it, onto Arrange, the switcher, saving, the zone editor, snapping and the
-  settings, without taking the keyboard. It hides while a game or a video fills the main monitor.
+  pointer rests on it, onto Arrange, the switcher, saving, the zone editor, snapping and
+  Mosaïk's window, without taking the keyboard. It hides while a game or a video fills the main monitor.
   Dragged along its edge, it stays there. Apps that drag their window themselves, without Windows' move loop, are followed
   too: a window that took the mouse and moves at the same size is being dragged. A window Mosaïk must not move (an app running as administrator, or one Windows
   protects) gets no zones, and the user is told why once, when the drag ends.

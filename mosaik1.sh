@@ -42,7 +42,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.2.0"
+MK_VERSION="1.3.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -310,23 +310,18 @@ export const metadata: Metadata = {
 
 /* The same three steps as the welcome page in the app. */
 const STEPS: [string, React.ReactNode][] = [
-  ['Arrange', 'Open the apps you use for one project and place them side by side, or rest the pointer on the line at the screen’s right edge and pick Arrange windows.'],
+  ['Arrange', 'Open the apps of one project. On Mosaïk’s home page, click Arrange windows, or pick a layout: every window snaps into its place.'],
+  ['Keep', 'Mosaïk remembers the arrangement as a workspace. Each zone wears its own colour.'],
   [
-    'Save',
+    'Come back',
     <>
-      Press <Keys k="Win Alt Space" /> then <Keys k="S" /> and name it. Each place becomes a zone with its own colour.
-    </>,
-  ],
-  [
-    'Switch',
-    <>
-      Press <Keys k="Win Alt Space" /> and pick a workspace: its windows come back and missing apps start.
+      Press <Keys k="Win Alt Space" /> and pick a workspace: its windows return, and closed apps open again.
     </>,
   ],
 ];
 
 const INSIDE = [
-  'Window zones and saved layouts, arranged in one click',
+  'Window zones and saved layouts: see where your windows will go, then arrange them in one click',
   'Tabs for any app',
   'One-click switching from the tray, the screen’s edge or the keyboard',
   'Multiple monitors, including different scaling',
@@ -605,7 +600,7 @@ const FEATURES = [
   {
     id: 'zones',
     title: 'Zones give every window a home',
-    body: 'Carve the screen into named areas, like Code, Terminal and Review, or let Arrange do it in one click. Drag a window near a zone and Mosaïk pulls it in; resize it and the zones beside it make room. Open a project and everything lands where you left it.',
+    body: 'Pick one of ten layouts, or carve the screen into your own named areas, like Code, Terminal and Review. Before you click, Mosaïk shows where each of your windows would go. Drag a window near a zone and it is pulled in; resize it and the zones beside it make room.',
     points: ['Zones belong to the project, not the monitor', 'Every window wears its zone’s colour, so you can tell at a glance', 'Works across multiple displays'],
     Art: ZonesArt,
   },

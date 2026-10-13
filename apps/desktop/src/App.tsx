@@ -1,5 +1,6 @@
-// Mosaïk's window: welcome on first run, then workspaces, settings and about, with the zone
-// editor for one workspace. Messages from Mosaïk show on top of every page.
+// Mosaïk's window: welcome on first run, then home (tidy the screen in one click), workspaces,
+// settings and about, with the zone editor for one workspace. Messages from Mosaïk show on top of
+// every page.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -7,6 +8,7 @@ import { About } from './About';
 import { guardClose, onNotices, onZonesToEdit, request, styleTitleBar, takeNotices, takeZonesToEdit } from './engine';
 import { keepTabInside } from './focusLoop';
 import { Notices, type ShownNotice } from './Notices';
+import { Home } from './Home';
 import { errorMessage, type HotkeyState, type Settings } from './protocol';
 import { SettingsPane } from './SettingsPane';
 import { Button, Confirm, Feedback, Mark } from './ui';
@@ -16,12 +18,14 @@ import { ZoneEditor } from './ZoneEditor';
 
 type View =
   | { page: 'welcome' }
+  | { page: 'home' }
   | { page: 'workspaces' }
   | { page: 'settings' }
   | { page: 'about' }
   | { page: 'zones'; workspace: string };
 
 const PAGES = [
+  { page: 'home', label: 'Home' },
   { page: 'workspaces', label: 'Workspaces' },
   { page: 'settings', label: 'Settings' },
   { page: 'about', label: 'About' },
@@ -67,6 +71,8 @@ export function App() {
   const [view, setView] = useState<View | null>(null);
   const [notices, setNotices] = useState<ShownNotice[]>([]);
   const [editorDirty, setEditorDirty] = useState(false);
+  /** The welcome was just finished: the home page shows once what Arrange does. */
+  const [welcomed, setWelcomed] = useState(false);
   /** Where the user asked to go while the zone editor has unsaved changes. */
   const [leavingTo, setLeavingTo] = useState<View | null>(null);
   /** The window is closing with unsaved zone edits: resolves the question. */
@@ -82,7 +88,7 @@ export function App() {
       if (reply.reply === 'settings') {
         setSettings(reply.settings);
         setHotkey(reply.hotkey);
-        setView((v) => v ?? (reply.settings.onboarding_done ? { page: 'workspaces' } : { page: 'welcome' }));
+        setView((v) => v ?? (reply.settings.onboarding_done ? { page: 'home' } : { page: 'welcome' }));
       } else {
         setProblem(errorMessage(reply) ?? 'Mosaïk did not answer.');
       }
@@ -231,6 +237,18 @@ export function App() {
               shortcut={shortcut}
               saveSettings={saveSettings}
               onDone={() => {
+                setWelcomed(true);
+                setView({ page: 'home' });
+              }}
+            />
+          );
+        case 'home':
+          return (
+            <Home
+              shortcut={shortcut}
+              edge={settings.edge}
+              demo={welcomed}
+              onManage={() => {
                 setView({ page: 'workspaces' });
               }}
             />
@@ -241,6 +259,9 @@ export function App() {
               shortcut={shortcut}
               onEditZones={(workspace) => {
                 setView({ page: 'zones', workspace });
+              }}
+              onHome={() => {
+                setView({ page: 'home' });
               }}
             />
           );

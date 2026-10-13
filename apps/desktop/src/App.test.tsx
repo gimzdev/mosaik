@@ -35,6 +35,13 @@ const registered: HotkeyState = { shortcut: 'Win+Alt+Space', registered: true, p
 
 const settingsReply = (settings: Settings, hotkey = registered): Reply => ({ reply: 'settings', settings, hotkey });
 const noWorkspaces: Reply = { reply: 'workspaces', workspaces: [], active: null };
+const emptyScreen: Reply = {
+  reply: 'preview',
+  work_area: { left: 0, top: 0, right: 1920, bottom: 1032 },
+  zones: [],
+  windows: [],
+  elsewhere: 0,
+};
 const ship: Reply = {
   reply: 'workspaces',
   workspaces: [{ id: 'ship', name: 'Ship', windows: 2, zones: 2, hotkey: null }],
@@ -71,6 +78,7 @@ describe('Mosaïk’s window', () => {
         return Promise.resolve({ reply: 'done', message: 'Settings saved.' });
       }
       if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
       return Promise.resolve(settingsReply(firstRun));
     });
     render(<App />);
@@ -80,10 +88,11 @@ describe('Mosaïk’s window', () => {
     await userEvent.click(screen.getByRole('switch', { name: 'Start Mosaïk with Windows' }));
     await userEvent.click(screen.getByRole('button', { name: 'Get started' }));
     expect(saved).toMatchObject({ cmd: 'set_settings', settings: { onboarding_done: true, start_with_windows: true } });
-    expect(await screen.findByRole('heading', { name: 'Workspaces' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Workspaces' }).getAttribute('aria-current')).toBe('page');
+    // Then the home page: tidy the screen in one click.
+    expect(await screen.findByRole('heading', { name: 'Tidy your screen' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Home' }).getAttribute('aria-current')).toBe('page');
     // The new page's title has the focus, for keyboard and screen-reader users.
-    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Workspaces' }));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Tidy your screen' }));
   });
 
   it('says why Windows kept Mosaïk from starting with it', async () => {
@@ -96,6 +105,7 @@ describe('Mosaïk’s window', () => {
         });
       }
       if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
       return Promise.resolve(settingsReply(firstRun));
     });
     render(<App />);
@@ -113,10 +123,16 @@ describe('Mosaïk’s window', () => {
     };
     engine.request.mockImplementation((c) =>
       Promise.resolve(
-        c.cmd === 'workspaces' ? noWorkspaces : settingsReply({ ...firstRun, onboarding_done: true }, fallback),
+        c.cmd === 'workspaces'
+          ? noWorkspaces
+          : c.cmd === 'preview_arrange'
+            ? emptyScreen
+            : settingsReply({ ...firstRun, onboarding_done: true }, fallback),
       ),
     );
     render(<App />);
+    expect((await screen.findByText(/switches workspaces/)).textContent).toContain('Win plus Alt plus S');
+    await userEvent.click(screen.getByRole('button', { name: 'Workspaces' }));
     const intro = (await screen.findByRole('heading', { name: 'Workspaces' })).parentElement?.parentElement;
     expect(intro?.textContent).toContain('Win plus Alt plus S');
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
@@ -131,6 +147,7 @@ describe('Mosaïk’s window', () => {
         return Promise.resolve({ reply: 'done', message: 'Settings saved.' });
       }
       if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
       return Promise.resolve(settingsReply({ ...firstRun, onboarding_done: true }));
     });
     render(<App />);
@@ -166,6 +183,7 @@ describe('Mosaïk’s window', () => {
         });
       }
       if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
       return Promise.resolve(settingsReply({ ...firstRun, onboarding_done: true }));
     });
     render(<App />);
@@ -184,19 +202,27 @@ describe('Mosaïk’s window', () => {
     const message = await screen.findByText('Mosaïk’s engine has stopped. Restart Mosaïk.');
     expect(message.getAttribute('role')).toBe('alert');
     engine.request.mockImplementation((c) =>
-      Promise.resolve(c.cmd === 'workspaces' ? noWorkspaces : settingsReply({ ...firstRun, onboarding_done: true })),
+      Promise.resolve(
+        c.cmd === 'workspaces'
+          ? noWorkspaces
+          : c.cmd === 'preview_arrange'
+            ? emptyScreen
+            : settingsReply({ ...firstRun, onboarding_done: true }),
+      ),
     );
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByRole('heading', { name: 'Workspaces' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Tidy your screen' })).toBeTruthy();
   });
 
   it('asks before leaving unsaved zones for another page', async () => {
     engine.request.mockImplementation((c) => {
       if (c.cmd === 'workspaces') return Promise.resolve(ship);
+      if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
       if (c.cmd === 'zones') return Promise.resolve(shipZones);
       return Promise.resolve(settingsReply({ ...firstRun, onboarding_done: true }));
     });
     render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Workspaces' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Edit zones of “Ship”' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Start from a preset' }));
     await userEvent.click(screen.getByRole('button', { name: 'Thirds' }));

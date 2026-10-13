@@ -59,6 +59,27 @@ impl Preset {
         }
     }
 
+    /// The preset with the id the zone editor and the home page use, if there is one.
+    pub fn from_id(id: &str) -> Option<Preset> {
+        Preset::ALL.into_iter().find(|p| p.id() == id)
+    }
+
+    /// Its name, as the interface shows it (`PRESETS` in apps/desktop/src/editor/model.ts).
+    pub const fn label(self) -> &'static str {
+        match self {
+            Preset::Full => "Whole screen",
+            Preset::Halves => "Halves",
+            Preset::Thirds => "Thirds",
+            Preset::MainSide => "Main and side",
+            Preset::SideMain => "Side and main",
+            Preset::Quarters => "Quarters",
+            Preset::HalfAndStack => "Half beside two stacked",
+            Preset::StackAndHalf => "Two stacked beside half",
+            Preset::Rows => "Top and bottom",
+            Preset::ThreeRows => "Three rows",
+        }
+    }
+
     /// Its zones, in reading order (top to bottom, then left to right).
     pub fn zones(self) -> Vec<RatioRect> {
         const THIRD: f64 = 1.0 / 3.0;
@@ -185,23 +206,25 @@ mod tests {
     }
 
     #[test]
-    fn ids_are_distinct_and_match_the_editor() {
+    fn ids_and_names_are_the_interfaces() {
         let ids: std::collections::HashSet<&str> = Preset::ALL.iter().map(|p| p.id()).collect();
         assert_eq!(ids.len(), Preset::ALL.len());
-        // The ids the zone editor's menu sends (apps/desktop/src/editor/model.ts).
-        for id in [
-            "full",
-            "halves",
-            "thirds",
-            "main-side",
-            "side-main",
-            "quarters",
-            "half-stack",
-            "stack-half",
-            "rows",
-            "three-rows",
-        ] {
-            assert!(ids.contains(id), "{id}");
+        // The ids the zone editor and the home page send, and the names they show, read from
+        // the interface's own list: `{ id: 'halves', label: 'Halves' }`.
+        let model = include_str!("../../../apps/desktop/src/editor/model.ts");
+        let listed: Vec<(&str, &str)> = model
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim();
+                let id = l.strip_prefix("{ id: '")?.split('\'').next()?;
+                let label = l.split("label: '").nth(1)?.split('\'').next()?;
+                Some((id, label))
+            })
+            .collect();
+        assert_eq!(listed.len(), Preset::ALL.len(), "{listed:?}");
+        for (id, label) in listed {
+            let preset = Preset::from_id(id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(preset.label(), label, "{id}");
         }
     }
 

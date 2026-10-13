@@ -9,23 +9,18 @@ export const metadata: Metadata = {
 
 /* The same three steps as the welcome page in the app. */
 const STEPS: [string, React.ReactNode][] = [
-  ['Arrange', 'Open the apps you use for one project and place them side by side, or rest the pointer on the line at the screen’s right edge and pick Arrange windows.'],
+  ['Arrange', 'Open the apps of one project. On Mosaïk’s home page, click Arrange windows, or pick a layout: every window snaps into its place.'],
+  ['Keep', 'Mosaïk remembers the arrangement as a workspace. Each zone wears its own colour.'],
   [
-    'Save',
+    'Come back',
     <>
-      Press <Keys k="Win Alt Space" /> then <Keys k="S" /> and name it. Each place becomes a zone with its own colour.
-    </>,
-  ],
-  [
-    'Switch',
-    <>
-      Press <Keys k="Win Alt Space" /> and pick a workspace: its windows come back and missing apps start.
+      Press <Keys k="Win Alt Space" /> and pick a workspace: its windows return, and closed apps open again.
     </>,
   ],
 ];
 
 const INSIDE = [
-  'Window zones and saved layouts, arranged in one click',
+  'Window zones and saved layouts: see where your windows will go, then arrange them in one click',
   'Tabs for any app',
   'One-click switching from the tray, the screen’s edge or the keyboard',
   'Multiple monitors, including different scaling',

@@ -618,13 +618,13 @@ impl Engine {
                 | Command::RenameWorkspace { .. }
                 | Command::DeleteWorkspace { .. }
                 | Command::SetWorkspaceHotkey { .. }
-                | Command::Arrange
+                | Command::Arrange { .. }
                 | Command::UndoArrange
         );
         // Once a workspace is opened, saved or edited, what Arrange did is part of it.
         let keeps_arrange = matches!(
             command,
-            Command::Arrange | Command::UndoArrange | Command::SetWorkspaceHotkey { .. }
+            Command::Arrange { .. } | Command::UndoArrange | Command::SetWorkspaceHotkey { .. }
         );
         let reply = self.dispatch(command);
         if changes_workspaces && !matches!(reply, Reply::Error { .. }) {
@@ -649,7 +649,8 @@ impl Engine {
             Command::Workspaces => self.workspaces(),
             Command::Switch { workspace } => self.switch(&workspace),
             Command::Save { workspace } => self.save(workspace),
-            Command::Arrange => self.arrange(),
+            Command::Arrange { preset } => self.arrange(preset.as_deref()),
+            Command::PreviewArrange { preset } => self.preview_arrange(preset.as_deref()),
             Command::UndoArrange => self.undo_arrange(),
             Command::Rescue => self.rescue(),
             Command::ShowSwitcher => {

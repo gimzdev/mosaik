@@ -35,6 +35,14 @@
    control outline is at least 3:1 against what is around it. */
 :root {
   color-scheme: light;
+  /* The small picture of the main screen on the home page: a dark desktop, light windows. */
+  --desk: #2a3242;
+  --desk-window: var(--color-paper);
+  --desk-bar: #e3e7df;
+  --desk-line: #1b2130;
+  --desk-text: var(--color-ink);
+  /* Text on the desktop itself (an empty screen, an empty zone's name). */
+  --desk-label: #e3e7df;
   --bg: var(--color-plaster);
   --surface: var(--color-paper);
   --line: var(--color-grout);
@@ -68,6 +76,12 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
+    --desk: #0a0d12;
+    --desk-window: #1e2532;
+    --desk-bar: #262e3d;
+    --desk-line: #3a4458;
+    --desk-text: #edefea;
+    --desk-label: #c9cfda;
     --bg: #0f1218;
     --surface: #161b25;
     --line: #2a3140;
@@ -91,6 +105,12 @@
 }
 :root[data-theme='dark'] {
   color-scheme: dark;
+  --desk: #0a0d12;
+  --desk-window: #1e2532;
+  --desk-bar: #262e3d;
+  --desk-line: #3a4458;
+  --desk-text: #edefea;
+  --desk-label: #c9cfda;
   --bg: #0f1218;
   --surface: #161b25;
   --line: #2a3140;
@@ -115,6 +135,12 @@
    so it wins over a theme the user picked too. */
 @media (forced-colors: active) {
   :root:root {
+    --desk: Canvas;
+    --desk-window: Canvas;
+    --desk-bar: Canvas;
+    --desk-line: CanvasText;
+    --desk-text: CanvasText;
+    --desk-label: CanvasText;
     --bg: Canvas;
     --surface: Canvas;
     --line: CanvasText;
@@ -200,6 +226,16 @@
   .zone-chip {
     background: var(--chip);
     color: var(--on-chip);
+  }
+  /* The home page's picture of the screen: windows glide to where Arrange would put them, and
+     the zones they would fill fade in (no motion when the user asks for less). */
+  .stage-window {
+    transition-property: left, top, width, height, opacity, box-shadow;
+    transition-duration: 460ms;
+    transition-timing-function: cubic-bezier(0.2, 0.75, 0.25, 1);
+  }
+  .stage-zone {
+    transition: opacity 260ms ease-out;
   }
 }
 

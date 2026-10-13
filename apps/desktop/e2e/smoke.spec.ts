@@ -14,17 +14,43 @@ async function windowDoesNotScroll(page: Page) {
   expect(overflow).toBeLessThanOrEqual(0);
 }
 
+test('the home page shows the screen and the layouts, and is accessible', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Tidy your screen', level: 1 })).toBeVisible();
+  await expect(page.getByText('Your main screen now: 4 windows')).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Or pick a layout for your main screen' }).getByRole('button'),
+  ).toHaveCount(10);
+  await accessible(page);
+  await windowDoesNotScroll(page);
+});
+
 test('workspaces are listed and the page is accessible', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Workspaces', level: 1 })).toBeVisible();
   await expect(page.getByRole('listitem')).toHaveCount(2);
   await accessible(page);
   await windowDoesNotScroll(page);
 });
 
+test('a layout shows where the windows would go, then puts them there, and Undo puts them back', async ({ page }) => {
+  await page.goto('/');
+  const picture = page.getByRole('img', { name: /^Your main screen now/ });
+  await expect(picture).toBeVisible();
+  await page.getByRole('button', { name: 'Thirds' }).hover();
+  await expect(page.getByText('With Thirds: 1 window as a tab')).toBeVisible();
+  await expect(page.getByRole('img', { name: /Visual Studio Code in Code/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Thirds' }).click();
+  await expect(page.getByText('Arranged 4 windows in the “Thirds” layout; 1 window as a tab.')).toBeVisible();
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByText('Windows are back where they were.')).toBeVisible();
+  await accessible(page);
+});
+
 test('the keyboard reaches every page, starting from the page title', async ({ page }) => {
   await page.goto('/');
-  const title = page.getByRole('heading', { name: 'Workspaces', level: 1 });
+  const title = page.getByRole('heading', { name: 'Tidy your screen', level: 1 });
   await expect(title).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await expect(page.getByRole('button', { name: 'About' })).toBeFocused();
@@ -41,13 +67,14 @@ test('the Tab key goes round the window and never leaves it', async ({ page }) =
   const last = page.getByRole('button', { name: 'Show the welcome again' });
   await last.focus();
   await page.keyboard.press('Tab');
-  await expect(page.getByRole('button', { name: 'Workspaces' })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Home' })).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await expect(last).toBeFocused();
 });
 
 test('a dialog keeps the Tab key inside it', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
   await page.getByRole('button', { name: 'Start from a preset' }).click();
   await page.getByRole('button', { name: 'Thirds' }).click();
@@ -72,6 +99,7 @@ test('a dark theme can be chosen, and stays accessible', async ({ page }) => {
 
 test('zones can be resized from the keyboard and saved', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
   const line = page.getByRole('separator', { name: 'Line right of Code, left of Browser and Terminal' });
   await line.focus();
@@ -86,14 +114,16 @@ test('zones can be resized from the keyboard and saved', async ({ page }) => {
 test('Arrange puts the windows in zones and can be undone', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Arrange windows' }).click();
-  await expect(page.getByText('Arranged 5 windows in 3 zones; 2 windows as tabs.')).toBeVisible();
-  await page.getByRole('button', { name: 'Undo arrange' }).click();
+  await expect(page.getByText('Arranged 4 windows in 4 zones.')).toBeVisible();
+  await expect(page.getByRole('img', { name: /^Your main screen now/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByText('Windows are back where they were.')).toBeVisible();
   await accessible(page);
 });
 
 test('the vertical presets: two stacked zones beside a half, and rows', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
   await page.getByRole('button', { name: 'Start from a preset' }).click();
   await page.getByRole('button', { name: 'Two stacked beside half' }).click();
@@ -108,6 +138,7 @@ test('the vertical presets: two stacked zones beside a half, and rows', async ({
 
 test('a zone can be picked and edited, and the page stays accessible', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
   await page.getByRole('button', { name: /^Code,/ }).click();
   await expect(page.getByRole('textbox', { name: 'Name' })).toHaveValue('Code');
@@ -120,7 +151,7 @@ test('the welcome shows on a first run, and fits the window', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Get started' })).toBeInViewport();
   await accessible(page);
   await page.getByRole('button', { name: 'Get started' }).click();
-  await expect(page.getByRole('heading', { name: 'Workspaces', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Tidy your screen', level: 1 })).toBeVisible();
 });
 
 test.describe('at the smallest window size', () => {
@@ -128,6 +159,9 @@ test.describe('at the smallest window size', () => {
 
   test('every page is usable and accessible', async ({ page }) => {
     await page.goto('/?second=1');
+    await expect(page.getByRole('heading', { name: 'Tidy your screen', level: 1 })).toBeVisible();
+    await accessible(page);
+    await windowDoesNotScroll(page);
     for (const name of ['Settings', 'About', 'Workspaces']) {
       await page.getByRole('button', { name, exact: true }).click();
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
@@ -147,6 +181,9 @@ test.describe('in high contrast', () => {
   test('the pages stay accessible', async ({ page }) => {
     await page.goto('/');
     await accessible(page);
+    await page.getByRole('button', { name: 'Thirds' }).hover();
+    await accessible(page);
+    await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
     await page.getByRole('button', { name: 'Edit zones of “Ship the release”' }).click();
     await page.getByRole('button', { name: /^Code,/ }).click();
     await accessible(page);

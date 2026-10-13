@@ -181,15 +181,37 @@ pub fn apply_zones(
         return Err(EditError::TooManyZones);
     }
 
-    // A window or tab group whose zone is gone keeps the place it had on screen: inside the
-    // zone's gaps, and for tabs below the band their strip needs.
-    let kept: HashSet<&ZoneId> = zones.iter().map(|z| &z.id).collect();
+    let kept: HashSet<ZoneId> = zones.iter().map(|z| z.id.clone()).collect();
+    free_places(&mut out.layout, ws, |z| !kept.contains(z), topology, style);
+    out.layout.zones = zones;
+    Ok(out)
+}
+
+/// The workspace without the zones `gone` (a layout picked on the home page makes way for its
+/// own on a monitor). Their windows and tab groups keep the places they had on screen.
+pub fn without_zones(ws: &Workspace, gone: &[ZoneId], topology: &Topology, style: FrameStyle) -> Workspace {
+    let mut out = ws.clone();
+    free_places(&mut out.layout, ws, |z| gone.contains(z), topology, style);
+    out.layout.zones.retain(|z| !gone.contains(&z.id));
+    out
+}
+
+/// Turns the places in zones that are going (`gone`) into places of their own, where those
+/// windows were on screen in `ws`: inside the zone's gaps, and for tabs below the band their
+/// strip needs.
+fn free_places(
+    layout: &mut crate::layout::Layout,
+    ws: &Workspace,
+    gone: impl Fn(&ZoneId) -> bool,
+    topology: &Topology,
+    style: FrameStyle,
+) {
     let resolver = Resolver::new(&ws.layout, topology, style);
     let place_without = |place: &Place, style: FrameStyle| -> Option<Place> {
         let Place::Zone { zone } = place else {
             return None;
         };
-        if kept.contains(zone) {
+        if !gone(zone) {
             return None;
         }
         let z = ws.layout.zone(zone)?;
@@ -215,8 +237,6 @@ pub fn apply_zones(
             g.place = p;
         }
     }
-    layout.zones = zones;
-    Ok(out)
 }
 
 /// The workspace renamed; the name must be free among `others` (same rule as the switcher:
@@ -481,6 +501,44 @@ mod tests {
             before_tabs,
             "tabs keep room for their strip above them"
         );
+    }
+
+    #[test]
+    fn zones_taken_away_leave_their_windows_where_they_were() {
+        // A layout picked on the home page replaces the main monitor's zones: the windows and
+        // tab groups that were in them keep their places on screen until Arrange moves them,
+        // and the other monitor's zones stay.
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let ws = workspace(&t);
+        let style = FrameStyle::default();
+        let primary_index = ws
+            .layout
+            .monitors
+            .iter()
+            .position(|m| t.get(&m.id).is_some_and(|c| c.id == t.primary().id))
+            .unwrap();
+        let gone: Vec<ZoneId> = ws
+            .layout
+            .zones
+            .iter()
+            .filter(|z| z.monitor == primary_index)
+            .map(|z| z.id.clone())
+            .collect();
+        assert!(!gone.is_empty());
+        let before = crate::place::Resolver::new(&ws.layout, &t, style);
+        let window_was = before.target(&ws.layout.slots[0].place);
+        let out = without_zones(&ws, &gone, &t, style);
+        assert!(out.layout.zones.iter().all(|z| !gone.contains(&z.id)));
+        assert_eq!(
+            out.layout.zones.len(),
+            ws.layout.zones.len() - gone.len(),
+            "the other monitor's zones stay"
+        );
+        assert!(matches!(out.layout.slots[0].place, Place::Free { .. }));
+        let after = crate::place::Resolver::new(&out.layout, &t, style);
+        assert_eq!(after.target(&out.layout.slots[0].place), window_was);
+        // Taking nothing away changes nothing.
+        assert_eq!(without_zones(&ws, &[], &t, style), ws);
     }
 
     #[test]

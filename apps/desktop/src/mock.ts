@@ -4,9 +4,22 @@
 //
 // URL switches for trying states: `?welcome=1` (first run), `?taken=1` (the switcher shortcut is
 // taken by another app), `?empty=1` (no workspaces), `?second=1` (a second, portrait monitor),
-// `?broken=1` (the engine does not answer).
+// `?nowindows=1` (nothing open on screen), `?broken=1` (the engine does not answer).
 
-import type { Command, HotkeyState, MonitorState, Reply, Settings, WorkspaceSummary, ZoneEdit } from './protocol';
+import { PRESETS, type Preset, presetShape } from './editor/model';
+import type {
+  ArrangePreview,
+  Command,
+  HotkeyState,
+  MonitorState,
+  PreviewWindow,
+  Rect,
+  Reply,
+  Settings,
+  WorkspaceSummary,
+  ZoneColor,
+  ZoneEdit,
+} from './protocol';
 
 const params = new URLSearchParams(window.location.search);
 
@@ -120,6 +133,108 @@ const workspaces: Workspace[] =
 let active: string | null = workspaces[0]?.id ?? null;
 let revision = 1;
 
+/** The windows on the main screen, front to back, as `preview_arrange` reports them. */
+interface OnScreen {
+  label: string;
+  /** What Arrange names its zone. */
+  zone: string;
+  now: Rect;
+}
+let onScreen: OnScreen[] =
+  params.get('nowindows') === '1'
+    ? []
+    : [
+        { label: 'Visual Studio Code', zone: 'Code', now: { left: 180, top: 120, right: 1500, bottom: 980 } },
+        { label: 'Google Chrome', zone: 'Browser', now: { left: 900, top: 260, right: 2300, bottom: 1240 } },
+        { label: 'Windows Terminal', zone: 'Terminal', now: { left: 1400, top: 760, right: 2200, bottom: 1300 } },
+        { label: 'Slack', zone: 'Chat', now: { left: 300, top: 640, right: 1100, bottom: 1250 } },
+      ];
+/** Where the windows were before the last Arrange, for Undo. */
+let beforeArrange: OnScreen[] | null = null;
+
+const ZONE_COLORS: ZoneColor[] = ['lapis', 'verdigris', 'saffron', 'madder', 'slate'];
+
+/** The layout Arrange gives a screen for this many windows (`Preset::for_windows`). */
+function autoPreset(windows: number): Preset {
+  if (windows <= 1) return 'full';
+  if (windows === 2) return 'halves';
+  if (windows === 3) return 'half-stack';
+  return 'quarters';
+}
+
+/** What Arrange would do with `preset` (or its own choice), as the engine reports it. */
+function preview(preset: Preset | undefined): ArrangePreview {
+  const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
+  const w = work.right - work.left;
+  const h = work.bottom - work.top;
+  // Arrange makes no zones on a screen without windows; a picked layout always has its own.
+  const shape = preset ? presetShape(preset) : onScreen.length ? presetShape(autoPreset(onScreen.length)) : [];
+  const rects = shape.map((a) => ({
+    left: Math.round(work.left + a.left * w),
+    top: Math.round(work.top + a.top * h),
+    right: Math.round(work.left + a.right * w),
+    bottom: Math.round(work.top + a.bottom * h),
+  }));
+  // The windows used last take the largest zones; the rest become tabs of the first.
+  const order = rects
+    .map((r, i) => ({ i, area: (r.right - r.left) * (r.bottom - r.top) }))
+    .sort((a, b) => b.area - a.area || a.i - b.i)
+    .map((x) => x.i);
+  const inset = (r: Rect): Rect => ({ left: r.left + 2, top: r.top + 2, right: r.right - 2, bottom: r.bottom - 2 });
+  const windows: PreviewWindow[] = onScreen.map((s, n) => {
+    const zone = order[n];
+    if (zone !== undefined) return { label: s.label, now: s.now, then: inset(rects[zone] as Rect), tab: false };
+    const first = order[0];
+    return { label: s.label, now: s.now, then: first === undefined ? null : inset(rects[first] as Rect), tab: true };
+  });
+  return {
+    work_area: work,
+    zones: rects.map((rect, i) => {
+      const n = order.indexOf(i);
+      return {
+        name: onScreen[n]?.zone ?? (i === 0 ? 'Zone' : `Zone ${String(i + 1)}`),
+        color: ZONE_COLORS[i % ZONE_COLORS.length] ?? 'slate',
+        rect,
+      };
+    }),
+    windows,
+    elsewhere: 0,
+  };
+}
+
+function arrange(preset: string | undefined): Reply {
+  const known = PRESETS.find((p) => p.id === preset);
+  if (preset !== undefined && !known) {
+    return {
+      reply: 'error',
+      code: 'bad_request',
+      message: `There is no layout called “${preset}”.`,
+      hint: `The layouts are ${PRESETS.map((p) => p.id).join(', ')}.`,
+    };
+  }
+  if (onScreen.length === 0) {
+    return {
+      reply: 'error',
+      code: 'failed',
+      message: 'There are no windows on screen to arrange.',
+      hint: 'Open the apps you work with, then arrange them.',
+    };
+  }
+  const p = preview(known?.id);
+  beforeArrange = onScreen;
+  onScreen = onScreen.map((s, i) => ({ ...s, now: p.windows[i]?.then ?? s.now }));
+  const tabs = p.windows.filter((x) => x.tab).length;
+  const what = known
+    ? `in the “${known.label}” layout`
+    : `in ${String(p.zones.length)} ${p.zones.length === 1 ? 'zone' : 'zones'}`;
+  const n = onScreen.length;
+  return done(
+    `Arranged ${String(n)} ${n === 1 ? 'window' : 'windows'} ${what}${
+      tabs ? `; ${tabs === 1 ? '1 window as a tab' : `${String(tabs)} windows as tabs`}` : ''
+    }.`,
+  );
+}
+
 const find = (which: string) =>
   workspaces.find((w) => w.id === which || w.name.toLowerCase() === which.trim().toLowerCase());
 const done = (message: string): Reply => ({ reply: 'done', message });
@@ -182,7 +297,7 @@ export const mock = {
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.1.0-dev', protocol: 3 };
+      return { reply: 'hello', app_version: '1.1.0-dev', protocol: 4 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -261,14 +376,29 @@ function answer(command: Command): Reply {
     case 'rescue':
       return done('Nothing was hidden: every window is already on screen.');
     case 'arrange':
-      return done('Arranged 5 windows in 3 zones; 2 windows as tabs.');
+      return arrange(command.preset);
+    case 'preview_arrange': {
+      const known = PRESETS.find((p) => p.id === command.preset);
+      if (command.preset !== undefined && !known) return arrange(command.preset);
+      return { reply: 'preview', ...preview(known?.id) };
+    }
     case 'undo_arrange':
+      if (!beforeArrange) {
+        return {
+          reply: 'error',
+          code: 'not_found',
+          message: 'There is no Arrange to undo.',
+          hint: 'Arrange can be undone for ten minutes, until a workspace is opened, saved or edited.',
+        };
+      }
+      onScreen = beforeArrange;
+      beforeArrange = null;
       return done('Windows are back where they were.');
     case 'state':
       return {
         reply: 'state',
         app_version: '1.1.0-dev',
-        protocol: 3,
+        protocol: 4,
         safe_mode: false,
         watchdog: true,
         monitors,

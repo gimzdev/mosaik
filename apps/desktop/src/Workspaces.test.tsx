@@ -26,10 +26,12 @@ const list = (names: string[]): Reply => ({
   active: 'w0',
 });
 
+const onHome = vi.fn();
+
 function page() {
   return render(
     <Feedback>
-      <Workspaces shortcut="Win+Alt+Space" onEditZones={vi.fn()} />
+      <Workspaces shortcut="Win+Alt+Space" onEditZones={vi.fn()} onHome={onHome} />
     </Feedback>,
   );
 }
@@ -38,12 +40,23 @@ describe('the workspaces page', () => {
   beforeEach(() => {
     engine.request.mockReset();
     engine.onWorkspacesChanged.mockClear();
+    onHome.mockClear();
   });
 
-  it('explains how to save one when there is none', async () => {
+  it('explains how to make one when there is none, and leads to Arrange', async () => {
     engine.request.mockResolvedValue(list([]));
     page();
     expect(await screen.findByRole('heading', { name: 'No workspaces yet' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Arrange windows' }));
+    expect(onHome).toHaveBeenCalled();
+  });
+
+  it('opens the switcher', async () => {
+    engine.request.mockImplementation((c) =>
+      Promise.resolve(c.cmd === 'show_switcher' ? { reply: 'done', message: 'The switcher is open.' } : list(['Ship'])),
+    );
+    page();
+    await screen.findAllByRole('listitem');
     await userEvent.click(screen.getByRole('button', { name: 'Open the switcher' }));
     expect(engine.request).toHaveBeenCalledWith({ cmd: 'show_switcher' });
   });
@@ -61,49 +74,6 @@ describe('the workspaces page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Open “Brand”' }));
     expect(engine.request).toHaveBeenCalledWith({ cmd: 'switch', workspace: 'w1' });
     expect(await screen.findByText('Opened “Brand”.')).toBeTruthy();
-  });
-
-  it('arranges the windows on screen, and undoes it', async () => {
-    engine.request.mockImplementation((c) => {
-      if (c.cmd === 'arrange') return Promise.resolve({ reply: 'done', message: 'Arranged 4 windows in 3 zones.' });
-      if (c.cmd === 'undo_arrange')
-        return Promise.resolve({ reply: 'done', message: 'Windows are back where they were.' });
-      return Promise.resolve(list(['Ship']));
-    });
-    page();
-    await screen.findAllByRole('listitem');
-    expect(screen.queryByRole('button', { name: 'Undo arrange' })).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: 'Arrange windows' }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'arrange' });
-    expect(await screen.findByText('Arranged 4 windows in 3 zones.')).toBeTruthy();
-    await userEvent.click(screen.getByRole('button', { name: 'Undo arrange' }));
-    expect(engine.request).toHaveBeenCalledWith({ cmd: 'undo_arrange' });
-    expect(await screen.findByText('Windows are back where they were.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Undo arrange' })).toBeNull();
-  });
-
-  it('says why the windows could not be arranged', async () => {
-    engine.request.mockImplementation((c) =>
-      Promise.resolve(
-        c.cmd === 'arrange'
-          ? {
-              reply: 'error',
-              code: 'failed',
-              message: 'There are no windows on screen to arrange.',
-              hint: 'Open the apps you work with, then arrange them.',
-            }
-          : list([]),
-      ),
-    );
-    page();
-    await screen.findByRole('heading', { name: 'No workspaces yet' });
-    await userEvent.click(screen.getByRole('button', { name: 'Arrange windows' }));
-    expect(
-      await screen.findByText(
-        'There are no windows on screen to arrange. Open the apps you work with, then arrange them.',
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Undo arrange' })).toBeNull();
   });
 
   it('reads them again when they change elsewhere', async () => {

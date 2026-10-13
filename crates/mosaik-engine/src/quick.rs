@@ -31,7 +31,7 @@ pub(crate) enum Action {
     Save,
     EditZones,
     Snapping,
-    Settings,
+    Open,
 }
 
 /// A press on the handle or on the menu.
@@ -223,7 +223,8 @@ impl Engine {
                 ..row("Snap while dragging")
             },
         ));
-        rows.push((Action::Settings, row("Settings")));
+        // The window: layouts to pick from, workspaces, settings.
+        rows.push((Action::Open, row("Open Mosaïk")));
         (
             "Mosaïk".to_owned(),
             workspace.unwrap_or_else(|| "No workspace open".to_owned()),
@@ -477,7 +478,7 @@ impl Engine {
     fn run_quick(&mut self, action: Action) {
         tracing::info!(?action, "quick menu");
         let reply = match action {
-            Action::Arrange => self.handle(Command::Arrange),
+            Action::Arrange => self.handle(Command::Arrange { preset: None }),
             Action::UndoArrange => self.handle(Command::UndoArrange),
             Action::Switcher => {
                 self.show_switcher(Instant::now());
@@ -497,7 +498,7 @@ impl Engine {
                 settings.snap.enabled = !settings.snap.enabled;
                 self.set_settings(settings)
             }
-            Action::Settings => {
+            Action::Open => {
                 (self.ui)(UiEvent::ShowSettings);
                 return;
             }

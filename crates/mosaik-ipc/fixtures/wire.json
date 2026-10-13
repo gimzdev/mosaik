@@ -25,6 +25,17 @@
       "cmd": "arrange"
     },
     {
+      "cmd": "arrange",
+      "preset": "half-stack"
+    },
+    {
+      "cmd": "preview_arrange"
+    },
+    {
+      "cmd": "preview_arrange",
+      "preset": "thirds"
+    },
+    {
       "cmd": "undo_arrange"
     },
     {
@@ -130,7 +141,7 @@
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 3,
+      "protocol": 4,
       "reply": "hello"
     },
     {
@@ -248,6 +259,88 @@
           "id": "z1",
           "monitor": "m1",
           "name": "Code"
+        }
+      ]
+    },
+    {
+      "elsewhere": 1,
+      "reply": "preview",
+      "windows": [
+        {
+          "label": "Visual Studio Code",
+          "now": {
+            "bottom": 760,
+            "left": 120,
+            "right": 1100,
+            "top": 80
+          },
+          "tab": false,
+          "then": {
+            "bottom": 1030,
+            "left": 2,
+            "right": 958,
+            "top": 2
+          }
+        },
+        {
+          "label": "Google Chrome",
+          "now": {
+            "bottom": 980,
+            "left": 700,
+            "right": 1800,
+            "top": 200
+          },
+          "tab": false,
+          "then": {
+            "bottom": 1030,
+            "left": 962,
+            "right": 1918,
+            "top": 2
+          }
+        },
+        {
+          "label": "Microsoft Edge",
+          "now": {
+            "bottom": 900,
+            "left": 300,
+            "right": 1200,
+            "top": 300
+          },
+          "tab": true,
+          "then": {
+            "bottom": 1030,
+            "left": 962,
+            "right": 1918,
+            "top": 2
+          }
+        }
+      ],
+      "work_area": {
+        "bottom": 1032,
+        "left": 0,
+        "right": 1920,
+        "top": 0
+      },
+      "zones": [
+        {
+          "color": "lapis",
+          "name": "Code",
+          "rect": {
+            "bottom": 1032,
+            "left": 0,
+            "right": 960,
+            "top": 0
+          }
+        },
+        {
+          "color": "verdigris",
+          "name": "Browser",
+          "rect": {
+            "bottom": 1032,
+            "left": 960,
+            "right": 1920,
+            "top": 0
+          }
         }
       ]
     }

@@ -11,8 +11,8 @@ to be saved before its zones existed.
 
 ## Decision
 
-- **One command, Arrange**: in the tray menu, the quick menu (ADR 0015), the Workspaces page
-  and `mosaikctl arrange`. Every window on screen that Mosaïk manages goes into the zone that
+- **One command, Arrange**: in the tray menu, the quick menu (ADR 0015), the home page
+  (ADR 0016) and `mosaikctl arrange`. Every window on screen that Mosaïk manages goes into the zone that
   suits it. The open workspace takes them in; with none open, a new one is made ("Workspace 2"
   and so on). It moves windows the way opening a workspace does, all at once, and saves the
   workspace.

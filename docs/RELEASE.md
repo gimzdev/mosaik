@@ -50,23 +50,25 @@ new in this version" and the listing below change.
   and move those windows. It makes no network requests."
 - **Store listing** (English):
   - *Description*: "Mosaïk gives every project its own workspace: your apps and windows arranged
-    and ready in one click. Carve the screen into named, coloured zones, or press Arrange and
-    every window goes where it suits; drag a window near a zone and it is pulled in, resize it
+    and ready in one click. Point at a layout and see where your windows would go; click, and
+    they go. Carve the screen into named, coloured zones, or press Arrange and every window goes
+    where it suits; drag a window near a zone and it is pulled in, resize it
     and the zones beside it make room. Stack any windows into tabs, browser tabs included, and
     flip between them. Save a workspace once and bring it back from the tray, the line at the
     screen's edge or Win+Alt+Space: positions, sizes and tabs return together, and missing apps
     start. Free and open source. No account, no telemetry, no network requests: your layouts
     stay on your computer."
   - *Features*: Zones that belong to the project, not the monitor · Arrange: every window in its
-    place in one click, with undo · Tabs for any app, not only the browser · One shortcut to
+    place in one click, with undo · Ten layouts, previewed on your own windows before you pick
+    one · Tabs for any app, not only the browser · One shortcut to
     switch workspaces, with a preview of each · Works across monitors and scales · Your layouts
     stay on your computer · A safety net brings back every window, always.
-  - *What's new in this version* (1.1.0): "Every window starts at the top of its zone, and zones
-    sit closer together. Resize a window and the zones beside it follow. Arrange puts every
-    window in the zone that suits it, in one click, with undo. A quick menu at the screen's
-    edge. Four more zone presets."
-  - *Screenshots*: at least one, 1920x1080, of Mosaïk in use (zones with tags, a tab strip, the
-    switcher).
+  - *What's new in this version* (1.1.0): "A home page: point at Arrange or one of ten layouts
+    and see your windows glide to where they would go; click, and they do, with undo. Every
+    window starts at the top of its zone, and zones sit closer together. Resize a window and the
+    zones beside it follow. A quick menu at the screen's edge. Four more zone presets."
+  - *Screenshots*: at least one, 1920x1080, of Mosaïk in use (the home page with a layout
+    pointed at, zones with tags, a tab strip, the switcher).
   - *Search terms*: window manager, workspaces, tabs, zones, tiling.
 - **Submission options**: publish as soon as it passes certification (a day or two), or by hand.
 

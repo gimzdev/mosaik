@@ -2,6 +2,16 @@
 
 ## 1.1.0
 
+### A home page that shows before it moves
+
+- Mosaïk opens on a picture of your main screen and its windows. Point at Arrange windows,
+  or at one of ten layouts (halves, thirds, main and side, quarters, rows...), and the windows
+  glide to where they would go; click, and they do. Undo puts everything back.
+- A layout replaces the zones of your main screen; windows more than its zones become tabs.
+- Your workspaces are a click away below, and the welcome shows Arrange at work before you
+  start.
+- The tray menu's and the quick menu's Settings is now Open Mosaïk.
+
 ### Every window at the top of its zone
 
 - A window whose title bar has little room for its zone's tag no longer sits lower than its
@@ -25,8 +35,8 @@
 
 ### Arrange
 
-- One click puts every window on screen in the zone that suits it: from the tray menu, the quick
-  menu, the Workspaces page or `mosaikctl arrange`. Zones named after an app or a kind of app
+- One click puts every window on screen in the zone that suits it: from the home page, the tray
+  menu, the quick menu or `mosaikctl arrange`. Zones named after an app or a kind of app
   ("Browser", "Terminal") draw those windows; the windows you use most get the largest zones;
   windows already in a zone stay there; windows more than the zones become tabs.
 - A monitor without zones gets a layout for its windows: halves, a half beside two stacked
@@ -37,7 +47,7 @@
 ### The quick menu
 
 - A thin line at the right edge of the main screen. Rest the pointer on it for Arrange, Undo
-  arrange, the switcher, Save layout, Edit zones, snapping on or off, and the settings. It never
+  arrange, the switcher, Save layout, Edit zones, snapping on or off, and Open Mosaïk. It never
   takes the keyboard from the app you are typing in, steps aside for a game or a video in full
   screen, and stays where you drag it along the edge. Settings: show it, and on which edge.
 
@@ -47,8 +57,10 @@
 
 ### Under the hood
 
-- `mosaikctl state` lists the quick menu, where it is and its rows. The protocol is version 3;
-  settings are format 4, and settings from 1.0 move to it on their own.
+- `mosaikctl state` lists the quick menu, where it is and its rows. `mosaikctl arrange <layout>`
+  uses a layout, and `mosaikctl preview [<layout>]` says what Arrange would do without doing it.
+  The protocol is version 4; settings are format 4, and settings from 1.0 move to it on their
+  own.
 
 ## 1.0.0
 

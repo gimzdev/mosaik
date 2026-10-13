@@ -68,7 +68,8 @@ export type Command =
   | { cmd: 'switch'; workspace: string }
   | { cmd: 'save'; workspace: string | null }
   | { cmd: 'rescue' }
-  | { cmd: 'arrange' }
+  | { cmd: 'arrange'; preset?: string }
+  | { cmd: 'preview_arrange'; preset?: string }
   | { cmd: 'undo_arrange' }
   | { cmd: 'show_switcher' }
   | { cmd: 'show_settings' }
@@ -109,8 +110,36 @@ export interface HotkeyState {
   problem: string | null;
 }
 
+/** A zone of the main screen once arranged (`preview_arrange`). */
+export interface PreviewZone {
+  name: string;
+  color: ZoneColor;
+  rect: Rect;
+}
+
+/** A window of the main screen: where it is, and where Arrange would put it. */
+export interface PreviewWindow {
+  /** The app's name. */
+  label: string;
+  now: Rect;
+  /** null: it stays where it is. */
+  then: Rect | null;
+  /** It would be a tab of the window already there. */
+  tab: boolean;
+}
+
+/** What Arrange (with a layout, or without) would do on the main screen, in screen pixels. */
+export interface ArrangePreview {
+  work_area: Rect;
+  zones: PreviewZone[];
+  windows: PreviewWindow[];
+  /** Windows on the other screens, which Arrange puts in zones there. */
+  elsewhere: number;
+}
+
 export type Reply =
   | { reply: 'hello'; app_version: string; protocol: number }
+  | ({ reply: 'preview' } & ArrangePreview)
   | { reply: 'workspaces'; workspaces: WorkspaceSummary[]; active: string | null }
   | { reply: 'done'; message: string }
   | { reply: 'error'; code: ErrorCode; message: string; hint: string | null }
@@ -223,6 +252,14 @@ export function isSettings(x: unknown): x is Settings {
   );
 }
 
+function isPreviewZone(x: unknown): x is PreviewZone {
+  return isObject(x) && isString(x.name) && isString(x.color) && COLORS.has(x.color) && isRect(x.rect);
+}
+
+function isPreviewWindow(x: unknown): x is PreviewWindow {
+  return isObject(x) && isString(x.label) && isRect(x.now) && (x.then === null || isRect(x.then)) && isBoolean(x.tab);
+}
+
 function isHotkeyState(x: unknown): x is HotkeyState {
   return isObject(x) && isString(x.shortcut) && isBoolean(x.registered) && isNullableString(x.problem);
 }
@@ -267,6 +304,15 @@ export function isReply(x: unknown): x is Reply {
         Array.isArray(x.zones) &&
         x.zones.every(isZone) &&
         isString(x.revision)
+      );
+    case 'preview':
+      return (
+        isRect(x.work_area) &&
+        Array.isArray(x.zones) &&
+        x.zones.every(isPreviewZone) &&
+        Array.isArray(x.windows) &&
+        x.windows.every(isPreviewWindow) &&
+        isNumber(x.elsewhere)
       );
     default:
       return false;

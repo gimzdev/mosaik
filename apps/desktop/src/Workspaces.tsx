@@ -1,5 +1,5 @@
-// The saved workspaces: open one, edit its zones, give it a shortcut, rename or delete it; and
-// Arrange, which puts every window on screen in the zone that suits it.
+// The saved workspaces: open one, edit its zones, give it a shortcut, rename or delete it.
+// (Arranging the screen, with or without a layout, is the home page's.)
 
 import { type SyntheticEvent, useCallback, useEffect, useId, useState } from 'react';
 
@@ -107,16 +107,22 @@ function EmptyPicture() {
   );
 }
 
-export function Workspaces({ shortcut, onEditZones }: { shortcut: string; onEditZones: (workspace: string) => void }) {
+export function Workspaces({
+  shortcut,
+  onEditZones,
+  onHome,
+}: {
+  shortcut: string;
+  onEditZones: (workspace: string) => void;
+  /** Goes to the home page, where the screen is arranged. */
+  onHome: () => void;
+}) {
   const [list, setList] = useState<WorkspaceSummary[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [deleting, setDeleting] = useState<WorkspaceSummary | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
-  const [arranging, setArranging] = useState(false);
-  /** Arrange was used from this page: it can be undone (the engine says until when). */
-  const [undoable, setUndoable] = useState(false);
   const say = useSay();
 
   const load = useCallback(() => {
@@ -143,29 +149,6 @@ export function Workspaces({ shortcut, onEditZones }: { shortcut: string; onEdit
     });
   };
 
-  const arrange = () => {
-    setArranging(true);
-    void request({ cmd: 'arrange' }).then((reply) => {
-      setArranging(false);
-      if (reply.reply === 'done') {
-        say(reply.message);
-        setUndoable(true);
-      } else {
-        say(errorMessage(reply) ?? 'The windows could not be arranged.', true);
-      }
-      load();
-    });
-  };
-
-  const undoArrange = () => {
-    setUndoable(false);
-    void request({ cmd: 'undo_arrange' }).then((reply) => {
-      if (reply.reply === 'done') say(reply.message);
-      else say(errorMessage(reply) ?? 'Arrange could not be undone.', true);
-      load();
-    });
-  };
-
   const open = (w: WorkspaceSummary) => {
     setOpening(w.id);
     void request({ cmd: 'switch', workspace: w.id }).then((reply) => {
@@ -187,15 +170,11 @@ export function Workspaces({ shortcut, onEditZones }: { shortcut: string; onEdit
         <div>
           <PageTitle id="workspaces-title">Workspaces</PageTitle>
           <p className="mt-2 text-[var(--muted)]">
-            To save the windows on screen, press <Keys shortcut={shortcut} /> then <Keys shortcut="S" />. Arrange puts
-            every window on screen in the zone that suits it.
+            Open one to bring its windows back where you left them. To save the windows on screen as a workspace, press{' '}
+            <Keys shortcut={shortcut} /> then <Keys shortcut="S" />.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {undoable ? <Button onClick={undoArrange}>Undo arrange</Button> : null}
-          <Button onClick={arrange} pending={arranging}>
-            Arrange windows
-          </Button>
           {list?.length ? <Button onClick={openSwitcher}>Open the switcher</Button> : null}
         </div>
       </div>
@@ -216,11 +195,11 @@ export function Workspaces({ shortcut, onEditZones }: { shortcut: string; onEdit
           <EmptyPicture />
           <h2 className="mt-5 font-display text-heading font-semibold">No workspaces yet</h2>
           <p className="mx-auto mt-1 max-w-md text-small text-[var(--muted)]">
-            Open the apps of one project, place them the way you like, then save them from the switcher.
+            Open the apps of one project and arrange them: Mosaïk keeps them as a workspace.
           </p>
           <div className="mt-5">
-            <Button tone="primary" onClick={openSwitcher}>
-              Open the switcher
+            <Button tone="primary" onClick={onHome}>
+              Arrange windows
             </Button>
           </div>
         </div>

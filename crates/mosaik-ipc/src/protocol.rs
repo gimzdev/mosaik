@@ -7,12 +7,13 @@ use mosaik_core::journal::{HiddenWindow, HideMethod};
 use mosaik_core::layout::{SlotId, TabGroupId, WorkspaceId};
 use mosaik_core::settings::Settings;
 use mosaik_core::window::{Elevation, WindowHandle};
-use mosaik_core::zone::ZoneId;
+use mosaik_core::zone::{ZoneColor, ZoneId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Raised when commands or replies change; a client may be older than Mosaïk, never newer.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// 4: `arrange` takes a layout, and `preview_arrange` shows what it would do.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -50,8 +51,18 @@ pub enum Command {
     Rescue,
     /// Put every window on screen in the zone that suits it: the open workspace's zones, or new
     /// ones on a monitor without zones (a new workspace when none is open). Windows left over
-    /// become tabs.
-    Arrange,
+    /// become tabs. With `preset` (a layout's id: "halves", "thirds"...), the main monitor's
+    /// zones make way for that layout first.
+    Arrange {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preset: Option<String>,
+    },
+    /// What `arrange` (with this `preset`, if any) would do now on the main monitor, without
+    /// doing it: the home page shows it while the pointer is on a layout.
+    PreviewArrange {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preset: Option<String>,
+    },
     /// Put back what the last `arrange` changed (for ten minutes, until a workspace is opened,
     /// saved or edited).
     UndoArrange,
@@ -156,6 +167,40 @@ pub enum Reply {
         /// Sent back with `set_zones`.
         revision: String,
     },
+    /// What `preview_arrange` found.
+    Preview(Box<ArrangePreview>),
+}
+
+/// What Arrange would do on the main monitor, in screen pixels.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArrangePreview {
+    /// The main monitor's work area: the zones and windows below are on it.
+    pub work_area: Rect,
+    /// Its zones once arranged: the open workspace's, new ones, or the picked layout's.
+    pub zones: Vec<PreviewZone>,
+    /// Its windows, front to back.
+    pub windows: Vec<PreviewWindow>,
+    /// Windows on the other monitors, which Arrange puts in zones there.
+    pub elsewhere: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewZone {
+    pub name: String,
+    pub color: ZoneColor,
+    pub rect: Rect,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewWindow {
+    /// The app's name ("Visual Studio Code").
+    pub label: String,
+    /// Where its frame is now.
+    pub now: Rect,
+    /// Where it would go (`None`: it stays where it is).
+    pub then: Option<Rect>,
+    /// It would be a tab of the window already there.
+    pub tab: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -434,7 +479,13 @@ mod tests {
             },
             Command::Save { workspace: None },
             Command::Rescue,
-            Command::Arrange,
+            Command::Arrange { preset: None },
+            Command::Arrange {
+                preset: Some("thirds".into()),
+            },
+            Command::PreviewArrange {
+                preset: Some("halves".into()),
+            },
             Command::UndoArrange,
             Command::Settings,
             Command::SetSettings {
@@ -496,7 +547,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":3,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":4,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -505,13 +556,13 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":3,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":4,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
     }
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":4,"id":1,"cmd":"state"}"#).unwrap_err();
-        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 4, server: 3 });
+        let err = decode_request(br#"{"v":5,"id":1,"cmd":"state"}"#).unwrap_err();
+        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 5, server: 4 });
         // Older clients are understood.
         assert!(decode_request(br#"{"v":1,"id":1,"cmd":"state"}"#).is_ok());
         assert!(err.to_string().contains("update Mosaïk"));
@@ -684,7 +735,14 @@ mod wire {
             },
             Command::Save { workspace: None },
             Command::Rescue,
-            Command::Arrange,
+            Command::Arrange { preset: None },
+            Command::Arrange {
+                preset: Some("half-stack".into()),
+            },
+            Command::PreviewArrange { preset: None },
+            Command::PreviewArrange {
+                preset: Some("thirds".into()),
+            },
             Command::UndoArrange,
             Command::ShowSwitcher,
             Command::ShowSettings,
@@ -769,6 +827,42 @@ mod wire {
                 zones: vec![zone()],
                 revision: "5e2b9c0f41d3a877".into(),
             },
+            Reply::Preview(Box::new(ArrangePreview {
+                work_area: Rect::new(0, 0, 1920, 1032),
+                zones: vec![
+                    PreviewZone {
+                        name: "Code".into(),
+                        color: ZoneColor::Lapis,
+                        rect: Rect::new(0, 0, 960, 1032),
+                    },
+                    PreviewZone {
+                        name: "Browser".into(),
+                        color: ZoneColor::Verdigris,
+                        rect: Rect::new(960, 0, 1920, 1032),
+                    },
+                ],
+                windows: vec![
+                    PreviewWindow {
+                        label: "Visual Studio Code".into(),
+                        now: Rect::new(120, 80, 1100, 760),
+                        then: Some(Rect::new(2, 2, 958, 1030)),
+                        tab: false,
+                    },
+                    PreviewWindow {
+                        label: "Google Chrome".into(),
+                        now: Rect::new(700, 200, 1800, 980),
+                        then: Some(Rect::new(962, 2, 1918, 1030)),
+                        tab: false,
+                    },
+                    PreviewWindow {
+                        label: "Microsoft Edge".into(),
+                        now: Rect::new(300, 300, 1200, 900),
+                        then: Some(Rect::new(962, 2, 1918, 1030)),
+                        tab: true,
+                    },
+                ],
+                elsewhere: 1,
+            })),
         ];
         serde_json::json!({ "commands": commands, "replies": replies })
     }
