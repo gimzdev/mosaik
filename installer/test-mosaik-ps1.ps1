@@ -32,8 +32,8 @@ foreach ($name in 'Under', 'Fail', 'Get-RunningBuild', 'Invoke-Build') {
 }
 
 $work = Join-Path ([IO.Path]::GetTempPath()) "mosaik-build-test-$PID"
-$release = Join-Path $work 'target\release'
-New-Item -ItemType Directory -Force -Path $release, (Join-Path $work 'apps\desktop') | Out-Null
+$release = [IO.Path]::Combine($work, 'target', 'release')
+New-Item -ItemType Directory -Force -Path $release, ([IO.Path]::Combine($work, 'apps', 'desktop')) | Out-Null
 Set-Content -Path (Join-Path $work 'THIRD-PARTY-NOTICES.txt') -Value 'notices'
 
 # What Invoke-Build does, in order.

@@ -146,9 +146,14 @@ try {
   Say ("Mosaik {0} to the Microsoft Store (app {1}): {2}" -f $version, $StoreId, (Split-Path -Leaf $Package)) Cyan
   Say "What's new: $notes" DarkGray
   if (-not $Yes) {
-    if ([Console]::IsInputRedirected) { Fail 'Nobody to confirm: run it with -Yes to send it from a script.' }
-    $answer = Read-Host 'Send it now? The Store checks it, then everyone gets it. [y/N]'
-    if ($answer -notmatch '^(y|yes|o|oui)$') { Say 'Nothing was sent.' Yellow; return }
+    # A person answers in the terminal; a script on its input, where nothing is a no (-Yes sends).
+    # A no ends as a failure: mosaik1.sh --deploy --app then puts nothing online either.
+    $question = 'Send it now? The Store checks it, then everyone gets it. [y/N]'
+    $answer = if ([Console]::IsInputRedirected) { Say $question; [Console]::In.ReadLine() } else { Read-Host $question }
+    if ("$answer".Trim() -notmatch '^(y|yes|o|oui)$') {
+      Say 'Nothing was sent.' Yellow
+      exit 1
+    }
   }
 
   $script:Token = Get-Token $access

@@ -76,6 +76,21 @@ try {
     throw ("publish.ps1 without keys: exit code {0}; it said: {1}" -f $code, ($out -join ' / '))
   }
   Write-Host 'publish.ps1 without keys and nobody to answer: it says what it needs, and sends nothing.' -ForegroundColor Green
+
+  # 3. Answered no: nothing is sent, and it ends as a failure, so mosaik1.sh --deploy --app puts
+  #    nothing online either. Nothing listens where the services would be: any request is an error.
+  $env:MOSAIK_STORE_TENANT = 'test-tenant'
+  $env:MOSAIK_STORE_CLIENT = 'test-client'
+  $env:MOSAIK_STORE_KEY = 'test-key'
+  foreach ($answer in 'n', '') {
+    $out = $answer | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" }
+    $code = $LASTEXITCODE
+    $said = $out -join ' '
+    if ($code -eq 0 -or $said -notmatch 'Nothing was sent' -or $said -match 'Starting a submission|did not give access|refused') {
+      throw ("publish.ps1 answered '{0}': exit code {1}; it said: {2}" -f $answer, $code, ($out -join ' / '))
+    }
+  }
+  Write-Host 'publish.ps1 answered no, or nothing: it sends nothing, says so, and ends as a failure.' -ForegroundColor Green
 }
 finally {
   foreach ($n in $names) { [Environment]::SetEnvironmentVariable($n, $saved[$n], 'Process') }

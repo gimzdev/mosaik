@@ -372,7 +372,7 @@ function Invoke-Cargo([string]$In, [string[]]$Arguments) {
 # built over. Like any function's, its output is unrolled (none is $null, one is not a list), so
 # callers collect it with @() before reading Count (job 0132).
 function Get-RunningBuild([string]$Source) {
-  $release = [IO.Path]::GetFullPath((Under $Source 'target' 'release')) + '\'
+  $release = [IO.Path]::GetFullPath((Under $Source 'target' 'release')) + [IO.Path]::DirectorySeparatorChar
   Get-Process -Name 'mosaik' -ErrorAction SilentlyContinue | Where-Object {
     $path = try { $_.Path } catch { $null }
     $path -and $path.StartsWith($release, [StringComparison]::OrdinalIgnoreCase)
