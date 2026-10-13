@@ -6,8 +6,9 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use mosaik_core::classify::{Rules, Verdict, classify};
 use mosaik_core::layout::Launch;
-use mosaik_core::sets::{Installed, suggest};
+use mosaik_core::sets::{Installed, Running, suggest};
 use mosaik_win::window::{Scanner, handle, top_level};
 use serde_json::{Value, json};
 
@@ -49,9 +50,30 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             path: a.path.clone(),
         })
         .collect();
-    let sets = suggest(&installed, &[]);
+    // The apps open now, as the engine counts them: the windows it would manage.
+    let own = mosaik_win::process::own_pid();
+    let running: Vec<Running> = Scanner::new()
+        .scan()
+        .into_iter()
+        .filter(|f| f.pid != own && classify(f, &Rules::default()) == Verdict::Manage)
+        .map(|f| Running {
+            exe: f.exe,
+            aumid: f.aumid,
+        })
+        .collect();
+    let sets = suggest(&installed, &running);
     for s in &sets {
-        let apps: Vec<&str> = s.apps.iter().map(|a| a.name.as_str()).collect();
+        let apps: Vec<String> = s
+            .apps
+            .iter()
+            .map(|a| {
+                if a.running {
+                    format!("{} (open)", a.name)
+                } else {
+                    a.name.clone()
+                }
+            })
+            .collect();
         println!("sets: {}: {}", s.name(), apps.join(", "));
     }
     let started = if args.iter().any(|a| a == "--start") {
@@ -77,6 +99,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             .map(|s| json!({
                 "name": s.name(),
                 "apps": s.apps.iter().map(|a| a.name.clone()).collect::<Vec<_>>(),
+                "open": s.apps.iter().filter(|a| a.running).count(),
             }))
             .collect::<Vec<_>>(),
         "started": started,

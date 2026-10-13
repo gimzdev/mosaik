@@ -5,8 +5,10 @@
 //! A set is offered for a task when an app the task is done in is installed (an editor for
 //! coding, a launcher for games) and at least one more goes with it: for coding, the editor,
 //! a terminal, a browser, an assistant and File Explorer. Of several apps of one kind, the one
-//! open now is taken, else the best known; apps that come with Windows (Edge, Notepad, Copilot,
-//! the Xbox app) are taken only when nothing else does the job, and never make a set alone.
+//! open now is taken, else the best known. Apps that come with Windows (Edge, Notepad, Copilot,
+//! the Xbox app) are taken only when open or when nothing else does the job, second tools
+//! (Notepad++ beside an IDE, a database client) only when nothing else does it; neither makes
+//! a set alone, nor takes a second place of a kind (a second chat app).
 
 use crate::arrange::Kind;
 use crate::layout::Launch;
@@ -97,12 +99,13 @@ const ROLES: [(Task, &[(Kind, usize)]); 5] = [
     ),
 ];
 
-/// The most sets offered at once.
-pub const MOST_SETS: usize = 4;
+/// The most sets offered at once: one row on the home page.
+pub const MOST_SETS: usize = 3;
 
 /// Apps that come with Windows, by program file or package id (lower case): never what a set is
-/// made for, and taken for a role only when nothing else is installed for it.
-const WITH_WINDOWS: [&str; 13] = [
+/// made for, and taken for a role only when nothing else is installed for it, or when open now
+/// while the others are not.
+const WITH_WINDOWS: [&str; 17] = [
     "msedge.exe",
     "notepad.exe",
     "microsoft.windowsnotepad",
@@ -116,13 +119,48 @@ const WITH_WINDOWS: [&str; 13] = [
     "wmplayer.exe",
     "microsoft.outlookforwindows",
     "olk.exe",
+    "microsoft.windowscommunicationsapps",
+    "microsoftteams",
+    "powershell.exe",
+    "cmd.exe",
 ];
+
+/// Tools that are of a kind without being where its work is done (a light editor beside an
+/// IDE, a database or Git client): never what a set is made for, and taken for a role only when
+/// no other app of the kind is installed, even when open now.
+const SECOND_TOOLS: [&str; 14] = [
+    "notepad++.exe",
+    "postman.exe",
+    "insomnia.exe",
+    "dbeaver.exe",
+    "docker desktop.exe",
+    "githubdesktop.exe",
+    "gitkraken.exe",
+    "sourcetree.exe",
+    "fork.exe",
+    "tableplus.exe",
+    "heidisql.exe",
+    "ssms.exe",
+    "pgadmin4.exe",
+    "mongodbcompass.exe",
+];
+
+/// Start menu entries that start a launcher whose window belongs to another program: the entry's
+/// program, and the window's.
+const LAUNCHERS: [(&str, &str); 2] = [
+    ("battle.net launcher.exe", "battle.net.exe"),
+    ("ealauncher.exe", "eadesktop.exe"),
+];
+
+/// The end of Mail and Calendar's Calendar entry: not a mail app.
+const CALENDAR_ENTRY: &str = "!microsoft.windowslive.calendar";
 
 /// File Explorer's entry in the Start menu.
 const EXPLORER_ID: &str = "Microsoft.Windows.Explorer";
 
-/// The program an entry starts, lower case: from its path, else from a Squirrel installer's app
-/// id ("com.squirrel.AnthropicClaude.claude" starts claude.exe), else from an id that is a path.
+/// The program whose windows an entry opens, lower case: the program it starts, from its path,
+/// else from a Squirrel installer's app id ("com.squirrel.AnthropicClaude.claude" starts
+/// claude.exe), else from an id that is a path; for a launcher, the program it starts in turn.
 fn exe_of(app: &Installed) -> Option<String> {
     let file = |p: &str| {
         p.rsplit(['\\', '/'])
@@ -130,17 +168,23 @@ fn exe_of(app: &Installed) -> Option<String> {
             .map(str::to_lowercase)
             .filter(|f| f.ends_with(".exe"))
     };
+    let window = |f: String| {
+        LAUNCHERS
+            .iter()
+            .find(|(launcher, _)| *launcher == f)
+            .map_or(f, |(_, program)| (*program).to_owned())
+    };
     if let Some(f) = app.path.as_deref().and_then(file)
         && f != "update.exe"
     {
-        return Some(f);
+        return Some(window(f));
     }
     if let Some(rest) = app.id.strip_prefix("com.squirrel.")
         && let Some(exe) = rest.rsplit('.').next().filter(|e| !e.is_empty())
     {
         return Some(format!("{}.exe", exe.to_lowercase()));
     }
-    file(&app.id)
+    file(&app.id).map(window)
 }
 
 /// The key an app is known by: its program file, else its package id, lower case.
@@ -150,6 +194,10 @@ fn key_of(app: &Installed) -> String {
 
 fn with_windows(key: &str) -> bool {
     WITH_WINDOWS.iter().any(|w| key.starts_with(w))
+}
+
+fn second_tool(key: &str) -> bool {
+    SECOND_TOOLS.contains(&key)
 }
 
 /// What an entry of the Start menu is, how its windows are found and how it is started, when it
@@ -169,7 +217,14 @@ fn known(app: &Installed) -> Option<(Kind, usize, AppMatch, Launch)> {
         return Some((Kind::Files, 0, found, launch));
     }
     let packaged = app.id.contains('!');
+    if packaged && app.id.to_lowercase().ends_with(CALENDAR_ENTRY) {
+        return None;
+    }
     let key = key_of(app);
+    // An entry that has explorer.exe open a folder or a document is not File Explorer.
+    if key == "explorer.exe" {
+        return None;
+    }
     let (kind, rank) = Kind::listed(&key)?;
     let (found, launch) = if packaged {
         (
@@ -215,6 +270,14 @@ pub fn suggest(installed: &[Installed], running: &[Running]) -> Vec<AppSet> {
         app: SetApp,
         rank: usize,
         with_windows: bool,
+        second_tool: bool,
+    }
+    impl Candidate {
+        /// An app the user chose for this kind of work, rather than one that came with Windows
+        /// or a second tool.
+        fn main(&self) -> bool {
+            !self.with_windows && !self.second_tool
+        }
     }
     let mut seen: Vec<String> = Vec::new();
     let mut candidates: Vec<Candidate> = Vec::new();
@@ -233,8 +296,10 @@ pub fn suggest(installed: &[Installed], running: &[Running]) -> Vec<AppSet> {
         }
         seen.push(key);
         let running = is_running(&found, running);
+        let program = key_of(app);
         candidates.push(Candidate {
-            with_windows: with_windows(&key_of(app)),
+            with_windows: with_windows(&program),
+            second_tool: second_tool(&program),
             app: SetApp {
                 name: app.name.trim().to_owned(),
                 kind,
@@ -245,12 +310,12 @@ pub fn suggest(installed: &[Installed], running: &[Running]) -> Vec<AppSet> {
             rank,
         });
     }
-    // Of several apps of one kind: the one open now, then not one that came with Windows, then
-    // the best known, then by name.
+    // Of several apps of one kind: not a second tool, then the one open now, then not one that
+    // came with Windows, then the best known, then by name.
     candidates.sort_by(|a, b| {
-        b.app
-            .running
-            .cmp(&a.app.running)
+        a.second_tool
+            .cmp(&b.second_tool)
+            .then(b.app.running.cmp(&a.app.running))
             .then(a.with_windows.cmp(&b.with_windows))
             .then(a.rank.cmp(&b.rank))
             .then(a.app.name.cmp(&b.app.name))
@@ -260,8 +325,13 @@ pub fn suggest(installed: &[Installed], running: &[Running]) -> Vec<AppSet> {
         let mut apps: Vec<SetApp> = Vec::new();
         let mut anchored = false;
         for &(kind, count) in *roles {
-            for c in candidates.iter().filter(|c| c.app.kind == kind).take(count) {
-                if task.anchors().contains(&kind) && !c.with_windows {
+            // The first of the kind, and more only if they are main apps: two chat apps the
+            // user chose, not a second Teams that came with Windows.
+            let mut of_kind = candidates.iter().filter(|c| c.app.kind == kind);
+            let first = of_kind.next();
+            let more = of_kind.filter(|c| c.main()).take(count.saturating_sub(1));
+            for c in first.into_iter().chain(more) {
+                if task.anchors().contains(&kind) && c.main() {
                     anchored = true;
                 }
                 apps.push(c.app.clone());
@@ -379,6 +449,12 @@ mod tests {
                 Some("C:\\Users\\s\\AppData\\Local\\AnthropicClaude\\Update.exe"),
             ),
             app("Copilot", "Microsoft.Copilot_8wekyb3d8bbwe!App", None),
+            // A folder of the Windows SDK, opened by explorer.exe: not File Explorer.
+            app(
+                "Windows Software Development Kit",
+                "{7C5A40EF}\\Windows Kits\\10",
+                Some("C:\\Windows\\explorer.exe"),
+            ),
             app("File Explorer", EXPLORER_ID, None),
             app("Notepad", "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App", None),
             app(
@@ -386,10 +462,11 @@ mod tests {
                 "Steam",
                 Some("C:\\Program Files (x86)\\Steam\\steam.exe"),
             ),
+            // Its entry starts its launcher; its window is Battle.net.exe's.
             app(
                 "Battle.net",
                 "{7C5A40EF}\\Battle.net\\Battle.net Launcher.exe",
-                Some("C:\\Program Files (x86)\\Battle.net\\Battle.net.exe"),
+                Some("C:\\Program Files (x86)\\Battle.net\\Battle.net Launcher.exe"),
             ),
             app(
                 "Discord",
@@ -455,6 +532,7 @@ mod tests {
         // Games: the two launchers and Discord. Notepad and Edge make no set of their own.
         let games = sets.iter().find(|s| s.task == Task::Playing).unwrap();
         assert_eq!(names(games), ["Steam", "Battle.net", "Discord"]);
+        assert_eq!(games.apps[1].app.exe.as_deref(), Some("battle.net.exe"));
         assert!(!sets.iter().any(|s| s.task == Task::Writing), "{sets:?}");
         // Discord alone is not a set for chat: coding and games.
         assert_eq!(sets.len(), 2, "{sets:?}");
@@ -499,6 +577,89 @@ mod tests {
         ];
         assert!(suggest(&only, &[]).is_empty());
         assert!(suggest(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn a_second_tool_or_an_app_that_comes_with_windows_does_not_take_the_main_apps_place() {
+        // The owner's PC in job 0110: Notepad++ open, VS Code not; Docker Desktop open. Both
+        // Teams, the one that comes with Windows too, and Mail and Calendar.
+        let mut installed = owner();
+        installed.extend([
+            app(
+                "Notepad++",
+                "{6D809377}\\Notepad++\\notepad++.exe",
+                Some("C:\\Program Files\\Notepad++\\notepad++.exe"),
+            ),
+            app(
+                "Docker Desktop",
+                "Docker.DockerDesktop",
+                Some("C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"),
+            ),
+            app(
+                "Microsoft Teams (personal)",
+                "MicrosoftTeams_8wekyb3d8bbwe!MicrosoftTeams",
+                None,
+            ),
+            app("Microsoft Teams", "MSTeams_8wekyb3d8bbwe!MSTeams", None),
+            app(
+                "Calendar",
+                "microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.calendar",
+                None,
+            ),
+            app(
+                "Mail",
+                "microsoft.windowscommunicationsapps_8wekyb3d8bbwe!microsoft.windowslive.mail",
+                None,
+            ),
+        ]);
+        let running = [
+            Running {
+                exe: Some("notepad++.exe".into()),
+                aumid: None,
+            },
+            Running {
+                exe: Some("docker desktop.exe".into()),
+                aumid: None,
+            },
+        ];
+        let sets = suggest(&installed, &running);
+        let coding = sets.iter().find(|s| s.task == Task::Coding).unwrap();
+        assert_eq!(coding.apps[0].name, "Visual Studio Code", "{sets:?}");
+        // One Teams, not both; mail is Mail, not Calendar.
+        let talking = sets.iter().find(|s| s.task == Task::Talking).unwrap();
+        assert_eq!(names(talking), ["Discord", "Microsoft Teams", "Mail"], "{sets:?}");
+        // Notepad++ alone, or a tool that is not an editor, makes no coding set.
+        let tools = vec![
+            installed[installed.len() - 6].clone(),
+            installed[installed.len() - 5].clone(),
+            app("Google Chrome", "Chrome", Some("C:\\Chrome\\chrome.exe")),
+        ];
+        assert!(
+            !suggest(&tools, &running).iter().any(|s| s.task == Task::Coding),
+            "{:?}",
+            suggest(&tools, &running)
+        );
+    }
+
+    #[test]
+    fn three_sets_at_most_the_ones_with_apps_open_first() {
+        let mut installed = owner();
+        installed.extend([
+            app(
+                "Word",
+                "Microsoft.Office.WINWORD.EXE.15",
+                Some("C:\\Office\\WINWORD.EXE"),
+            ),
+            app("Figma", "com.squirrel.figma.Figma", None),
+            app("Slack", "com.squirrel.slack.slack", None),
+        ]);
+        let running = [Running {
+            exe: Some("winword.exe".into()),
+            aumid: None,
+        }];
+        let sets = suggest(&installed, &running);
+        assert_eq!(sets.len(), 3, "{sets:?}");
+        assert_eq!(sets[0].task, Task::Writing, "{sets:?}");
     }
 
     #[test]

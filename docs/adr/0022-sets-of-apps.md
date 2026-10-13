@@ -24,10 +24,15 @@ sure it's clean, concise, non-invasive and easy to understand."
   design tool, a browser, File Explorer and an assistant; for writing, a word processor, notes,
   a browser and an assistant; for chat and mail, two chat apps and a mail app; for games, two
   launchers, a chat app and a media app. Of several apps of one kind, the one open now is taken,
-  else the best known. Apps that come with Windows (Edge, Notepad, Copilot, the Xbox app) fill a
-  role only when nothing else is installed for it. A set needs an app the task is done in that
-  the user installed (an editor, a launcher...), and two apps at least. At most four sets, the
-  ones with the most apps open first.
+  else the best known. Apps that come with Windows (Edge, Notepad, Copilot, the Xbox app, the
+  Teams and Mail that come with it, PowerShell) are taken only when open or when nothing else is
+  installed for the role; second tools (Notepad++ beside an IDE, Docker Desktop, a database or
+  Git client) only when nothing else is, even when open. Neither takes a second place of a kind
+  (a second chat app) or makes a set alone: a set needs an app the task is done in that the user
+  chose (an editor, a launcher...), and two apps at least. An entry that has explorer.exe open a
+  folder is not File Explorer, Calendar is not a mail app, and a launcher's entry (Battle.net
+  Launcher.exe) is known by the program whose window it opens (Battle.net.exe). Three sets at
+  most, one row, the ones with the most apps open first.
 - **The home page shows them, under "Sets of apps", right below Arrange**: one small card per
   set, its name and its apps. Nothing shows when Mosaïk finds no set.
 - **A click opens the set as a workspace named after its task** ("Coding"): made the first time
@@ -46,6 +51,11 @@ sure it's clean, concise, non-invasive and easy to understand."
 
 ## Consequences
 
+- Measured on the owner's PC (job 0110, `mosaik-probe sets`): Mosaïk's reading of the Start menu
+  and Windows' own list (`Get-StartApps`) give the same 139 apps, read in 163 ms. Its first
+  choices there took a folder of the Windows SDK, opened by explorer.exe, for File Explorer,
+  offered two Teams and Calendar as chat and mail, and would have taken Notepad++ over VS Code
+  because it was open: the rules above come from that run.
 - Only apps in the Start menu and of a kind Mosaïk knows (`arrange::Kind`) are offered: a
   portable app, or one Mosaïk has no kind for, is not.
 - A set finds its workspace by name: renamed, the set makes a new one on the next click.

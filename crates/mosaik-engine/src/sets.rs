@@ -55,7 +55,12 @@ impl StartApps {
                     // SAFETY: pairs the successful initialisation above.
                     unsafe { CoUninitialize() };
                 }
-                tracing::debug!(apps = list.len(), "Start menu read");
+                tracing::info!(
+                    apps = list.len(),
+                    packaged = list.iter().filter(|a| a.id.contains('!')).count(),
+                    with_program = list.iter().filter(|a| a.path.is_some()).count(),
+                    "Start menu read"
+                );
                 if let Ok(mut r) = read.lock() {
                     *r = Some((Instant::now(), list));
                 }
