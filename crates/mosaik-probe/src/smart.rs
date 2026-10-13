@@ -1666,11 +1666,12 @@ fn quick_menu(
 
     // 4b. With a window in front and two windows moved out of their zones, the pointer rests
     // on the handle: the menu opens, and the window in front keeps the keyboard.
-    let ws_name = match engine.request(Command::Workspaces, TIMEOUT) {
+    // The workspace open, if one is: listed once among the workspaces (marked there).
+    let ws_name: Option<String> = match engine.request(Command::Workspaces, TIMEOUT) {
         Reply::Workspaces { workspaces, active } => active
             .and_then(|a| workspaces.into_iter().find(|w| w.id == a))
-            .map_or_else(|| "No workspace open".to_owned(), |w| w.name),
-        _ => String::new(),
+            .map(|w| w.name),
+        _ => None,
     };
     let front = w[2];
     let focused = give_keyboard(front);
@@ -1740,13 +1741,13 @@ fn quick_menu(
             "front_window_focused_first": focused,
             "front_window_kept_keyboard": kept_keyboard,
             // It opens as soon as the pointer stops on the handle (the owner: "instantly"),
-            // Mosaïk and the workspace on its first line, Arrange, a strip of layouts, the
-            // workspaces, and no Undo row.
+            // Mosaïk on its first line (it opens the window), Arrange, a strip of layouts, the
+            // workspaces with the open one listed once, and no Undo row.
             "ok": rested && open_ms <= 250 && labels.get(1) == Some(&"Arrange")
                 && ["Halves", "Thirds", "Main + side", "Half + stack", "Quarters"].iter().all(|l| labels.contains(l))
-                && labels.iter().filter(|l| **l == ws_name).count() == 2
+                && ws_name.as_deref().is_none_or(|n| labels.iter().filter(|l| **l == n).count() == 1)
                 && !labels.contains(&"Undo arrange")
-                && menu.rows.first().is_some_and(|r| r.label == ws_name)
+                && menu.rows.first().is_some_and(|r| r.label == "Mosaïk")
                 && (!focused || kept_keyboard),
         }),
     );

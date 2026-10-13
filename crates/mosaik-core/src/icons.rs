@@ -8,6 +8,7 @@
 
 use crate::layout::{Launch, Slot};
 use crate::matching::AppMatch;
+use crate::sets::EXPLORER_ID;
 
 /// Where a key says the picture is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,9 +41,28 @@ pub fn key(app_id: Option<&str>, path: Option<&str>) -> Option<String> {
 pub fn of_app(app: &AppMatch, launch: Option<&Launch>) -> Option<String> {
     match launch {
         Some(Launch::Packaged { aumid }) => key(Some(aumid), None),
-        Some(Launch::Program { path, .. }) => key(app.aumid.as_deref(), Some(path)),
+        Some(Launch::Program { path, .. }) => match start_menu_entry(path) {
+            Some(id) => key(Some(id), None),
+            None => key(app.aumid.as_deref(), Some(path)),
+        },
         None => key(app.aumid.as_deref(), None),
     }
+}
+
+/// The Start menu's folder, as the shell parses it: `shell:AppsFolder\<id>` starts that entry.
+const APPS_FOLDER: &str = r"shell:AppsFolder\";
+
+/// The Start menu entry a program "path" starts, when it is one: a suggested set starts a desktop
+/// app through its entry, and File Explorer as explorer.exe, which is the entry
+/// [`EXPLORER_ID`].
+fn start_menu_entry(path: &str) -> Option<&str> {
+    let path = path.trim();
+    if path.eq_ignore_ascii_case("explorer.exe") {
+        return Some(EXPLORER_ID);
+    }
+    path.get(..APPS_FOLDER.len())
+        .filter(|head| head.eq_ignore_ascii_case(APPS_FOLDER))
+        .map(|_| &path[APPS_FOLDER.len()..])
 }
 
 /// The key for a workspace's app.
@@ -203,6 +223,48 @@ mod tests {
             Some("app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App")
         );
         assert_eq!(of_slot(&slot(None, None)), None);
+    }
+
+    #[test]
+    fn an_app_started_by_its_start_menu_entry_is_known_by_that_entry() {
+        // A suggested set starts a desktop app through its entry (job 0123: no picture for VS
+        // Code, Chrome, Claude or File Explorer in the sets).
+        let chrome = AppMatch {
+            exe: Some("chrome.exe".into()),
+            ..AppMatch::default()
+        };
+        let entry = Launch::Program {
+            path: r"shell:AppsFolder\Chrome".into(),
+            args: Vec::new(),
+            working_dir: None,
+        };
+        assert_eq!(of_app(&chrome, Some(&entry)).as_deref(), Some("app:Chrome"));
+        let any_case = Launch::Program {
+            path: r"Shell:appsfolder\Microsoft.VisualStudioCode".into(),
+            args: Vec::new(),
+            working_dir: None,
+        };
+        assert_eq!(
+            of_app(&AppMatch::default(), Some(&any_case)).as_deref(),
+            Some("app:Microsoft.VisualStudioCode")
+        );
+        // File Explorer starts as explorer.exe; the Start menu has it as its own entry.
+        let explorer = Launch::Program {
+            path: "explorer.exe".into(),
+            args: Vec::new(),
+            working_dir: None,
+        };
+        assert_eq!(
+            of_app(&AppMatch::default(), Some(&explorer)).as_deref(),
+            Some("app:Microsoft.Windows.Explorer")
+        );
+        // An entry with nothing after the folder names no app.
+        let empty = Launch::Program {
+            path: r"shell:AppsFolder\".into(),
+            args: Vec::new(),
+            working_dir: None,
+        };
+        assert_eq!(of_app(&AppMatch::default(), Some(&empty)), None);
     }
 
     #[test]

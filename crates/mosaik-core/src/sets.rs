@@ -151,7 +151,7 @@ const LAUNCHERS: [(&str, &str); 2] = [
 const CALENDAR_ENTRY: &str = "!microsoft.windowslive.calendar";
 
 /// File Explorer's entry in the Start menu.
-const EXPLORER_ID: &str = "Microsoft.Windows.Explorer";
+pub(crate) const EXPLORER_ID: &str = "Microsoft.Windows.Explorer";
 
 /// The program whose windows an entry opens, lower case: the program it starts, from its path,
 /// else from a Squirrel installer's app id ("com.squirrel.AnthropicClaude.claude" starts
@@ -661,6 +661,39 @@ mod tests {
         assert!(!sets.iter().any(|s| s.task == Task::Writing), "{sets:?}");
         // Discord alone is not a set for chat: coding and games.
         assert_eq!(sets.len(), 2, "{sets:?}");
+    }
+
+    #[test]
+    fn every_app_of_a_set_shows_its_start_menu_picture() {
+        // Job 0123: of the Coding set, only the Terminal (a packaged app) had a picture; the
+        // desktop apps start through their Start menu entry, which has their picture too.
+        let sets = suggest(&owner(), &[]);
+        let coding = sets.iter().find(|s| s.task == Task::Coding).unwrap();
+        let keys: Vec<Option<String>> = coding
+            .apps
+            .iter()
+            .map(|a| crate::icons::of_app(&a.app, Some(&a.launch)))
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                Some("app:Microsoft.VisualStudioCode".to_owned()),
+                Some("app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App".to_owned()),
+                Some("app:Chrome".to_owned()),
+                Some("app:com.squirrel.AnthropicClaude.claude".to_owned()),
+                Some(format!("app:{EXPLORER_ID}")),
+            ]
+        );
+        for set in &sets {
+            for a in &set.apps {
+                let key = crate::icons::of_app(&a.app, Some(&a.launch));
+                assert!(
+                    key.as_deref().and_then(crate::icons::parse).is_some(),
+                    "{}: {key:?}",
+                    a.name
+                );
+            }
+        }
     }
 
     #[test]

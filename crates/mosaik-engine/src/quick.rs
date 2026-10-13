@@ -1,7 +1,7 @@
 //! The side menu: a thin handle at an edge of the main monitor (`mosaik_overlay::edge`) that
 //! opens as soon as the pointer stops on it (or it is clicked), sliding in from the edge, onto
-//! what is done most: Mosaïk and the open workspace (a click opens Mosaïk's window), Arrange and
-//! a strip of layouts, the workspaces (a click opens one), saving the layout, editing the zones,
+//! what is done most: Mosaïk (a click opens its window), Arrange and a strip of layouts, the
+//! workspaces with the one open marked (a click opens one), saving the layout, editing the zones,
 //! and snapping on or off. Dragging the handle, or the open menu by its first line, along its
 //! edge moves it; the place is kept.
 //!
@@ -115,8 +115,8 @@ struct Press {
     row: Option<Hot>,
 }
 
-/// The menu's first line: Mosaïk and the open workspace. A click on it opens Mosaïk's window; a
-/// drag moves the menu along its edge.
+/// The menu's first line: Mosaïk. A click on it opens Mosaïk's window; a drag moves the menu
+/// along its edge.
 const HEADER: usize = 0;
 
 #[derive(Default)]
@@ -271,8 +271,8 @@ impl Engine {
         self.watch.put_canvas(canvas);
     }
 
-    /// The menu's rows, with what each does: first Mosaïk and the open workspace (which opens
-    /// Mosaïk's window), then Arrange and a strip of layouts, the workspaces, and the rest.
+    /// The menu's rows, with what each does: first Mosaïk (which opens its window), then Arrange
+    /// and a strip of layouts, the workspaces with the one open marked, and the rest.
     fn quick_rows(&self) -> Vec<(Action, Row)> {
         let workspace = self
             .active
@@ -292,13 +292,14 @@ impl Engine {
             .and_then(|k| LAYOUTS.get(k))
             .map(|p| p.label().to_owned());
         let mut rows = vec![
+            // Mosaïk itself: a click opens its window. The workspace open is marked in the list
+            // below ("Open" there means open now; here it would read the same).
             (
                 Action::Open,
                 Row {
                     header: true,
-                    prefix: Some("Mosaïk".to_owned()),
-                    detail: Some("Open".to_owned()),
-                    ..row(workspace.as_deref().unwrap_or("No workspace open"))
+                    detail: Some("Open window".to_owned()),
+                    ..row("Mosaïk")
                 },
             ),
             (

@@ -291,10 +291,8 @@ pub struct Row {
     pub primary: bool,
     /// A thin line above it, to group the rows.
     pub rule_before: bool,
-    /// The menu's first line, taller: `prefix` (Mosaïk) in a quieter colour, then the label (the
-    /// open workspace).
+    /// The menu's first line (Mosaïk), taller, in semibold.
     pub header: bool,
-    pub prefix: Option<String>,
     /// A quiet title over the rows that follow ("Layouts", "Workspaces"): not a button.
     pub caption: bool,
     /// A workspace's layout in small, before its name.
@@ -620,22 +618,21 @@ impl Edge {
             placed.push((a, r, lit, tiles));
             y += height(r);
         }
-        // Details are right-aligned: measured first; so is the header's prefix.
+        // Details are right-aligned: measured first.
         let detail_size = 12.0 * s;
-        let prefix_w: Vec<f32> = rows
-            .iter()
-            .map(|r| {
-                r.prefix.as_deref().map_or(0.0, |p| {
-                    canvas.text_width(&format!("{p} \u{b7} "), 13.5 * s, Weight::SemiBold)
-                })
-            })
-            .collect();
+        // Measured in the weight each is drawn in (a caption's in semibold), and a pixel more,
+        // so a detail that fits is never cut short ("Win+Alt+Spa…").
         let widths: Vec<f32> = rows
             .iter()
             .map(|r| {
+                let weight = if r.caption {
+                    Weight::SemiBold
+                } else {
+                    Weight::Normal
+                };
                 r.detail
                     .as_deref()
-                    .map_or(0.0, |d| canvas.text_width(d, detail_size, Weight::Normal))
+                    .map_or(0.0, |d| canvas.text_width(d, detail_size, weight) + s)
             })
             .collect();
         let surface = self
@@ -755,18 +752,6 @@ impl Edge {
                     pen.fill_round(box_, 3.0 * s, Rgba(0.0, 0.0, 0.0, 0.35));
                     draw_mini(pen, mini, box_.inset(1.5 * s), 1.5 * s, 1.5 * s, None);
                     label_left += size::MINI_W * s + 9.0 * s;
-                }
-                if let Some(p) = &r.prefix {
-                    let w = prefix_w.get(i).copied().unwrap_or(0.0);
-                    pen.text(
-                        &format!("{p} \u{b7} "),
-                        Area::new(label_left, a.top, (label_left + w).min(label_right), a.bottom),
-                        13.5 * s,
-                        Weight::SemiBold,
-                        Align::Leading,
-                        if *lit { palette.hover_text } else { palette.muted },
-                    )?;
-                    label_left += w;
                 }
                 pen.text(
                     &r.label,
