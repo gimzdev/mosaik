@@ -722,12 +722,43 @@ process, its own windows, a scratch folder).
   written back, so the move, and its note, came again at each start until the user changed a
   setting. A file moved forward or mended is now written back at once (a test failed before:
   core 185).
-- **Left for the next run with the mouse**: `smart` (the line grabbed by the edge facing it, now
-  that zones are 4 px apart; the quick menu from the probe), `workspace --drag`, `kinds` and
-  `workspace --apps` with tags in title bars (a window with no room stays at the top of its
-  zone; Calculator wears its zone's initial; a tab group with no room for its strip sits below a
-  band), screenshots of a cramped title bar's initial; then the release build and package again
-  at the last commit.
+- **A home page that shows before it moves** (ADR 0016; the owner: "usable by an absolute
+  noob", "anim and preset on homepage"). Locally: core 190 (a layout replaces a monitor's zones,
+  fewer zones than windows make tabs, other monitors left to Arrange, layout ids and names the
+  same as the interface's), IPC 10 (protocol 4 on the wire), the interface's 59 tests (the home
+  page: the screen now, a layout previewed by pointer and by keyboard, used, undone, errors,
+  nothing open) and 15 smoke tests in a browser, axe included; clippy clean for Windows. On the
+  owner's PC with the real mouse (job 0099, commit 0a978c7):
+  - `smart`, a layout (Thirds) over four windows in quarters: the preview answered in 2.7 ms
+    with the three thirds as zones and changed nothing; Arrange with it took 49.8 ms ("Arranged
+    4 windows in the “Thirds” layout; 1 window as a tab."), and each window landed 0 px from
+    where the preview said, the fourth a tab; Undo: every window back, 0 px, the quarters back.
+  - The picture of a screen Arrange has just arranged shows nothing moving (0 px), the window of
+    a fixed size included (the preview used to show it filling its zone).
+  - Arrange: a new workspace in quarters in 47.7 ms, every window 0 px from its zone, the fixed
+    one centred at the top (0 px), Undo in 19.5 ms (0 px), twice moved nothing; a fifth window
+    became a tab and came back with Undo.
+  - The quick menu: opened 320 ms after the pointer rested on its handle, closed 215 ms after it
+    left, dragged 120 px and kept there, hidden while a game filled the screen and back 65 ms
+    after it left; its rows end with "Open Mosaïk".
+  - `workspace --drag`: every window 0 px from its zone after saving and switching, rings in the
+    zones' colours, tags in title bars, tabs made, clicked and pulled out by the mouse.
+  - `kinds`: a borderless app 0 px from its zone, as a tab and pulled out again; games of a
+    fixed size kept their size, where `fit_size` puts them (0 px); a game in full screen was
+    left alone.
+  - On the owner's own screen (six windows), asked without moving anything: what Arrange would
+    do, 11 ms (four zones, two windows as tabs), and the Thirds layout, 10 ms; no workspace
+    opened.
+  - `mosaik.ps1 test` passed in 66 s; the release build (152 s, one file refused by Smart App
+    Control made again) and the Store package (2.74 MB); `pack`, 240 files, checked against the
+    repository; `mosaik.ps1` (1.09 MB) and `mosaik1.sh` (site 1.3.0) beside it.
+  - What the run found, in the probes: the line between zones was looked for half way along an
+    edge, where two neighbours meet and Windows answers with a corner; the fifth window's
+    message changed ("1 window as a tab"); the band drag ran for a window with no band; the probe
+    could not give its window the keyboard from the background (the quick menu's keyboard check
+    did not run); Mosaïk's window opened behind the app in front, so the tour could not click it.
+    Each is fixed for the next run (commit 6c55fc6). Mosaïk was not running when the job
+    started (it had run since 16:45).
 
 ## Owner decisions
 
