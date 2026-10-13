@@ -19,6 +19,7 @@ re-run before each release.
 | 7. Hardening | done here: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers, soak, two screens at two scales; left for the owner by hand: sleep and resume, a screen unplugged; not possible here: RDP (Windows 11 Home has no Remote Desktop host), Windows 10 | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.1 | built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.1](#11) |
+| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0128): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu; every test and every probe check passing; the Store package 2.0.0.0 ready for the owner to submit | [2.0](#20) |
 
 ## Step 1: verify assumptions
 
@@ -1005,6 +1006,82 @@ process, its own windows, a scratch folder).
     close button does. The probe now closes the window the engine would manage; run again (job
     0119): Character Map's window in 465 ms, 1 window, closed, none left open.
 
+## 2.0
+
+What the owner asked for on 2026-10-13, after opening 1.0 from the Store ("break everything and
+redo everything", "the dark theme default was much better", "production ready"), and the
+evidence (ADR 0024). Jobs 0122 to 0128 ran on the owner's PC: the main screen 1920 x 1080 at 100%,
+two virtual screens of 2560 x 1440 at 125% to its right (so the side menu's line is on the left
+edge, where the pointer stops).
+
+- **The window, rebuilt**: Home (the screen as the chosen layout would leave it, Smart and the
+  ten layouts, Arrange and Undo; the workspaces beside it, then the suggested sets), a
+  workspace's page, the zone editor, Settings. In a browser (2026-10-13): type check, lint and
+  format clean, 88 component tests, 27 smoke tests in Chromium (light, dark, high contrast, the
+  keyboard path, Mosaïk not answering). On Windows, `mosaik.ps1 test`, "Every test passed" (job
+  0126: core 241, IPC 11 and 10, Win32 11 and 7 with real windows, overlays 8, engine 2 and 1,
+  the interface's 88, clippy with warnings as errors); rustfmt clean. The tour (jobs 0122, 0123, 0126): 29 pictures,
+  every control named, on Home, a workspace's page, the zones and Settings, dark, light, at the
+  smallest size and with keyboard focus.
+- **Dark by default** (settings format 6): the owner's settings, written as format 1 by the
+  Store's 1.0 at 14:52 with the theme following Windows, read by 2.0 as dark ("format 6; theme
+  dark; start with Windows False; side menu True right", jobs 0122, 0123, 0126).
+- **Apps by their own icons**: a window by its program, a packaged app by its id. Job 0122 showed
+  no picture for Chrome (its windows say "Chrome", which the Start menu knows by another id):
+  desktop apps are now keyed by their program (test first). Job 0123 showed only the Terminal's
+  among the suggested sets: a set starts a desktop app through its Start menu entry, which is now
+  its key too, and File Explorer through its own entry (tests first:
+  `every_app_of_a_set_shows_its_start_menu_picture`,
+  `an_app_started_by_its_start_menu_entry_is_known_by_that_entry`). Job 0126,
+  `mosaik-probe sets`: the Start menu read in 184 ms, the same 139 apps as `Get-StartApps`; 11 of
+  11 apps of the three sets with their own icon, read as Mosaïk's window reads them (PNGs of 1.3
+  to 4.1 KB: Visual Studio Code, Terminal, Chrome, Claude, File Explorer, Canva, Word, OneNote),
+  and on Home in the tour's pictures.
+- **No alerts**: a toast by the corner of the pointer's screen, pictured in both themes (job
+  0126, `mosaik-probe menu-shot`, 384 x 108 px: "FancyZones is running. It moves windows too.
+  Turn it off in PowerToys, or it and Mosaïk will keep moving the same windows."). Mosaïk's window
+  opens only when asked: by hand in 0.2 to 0.3 s; started with `--background`, none (jobs 0122,
+  0123, 0126).
+- **The side menu** (job 0126, both themes): Mosaïk on its first line ("Open window"), Arrange,
+  the five layouts, the workspaces with the open one marked, Save layout, Edit zones, Snap while
+  dragging; the switcher's shortcut in full beside "Workspaces" (in job 0123 it was cut short,
+  "Win+Alt+Spa…": measured in one weight, drawn in another). It opened 50 to 57 ms after the
+  pointer rested on its line.
+- **The probes** (job 0128, the engine in the probe's process, its own windows; every check
+  passing): zones following a resize, 0 px; Arrange of three windows, one of a fixed size, into
+  a new workspace laid out for the task in 14 ms (the main window in the largest zone, the
+  fixed one at its size, centred at the top of its zone, 0 px), Undo in 18 ms (0 px, no
+  workspace left), arranged twice with nothing moved; a fifth window opened last took the main
+  zone and the one used longest ago was minimised; Halves in 15 ms (its preview in 3 ms, which
+  moved nothing), Quarters making room for a window that will not go below 1152 x 619; a window
+  dropped in a zone too short for it grew its zone; windows brought forward 6 times, 0 px; a
+  workspace's apps edited, 0 px. The side menu: Arrange from it 0 px with the window in front
+  keeping the keyboard; Halves from its strip (the window in front and the one used next in the
+  halves, the third minimised, as Arrange decides: jobs 0122 to 0127 expected other windows,
+  the probe was wrong, not the engine); closing 323 ms after the pointer left; dragged 120 px
+  along its edge; hidden while a game filled the screen and back 76 ms after; never opened while
+  the game hid the pointer. `workspace` (job 0126): saved in 24 ms, opened in 25 ms, 3 of 3
+  windows in their zones, a closed app started again once, 0 px; the probe's memory with
+  frames 8.5 MB private.
+- **Previews on the owner's own screen** (`mosaikctl preview`, asked only, job 0126): Smart in
+  12 ms (Chrome 1114 x 1032 as the browser, Windows Terminal 806 x 568, Claude 806 x 464; File
+  Explorer and two others minimised), Thirds and Quarters in 10 ms.
+- **Another Mosaïk**: the Store's 1.0 held Mosaïk's pipe in job 0122. `mosaikctl` now says so
+  ("it is another copy of Mosaïk (mosaik.exe), not this one", with how to quit it), and windows of
+  Mosaïk's own programs are never arranged (the 1.0 watchdog's message had a zone in job 0122's
+  preview; job 0123, none).
+- **The Store's 1.0 opened while 2.0 runs** (job 0126): from the Start menu, it handed over and
+  left: Mosaïk 2's window showed 1.0 s later, and no 1.0 process was left 3 s later. 1.0 does
+  not start with Windows on this PC (its startup task is off, state 0).
+- **Built and packed** (job 0126): release build in 80 s, `Mosaik_2.0.0.0_x64.msix` 2.90 MB;
+  `pack`, 264 files, checked file by file against the repository; `mosaik.ps1` and `mosaik1.sh`
+  beside the repository, dated that day. Mosaïk 2 left in the tray on the owner's own data
+  (job 0128: version 2.0.0, protocol 7, its watchdog, Win+Alt+Space registered, no window).
+- **The site** (`mosaik1.sh` 1.8.0): its first home page back (the title, "Every project gets
+  its own workspace: your apps and windows arranged and ready in one click.", "Free and open
+  source.", desktops of two to four windows); the site folder is what the script writes (its 23
+  files compared one by one, 2026-10-13).
+
 ## Owner decisions
 
 - 2026-10-11: the Patreon link is https://www.patreon.com/gimzdev (About and the tray menu only).
@@ -1042,3 +1119,9 @@ process, its own windows, a scratch folder).
   the home page, secondary but in view; the windows open the first time sorted into workspaces
   by task; "clean, concise, non-invasive" (ADR 0022). On the site, the header's Download button
   alone; the hero is the title and the desktop.
+- 2026-10-13 (2.0): "break everything and redo everything", "production ready": the window
+  rebuilt, dark by default (ADR 0024). The site's home page as it first was ("Every window, in
+  its place.", "Every project gets its own workspace: your apps and windows arranged and ready in
+  one click.", "Free and open source."). In the app, one to three zones (four rarely); on the
+  site, desktops of two to four windows. Apps shown by their own icons or not at all, and never
+  a picture in the middle of a zone.
