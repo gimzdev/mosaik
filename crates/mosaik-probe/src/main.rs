@@ -12,6 +12,9 @@
 //! mosaik-probe smart      what 1.1 adds, with the real engine: windows on one line, zones
 //!                         that follow a resized window, Arrange and Undo, the quick menu
 //!                         (moves the mouse; --only follow, arrange or quick for one part)
+//! mosaik-probe sets       the Start menu as Mosaïk reads it against Windows' own list, and the
+//!                         sets of apps it makes (--start: File Explorer started through its
+//!                         Start menu entry, as a set starts an app, and closed again)
 //! mosaik-probe workspace  save, switch and reopen with the real engine (--drag: drag to snap;
 //!                         --browser edge|chrome: browser tabs dragged out into a workspace;
 //!                         --apps: real apps into zones and tabs; --soak N: N switches,
@@ -57,6 +60,8 @@ mod pixels;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod report;
 #[cfg(windows)]
+mod sets;
+#[cfg(windows)]
 mod smart;
 #[cfg(windows)]
 mod soak;
@@ -99,7 +104,7 @@ fn main() {
     }
     let Some(command) = args.first().cloned() else {
         eprintln!(
-            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace|smart|menu-shot|titlebar|ui-tour> [--out file.json]"
+            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace|smart|sets|menu-shot|titlebar|ui-tour> [--out file.json]"
         );
         std::process::exit(2);
     };
@@ -128,6 +133,7 @@ fn main() {
         "dummy" => dummy::run(&args),
         "workspace" => workspace::run(&args),
         "smart" => smart::run(&args),
+        "sets" => sets::run(&args),
         "menu-shot" => smart::menu_shot(&args),
         "titlebar" => titlebar::run(&args),
         "ui-tour" => ui_tour::run(&args),
