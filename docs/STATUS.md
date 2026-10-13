@@ -10,15 +10,15 @@ re-run before each release.
 
 | Step | State | Evidence |
 | --- | --- | --- |
-| 1. Verify assumptions | in progress: two monitors verified at one scale (job 0072); mixed scales and Windows 10 left | [Step 1](#step-1-verify-assumptions) |
+| 1. Verify assumptions | done: two monitors at one scale (job 0072) and at two (100% and 125%, job 0116); Windows 10 cannot be run here (no second PC or VM) | [Step 1](#step-1-verify-assumptions) |
 | 2. Core, topologies, persistence, IPC, mosaikctl | done | [Step 2](#step-2-core-persistence-ipc) |
 | 3. Zones | done: capture, frames and tags in title bars, drag to snap, zone editor | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces), [Step 6](#step-6-product-ui) |
 | 4. Workspaces | done: save, switch, start missing apps, switcher, tray, workspace shortcuts | [Steps 3 and 4](#steps-3-and-4-zones-and-workspaces) |
 | 5. Tabs | done, with 12 real apps and browser tabs dragged out of Edge; multi-monitor left for step 7 | [Step 5](#step-5-tabs), [Step 7](#step-7-hardening) |
 | 6. Product UI | done: every page reviewed, tested in a browser and toured on Windows (names, Tab key, light and dark, smallest size); a Windows contrast theme and Narrator by ear are in the release checks | [Step 6](#step-6-product-ui) |
-| 7. Hardening | in progress: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers and soak done; sleep, hotplug, RDP and Windows 10 left | [Step 7](#step-7-hardening) |
-| 8. Release | Store package, licences, one-file app and site ready; Store submission is the owner's | [Step 8](#step-8-release) |
-| 1.1 | built, tested and packaged on Windows (jobs 0094 to 0113: every test, the Store package); zones that follow a resize, Arrange laid out for the task, zones that make room for a window too big for them, and its undo, the home page with each workspace's apps, a workspace's apps, windows edge to edge without rings, tab strips in one place, no window moved when brought forward, the quick menu, all measured with the mouse; sets of apps read from the owner's Start menu and the windows open sorted into workspaces, measured; opening a set on the owner's screen not yet run (it starts apps) | [1.1](#11) |
+| 7. Hardening | done here: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers, soak, two screens at two scales; left for the owner by hand: sleep and resume, a screen unplugged; not possible here: RDP (Windows 11 Home has no Remote Desktop host), Windows 10 | [Step 7](#step-7-hardening) |
+| 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
+| 1.1 | built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.1](#11) |
 
 ## Step 1: verify assumptions
 
@@ -197,13 +197,15 @@ App Control refused a new `mosaikctl` test program ("error: 1 target failed"); `
 said "Windows (Smart App Control) refused 1 file(s) this build made:
 mosaikctl-fc4207af53db9f1f.exe. Making them again.", and every test then passed (core 185).
 
-### Still to do in step 1
+### Left in step 1
 
-- Two monitors with different scale factors and hotplug, with virtual displays: the driver is
-  installed (Virtual Display Driver 25.7.26 from winget, owner's go-ahead) and one virtual
-  display is on (800x600 at 100%); two monitors at the same scale pass (job 0072, step 7). The
-  owner sets a different scale on it (Windows' display settings) for the mixed-scale run.
-- Windows 10 22H2: needs a second machine or a VM (this PC has 18.6 GB free, too little for a VM).
+- Two monitors with different scale factors, with virtual displays (Virtual Display Driver
+  25.7.26 from winget, owner's go-ahead): done in job 0116, the main screen at 100% and a
+  virtual 2560x1440 one at 125% (`workspace --monitors`, 1.1 below). A screen unplugged and
+  plugged back (switching the virtual displays off and on changes Windows' display settings):
+  left for the owner, by hand.
+- Windows 10 22H2: needs a second machine or a VM (this PC has 28 GB free, too little for a VM);
+  Windows 10 has been out of support since 2025-10-14.
 
 ## Step 2: core, persistence, IPC
 
@@ -929,6 +931,77 @@ process, its own windows, a scratch folder).
     1.0 s), `--background` (no window; protocol 6, watchdog, Win+Alt+Space registered), `pack`
     (255 files, verified), both files beside the repository dated that day, the site folder made
     again (1.6.0, job 0110); Mosaïk left running in the tray on the scratch data.
+
+- **Asked 2026-10-13, 03:02 to 03:11** (ADR 0023): "the app is way too complicated: simplify
+  without losing value and functions"; "it shouldn't open an app twice: if it's open, take the
+  one opened"; "when opening the code preset it doesn't organise right away"; "we should really
+  rarely use more than 3 windows in a view"; "for writing and design, why would someone need
+  Claude"; "the tabs go behind the new window" when another tab of a zone is clicked; "opening
+  the options of the last on the list doesn't show them"; the quick menu's line "has to be pixel
+  perfect" and should "never open while playing an FPS"; on the site, a line beside the title,
+  and the first picture's windows "kind of overlap"; "what is the Check workspace"; and the
+  installer (the owner kept the Store's). Jobs 0116 to 0118 (commits 63b7e9b to d85ece2):
+  - `mosaik.ps1 test`: every test passed in about 60 s (core 231, among them three windows to a
+    view, a set's other apps as tabs with the app they go with, the writing and design sets
+    without an assistant, apps the same by id without case or by program, where the quick menu's
+    line goes; Win32 10, among them the folder an app starts in; the interface's 73, among them
+    a menu that opens upward near the bottom of the window).
+  - First against the engine without the fixes (side commits, jobs 0116 to 0118): a closed probe
+    window that shows cloaked first, as Chrome, VS Code, Claude and Windows Terminal show
+    theirs, with its workspace opened twice before it showed, started twice (2 copies) and never
+    took its zone (1087 px off); a game window over the work area hiding the pointer: the quick
+    menu opened when the pointer went onto the line. With the fixes: 1 copy, 0 px (jobs 0117 and
+    0118); the menu stayed closed over the game and opened once the game was closed (job 0118).
+    Keeping the pointer shapeless over the line did not work (job 0117): over the line the
+    pointer is Mosaïk's own (Windows keeps one per program); the pointer is now looked at five
+    times a second while a window covering the main monitor is in front.
+  - The sets saw Windows Terminal as not open (its windows carry no AppUserModelID of their own,
+    job 0113): now "Coding: Visual Studio Code, Terminal (open), Google Chrome (open), Claude
+    (open), File Explorer"; "Design: Canva, Google Chrome (open), File Explorer"; "Writing: Word,
+    OneNote, Google Chrome (open)" (job 0116).
+  - The tab strip above the window shown after each of three tab clicks (job 0116, `workspace
+    --drag`).
+  - `smart`, every check passing (job 0118): three probe windows of no known kind (two that can
+    be resized, one of a fixed size) laid out in a new workspace in 8 ms: the window used last in
+    the main zone (1114 x 1032), two beside it, the fixed one at its size at the top of its zone
+    (0 px); Undo 0 px; arranged twice, nothing moved. A fourth window, opened last, took the main
+    zone and the one used longest ago was minimised ("Arranged 3 windows in 3 zones; 1 window
+    minimized."); Halves put two in halves and minimised one; 3h, a window that will not go below
+    1152 x 619 (read as 1138 x 612, its frame) got a quarter grown to 1138 x 612 in Quarters and
+    no window was minimised; 3i, a window dropped in a zone too short for it got a zone grown to
+    560 px; the windows brought forward 6 times, 0 px; a workspace's apps edited, 0 px. The quick
+    menu's line on the left edge (0,271 to 8,347), since the owner's two virtual screens are on the
+    right and the pointer does not stop at that edge; it opened 55 ms after the pointer rested on
+    it, then as before (Arrange from the menu, closing, dragging, out of the way of a game in full
+    screen), and stayed closed over the game hiding the pointer (4g).
+  - The line's move to the other edge was said in a notice that opened Mosaïk's window at every
+    start (job 0116); it is now a note, once ever, shown when the window is next opened.
+  - Two screens at two scales (job 0116, `workspace --monitors`): the main one at 100% (96 dpi)
+    and a virtual 2560 x 1440 one at 125% (120 dpi). Saved and opened again, every window 0 px
+    from its zone on both; a window dragged onto a tag on the other screen joined it as a tab,
+    pulled out it went back to its zone there (0 px), its tag in its zone's colour.
+  - Every kind of app (`kinds`, job 0116) passing; Character Map started through its Start menu
+    entry, its window in 450 ms, closed.
+  - Steam, started by the Mosaïk in the tray, wrote its log `logs\webhelper.txt` in the folder
+    Mosaïk was started from (the repository, job 0115): apps now start in their own folder, or
+    the user's for a Start menu entry (test first). The file was left for the owner to delete.
+  - "Check" was a workspace saved from the switcher in the test data (`%TEMP%\mosaik-first-run`)
+    on 2026-10-12 at 02:17, beside "Workspace 1" to "Workspace 3", "Coding", "Writing", "Design"
+    and "Coding 2". Since job 0116 the Mosaïk in the tray runs on the owner's own data, empty at
+    first: the welcome shows once.
+  - The tour (jobs 0117 and 0118, 29 pictures, every control named): Home with a workspace's ⋯
+    menu, which opened upward near the bottom of the window at the usual and smallest sizes, its
+    apps and the windows it could take, the zone editor opened from it, Settings with More
+    settings and About, the switcher; in light and dark and at the smallest size. Job 0116's tour
+    stopped at Thirds: the note about the quick menu's edge, at the top of the page, pushed the
+    layouts down out of view; the tour now brings what it points at into view, as the keyboard
+    does.
+  - Release build (77 to 82 s), Store package (2.85 MB), opened by hand (window in 0.3 s), on the
+    owner's own data with `--background` (the welcome, once: Mosaïk had not been set up there),
+    `pack` (258 files, verified), both files beside the repository dated that day, the site
+    folder made again (1.7.0, job 0116); Mosaïk left running in the tray on the owner's own data.
+  - A Character Map window stayed open on the owner's screen after job 0116: the sets probe had
+    closed another window of the program; it now closes the window the engine would manage.
 
 ## Owner decisions
 

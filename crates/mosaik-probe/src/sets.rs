@@ -149,29 +149,44 @@ fn start_character_map(apps: &[mosaik_win::apps::StartApp]) -> Value {
         return json!({ "error": e, "ok": false });
     }
     let mut scanner = Scanner::new();
+    // Character Map's own window, shown, as the engine would manage it (job 0116 closed another
+    // window of the program, and left its window open).
+    let new_windows = |scanner: &mut Scanner| -> Vec<windows::Win32::Foundation::HWND> {
+        top_level()
+            .into_iter()
+            .filter(|&h| {
+                !before.contains(&handle(h).0)
+                    && scanner.facts(h).is_some_and(|f| {
+                        f.exe
+                            .as_deref()
+                            .is_some_and(|e| e.eq_ignore_ascii_case("charmap.exe"))
+                            && classify(&f, &Rules::default()) == Verdict::Manage
+                    })
+            })
+            .collect()
+    };
     let mut found = None;
     while found.is_none() && watch.elapsed() < Duration::from_secs(20) {
         mosaik_win::events::pump_until(250, || false);
-        found = top_level().into_iter().find(|&h| {
-            !before.contains(&handle(h).0)
-                && scanner.facts(h).is_some_and(|f| {
-                    f.exe
-                        .as_deref()
-                        .is_some_and(|e| e.eq_ignore_ascii_case("charmap.exe"))
-                })
-        });
+        found = new_windows(&mut scanner).first().copied();
     }
     let open_ms = watch.elapsed().as_secs_f64() * 1000.0;
-    let closed = found.is_some_and(|h| {
+    // A moment for a second window, had it been started twice.
+    mosaik_win::events::pump_until(1500, || false);
+    let shown = new_windows(&mut scanner);
+    for &h in &shown {
         crate::apps::close(h);
-        mosaik_win::events::pump_until(2000, || !mosaik_win::window::exists(h));
-        !mosaik_win::window::exists(h)
-    });
+    }
+    mosaik_win::events::pump_until(2000, || shown.iter().all(|&h| !mosaik_win::window::exists(h)));
+    let closed = found.is_some() && shown.iter().all(|&h| !mosaik_win::window::exists(h));
     println!(
         "sets: Character Map started through its Start menu entry ({:.0} ms to start): {}",
         started_ms,
         if found.is_some() {
-            format!("its window in {open_ms:.0} ms; closed {closed}")
+            format!(
+                "its window in {open_ms:.0} ms; {} window(s); closed {closed}",
+                shown.len()
+            )
         } else {
             "no window within 20 s".to_owned()
         }
@@ -180,7 +195,8 @@ fn start_character_map(apps: &[mosaik_win::apps::StartApp]) -> Value {
         "start_ms": started_ms,
         "window": found.is_some(),
         "open_ms": found.map(|_| open_ms),
+        "windows": shown.len(),
         "closed": closed,
-        "ok": found.is_some() && closed,
+        "ok": found.is_some() && shown.len() == 1 && closed,
     })
 }
