@@ -50,6 +50,10 @@ pub struct Layout {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Slot {
     pub id: SlotId,
+    /// What to call its app in lists ("Visual Studio Code"), from when its window joined
+    /// (older workspaces have none: [`Slot::name`] makes one up).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub app: AppMatch,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch: Option<Launch>,
@@ -95,6 +99,38 @@ pub enum Launch {
     },
     /// A packaged (Store) app, started by its Application User Model ID.
     Packaged { aumid: String },
+}
+
+impl Slot {
+    /// What to call its app: its label, else a name made from its program or app id.
+    pub fn name(&self) -> String {
+        if let Some(label) = self.label.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+            return label.to_owned();
+        }
+        if let Some(exe) = self.app.exe.as_deref() {
+            if let Some(known) = crate::window::known_app_name(exe) {
+                return known.to_owned();
+            }
+            let stem = exe.trim_end_matches(".exe");
+            let mut chars = stem.chars();
+            if let Some(first) = chars.next() {
+                return first.to_uppercase().chain(chars).collect();
+            }
+        }
+        // A packaged app's id starts with its publisher's and its own name: "Microsoft.
+        // WindowsCalculator_8wekyb3d8bbwe!App" is "WindowsCalculator".
+        if let Some(name) = self
+            .app
+            .aumid
+            .as_deref()
+            .and_then(|a| a.split(['_', '!']).next())
+            .and_then(|family| family.rsplit('.').next())
+            .filter(|n| !n.is_empty())
+        {
+            return name.to_owned();
+        }
+        "App".to_owned()
+    }
 }
 
 impl Layout {
@@ -491,6 +527,7 @@ mod tests {
             slots: vec![
                 Slot {
                     id: SlotId("s1".into()),
+                    label: None,
                     app: AppMatch::exe("code.exe"),
                     launch: None,
                     place: Place::Tab {
@@ -499,6 +536,7 @@ mod tests {
                 },
                 Slot {
                     id: SlotId("s2".into()),
+                    label: None,
                     app: AppMatch::exe("windowsterminal.exe"),
                     launch: None,
                     place: Place::Tab {
@@ -537,6 +575,7 @@ mod tests {
         l.zones[0].monitor = 3;
         l.slots.push(Slot {
             id: SlotId("s3".into()),
+            label: None,
             app: AppMatch::exe("x.exe"),
             launch: None,
             place: Place::Zone {
@@ -560,6 +599,7 @@ mod tests {
         }
         l.slots.push(Slot {
             id: SlotId("s3".into()),
+            label: None,
             app: AppMatch::exe("chrome.exe"),
             launch: None,
             place: Place::Free {
@@ -646,6 +686,7 @@ mod tests {
         // A fourth window, and s2 moves from g1 into a new group with it.
         l.slots.push(Slot {
             id: sid("s4"),
+            label: None,
             app: AppMatch::exe("notepad.exe"),
             launch: None,
             place: Place::Maximized { monitor: 0 },
@@ -686,6 +727,7 @@ mod tests {
         let mut l = three_in_zones();
         l.slots.push(Slot {
             id: sid("s4"),
+            label: None,
             app: AppMatch::exe("notepad.exe"),
             launch: None,
             place: tab("gone"),
@@ -849,6 +891,7 @@ mod tests {
             l.slots = (0..n)
                 .map(|i| Slot {
                     id: SlotId(format!("s{i}")),
+                    label: None,
                     app: AppMatch::exe("app.exe"),
                     launch: None,
                     place: Place::Zone {

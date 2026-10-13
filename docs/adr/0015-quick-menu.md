@@ -49,3 +49,9 @@ in the corner farthest from most windows.
 - At rest it costs nothing: it is drawn again only when the pointer comes or goes, the settings,
   the theme or the monitors change.
 - Measured with `mosaik-probe smart` (`docs/STATUS.md`).
+
+## Amended by ADR 0017 (2026-10-12)
+
+The menu opens 60 ms after the pointer stops on the line, sliding in over 150 ms, and fades out
+over 110 ms (at once without Windows' animations). Its first row, "Mosaïk · <workspace>" with
+"Open", opens Mosaïk's window; Undo arrange is no longer a row (it stays on the home page).

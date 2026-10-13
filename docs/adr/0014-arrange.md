@@ -23,7 +23,8 @@ to be saved before its zones existed.
   whole monitor; two, halves (rows on a monitor turned on its side); three, a half beside two
   stacked zones (three columns on an ultrawide, three rows on a monitor on its side); four or
   more, quarters (thirds on an ultrawide, three rows on its side). Never more than four zones on
-  a monitor: more windows become tabs. Monitors that have zones keep them.
+  a monitor: more windows become tabs. Monitors that have zones keep them. (Since ADR 0017: more
+  windows get a grid of up to 4 by 3 zones, as many as the monitor holds well.)
 - **Kinds of apps**, from their program, or their package for Store apps: code, terminal,
   browser, chat, mail, notes, documents, design, media, files, other (`Kind::of`). A zone named
   for a kind ("Browser", "Terminal") or after an app ("Notepad++") draws those windows.
@@ -40,7 +41,9 @@ to be saved before its zones existed.
 - **Windows left over** take an empty zone, unless a zone with a window in it is their own
   (named after their app or for their kind: a score of 50 or more), where they join as a tab.
   With every zone taken, they join, as a tab, the window in the zone that suits them best. A
-  tab group moves as one, as its visible tab.
+  tab group moves as one, as its visible tab. (Since ADR 0017: they take an empty zone on their
+  monitor, else they are minimised; Arrange makes no tabs, and a window in its zone already
+  scores +100.)
 - **New zones are named** after the window that gets them: its kind ("Browser"), else its app;
   "Browser 2" when the name is taken. Their colours follow the palette's order.
 - **Undo**, for ten minutes, until a workspace is opened, saved or edited: the workspace goes

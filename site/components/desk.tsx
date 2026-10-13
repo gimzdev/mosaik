@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppBody, AppWindow, EditorApp, ZoneFrame } from '@/components/apps';
 import { Icon } from '@/components/ui';
-import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
+import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
 const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
@@ -364,23 +364,5 @@ export function SwitcherArt() {
         </div>
       </div>
     </div>
-  );
-}
-
-/** A whole workspace as a still desktop, for thumbnails. */
-export function DeskThumb({ index }: { index: number }) {
-  return (
-    <Scaled className="bg-ink">
-      <Wallpaper />
-      <Taskbar />
-      {WORKSPACES[index].windows.map((w) => {
-        const b = slotBox(w.slot, DESK_H);
-        return (
-          <div key={w.id} className="absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height }}>
-            <AppWindow win={w} />
-          </div>
-        );
-      })}
-    </Scaled>
   );
 }

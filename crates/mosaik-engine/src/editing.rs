@@ -17,7 +17,7 @@ use crate::thread::Engine;
 /// The id used to check that a shortcut is free, released at once.
 const PROBE_KEY: i32 = 99;
 
-fn refused(message: impl Into<String>, hint: Option<&str>) -> Reply {
+pub(crate) fn refused(message: impl Into<String>, hint: Option<&str>) -> Reply {
     Reply::Error {
         code: ErrorCode::BadRequest,
         message: message.into(),
@@ -25,7 +25,7 @@ fn refused(message: impl Into<String>, hint: Option<&str>) -> Reply {
     }
 }
 
-fn failed(message: impl Into<String>) -> Reply {
+pub(crate) fn failed(message: impl Into<String>) -> Reply {
     Reply::Error {
         code: ErrorCode::Failed,
         message: message.into(),
@@ -33,7 +33,7 @@ fn failed(message: impl Into<String>) -> Reply {
     }
 }
 
-fn not_found(which: &str) -> Reply {
+pub(crate) fn not_found(which: &str) -> Reply {
     Reply::Error {
         code: ErrorCode::NotFound,
         message: format!("There is no workspace called \u{201c}{}\u{201d}.", which.trim()),
@@ -41,7 +41,7 @@ fn not_found(which: &str) -> Reply {
     }
 }
 
-fn no_monitors() -> Reply {
+pub(crate) fn no_monitors() -> Reply {
     failed("Mosaïk could not read the monitor layout.")
 }
 

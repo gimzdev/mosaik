@@ -8,8 +8,8 @@ import type { ArrangePreview, Settings } from './protocol';
 import { Stage } from './Stage';
 import { Button, Keys, Mark, PageTitle, Status, Toggle, useSay } from './ui';
 
-/** A made-up screen for the welcome: four windows left where they fell, and where Arrange
- * puts them (the chat as a tab of the notes). */
+/** A made-up screen for the welcome: three windows left where they fell, and where Arrange
+ * puts them. */
 const DEMO: ArrangePreview = {
   work_area: { left: 0, top: 0, right: 1600, bottom: 900 },
   zones: [
@@ -22,25 +22,19 @@ const DEMO: ArrangePreview = {
       label: 'Browser',
       now: { left: 140, top: 90, right: 860, bottom: 610 },
       then: { left: 3, top: 3, right: 797, bottom: 897 },
-      tab: false,
+      minimized: false,
     },
     {
       label: 'Code editor',
       now: { left: 620, top: 220, right: 1380, bottom: 760 },
       then: { left: 803, top: 3, right: 1597, bottom: 447 },
-      tab: false,
+      minimized: false,
     },
     {
       label: 'Notes',
       now: { left: 1040, top: 60, right: 1520, bottom: 420 },
       then: { left: 803, top: 453, right: 1597, bottom: 897 },
-      tab: false,
-    },
-    {
-      label: 'Chat',
-      now: { left: 260, top: 520, right: 760, bottom: 860 },
-      then: { left: 803, top: 453, right: 1597, bottom: 897 },
-      tab: true,
+      minimized: false,
     },
   ],
   elsewhere: 0,
@@ -78,17 +72,17 @@ export function Welcome({
   const steps = [
     {
       title: 'Arrange',
-      body: 'Click Arrange windows, or pick a layout. Every window snaps into its place.',
+      body: 'One click, or pick a layout.',
     },
     {
       title: 'Keep',
-      body: 'Mosaïk remembers the arrangement as a workspace. Each zone wears its own colour.',
+      body: 'Mosaïk keeps it as a workspace.',
     },
     {
       title: 'Come back',
       body: (
         <>
-          Press <Keys shortcut={shortcut} /> and pick a workspace: its windows return, and closed apps open again.
+          <Keys shortcut={shortcut} /> opens it again.
         </>
       ),
     },
@@ -114,8 +108,7 @@ export function Welcome({
         <PageTitle id="welcome-title">Welcome to Mosaïk</PageTitle>
       </div>
       <p className="mt-2 max-w-2xl text-[var(--muted)]">
-        One click tidies your screen: every window snaps into a zone, and Mosaïk remembers them for next time. It is
-        free, makes no network requests, and keeps your layouts on this PC.
+        One click tidies your screen, and Mosaïk remembers it for next time. Free, and nothing leaves this PC.
       </p>
       <div className="mt-5">
         <Stage
@@ -125,7 +118,7 @@ export function Welcome({
           caption={
             arranged ? (
               <>
-                Arranged: each window in a zone, the chat as a tab.{' '}
+                Arranged: each window in a zone.{' '}
                 <button
                   type="button"
                   onClick={() => {
@@ -161,7 +154,7 @@ export function Welcome({
           <Toggle
             leading
             label="Start Mosaïk with Windows"
-            description="It waits in the tray until you need it."
+            description="It waits in the tray."
             checked={startWithWindows}
             onChange={setStartWithWindows}
           />

@@ -30,15 +30,14 @@ export function About({ onWelcome }: { onWelcome: () => void }) {
     <article aria-labelledby="about-title">
       <PageTitle id="about-title">Mosaïk</PageTitle>
       <p className="mt-2 text-[var(--muted)]">
-        {version ? `Version ${version}. ` : ''}Free forever, and in the public domain (CC0): no rights reserved.
+        {version ? `Version ${version}. ` : ''}Free forever, in the public domain (CC0).
       </p>
 
       <div className="mt-6">
         <Section title="Your windows, your computer">
           <div className="flex flex-wrap items-center justify-between gap-3 py-3">
             <p className="max-w-lg text-small text-[var(--muted)]">
-              Mosaïk makes no network requests: no account, no tracking, no cloud. Your workspaces and settings stay on
-              this PC; updates come through the Microsoft Store.
+              No account, no tracking, no network requests. Everything stays on this PC.
             </p>
             <Button tone="quiet" onClick={link('privacy')}>
               Privacy
@@ -47,10 +46,7 @@ export function About({ onWelcome }: { onWelcome: () => void }) {
         </Section>
       </div>
 
-      <Section
-        title="Support Mosaïk"
-        intro="Mosaïk is free and stays free. If it helps you, you can support its work on Patreon."
-      >
+      <Section title="Support Mosaïk">
         <div className="flex flex-wrap gap-2 py-3">
           <Button tone="primary" onClick={link('patreon')}>
             Support on Patreon
@@ -72,9 +68,7 @@ export function About({ onWelcome }: { onWelcome: () => void }) {
 
       <Section title="If something goes wrong">
         <div className="py-3">
-          <p className="text-small text-[var(--muted)]">
-            Every window Mosaïk hides (tabs not shown) comes back at once, even if Mosaïk stopped answering.
-          </p>
+          <p className="text-small text-[var(--muted)]">Rescue brings back every window Mosaïk hid.</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
               pending={rescuing}

@@ -10,6 +10,10 @@
 //! mosaikctl hotkey <workspace> <shortcut>    give a workspace its own shortcut (`none` removes it)
 //! mosaikctl check-hotkey <shortcut> [<workspace>]  whether a shortcut can be used
 //! mosaikctl zones <workspace>                a workspace's zones, as JSON
+//! mosaikctl apps <workspace> [--json]        a workspace's apps, and the windows it could take
+//! mosaikctl add-app <workspace> <window> [<zone>]  add a window's app (its handle, from `apps`)
+//! mosaikctl move-app <workspace> <app> <zone>  put an app in another zone
+//! mosaikctl remove-app <workspace> <app>     take an app out (its window stays)
 //! mosaikctl rescue                           bring back every window Mosaïk hid (works even if it is not running)
 //! mosaikctl switcher | settings | quit | version
 //! ```
@@ -40,9 +44,12 @@ mod windows_main {
     use std::time::Duration;
 
     use mosaik_core::journal::Journal;
+    use mosaik_core::layout::SlotId;
     use mosaik_core::store::Store;
+    use mosaik_core::window::WindowHandle;
+    use mosaik_core::zone::ZoneId;
     use mosaik_ipc::pipe::{Client, PipeError, Program, pipe_name};
-    use mosaik_ipc::protocol::{Command, ErrorCode, Reply, StateSnapshot};
+    use mosaik_ipc::protocol::{Command, ErrorCode, Reply, StateSnapshot, WorkspaceApps};
 
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
     const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -63,6 +70,10 @@ mod windows_main {
   hotkey <workspace> <shortcut>  give a workspace its own shortcut (`none` removes it)
   check-hotkey <shortcut> [<workspace>]  whether a shortcut can be used
   zones <workspace>              a workspace's zones, as JSON
+  apps <workspace> [--json]      a workspace's apps, and the windows on screen it could take
+  add-app <workspace> <window> [<zone>]  add a window's app (its handle, from apps)
+  move-app <workspace> <app> <zone>      put an app in another zone
+  remove-app <workspace> <app>   take an app out (its window stays)
   rescue                         bring back every window Mosaïk hid
   switcher | settings | quit | version
 A <workspace> is its name or its id.";
@@ -110,6 +121,29 @@ A <workspace> is its name or its id.";
             },
             ("zones", [w]) => Command::Zones {
                 workspace: (*w).to_owned(),
+            },
+            ("apps", [w]) => Command::Apps {
+                workspace: (*w).to_owned(),
+            },
+            ("add-app", [w, window, zone @ ..]) if zone.len() <= 1 => {
+                let Some(window) = handle(window) else {
+                    eprintln!("{window} is not a window handle: `mosaikctl apps <workspace>` lists them.");
+                    return 2;
+                };
+                Command::AddApp {
+                    workspace: (*w).to_owned(),
+                    window,
+                    zone: zone.first().map(|z| ZoneId::new(*z)),
+                }
+            }
+            ("move-app", [w, app, zone]) => Command::MoveApp {
+                workspace: (*w).to_owned(),
+                app: SlotId((*app).to_owned()),
+                zone: ZoneId::new(*zone),
+            },
+            ("remove-app", [w, app]) => Command::RemoveApp {
+                workspace: (*w).to_owned(),
+                app: SlotId((*app).to_owned()),
             },
             ("arrange", []) => Command::Arrange { preset: None },
             ("arrange", [layout]) => Command::Arrange {
@@ -184,6 +218,10 @@ A <workspace> is its name or its id.";
         match cmd {
             Command::Switch { workspace }
             | Command::Zones { workspace }
+            | Command::Apps { workspace }
+            | Command::AddApp { workspace, .. }
+            | Command::MoveApp { workspace, .. }
+            | Command::RemoveApp { workspace, .. }
             | Command::RenameWorkspace { workspace, .. }
             | Command::DeleteWorkspace { workspace }
             | Command::SetWorkspaceHotkey { workspace, .. }
@@ -193,6 +231,16 @@ A <workspace> is its name or its id.";
             } => Some(workspace),
             _ => None,
         }
+    }
+
+    /// A window handle as `apps` prints it (`0x2A04F2`), or in decimal.
+    fn handle(text: &str) -> Option<WindowHandle> {
+        let t = text.trim();
+        let n = match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+            Some(hex) => u64::from_str_radix(hex, 16).ok()?,
+            None => t.parse().ok()?,
+        };
+        Some(WindowHandle(n))
     }
 
     /// The id of the workspace with the name the user typed; what they typed when no
@@ -294,6 +342,49 @@ A <workspace> is its name or its id.";
             }
             Reply::Settings { settings, .. } => print_json(settings),
             Reply::Zones { .. } | Reply::Preview(_) => print_json(reply),
+            Reply::Apps(_) if json => print_json(reply),
+            Reply::Apps(list) => {
+                let WorkspaceApps {
+                    name,
+                    apps,
+                    zones,
+                    windows,
+                    ..
+                } = list.as_ref();
+                println!("{}", printable(name));
+                if apps.is_empty() {
+                    println!("  No apps yet.");
+                }
+                for a in apps {
+                    let zone = a
+                        .zone
+                        .as_ref()
+                        .and_then(|z| zones.iter().find(|x| &x.id == z))
+                        .map_or_else(
+                            || "its own place".to_owned(),
+                            |z| format!("{} ({})", z.name, z.id.0),
+                        );
+                    println!(
+                        "  {:<6} {:<28} {}{}",
+                        a.id.0,
+                        printable(&a.label),
+                        printable(&zone),
+                        if a.tab { ", a tab" } else { "" }
+                    );
+                }
+                if !windows.is_empty() {
+                    println!("Windows on screen it could take:");
+                    for w in windows {
+                        println!(
+                            "  {:<10} {:<28} {}",
+                            w.window,
+                            printable(&w.label),
+                            printable(&w.title)
+                        );
+                    }
+                }
+                0
+            }
             Reply::Hotkey {
                 hotkey,
                 problem,

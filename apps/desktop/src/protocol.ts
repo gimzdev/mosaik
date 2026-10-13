@@ -82,7 +82,11 @@ export type Command =
   | { cmd: 'rename_workspace'; workspace: string; name: string }
   | { cmd: 'delete_workspace'; workspace: string }
   | { cmd: 'set_workspace_hotkey'; workspace: string; hotkey: string | null }
-  | { cmd: 'hold_hotkeys'; hold: boolean };
+  | { cmd: 'hold_hotkeys'; hold: boolean }
+  | { cmd: 'apps'; workspace: string }
+  | { cmd: 'add_app'; workspace: string; window: number; zone: string | null }
+  | { cmd: 'move_app'; workspace: string; app: string; zone: string }
+  | { cmd: 'remove_app'; workspace: string; app: string };
 
 export type ErrorCode = 'unsupported_version' | 'bad_request' | 'not_found' | 'busy' | 'failed' | 'unknown';
 
@@ -122,10 +126,43 @@ export interface PreviewWindow {
   /** The app's name. */
   label: string;
   now: Rect;
-  /** null: it stays where it is. */
+  /** null: it stays where it is, or is minimised. */
   then: Rect | null;
-  /** It would be a tab of the window already there. */
+  /** It would be minimised: every zone has a window. */
+  minimized: boolean;
+}
+
+/** An app of a workspace. */
+export interface WorkspaceApp {
+  id: string;
+  label: string;
+  /** The zone it goes in (a tab: its group's). */
+  zone: string | null;
+  /** It is a tab of a group. */
   tab: boolean;
+}
+
+/** A zone an app can go in. */
+export interface AppZone {
+  id: string;
+  name: string;
+  color: ZoneColor;
+}
+
+/** A window on screen that is not part of the workspace. */
+export interface OpenWindow {
+  window: number;
+  label: string;
+  title: string;
+}
+
+/** A workspace's apps, its zones, and the windows on screen it could take (`apps`). */
+export interface WorkspaceApps {
+  workspace: string;
+  name: string;
+  apps: WorkspaceApp[];
+  zones: AppZone[];
+  windows: OpenWindow[];
 }
 
 /** What Arrange (with a layout, or without) would do on the main screen, in screen pixels. */
@@ -140,6 +177,7 @@ export interface ArrangePreview {
 export type Reply =
   | { reply: 'hello'; app_version: string; protocol: number }
   | ({ reply: 'preview' } & ArrangePreview)
+  | ({ reply: 'apps' } & WorkspaceApps)
   | { reply: 'workspaces'; workspaces: WorkspaceSummary[]; active: string | null }
   | { reply: 'done'; message: string }
   | { reply: 'error'; code: ErrorCode; message: string; hint: string | null }
@@ -257,7 +295,21 @@ function isPreviewZone(x: unknown): x is PreviewZone {
 }
 
 function isPreviewWindow(x: unknown): x is PreviewWindow {
-  return isObject(x) && isString(x.label) && isRect(x.now) && (x.then === null || isRect(x.then)) && isBoolean(x.tab);
+  return (
+    isObject(x) && isString(x.label) && isRect(x.now) && (x.then === null || isRect(x.then)) && isBoolean(x.minimized)
+  );
+}
+
+function isWorkspaceApp(x: unknown): x is WorkspaceApp {
+  return isObject(x) && isString(x.id) && isString(x.label) && isNullableString(x.zone) && isBoolean(x.tab);
+}
+
+function isAppZone(x: unknown): x is AppZone {
+  return isObject(x) && isString(x.id) && isString(x.name) && isString(x.color) && COLORS.has(x.color);
+}
+
+function isOpenWindow(x: unknown): x is OpenWindow {
+  return isObject(x) && isNumber(x.window) && isString(x.label) && isString(x.title);
 }
 
 function isHotkeyState(x: unknown): x is HotkeyState {
@@ -313,6 +365,17 @@ export function isReply(x: unknown): x is Reply {
         Array.isArray(x.windows) &&
         x.windows.every(isPreviewWindow) &&
         isNumber(x.elsewhere)
+      );
+    case 'apps':
+      return (
+        isString(x.workspace) &&
+        isString(x.name) &&
+        Array.isArray(x.apps) &&
+        x.apps.every(isWorkspaceApp) &&
+        Array.isArray(x.zones) &&
+        x.zones.every(isAppZone) &&
+        Array.isArray(x.windows) &&
+        x.windows.every(isOpenWindow)
       );
     default:
       return false;

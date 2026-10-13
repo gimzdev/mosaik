@@ -1,0 +1,239 @@
+//! A workspace's apps, from the Workspaces page: each with its zone, the windows on screen it
+//! could take, and the changes the user makes there (add a window's app, put an app in another
+//! zone, take one out). Each change is saved before anything moves; in the open workspace, the
+//! window it is about goes to its place at once, since the user asked for it.
+
+use std::collections::HashSet;
+
+use mosaik_core::editing::{add_app, empty_zone, move_app, remove_app};
+use mosaik_core::layout::{Launch, Place, Slot, SlotId, Workspace};
+use mosaik_core::window::WindowHandle;
+use mosaik_core::zone::ZoneId;
+use mosaik_ipc::protocol::{AppZone, OpenWindow, Reply, WorkspaceApp, WorkspaceApps};
+use mosaik_win::{apps, window};
+
+use crate::editing::{failed, no_monitors, not_found, refused};
+use crate::thread::Engine;
+
+impl Engine {
+    /// What to call an app of a workspace: its own label; for one saved before apps had one,
+    /// its open window's app, or its program's description.
+    fn app_name(&mut self, slot: &Slot, window: Option<WindowHandle>) -> String {
+        if slot.label.is_some() {
+            return slot.name();
+        }
+        if let Some(f) = window.and_then(|h| self.scanner.facts(window::hwnd(h))) {
+            let path = self.scanner.process_path(f.pid);
+            return self.apps.label(&f, path.as_deref());
+        }
+        if let Some(Launch::Program { path, .. }) = &slot.launch
+            && slot
+                .app
+                .exe
+                .as_deref()
+                .and_then(mosaik_core::window::known_app_name)
+                .is_none()
+            && let Some(d) = self.apps.description(path)
+        {
+            return d;
+        }
+        slot.name()
+    }
+
+    /// A workspace's apps, its zones, and the windows on screen it could take.
+    pub(crate) fn apps_reply(&mut self, which: &str) -> Reply {
+        let Some(index) = self.find_workspace(which) else {
+            return not_found(which);
+        };
+        let id = self.file.workspaces[index].id.clone();
+        let filled = self
+            .active
+            .as_ref()
+            .filter(|a| a.id == id)
+            .map(|a| a.windows.clone())
+            .unwrap_or_default();
+        // Windows on screen that are not this workspace's already, front to back.
+        let taken: HashSet<WindowHandle> = filled.values().copied().collect();
+        let on_screen: Vec<_> = self
+            .scan_marked()
+            .into_iter()
+            .filter(|f| {
+                self.manageable(f)
+                    && !self.hiding.hidden.contains_key(&f.handle)
+                    && !taken.contains(&f.handle)
+            })
+            .collect();
+        let windows = on_screen
+            .iter()
+            .map(|f| {
+                let path = self.scanner.process_path(f.pid);
+                OpenWindow {
+                    window: f.handle,
+                    label: self.apps.label(f, path.as_deref()),
+                    title: f.title.trim().to_owned(),
+                }
+            })
+            .collect();
+        let ws: Workspace = self.file.workspaces[index].clone();
+        let apps = ws
+            .layout
+            .slots
+            .iter()
+            .map(|s| WorkspaceApp {
+                id: s.id.clone(),
+                label: self.app_name(s, filled.get(&s.id).copied()),
+                zone: match ws.layout.effective_place(s) {
+                    Some(Place::Zone { zone }) => Some(zone.clone()),
+                    _ => None,
+                },
+                tab: matches!(s.place, Place::Tab { .. }),
+            })
+            .collect();
+        let zones = ws
+            .layout
+            .zones
+            .iter()
+            .map(|z| AppZone {
+                id: z.id.clone(),
+                name: z.name.clone(),
+                color: z.color,
+            })
+            .collect();
+        Reply::Apps(Box::new(WorkspaceApps {
+            workspace: ws.id,
+            name: ws.name,
+            apps,
+            zones,
+            windows,
+        }))
+    }
+
+    /// Replaces workspace `index` with `updated` and saves; puts it back when it cannot be
+    /// saved, and says why.
+    fn save_workspace(&mut self, index: usize, updated: Workspace) -> Result<(), String> {
+        let before = std::mem::replace(&mut self.file.workspaces[index], updated);
+        self.save_file().inspect_err(|_| {
+            self.file.workspaces[index] = before;
+        })
+    }
+
+    /// Whether workspace `index` is the open one.
+    fn is_open(&self, index: usize) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|a| a.id == self.file.workspaces[index].id)
+    }
+
+    /// In the open workspace, the windows of `zone` go to their places in it (one just added or
+    /// moved there, that is), and tab groups show what they should.
+    fn place_in(&mut self, zone: &ZoneId) {
+        let Some(topology) = self.refresh_topology() else {
+            return;
+        };
+        let only: HashSet<ZoneId> = HashSet::from([zone.clone()]);
+        self.refit(&topology, Some(&only));
+        self.sync_tabs();
+        self.refresh_frames();
+    }
+
+    /// Adds the app of `window` (on screen) to a workspace: in `zone`, else its first empty
+    /// zone, else where the window is.
+    pub(crate) fn add_app_to(&mut self, which: &str, window: WindowHandle, zone: Option<ZoneId>) -> Reply {
+        let Some(index) = self.find_workspace(which) else {
+            return not_found(which);
+        };
+        let Some(topology) = self.refresh_topology() else {
+            return no_monitors();
+        };
+        let Some(facts) = self
+            .scanner
+            .facts(window::hwnd(window))
+            .filter(|f| self.manageable(f))
+        else {
+            return refused(
+                "This window is not on screen any more.",
+                Some("Pick it again from the list."),
+            );
+        };
+        let open = self.is_open(index);
+        if open && self.active.as_ref().and_then(|a| a.slot_of(window)).is_some() {
+            return refused("This window is part of the workspace already.", None);
+        }
+        let path = self.scanner.process_path(facts.pid);
+        let label = self.apps.label(&facts, path.as_deref());
+        let launch = apps::launch_for(&facts, path.as_deref());
+        let ws = &self.file.workspaces[index];
+        let zone = zone.or_else(|| empty_zone(ws));
+        let (updated, slot) = match add_app(ws, &facts, &label, launch, zone.as_ref(), &topology) {
+            Ok(x) => x,
+            Err(e) => return refused(e.to_string(), None),
+        };
+        let id = updated.id.0.clone();
+        if let Err(e) = self.save_workspace(index, updated) {
+            return failed(e);
+        }
+        tracing::info!(slot = %slot.0, zone = ?zone, open, "app added");
+        if open {
+            if let Some(a) = &mut self.active {
+                a.windows.insert(slot, window);
+            }
+            match &zone {
+                Some(z) => self.place_in(z),
+                None => self.refresh_frames(),
+            }
+        }
+        self.apps_reply(&id)
+    }
+
+    /// Puts an app of a workspace in one of its zones.
+    pub(crate) fn move_app_to(&mut self, which: &str, slot: &SlotId, zone: &ZoneId) -> Reply {
+        let Some(index) = self.find_workspace(which) else {
+            return not_found(which);
+        };
+        let updated = match move_app(&self.file.workspaces[index], slot, zone) {
+            Ok(w) => w,
+            Err(e) => return refused(e.to_string(), Some("Look at the list again.")),
+        };
+        let id = updated.id.0.clone();
+        if updated != self.file.workspaces[index] {
+            if let Err(e) = self.save_workspace(index, updated) {
+                return failed(e);
+            }
+            tracing::info!(slot = %slot.0, zone = %zone.0, "app moved");
+            if self.is_open(index) {
+                if let Some(a) = &mut self.active {
+                    // It may have been a tab shown for now: it is no longer one.
+                    a.shown.retain(|_, s| s != slot);
+                }
+                self.place_in(zone);
+            }
+        }
+        self.apps_reply(&id)
+    }
+
+    /// Takes an app out of a workspace; its window, if open, stays where it is.
+    pub(crate) fn remove_app_from(&mut self, which: &str, slot: &SlotId) -> Reply {
+        let Some(index) = self.find_workspace(which) else {
+            return not_found(which);
+        };
+        let updated = match remove_app(&self.file.workspaces[index], slot) {
+            Ok(w) => w,
+            Err(e) => return refused(e.to_string(), Some("Look at the list again.")),
+        };
+        let id = updated.id.0.clone();
+        if let Err(e) = self.save_workspace(index, updated) {
+            return failed(e);
+        }
+        tracing::info!(slot = %slot.0, "app removed");
+        if self.is_open(index) {
+            if let Some(a) = &mut self.active {
+                a.windows.remove(slot);
+                a.shown.retain(|_, s| s != slot);
+            }
+            // A tab it hid comes back; the group it leaves shows what it should.
+            self.sync_tabs();
+            self.refresh_frames();
+        }
+        self.apps_reply(&id)
+    }
+}

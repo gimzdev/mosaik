@@ -225,7 +225,7 @@ pub fn app_match(w: &WindowFacts) -> AppMatch {
 }
 
 /// A free place for `frame` on its monitor.
-fn free_place(refs: &mut Vec<MonitorRef>, topology: &Topology, frame: Rect) -> Place {
+pub(crate) fn free_place(refs: &mut Vec<MonitorRef>, topology: &Topology, frame: Rect) -> Place {
     let monitor = topology.monitor_for_rect(frame);
     let index = remembered_index(refs, monitor, topology);
     match RatioRect::from_rect(frame, monitor.work_area) {
@@ -408,6 +408,7 @@ pub fn capture(
         slot_ids.insert(id.0.clone());
         layout.slots.push(Slot {
             id,
+            label: Some(seen.label.clone()),
             app: app_match(w),
             launch: seen.launch.clone(),
             place,
@@ -704,6 +705,7 @@ pub fn regroup(ws: &mut Workspace, groups: &[GroupSeen<'_>]) -> Vec<(SlotId, Win
                     added.push((
                         Slot {
                             id,
+                            label: Some(seen.label.clone()),
                             app: app_match(seen.facts),
                             launch: seen.launch.clone(),
                             place: place.clone(),

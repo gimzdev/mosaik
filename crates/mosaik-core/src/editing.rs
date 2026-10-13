@@ -1,5 +1,5 @@
-//! Editing workspaces from the interface: their zones (the zone editor), names and shortcuts,
-//! as checks and changes on plain data.
+//! Editing workspaces from the interface: their zones (the zone editor), their apps, names and
+//! shortcuts, as checks and changes on plain data.
 //!
 //! The editor works on the monitors connected now: each zone says which of them it is on and
 //! where, as fractions of its work area. A zone of a monitor that is not connected shows on the
@@ -12,10 +12,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::geometry::RatioRect;
-use crate::layout::{Place, Workspace};
+use crate::layout::{Launch, Place, Slot, SlotId, Workspace};
 use crate::place::Resolver;
 use crate::topology::{MonitorId, Topology, fnv1a64, map_monitors};
-use crate::workspace::next_id;
+use crate::window::WindowFacts;
+use crate::workspace::{app_match, free_place, next_id};
 use crate::zone::{FrameStyle, Zone, ZoneColor, ZoneId};
 
 /// The longest workspace or zone name, in characters.
@@ -61,6 +62,10 @@ pub enum EditError {
     TooSmall(String),
     #[error("A monitor has more than {MAX_ZONES_PER_MONITOR} zones.")]
     TooManyZones,
+    #[error("This app is not in the workspace any more.")]
+    GoneApp,
+    #[error("This zone is not in the workspace any more.")]
+    GoneZone,
 }
 
 /// Checks a workspace or zone name, returning it trimmed.
@@ -254,6 +259,82 @@ pub fn rename(ws: &Workspace, name: &str, others: &[Workspace]) -> Result<Worksp
     Ok(out)
 }
 
+/// The first zone of `ws` without a window or tab group in it: where a new app goes.
+pub fn empty_zone(ws: &Workspace) -> Option<ZoneId> {
+    let layout = &ws.layout;
+    layout
+        .zones
+        .iter()
+        .find(|z| {
+            !layout
+                .slots
+                .iter()
+                .any(|s| matches!(layout.effective_place(s), Some(Place::Zone { zone }) if *zone == z.id))
+        })
+        .map(|z| z.id.clone())
+}
+
+/// The workspace with the app of a window on screen (`facts`, called `label`) as a new app,
+/// in `zone`, or where the window is now without one. Returns it with the new app's id.
+pub fn add_app(
+    ws: &Workspace,
+    facts: &WindowFacts,
+    label: &str,
+    launch: Option<Launch>,
+    zone: Option<&ZoneId>,
+    topology: &Topology,
+) -> Result<(Workspace, SlotId), EditError> {
+    let mut out = ws.clone();
+    let place = match zone {
+        Some(z) if out.layout.zone(z).is_none() => return Err(EditError::GoneZone),
+        Some(z) => Place::Zone { zone: z.clone() },
+        None => free_place(&mut out.layout.monitors, topology, facts.frame_rect),
+    };
+    let taken: HashSet<String> = out.layout.slots.iter().map(|s| s.id.0.clone()).collect();
+    let id = SlotId(next_id("s", &taken));
+    out.layout.slots.push(Slot {
+        id: id.clone(),
+        label: Some(label.trim().to_owned()).filter(|l| !l.is_empty()),
+        app: app_match(facts),
+        launch,
+        place,
+    });
+    Ok((out, id))
+}
+
+/// The workspace with its app `slot` in the zone `zone`. A tab leaves its group for it, unless
+/// the group is in that zone already.
+pub fn move_app(ws: &Workspace, slot: &SlotId, zone: &ZoneId) -> Result<Workspace, EditError> {
+    let current = ws.layout.slot(slot).ok_or(EditError::GoneApp)?;
+    if ws.layout.zone(zone).is_none() {
+        return Err(EditError::GoneZone);
+    }
+    let place = Place::Zone { zone: zone.clone() };
+    if ws.layout.effective_place(current) == Some(&place) {
+        return Ok(ws.clone());
+    }
+    let mut out = ws.clone();
+    if !out.layout.leave_tab(slot, place.clone())
+        && let Some(s) = out.layout.slots.iter_mut().find(|s| &s.id == slot)
+    {
+        s.place = place;
+    }
+    Ok(out)
+}
+
+/// The workspace without its app `slot` (a tab leaves its group first). Its window, when open,
+/// stays where it is.
+pub fn remove_app(ws: &Workspace, slot: &SlotId) -> Result<Workspace, EditError> {
+    if ws.layout.slot(slot).is_none() {
+        return Err(EditError::GoneApp);
+    }
+    let mut out = ws.clone();
+    // The place it is given does not matter: it goes.
+    out.layout.leave_tab(slot, Place::Maximized { monitor: 0 });
+    out.layout.slots.retain(|s| &s.id != slot);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +360,7 @@ mod tests {
         };
         let slot = |id: &str, place: Place| Slot {
             id: SlotId(id.into()),
+            label: None,
             app: AppMatch::exe("a.exe"),
             launch: None,
             place,
@@ -617,6 +699,114 @@ mod tests {
             zone: ZoneId::new("z2"),
         };
         assert_eq!(revision(&moved, &t), r);
+    }
+
+    fn sid(id: &str) -> SlotId {
+        SlotId(id.into())
+    }
+
+    #[test]
+    fn apps_are_added_moved_and_removed() {
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let ws = workspace(&t);
+        // z1 holds s1, z2 the group of s2 and s3; z3 is empty.
+        assert_eq!(empty_zone(&ws), Some(ZoneId::new("z3")));
+
+        let notes = crate::window::WindowFacts {
+            exe: Some("notepad.exe".into()),
+            class: "Notepad".into(),
+            title: "todo.txt - Notepad".into(),
+            frame_rect: crate::geometry::Rect::new(100, 100, 900, 700),
+            ..crate::window::WindowFacts::default()
+        };
+        let (added, id) = add_app(&ws, &notes, " Notepad ", None, Some(&ZoneId::new("z3")), &t).unwrap();
+        assert_eq!(id, sid("s4"));
+        assert_eq!(added.layout.problems(), vec![]);
+        let s4 = added.layout.slot(&id).unwrap();
+        assert_eq!(s4.name(), "Notepad");
+        assert_eq!(
+            s4.place,
+            Place::Zone {
+                zone: ZoneId::new("z3")
+            }
+        );
+        assert_eq!(s4.app.exe.as_deref(), Some("notepad.exe"));
+        assert_eq!(empty_zone(&added), None, "every zone has a window now");
+        // Without a zone, it keeps the place it has on screen.
+        let (free, _) = add_app(&ws, &notes, "Notepad", None, None, &t).unwrap();
+        assert!(matches!(free.layout.slots[3].place, Place::Free { .. }));
+        assert_eq!(
+            add_app(&ws, &notes, "Notepad", None, Some(&ZoneId::new("gone")), &t),
+            Err(EditError::GoneZone)
+        );
+
+        // A tab moved to another zone leaves its group, which ends with one tab left.
+        let moved = move_app(&added, &sid("s3"), &ZoneId::new("z1")).unwrap();
+        assert_eq!(moved.layout.problems(), vec![]);
+        assert!(moved.layout.tab_groups.is_empty());
+        assert_eq!(
+            moved.layout.slot(&sid("s3")).unwrap().place,
+            Place::Zone {
+                zone: ZoneId::new("z1")
+            }
+        );
+        assert_eq!(
+            moved.layout.slot(&sid("s2")).unwrap().place,
+            Place::Zone {
+                zone: ZoneId::new("z2")
+            }
+        );
+        // A tab "moved" to its group's zone stays a tab.
+        assert_eq!(move_app(&ws, &sid("s2"), &ZoneId::new("z2")).unwrap(), ws);
+        assert_eq!(
+            move_app(&ws, &sid("nope"), &ZoneId::new("z1")),
+            Err(EditError::GoneApp)
+        );
+        assert_eq!(
+            move_app(&ws, &sid("s1"), &ZoneId::new("gone")),
+            Err(EditError::GoneZone)
+        );
+
+        // Removing a tab ends its group of two: the other tab keeps the group's zone.
+        let removed = remove_app(&ws, &sid("s2")).unwrap();
+        assert_eq!(removed.layout.problems(), vec![]);
+        assert!(removed.layout.slot(&sid("s2")).is_none());
+        assert!(removed.layout.tab_groups.is_empty());
+        assert_eq!(
+            removed.layout.slot(&sid("s3")).unwrap().place,
+            Place::Zone {
+                zone: ZoneId::new("z2")
+            }
+        );
+        let removed = remove_app(&removed, &sid("s1")).unwrap();
+        assert_eq!(removed.layout.slots.len(), 1);
+        assert_eq!(empty_zone(&removed), Some(ZoneId::new("z1")));
+        assert_eq!(remove_app(&ws, &sid("nope")), Err(EditError::GoneApp));
+    }
+
+    #[test]
+    fn apps_without_a_label_are_named_after_their_program() {
+        let slot = |exe: Option<&str>, aumid: Option<&str>| Slot {
+            id: sid("s1"),
+            label: None,
+            app: crate::matching::AppMatch {
+                exe: exe.map(str::to_owned),
+                aumid: aumid.map(str::to_owned),
+                ..crate::matching::AppMatch::default()
+            },
+            launch: None,
+            place: Place::Maximized { monitor: 0 },
+        };
+        assert_eq!(slot(Some("windowsterminal.exe"), None).name(), "Windows Terminal");
+        assert_eq!(slot(Some("obsidian.exe"), None).name(), "Obsidian");
+        assert_eq!(
+            slot(None, Some("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App")).name(),
+            "WindowsCalculator"
+        );
+        assert_eq!(slot(None, None).name(), "App");
+        let mut labelled = slot(Some("code.exe"), None);
+        labelled.label = Some("Visual Studio Code".into());
+        assert_eq!(labelled.name(), "Visual Studio Code");
     }
 
     #[test]

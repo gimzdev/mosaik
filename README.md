@@ -113,12 +113,12 @@ Each place becomes a zone with its own colour.</p>
 <tr><td><kbd>Esc</kbd></td><td>closes the switcher</td></tr>
 </table>
 
-<p>Or rest the pointer on the thin line at the right edge of the screen and pick <b>Arrange windows</b>:<br>
-every window goes into the zone that suits it, and <b>Undo arrange</b> puts them back.</p>
+<p>Or point at the thin line at the right edge of the screen and pick <b>Arrange windows</b>:<br>
+every window goes into the zone that suits it.</p>
 
 <p>Resize a window in a zone and the zones beside it follow.<br>
 While dragging or resizing a window, hold <kbd>Shift</kbd> to move it freely.<br>
-Workspaces, zones, shortcuts and everything else are in Mosaïk's window, from the tray icon.</p>
+Workspaces, their apps and zones, shortcuts and everything else are in Mosaïk's window, from the tray icon.</p>
 
 <hr>
 

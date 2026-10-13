@@ -132,9 +132,6 @@ describe('Mosaïk’s window', () => {
     );
     render(<App />);
     expect((await screen.findByText(/switches workspaces/)).textContent).toContain('Win plus Alt plus S');
-    await userEvent.click(screen.getByRole('button', { name: 'Workspaces' }));
-    const intro = (await screen.findByRole('heading', { name: 'Workspaces' })).parentElement?.parentElement;
-    expect(intro?.textContent).toContain('Win plus Alt plus S');
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(await screen.findByText('Win+Alt+Space is taken; using Win+Alt+S.')).toBeTruthy();
   });
@@ -154,7 +151,6 @@ describe('Mosaïk’s window', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
     const place = await screen.findByRole('group', { name: 'Tags and tabs' });
     expect(within(place).getByRole('radio', { name: 'In each window’s title bar' })).toHaveProperty('checked', true);
-    expect(place.getAttribute('aria-describedby')).toBeTruthy();
     await userEvent.click(within(place).getByRole('radio', { name: 'In a bar above each window' }));
     expect(saved).toMatchObject({ cmd: 'set_settings', settings: { frames: { tags_in_title_bar: false } } });
   });

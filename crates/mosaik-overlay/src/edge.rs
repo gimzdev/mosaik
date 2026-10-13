@@ -1,5 +1,6 @@
-//! The quick menu's handle: a thin line at an edge of the main monitor that opens, when the
-//! pointer rests on it, onto a short menu (Arrange, the switcher, saving the layout...).
+//! The quick menu's handle: a thin line at an edge of the main monitor that opens, as soon as
+//! the pointer stops on it, onto a short menu (Mosaïk and the open workspace, Arrange, the
+//! switcher, saving the layout...), sliding in from the edge.
 //!
 //! It is a layered window that takes the mouse but never the keyboard focus, so whatever the
 //! user was typing in keeps it. Every pixel of it is at least faintly opaque, so the pointer
@@ -30,9 +31,14 @@ use crate::layered::LayeredWindow;
 const WM_MOUSEHOVER: u32 = 0x02A1;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
-/// How long the pointer rests on the handle before the menu opens, in milliseconds: long enough
-/// that passing by (on the way to a scroll bar at the screen's edge) does not open it.
-pub const HOVER_MS: u32 = 300;
+/// How long the pointer rests on the handle before the menu opens, in milliseconds: no time to
+/// a person (the owner: "it should open instantly"), enough that a pointer passing by on its way
+/// to another monitor does not open it.
+pub const HOVER_MS: u32 = 60;
+
+/// How long the menu takes to slide in from its edge, and to fade away, in milliseconds.
+pub const OPEN_MS: u32 = 150;
+pub const CLOSE_MS: u32 = 110;
 
 /// What the mouse did on the handle or the menu, in screen coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -259,16 +265,20 @@ impl Palette {
 }
 
 /// One line of the menu.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Row {
     pub label: String,
-    /// A short note at the right end: a shortcut, "On" or "Off".
+    /// A short note at the right end: a shortcut, "On" or "Off", "Open".
     pub detail: Option<String>,
     pub enabled: bool,
     /// The menu's main action, in the accent colour.
     pub primary: bool,
     /// A thin line above it, to group the rows.
     pub rule_before: bool,
+    /// The menu's first line, taller: `prefix` (Mosaïk) in a quieter colour, then the label (the
+    /// open workspace).
+    pub header: bool,
+    pub prefix: Option<String>,
 }
 
 /// Sizes at 96 DPI.
@@ -283,8 +293,10 @@ mod size {
     pub const STRIP_THROUGH: f32 = 12.0;
     pub const STRIP_LENGTH: f32 = 76.0;
     pub const PANEL: f32 = 256.0;
-    pub const HEADER: f32 = 50.0;
+    pub const HEADER_ROW: f32 = 42.0;
     pub const ROW: f32 = 34.0;
+    /// How far the menu slides in from its edge as it opens.
+    pub const SLIDE: f32 = 14.0;
     pub const RULE: f32 = 9.0;
     pub const PAD: f32 = 6.0;
     pub const RADIUS: f32 = 10.0;
@@ -320,8 +332,6 @@ enum Shown {
     },
     Menu {
         place: Place,
-        title: String,
-        subtitle: String,
         rows: Vec<Row>,
         hot: Option<usize>,
         palette: Palette,
@@ -333,6 +343,14 @@ pub struct Edge {
     shown: Option<Shown>,
     /// The menu's rows on screen, for [`Edge::row_at`].
     rows: Vec<Rect>,
+    /// Where the open menu sits once in place.
+    menu_at: Option<Rect>,
+}
+
+/// How far in a slide or fade of `OPEN_MS` is after `t` (0 to 1) of it: fast, then settling.
+pub fn ease(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    1.0 - (1.0 - t).powi(3)
 }
 
 /// Where the handle's strip goes on screen.
@@ -367,6 +385,7 @@ impl Edge {
             window: LayeredWindow::with_proc("MosaikEdge", false, true, edge_proc)?,
             shown: None,
             rows: Vec::new(),
+            menu_at: None,
         })
     }
 
@@ -392,6 +411,25 @@ impl Edge {
         self.window.hide();
         self.shown = None;
         self.rows.clear();
+        self.menu_at = None;
+    }
+
+    /// Shows the open menu `t` of the way in (0: just appearing at its edge, 1: in place): it
+    /// slides in and fades in, without being drawn again. Run backwards, it fades away.
+    pub fn menu_frame(&mut self, t: f32) -> Result<()> {
+        let (Some(at), Some(Shown::Menu { place, .. })) = (self.menu_at, &self.shown) else {
+            return Ok(());
+        };
+        let e = ease(t);
+        let slide = px((1.0 - e) * size::SLIDE * scale(place.dpi));
+        let x = match place.side {
+            Side::Left => at.left - slide,
+            Side::Right => at.left + slide,
+        };
+        // The fade is a byte of opacity.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let alpha = (e * 255.0).round().clamp(1.0, 255.0) as u8;
+        self.window.present(Point::new(x, at.top), alpha)
     }
 
     /// Shows the handle: the line at `place`, wider while the pointer is on it (`wide`).
@@ -440,26 +478,23 @@ impl Edge {
         }
         self.shown = Some(want);
         self.rows.clear();
+        self.menu_at = None;
         Ok(())
     }
 
-    /// Opens the menu by the handle at `place`: `title` and `subtitle` at its top (Mosaïk, the
-    /// open workspace), then `rows`, the one at `hot` lit.
-    #[allow(clippy::too_many_arguments)]
+    /// Opens the menu by the handle at `place`: `rows`, the one at `hot` lit, shown `t` of the
+    /// way in ([`Edge::menu_frame`]; 1 when it is in place).
     pub fn show_menu(
         &mut self,
         canvas: &mut Canvas,
         place: Place,
-        title: &str,
-        subtitle: &str,
         rows: &[Row],
         hot: Option<usize>,
         palette: Palette,
+        t: f32,
     ) -> Result<()> {
         let want = Shown::Menu {
             place,
-            title: title.to_owned(),
-            subtitle: subtitle.to_owned(),
             rows: rows.to_vec(),
             hot,
             palette,
@@ -470,12 +505,13 @@ impl Edge {
         let s = scale(place.dpi);
         let shadow = size::SHADOW * s;
         let panel_w = size::PANEL * s;
-        let mut panel_h = size::HEADER * s + 2.0 * size::PAD * s;
+        let height = |r: &Row| if r.header { size::HEADER_ROW } else { size::ROW } * s;
+        let mut panel_h = 2.0 * size::PAD * s;
         for r in rows {
             if r.rule_before {
                 panel_h += size::RULE * s;
             }
-            panel_h += size::ROW * s;
+            panel_h += height(r);
         }
         let (w, h) = (px(panel_w + 2.0 * shadow), px(panel_h + 2.0 * shadow));
         let handle = handle_rect(place);
@@ -488,7 +524,7 @@ impl Edge {
         let at = Rect::from_origin_size(left, top, w, h);
         // Rows, and where each lands on screen.
         let mut placed: Vec<(Area, &Row, bool)> = Vec::new();
-        let mut y = shadow + size::HEADER * s + size::PAD * s;
+        let mut y = shadow + size::PAD * s;
         for (i, r) in rows.iter().enumerate() {
             if r.rule_before {
                 y += size::RULE * s;
@@ -497,13 +533,21 @@ impl Edge {
                 shadow + size::PAD * s,
                 y,
                 shadow + panel_w - size::PAD * s,
-                y + size::ROW * s,
+                y + height(r),
             );
             placed.push((a, r, hot == Some(i) && r.enabled));
-            y += size::ROW * s;
+            y += height(r);
         }
-        // Details are right-aligned: measured first.
+        // Details are right-aligned: measured first; so is the header's prefix.
         let detail_size = 12.0 * s;
+        let prefix_w: Vec<f32> = rows
+            .iter()
+            .map(|r| {
+                r.prefix.as_deref().map_or(0.0, |p| {
+                    canvas.text_width(&format!("{p} \u{b7} "), 13.5 * s, Weight::SemiBold)
+                })
+            })
+            .collect();
         let widths: Vec<f32> = rows
             .iter()
             .map(|r| {
@@ -540,24 +584,6 @@ impl Edge {
             }
             pen.fill_round(panel, radius, palette.panel);
             pen.stroke_round(panel, radius, s.max(1.0), palette.line);
-            let text_left = panel.left + 16.0 * s;
-            let text_right = panel.right - 16.0 * s;
-            pen.text(
-                title,
-                Area::new(text_left, panel.top + 8.0 * s, text_right, panel.top + 24.0 * s),
-                11.5 * s,
-                Weight::SemiBold,
-                Align::Leading,
-                palette.muted,
-            )?;
-            pen.text(
-                subtitle,
-                Area::new(text_left, panel.top + 23.0 * s, text_right, panel.top + 43.0 * s),
-                14.5 * s,
-                Weight::SemiBold,
-                Align::Leading,
-                palette.text,
-            )?;
             for (i, (a, r, lit)) in placed.iter().enumerate() {
                 if r.rule_before {
                     let y = a.top - size::RULE * s / 2.0;
@@ -583,11 +609,24 @@ impl Edge {
                 };
                 let detail_w = widths.get(i).copied().unwrap_or(0.0);
                 let label_right = a.right - 10.0 * s - if detail_w > 0.0 { detail_w + 8.0 * s } else { 0.0 };
+                let mut label_left = a.left + 10.0 * s;
+                if let Some(p) = &r.prefix {
+                    let w = prefix_w.get(i).copied().unwrap_or(0.0);
+                    pen.text(
+                        &format!("{p} \u{b7} "),
+                        Area::new(label_left, a.top, (label_left + w).min(label_right), a.bottom),
+                        13.5 * s,
+                        Weight::SemiBold,
+                        Align::Leading,
+                        if *lit { palette.hover_text } else { palette.muted },
+                    )?;
+                    label_left += w;
+                }
                 pen.text(
                     &r.label,
-                    Area::new(a.left + 10.0 * s, a.top, label_right, a.bottom),
+                    Area::new(label_left, a.top, label_right, a.bottom),
                     13.5 * s,
-                    if r.primary {
+                    if r.primary || r.header {
                         Weight::SemiBold
                     } else {
                         Weight::Normal
@@ -608,7 +647,9 @@ impl Edge {
             }
             Ok(())
         })?;
-        self.window.present(at.origin(), 255)?;
+        self.menu_at = Some(at);
+        self.shown = Some(want);
+        self.menu_frame(t)?;
         crate::layered::restack(&[&self.window], crate::layered::Stack::Topmost);
         self.rows = placed
             .iter()
@@ -621,7 +662,6 @@ impl Edge {
                 )
             })
             .collect();
-        self.shown = Some(want);
         Ok(())
     }
 

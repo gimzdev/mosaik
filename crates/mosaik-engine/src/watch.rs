@@ -1172,6 +1172,8 @@ impl Engine {
     }
 
     fn drag_end(&mut self, h: WindowHandle) {
+        // A window put down by the user: its band is decided as its title bar is read.
+        self.acted();
         if self.watch.moving == Some(h) {
             self.watch.moving = None;
         }

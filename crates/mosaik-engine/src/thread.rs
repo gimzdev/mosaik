@@ -63,6 +63,8 @@ pub(crate) mod timer {
     pub const QUICK: usize = 7;
     /// The pointer has rested on the quick menu's handle: the menu opens.
     pub const QUICK_HOVER: usize = 8;
+    /// A frame of the quick menu sliding in or fading away.
+    pub const QUICK_ANIM: usize = 9;
 }
 
 /// Shift a timer id into the `Pending::timers` bit set.
@@ -473,6 +475,9 @@ impl Engine {
         if todo.timers & timer_bit(timer::QUICK_HOVER) != 0 {
             self.quick_hover_tick();
         }
+        if todo.timers & timer_bit(timer::QUICK_ANIM) != 0 {
+            self.quick_anim_tick();
+        }
         if todo.displays {
             // Windows sends several of these for one change; act once it is done.
             self.set_timer(timer::TOPOLOGY, 400);
@@ -620,12 +625,18 @@ impl Engine {
                 | Command::SetWorkspaceHotkey { .. }
                 | Command::Arrange { .. }
                 | Command::UndoArrange
+                | Command::AddApp { .. }
+                | Command::MoveApp { .. }
+                | Command::RemoveApp { .. }
         );
         // Once a workspace is opened, saved or edited, what Arrange did is part of it.
         let keeps_arrange = matches!(
             command,
             Command::Arrange { .. } | Command::UndoArrange | Command::SetWorkspaceHotkey { .. }
         );
+        if changes_workspaces {
+            self.acted();
+        }
         let reply = self.dispatch(command);
         if changes_workspaces && !matches!(reply, Reply::Error { .. }) {
             if !keeps_arrange {
@@ -682,6 +693,14 @@ impl Engine {
                 self.set_workspace_hotkey(&workspace, hotkey.as_deref())
             }
             Command::HoldHotkeys { hold } => self.hold_hotkeys(hold),
+            Command::Apps { workspace } => self.apps_reply(&workspace),
+            Command::AddApp {
+                workspace,
+                window,
+                zone,
+            } => self.add_app_to(&workspace, window, zone),
+            Command::MoveApp { workspace, app, zone } => self.move_app_to(&workspace, &app, &zone),
+            Command::RemoveApp { workspace, app } => self.remove_app_from(&workspace, &app),
             Command::Quit => {
                 // SAFETY: a one-shot timer on our own window; the exit happens when it fires.
                 let timer = unsafe { SetTimer(Some(self.window), timer::EXIT, 250, None) };

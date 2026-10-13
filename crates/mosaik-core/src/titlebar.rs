@@ -7,13 +7,14 @@
 //! draws the tag, or the strip, in such a stretch ([`TitleRoom::spot`]), so the window keeps its
 //! whole zone. A tag with less room than its name needs is cut short, then to the zone's initial
 //! ([`crate::zone::tag_cut`]); a window with no stretch even for that wears its ring alone, at the
-//! top of its zone like its neighbours. Only the tab that shows of a group whose title bar has no
-//! room for the group's strip goes below a band, with the strip in it: the way to its other tabs
-//! must stay in reach.
+//! top of its zone like its neighbours. A tab group's strip always goes at the right end of its
+//! visible tab's title bar ([`TitleRoom::strip_spot`]), over the end of a stretch too short for
+//! it: in the same place on every window, and no window moves for it. Only a window whose title
+//! bar never answers wears its strip above it, below a band, decided when it is placed.
 
 use std::time::{Duration, Instant};
 
-use crate::geometry::{Point, Rect, Size, scale_for_dpi};
+use crate::geometry::{Point, Rect, scale_for_dpi};
 use crate::zone::{CHIP_HEIGHT, TAG_INITIAL};
 
 /// What a window answers for a point of its title bar.
@@ -51,6 +52,9 @@ const STRIP_LEAST: i32 = 140;
 /// Left free at the start of a strip's stretch: the chips take the mouse, and the window must
 /// still have a stretch of title bar to be grabbed by.
 const GRAB: i32 = 32;
+/// The width of Windows' three caption buttons (minimise, maximise, close): a strip in a title
+/// bar with no free stretch at all goes just left of them.
+const BUTTONS: i32 = 138;
 
 /// A free stretch of a title bar, as its distances from the frame's left and right edges. When
 /// the window is resized, a stretch keeps to what bounds it (the tabs or the title on its left,
@@ -210,6 +214,33 @@ impl TitleRoom {
     }
 }
 
+impl TitleRoom {
+    /// Where a tab group's strip goes in the title bar of its visible tab, whose frame is
+    /// `frame` (on a monitor at `dpi`): where [`TitleRoom::spot`] finds room for it, else at the
+    /// right end of the rightmost stretch (just left of Windows' buttons when there is none), as
+    /// wide as the least it can do with, over the end of what is left of the stretch. The way to
+    /// the group's other tabs stays in reach, in the same place as on every other window, and
+    /// the window does not move for it.
+    pub fn strip_spot(&self, frame: Rect, fit: Fit, dpi: u32) -> Rect {
+        if let Some(r) = self.spot(frame, fit) {
+            return r;
+        }
+        let end = self
+            .runs_on(frame)
+            .last()
+            .map_or(frame.right - scale_for_dpi(BUTTONS, dpi), |(_, r)| *r);
+        let right = end - fit.margin;
+        let left = (right - fit.least).max(frame.left);
+        let middle = if self.bottom > self.top {
+            frame.top + (self.top + self.bottom) / 2
+        } else {
+            frame.top + scale_for_dpi(ROW, dpi)
+        };
+        let top = middle - fit.height / 2;
+        Rect::new(left, top, right, top + fit.height)
+    }
+}
+
 /// How long after a change of band is proposed a reading must be taken to confirm it. Apps
 /// answer for their title bars differently for a moment while they show again (job 0070:
 /// Calculator, shown again as a tab, had room for a strip in one reading and not in the next,
@@ -230,18 +261,26 @@ pub enum BandStep {
     Change,
 }
 
+/// How long after an action of the user's (opening a workspace, Arrange, a drop, a click on a
+/// tab) a window it placed may still go into or out of its band: its title bar is read once it
+/// is in place, which takes a moment. Later readings never move a window (the owner: windows
+/// were resized when brought forward with Alt+Tab).
+pub const PLACING: Duration = Duration::from_secs(3);
+
 /// Whether a window goes into or out of its band now. `banded`: whether it wears its tag above
 /// it now; `want`: whether its title bar, last read at `read_at` (`None`: never), says it must;
-/// `proposed`: the change proposed before, and when. A window moves only when a reading taken at
-/// least [`CONFIRM`] after the change was proposed still asks for it.
+/// `proposed`: the change proposed before, and when; `placing`: an action of the user's placed
+/// it less than [`PLACING`] ago. A window moves only while being placed, and only when a reading
+/// taken at least [`CONFIRM`] after the change was proposed still asks for it.
 pub fn band_step(
     banded: bool,
     want: bool,
     read_at: Option<Instant>,
     proposed: Option<(bool, Instant)>,
     now: Instant,
+    placing: bool,
 ) -> BandStep {
-    if want == banded {
+    if want == banded || !placing {
         return BandStep::Keep;
     }
     match proposed {
@@ -255,18 +294,6 @@ pub fn band_step(
         }
         _ => BandStep::Propose,
     }
-}
-
-/// Whether the tab that shows of a group must wear the group's strip above it, below a band in
-/// its zone: its title bar, read while its frame was `read` in size and now `frame`, has no
-/// stretch with room for `fit`. Read at another size, its stretches are only a guess (each keeps to the
-/// edges that bound it, so all of them grow as the window widens), and a guess must not move a
-/// window: it keeps its band, or no band (`banded`), until it is read at its size.
-pub fn needs_band(room: &TitleRoom, read: Size, frame: Rect, fit: Fit, banded: bool) -> bool {
-    if frame.size() != read {
-        return banded;
-    }
-    room.spot(frame, fit).is_none()
 }
 
 #[cfg(test)]
@@ -376,35 +403,34 @@ mod tests {
     }
 
     #[test]
-    fn a_guess_from_another_size_moves_no_window_into_or_out_of_a_band() {
-        // Calculator, 856 px wide: its own content, then 32 px of caption by its buttons (job
-        // 0067).
-        let read = Rect::new(1060, 526, 1916, 1028);
-        let room = scan(read, 96, |p: Point| {
-            let x = p.x - read.left;
-            let caption = p.y - read.top < 32 && (664..696).contains(&x);
+    fn a_strip_always_has_its_place_at_the_right_end_of_the_title_bar() {
+        // Calculator, 856 px wide: 32 px of caption by its buttons (job 0067), too short for a
+        // strip. The strip goes at the right end of that stretch all the same, as on every other
+        // window, over the end of what is left of it, and the window does not move for it (the
+        // owner: tab strips sat in different places, and windows moved below bands and back).
+        let frame = Rect::new(1060, 526, 1916, 1028);
+        let room = scan(frame, 96, |p: Point| {
+            let x = p.x - frame.left;
+            let caption = p.y - frame.top < 32 && (664..696).contains(&x);
             Some(if caption { Hit::Caption } else { Hit::Other })
         })
         .unwrap();
-        let strip = Fit::strip(i32::MAX, 96);
-        assert!(needs_band(&room, read.size(), read, strip, false));
-        // Made the visible tab of a group 1048 px wide: its stretch, kept to the edges that
-        // bound it, would be 224 px wide, room for a strip. Only a reading at that size can say
-        // so; until then the window keeps its band (job 0067: it left its band and went back to
-        // it 24 ms later, moved twice).
-        let joined = Rect::new(4, 4, 1052, 1028);
-        assert!(room.spot(joined, strip).is_some());
-        assert!(needs_band(&room, read.size(), joined, strip, true));
-        // Nor does a guess put a window below a band.
-        assert!(!needs_band(&room, read.size(), joined, strip, false));
-        // Read at its new size, it says.
-        let again = scan(joined, 96, |p: Point| {
-            let x = p.x - joined.left;
-            let caption = p.y - joined.top < 32 && (856..888).contains(&x);
-            Some(if caption { Hit::Caption } else { Hit::Other })
-        })
-        .unwrap();
-        assert!(needs_band(&again, joined.size(), joined, strip, false));
+        let fit = Fit::strip(i32::MAX, 96);
+        assert_eq!(room.spot(frame, fit), None);
+        let at = room.strip_spot(frame, fit, 96);
+        let (_, end) = room.runs_on(frame)[0];
+        assert!(end > frame.left + 664 && end <= frame.left + 696, "{end}");
+        assert_eq!(at.right, end - 6);
+        assert_eq!(at.width(), 140);
+        // With room, the stretch itself.
+        let wide = scan(Rect::new(0, 0, 960, 600), 96, bar(&[(36, 822)], 1, 31)).unwrap();
+        let frame = Rect::new(0, 0, 960, 600);
+        assert_eq!(wide.strip_spot(frame, fit, 96), wide.spot(frame, fit).unwrap());
+        // A title bar with no stretch at all: just left of where Windows puts the buttons.
+        let none = TitleRoom::default();
+        let at = none.strip_spot(frame, fit, 96);
+        assert_eq!(at.right, 960 - 138 - 6);
+        assert_eq!(at.top + at.height() / 2, ROW);
     }
 
     #[test]
@@ -414,33 +440,54 @@ mod tests {
         // Calculator, banded, shown again as a tab (job 0070): one reading, taken as it showed,
         // found room for its strip; the next, 40 ms later, did not.
         assert_eq!(
-            band_step(true, false, Some(ms(0)), None, ms(0)),
+            band_step(true, false, Some(ms(0)), None, ms(0), true),
             BandStep::Propose
         );
         let proposed = Some((false, ms(0)));
         assert_eq!(
-            band_step(true, true, Some(ms(40)), proposed, ms(40)),
+            band_step(true, true, Some(ms(40)), proposed, ms(40), true),
             BandStep::Keep
         );
         // Had it still found room in a reading taken late enough, it would leave its band then,
         // and not before.
         assert_eq!(
-            band_step(true, false, Some(ms(40)), proposed, ms(40)),
+            band_step(true, false, Some(ms(40)), proposed, ms(40), true),
             BandStep::Wait(Duration::from_millis(210))
         );
         assert_eq!(
-            band_step(true, false, Some(ms(260)), proposed, ms(270)),
+            band_step(true, false, Some(ms(260)), proposed, ms(270), true),
             BandStep::Change
         );
         // A reading asking for the other change starts over.
         assert_eq!(
-            band_step(false, true, Some(ms(300)), proposed, ms(300)),
+            band_step(false, true, Some(ms(300)), proposed, ms(300), true),
             BandStep::Propose
         );
         // Never read: it waits for a reading.
         assert_eq!(
-            band_step(false, true, None, Some((true, ms(0))), ms(500)),
+            band_step(false, true, None, Some((true, ms(0))), ms(500), true),
             BandStep::Wait(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn a_reading_long_after_the_window_was_placed_moves_nothing() {
+        // Brought forward with Alt+Tab, a window is read again: whatever its title bar says now,
+        // it stays where it is.
+        let t0 = Instant::now();
+        let later = t0 + CONFIRM * 2;
+        assert_eq!(
+            band_step(false, true, Some(later), Some((true, t0)), later, false),
+            BandStep::Keep
+        );
+        assert_eq!(
+            band_step(true, false, Some(later), None, later, false),
+            BandStep::Keep
+        );
+        // Right after the user's action, the same reading moves it.
+        assert_eq!(
+            band_step(false, true, Some(later), Some((true, t0)), later, true),
+            BandStep::Change
         );
     }
 

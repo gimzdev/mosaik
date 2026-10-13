@@ -121,3 +121,10 @@ over the window's own title bar, the two rows this ADR set out to end.
   (`PhysicalToLogicalPointForPerMonitorDPI`); this is tested at 100% only so far.
 - A title bar changed while its window stays in front, without a new title, is read again only
   when the window next changes size, title or comes to the front.
+
+## Amended by ADR 0017 (2026-10-12)
+
+A tab group's strip now always goes in its visible tab's title bar, at its right end, over the
+end of a stretch too short for it rather than below a band; only a window whose title bar never
+answers wears its strip above it. A band changes only within 3 seconds of an action of the
+user's: a title bar read again later (a window brought forward) moves no window.

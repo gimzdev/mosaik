@@ -1,11 +1,11 @@
 //! Arrange: every window on screen in the zone that suits it, and Undo.
 //!
 //! The plan is `mosaik_core::arrange::plan`; this applies it. The open workspace takes the
-//! windows on screen (they join it if they were not part of it); with no workspace open, a new
-//! one is made from them. A monitor without zones gets a preset. Windows left over become tabs
-//! where they belong. What Arrange changed can be undone for ten minutes, until a workspace is
-//! opened, saved or edited: the workspace goes back to what it was, and every window it moved
-//! goes back where it was.
+//! windows it puts in zones (they join it if they were not part of it); with no workspace open,
+//! a new one is made from them. A monitor without zones gets zones for its windows. Windows left
+//! over once every zone has one are minimised. What Arrange changed can be undone for ten
+//! minutes, until a workspace is opened, saved or edited: the workspace goes back to what it
+//! was, and every window it moved or minimised goes back where it was.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -62,8 +62,9 @@ struct Prepared {
     assigned: HashMap<SlotId, WindowHandle>,
     /// Where the windows that fill zones go.
     moves: Vec<(WindowHandle, To)>,
+    /// The windows left over, minimised.
+    minimize: Vec<WindowHandle>,
     zoned: usize,
-    tabbed: usize,
     made: usize,
 }
 
@@ -90,11 +91,6 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 }
 
 impl Engine {
-    /// Whether Arrange can be undone now (the quick menu offers it).
-    pub(crate) fn can_undo_arrange(&self) -> bool {
-        self.undo.as_ref().is_some_and(|u| u.at.elapsed() < UNDO_FOR)
-    }
-
     /// A workspace was opened, saved or edited: what Arrange did is that workspace's now.
     pub(crate) fn forget_arrange(&mut self) {
         self.undo = None;
@@ -244,7 +240,8 @@ impl Engine {
             ZoneRef::New(i) => made.get(i).cloned(),
         };
 
-        // Each window's slot: the one it fills, or a new one.
+        // Each window's slot: the one it fills, or a new one for a window going into a zone (a
+        // window minimised does not join the workspace).
         let mut assigned: HashMap<SlotId, WindowHandle> = self
             .active
             .as_ref()
@@ -252,59 +249,52 @@ impl Engine {
             .map(|a| a.windows.clone())
             .unwrap_or_default();
         let mut slot_ids: HashSet<String> = ws.layout.slots.iter().map(|s| s.id.0.clone()).collect();
-        let mut slots: Vec<SlotId> = Vec::with_capacity(windows.len());
-        for w in &windows {
+        let mut slots: Vec<Option<SlotId>> = Vec::with_capacity(windows.len());
+        for (i, w) in windows.iter().enumerate() {
             if let Some((s, _)) = assigned.iter().find(|(_, h)| **h == w.handle) {
-                slots.push(s.clone());
+                slots.push(Some(s.clone()));
+                continue;
+            }
+            if !matches!(plan.goes.get(i), Some(Goes::Zone(_))) {
+                slots.push(None);
                 continue;
             }
             let id = SlotId(fresh("s", &mut slot_ids));
             let path = self.scanner.process_path(w.pid);
             ws.layout.slots.push(Slot {
                 id: id.clone(),
+                label: units.get(i).map(|u| u.label.clone()),
                 app: app_match(w),
                 launch: apps::launch_for(w, path.as_deref()),
                 place: Place::Maximized { monitor: 0 },
             });
             assigned.insert(id.clone(), w.handle);
-            slots.push(id);
+            slots.push(Some(id));
         }
 
-        // Zones first, then tabs (a tab joins the window filling its zone, wherever that is in
-        // the order).
+        // Each window into its zone (a tab group as one); the others minimised.
         let mut zoned = 0;
+        let mut minimize = Vec::new();
         for (i, goes) in plan.goes.iter().enumerate() {
-            let Goes::Zone(r) = goes else { continue };
-            let Some(zone) = zone_id(*r) else { continue };
-            let place = Place::Zone { zone };
-            match ws.layout.group_of(&slots[i]).map(|g| g.id.clone()) {
-                Some(group) => ws.layout.move_group(&group, place),
-                None => {
-                    if let Some(s) = ws.layout.slots.iter_mut().find(|s| s.id == slots[i]) {
-                        s.place = place;
+            match goes {
+                Goes::Zone(r) => {
+                    let (Some(zone), Some(slot)) = (zone_id(*r), slots[i].as_ref()) else {
+                        continue;
+                    };
+                    let place = Place::Zone { zone };
+                    match ws.layout.group_of(slot).map(|g| g.id.clone()) {
+                        Some(group) => ws.layout.move_group(&group, place),
+                        None => {
+                            if let Some(s) = ws.layout.slots.iter_mut().find(|s| &s.id == slot) {
+                                s.place = place;
+                            }
+                        }
                     }
+                    zoned += 1;
                 }
+                Goes::Minimize => minimize.push(windows[i].handle),
+                Goes::Stay => {}
             }
-            zoned += 1;
-        }
-        let mut tabbed = 0;
-        for (i, goes) in plan.goes.iter().enumerate() {
-            let Goes::TabOf(owner) = goes else { continue };
-            let Some(onto) = slots.get(*owner).cloned() else {
-                continue;
-            };
-            // A tab group joins as all of its tabs, in their order.
-            let tabs = ws
-                .layout
-                .group_of(&slots[i])
-                .map_or_else(|| vec![slots[i].clone()], |g| g.tabs.clone());
-            for t in tabs {
-                if ws.layout.join_tab(&onto, &t, None).is_some() {
-                    tabbed += 1;
-                }
-            }
-            // The window that fills the zone stays the one showing.
-            ws.layout.show_tab(&onto);
         }
 
         // Where the windows that fill zones go.
@@ -314,7 +304,11 @@ impl Engine {
             if !matches!(goes, Goes::Zone(_)) {
                 continue;
             }
-            let Some(place) = ws.layout.slot(&slots[i]).map(|s| s.place.clone()) else {
+            let Some(place) = slots[i]
+                .as_ref()
+                .and_then(|slot| ws.layout.slot(slot))
+                .map(|s| s.place.clone())
+            else {
                 continue;
             };
             let h = windows[i].handle;
@@ -342,8 +336,8 @@ impl Engine {
             before,
             assigned,
             moves,
+            minimize,
             zoned,
-            tabbed,
             made: made.len(),
         })
     }
@@ -389,6 +383,9 @@ impl Engine {
                 }
             })
             .collect();
+        for h in &p.minimize {
+            mosaik_win::arrange::minimize(window::hwnd(*h));
+        }
         self.activate(id, p.assigned, placed);
         self.hiding.resume();
         self.sync_tabs();
@@ -398,30 +395,32 @@ impl Engine {
         tracing::info!(
             windows = p.windows.len(),
             zoned = p.zoned,
-            tabbed = p.tabbed,
+            minimized = p.minimize.len(),
             new_zones = p.made,
             preset = p.preset.map(Preset::id),
             "windows arranged"
         );
+        // The windows put in zones; the ones minimised are said after.
+        let placed_n = p.windows.len().saturating_sub(p.minimize.len());
         let mut message = match p.preset {
             Some(preset) => format!(
                 "Arranged {} in the \u{201c}{}\u{201d} layout",
-                plural(p.windows.len(), "window", "windows"),
+                plural(placed_n, "window", "windows"),
                 preset.label()
             ),
             None => format!(
                 "Arranged {} in {}",
-                plural(p.windows.len(), "window", "windows"),
+                plural(placed_n, "window", "windows"),
                 plural(zones_n, "zone", "zones")
             ),
         };
         if p.index.is_none() {
             message.push_str(&format!(" of \u{201c}{name}\u{201d}, a new workspace"));
         }
-        match p.tabbed {
+        match p.minimize.len() {
             0 => {}
-            1 => message.push_str("; 1 window as a tab"),
-            n => message.push_str(&format!("; {n} windows as tabs")),
+            1 => message.push_str("; 1 window minimized"),
+            n => message.push_str(&format!("; {n} windows minimized")),
         }
         message.push('.');
         Reply::Done { message }
@@ -482,16 +481,16 @@ impl Engine {
                 elsewhere += 1;
                 continue;
             }
-            let (then, tab) = match p.goes[i] {
+            let (then, minimized) = match p.goes[i] {
                 Goes::Zone(_) => (target(i), false),
-                Goes::TabOf(owner) => (target(owner), true),
+                Goes::Minimize => (None, true),
                 Goes::Stay => (None, false),
             };
             windows.push(PreviewWindow {
                 label: p.labels[i].clone(),
                 now: w.frame_rect,
                 then: then.map(|r| lands(w, r)),
-                tab,
+                minimized,
             });
         }
         Reply::Preview(Box::new(ArrangePreview {
@@ -533,16 +532,7 @@ impl Engine {
                 self.file.active = None;
             }
         }
-        // Tabs Arrange made show again, as the windows they were (a window no longer the
-        // workspace's would come back minimised); then every window goes back where it was.
-        // Arrange only took windows on screen, so any of them hidden now is one of its tabs.
-        let tabs_made: Vec<(WindowHandle, bool)> = undo
-            .windows
-            .iter()
-            .filter(|(h, _, _)| self.hiding.hidden.contains_key(h))
-            .map(|(h, _, _)| (*h, false))
-            .collect();
-        self.show_windows(&tabs_made);
+        // Every window back where it was, the ones minimised too.
         self.hiding.resume();
         self.sync_tabs();
         let topology = self.refresh_topology();

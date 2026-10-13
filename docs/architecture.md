@@ -40,7 +40,7 @@ hands each move to a short-lived thread and keeps handling its messages while it
 2.5 s (`mover.rs`).
 
 Mosaïk's window is the same app: its commands reach the engine in process, in protocol
-version 4. A save from the zone editor carries the revision of the zones it was opened on, so it
+version 5. A save from the zone editor carries the revision of the zones it was opened on, so it
 is refused, with the reason, when the monitors or the zones changed meanwhile. While the shortcut
 recorder listens, Mosaïk's own shortcuts let go (`hold_hotkeys`, at most a minute), so pressing
 one records it instead of opening the switcher.
@@ -102,16 +102,24 @@ the engine gathers windows and applies the result.
 - **Arrange** (ADR 0014): one command puts every window on screen in the zone that suits it, by a
   pure planner (`mosaik_core::arrange`): zones named after an app or a kind of app draw those
   windows, the windows used most get the largest zones, windows stay where they are when they
-  fit, and windows left over become tabs. A monitor without zones gets a preset for its windows;
-  with no workspace open, a new one is made. Undo puts everything back, for ten minutes.
+  fit, and windows left over are minimised (ADR 0017). A monitor without zones gets a preset for
+  its windows, or a grid for more than four; with no workspace open, a new one is made. Undo
+  puts everything back, for ten minutes.
+- **Windows move only on the user's actions** (ADR 0017): Arrange, a layout, opening or saving
+  a workspace, a drop, the zone editor, a resize by hand, a tab clicked, an app added or moved.
+  A title bar read again later (a window brought forward) changes no band and moves no window;
+  a tab group's strip always sits at the right end of its visible tab's title bar.
+- **A workspace's apps** (ADR 0018): the Workspaces page lists them with their zones; adding a
+  window on screen, moving an app to another zone or removing it is a pure edit
+  (`mosaik_core::editing`), saved, then applied at once in the open workspace.
 - **The home page** (ADR 0016): a picture of the main monitor, drawn from `preview_arrange`
   (the same preparation as Arrange, changing nothing). While the pointer or the keyboard is on
   Arrange or one of ten layouts, the windows glide to where they would go and the zones appear;
   a click does it. A layout replaces the main monitor's zones with its own, and Undo brings
   them back.
-- **The quick menu** (ADR 0015): a thin line on an edge of the main monitor opens, when the
-  pointer rests on it, onto Arrange, the switcher, saving, the zone editor, snapping and
-  Mosaïk's window, without taking the keyboard. It hides while a game or a video fills the main monitor.
+- **The quick menu** (ADR 0015, 0017): a thin line on an edge of the main monitor slides open
+  as soon as the pointer stops on it, onto Mosaïk's window and the open workspace, Arrange, the
+  switcher, saving, the zone editor and snapping, without taking the keyboard. It hides while a game or a video fills the main monitor.
   Dragged along its edge, it stays there. Apps that drag their window themselves, without Windows' move loop, are followed
   too: a window that took the mouse and moves at the same size is being dragged. A window Mosaïk must not move (an app running as administrator, or one Windows
   protects) gets no zones, and the user is told why once, when the drag ends.

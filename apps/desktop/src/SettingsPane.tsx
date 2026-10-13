@@ -58,7 +58,7 @@ export function SettingsPane({
       <PageTitle id="settings-title">Settings</PageTitle>
 
       <div className="mt-6">
-        <Section title="Switcher" intro="One shortcut opens the switcher, where you open, save and manage workspaces.">
+        <Section title="Switcher">
           <ShortcutRecorder
             label="Open the switcher"
             value={hotkey.registered ? hotkey.shortcut : null}
@@ -80,7 +80,7 @@ export function SettingsPane({
       <Section title="General">
         <Toggle
           label="Start Mosaïk with Windows"
-          description="It waits in the tray until you press its shortcut."
+          description="It waits in the tray."
           checked={settings.start_with_windows}
           onChange={(on) => {
             save({ ...settings, start_with_windows: on });
@@ -99,7 +99,7 @@ export function SettingsPane({
       <Section title="Zones">
         <Toggle
           label="Snap windows into zones"
-          description="While you drag a window by its title bar, the zones show; let go over one and the window goes into it."
+          description="Drag a window over a zone and let go."
           checked={settings.snap.enabled}
           onChange={(on) => {
             save({ ...settings, snap: { ...settings.snap, enabled: on } });
@@ -107,7 +107,7 @@ export function SettingsPane({
         />
         <Toggle
           label="Zones follow a resized window"
-          description="Resize a window in a zone by an edge it shares with other zones, and those zones and their windows follow. Shift resizes the window alone."
+          description="Neighbouring zones follow its edge. Shift resizes the window alone."
           checked={settings.snap.resize_zones}
           onChange={(on) => {
             save({ ...settings, snap: { ...settings.snap, resize_zones: on } });
@@ -123,7 +123,7 @@ export function SettingsPane({
         />
         <Toggle
           label="Coloured frames"
-          description="Each window in a zone wears the zone’s colour around it."
+          description="Each window wears its zone’s colour."
           checked={settings.frames.show_frames}
           onChange={(on) => {
             save({ ...settings, frames: { ...settings.frames, show_frames: on } });
@@ -131,7 +131,7 @@ export function SettingsPane({
         />
         <Toggle
           label="Zone tags"
-          description="The zone’s name on its windows. Drop a window on a tag to make them tabs."
+          description="Each window shows its zone’s name. Drop a window on a tag to make tabs."
           checked={settings.frames.show_tags}
           onChange={(on) => {
             save({ ...settings, frames: { ...settings.frames, show_tags: on } });
@@ -139,7 +139,6 @@ export function SettingsPane({
         />
         <Choice
           label="Tags and tabs"
-          description="In title bars, every window fills its zone; where a title bar has little room, the tag shows the zone’s initial. In a bar, each window sits below a strip with its zone’s name."
           value={settings.frames.tags_in_title_bar ? 'title' : 'above'}
           options={TAG_PLACES}
           onChange={(v) => {
@@ -150,7 +149,7 @@ export function SettingsPane({
 
       <Section
         title="Quick menu"
-        intro="A thin line at the edge of your main screen. Rest the pointer on it for Arrange, the switcher and more; drag it along the edge to move it."
+        intro="A thin line at the screen’s edge. Point at it for Arrange and more; drag it to move it."
       >
         <Toggle
           label="Show the quick menu"
@@ -172,7 +171,7 @@ export function SettingsPane({
       <Section title="Switching workspaces">
         <Toggle
           label="Minimise the previous workspace’s windows"
-          description="Windows the new workspace does not use are minimised, so only its windows are on screen."
+          description="Only the new workspace’s windows stay on screen."
           checked={settings.switching.minimize_others}
           onChange={(on) => {
             save({ ...settings, switching: { ...settings.switching, minimize_others: on } });
@@ -180,7 +179,7 @@ export function SettingsPane({
         />
         <Toggle
           label="Start apps that are not open"
-          description="When a workspace opens, apps it needs are started, and their windows go to their places."
+          description="Its closed apps open again."
           checked={settings.switching.launch_missing}
           onChange={(on) => {
             save({ ...settings, switching: { ...settings.switching, launch_missing: on } });
@@ -190,7 +189,7 @@ export function SettingsPane({
 
       <Section title="Tabs">
         <Choice
-          label="Tabs not shown"
+          label="Hidden tabs"
           value={settings.tab_hiding === 'minimize' ? 'minimize' : 'auto'}
           options={HIDING}
           onChange={(v) => {

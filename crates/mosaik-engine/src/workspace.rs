@@ -869,6 +869,7 @@ impl Engine {
             return;
         };
         let style = self.style();
+        self.acted();
         let Some(active) = &mut self.active else { return };
         let launched = active.launching.remove(pos);
         active.windows.insert(launched.slot.clone(), h);

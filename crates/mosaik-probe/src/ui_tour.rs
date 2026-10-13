@@ -516,6 +516,16 @@ impl Tour {
         // Each page, in the theme Windows uses, with the keyboard path.
         self.nav("Workspaces")?;
         self.page("workspaces", true)?;
+        // A workspace's apps, and the windows on screen it could take: shown, none added.
+        let apps = self.find("button", &format!("Apps of “{WORKSPACE}”"))?;
+        self.click(&apps)?;
+        self.page("workspaces-apps", false)?;
+        if let Ok(add) = self.find("button", &format!("Add a window to “{WORKSPACE}”")) {
+            self.click(&add)?;
+            self.page("workspaces-apps-add", false)?;
+            Self::press(VK_ESCAPE.0);
+        }
+        self.click(&apps)?;
         self.zones()?;
         self.page("zones", true)?;
         self.nav("Settings")?;

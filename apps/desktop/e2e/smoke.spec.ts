@@ -45,16 +45,14 @@ async function pictureStaysClear(page: Page, height: number) {
   await expect(page.getByRole('button', { name: 'Arrange windows' })).toBeFocused();
   // The last layout, reached by the keyboard, shows in the picture.
   await page.getByRole('button', { name: 'Whole screen' }).focus();
-  await expect(page.getByText('With Whole screen: 3 windows as tabs')).toBeVisible();
+  await expect(page.getByText('With Whole screen: 3 windows minimized')).toBeVisible();
 }
 
 test('the home page shows the screen and the layouts, and is accessible', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Tidy your screen', level: 1 })).toBeVisible();
   await expect(page.getByText('Your main screen now: 4 windows')).toBeVisible();
-  await expect(
-    page.getByRole('region', { name: 'Or pick a layout for your main screen' }).getByRole('button'),
-  ).toHaveCount(10);
+  await expect(page.getByRole('region', { name: 'Layouts' }).getByRole('button')).toHaveCount(10);
   await accessible(page);
   await windowDoesNotScroll(page);
 });
@@ -72,15 +70,33 @@ test('workspaces are listed and the page is accessible', async ({ page }) => {
   await windowDoesNotScroll(page);
 });
 
+test('a workspace’s apps are listed, and can be moved, removed and added', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+  await page.getByRole('button', { name: 'Apps of “Ship the release”' }).click();
+  const apps = page.getByRole('list', { name: 'Apps of “Ship the release”' });
+  await expect(apps.getByRole('listitem')).toHaveCount(4);
+  await page.getByRole('combobox', { name: 'Zone of Slack' }).selectOption({ label: 'Browser' });
+  await expect(page.getByText('Slack goes in Browser.')).toBeVisible();
+  await page.getByRole('button', { name: 'Remove Slack' }).click();
+  await expect(apps.getByRole('listitem')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Add a window to “Ship the release”' }).click();
+  await page.getByRole('button', { name: /^Slack/ }).click();
+  await expect(page.getByText('Slack added.')).toBeVisible();
+  await expect(apps.getByRole('listitem')).toHaveCount(4);
+  await accessible(page);
+  await windowDoesNotScroll(page);
+});
+
 test('a layout shows where the windows would go, then puts them there, and Undo puts them back', async ({ page }) => {
   await page.goto('/');
   const picture = page.getByRole('img', { name: /^Your main screen now/ });
   await expect(picture).toBeVisible();
   await page.getByRole('button', { name: 'Thirds' }).hover();
-  await expect(page.getByText('With Thirds: 1 window as a tab')).toBeVisible();
+  await expect(page.getByText('With Thirds: 1 window minimized')).toBeVisible();
   await expect(page.getByRole('img', { name: /Visual Studio Code in Code/ })).toBeVisible();
   await page.getByRole('button', { name: 'Thirds' }).click();
-  await expect(page.getByText('Arranged 4 windows in the “Thirds” layout; 1 window as a tab.')).toBeVisible();
+  await expect(page.getByText('Arranged 3 windows in the “Thirds” layout; 1 window minimized.')).toBeVisible();
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByText('Windows are back where they were.')).toBeVisible();
   await accessible(page);

@@ -72,6 +72,27 @@ pub fn apps_use_light_theme() -> bool {
     status.is_err() || value != 0
 }
 
+/// Windows shows animations (Settings, Accessibility, Visual effects, Animation effects): when
+/// they are off, Mosaïk's own drawing changes at once too.
+pub fn animations() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    use windows::core::BOOL;
+    let mut on = BOOL(1);
+    // SAFETY: SPI_GETCLIENTAREAANIMATION fills one BOOL.
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some((&raw mut on).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    }
+    .is_ok();
+    !ok || on.as_bool()
+}
+
 /// A high-contrast theme is on (Settings, Accessibility, Contrast themes): Mosaïk's own drawing
 /// uses Windows' colours then.
 pub fn high_contrast() -> bool {

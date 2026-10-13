@@ -911,6 +911,7 @@ impl Engine {
         }
         let facts = self.scanner.facts(window::hwnd(h))?;
         let path = self.scanner.process_path(facts.pid);
+        let label = self.apps.label(&facts, path.as_deref());
         let id = {
             let active = self.active.as_ref()?;
             let ws = self.file.workspaces.iter_mut().find(|w| w.id == active.id)?;
@@ -925,6 +926,7 @@ impl Engine {
                 0,
                 Slot {
                     id: id.clone(),
+                    label: Some(label),
                     app: app_match(&facts),
                     launch: apps::launch_for(&facts, path.as_deref()),
                     place,
@@ -1070,6 +1072,8 @@ impl Engine {
     /// Mouse input on tab strips: a click shows a tab, a drag along the strip reorders it, a
     /// drag away from the strip pulls it out (zones show, as when dragging a window).
     pub(crate) fn on_bar_inputs(&mut self, inputs: Vec<BarInput>) {
+        // A click on a tab shows another window in the group's place.
+        self.acted();
         for input in inputs {
             match input {
                 BarInput::Down { bar, at } => {

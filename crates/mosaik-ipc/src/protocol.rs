@@ -13,7 +13,9 @@ use thiserror::Error;
 
 /// Raised when commands or replies change; a client may be older than Mosaïk, never newer.
 /// 4: `arrange` takes a layout, and `preview_arrange` shows what it would do.
-pub const PROTOCOL_VERSION: u32 = 4;
+/// 5: a workspace's apps (`apps`, `add_app`, `move_app`, `remove_app`); Arrange minimises the
+/// windows it has no zone for, rather than making them tabs.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -51,8 +53,8 @@ pub enum Command {
     Rescue,
     /// Put every window on screen in the zone that suits it: the open workspace's zones, or new
     /// ones on a monitor without zones (a new workspace when none is open). Windows left over
-    /// become tabs. With `preset` (a layout's id: "halves", "thirds"...), the main monitor's
-    /// zones make way for that layout first.
+    /// once every zone has one are minimised. With `preset` (a layout's id: "halves",
+    /// "thirds"...), the main monitor's zones make way for that layout first.
     Arrange {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         preset: Option<String>,
@@ -107,6 +109,31 @@ pub enum Command {
     SetWorkspaceHotkey {
         workspace: String,
         hotkey: Option<String>,
+    },
+    /// A workspace's apps, its zones, and the windows on screen it could take.
+    Apps {
+        workspace: String,
+    },
+    /// Adds the app of `window` (on screen now) to a workspace, in `zone`; without one, in its
+    /// first empty zone, else where the window is. In the open workspace, the window goes there
+    /// at once. Answers with `apps`.
+    AddApp {
+        workspace: String,
+        window: WindowHandle,
+        #[serde(default)]
+        zone: Option<ZoneId>,
+    },
+    /// Puts an app of a workspace in one of its zones (a tab leaves its group). In the open
+    /// workspace, its window moves there at once. Answers with `apps`.
+    MoveApp {
+        workspace: String,
+        app: SlotId,
+        zone: ZoneId,
+    },
+    /// Takes an app out of a workspace; its window stays where it is. Answers with `apps`.
+    RemoveApp {
+        workspace: String,
+        app: SlotId,
     },
     /// While the interface records a shortcut, Mosaïk's own shortcuts let go, so pressing one
     /// reaches the recorder instead of opening the switcher. They come back with `hold: false`,
@@ -169,6 +196,46 @@ pub enum Reply {
     },
     /// What `preview_arrange` found.
     Preview(Box<ArrangePreview>),
+    /// What `apps` found (also the answer to `add_app`, `move_app` and `remove_app`).
+    Apps(Box<WorkspaceApps>),
+}
+
+/// A workspace's apps (front to back), its zones, and the windows on screen it could take.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceApps {
+    pub workspace: WorkspaceId,
+    pub name: String,
+    pub apps: Vec<WorkspaceApp>,
+    pub zones: Vec<AppZone>,
+    pub windows: Vec<OpenWindow>,
+}
+
+/// An app of a workspace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceApp {
+    pub id: SlotId,
+    /// What to call it ("Visual Studio Code").
+    pub label: String,
+    /// The zone it goes in (a tab: its group's), if any.
+    pub zone: Option<ZoneId>,
+    /// It is a tab of a group.
+    pub tab: bool,
+}
+
+/// A zone an app can go in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppZone {
+    pub id: ZoneId,
+    pub name: String,
+    pub color: ZoneColor,
+}
+
+/// A window on screen that is not part of the workspace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenWindow {
+    pub window: WindowHandle,
+    pub label: String,
+    pub title: String,
 }
 
 /// What Arrange would do on the main monitor, in screen pixels.
@@ -180,7 +247,7 @@ pub struct ArrangePreview {
     pub zones: Vec<PreviewZone>,
     /// Its windows, front to back.
     pub windows: Vec<PreviewWindow>,
-    /// Windows on the other monitors, which Arrange puts in zones there.
+    /// Windows on the other monitors, which Arrange arranges there.
     pub elsewhere: u32,
 }
 
@@ -197,10 +264,10 @@ pub struct PreviewWindow {
     pub label: String,
     /// Where its frame is now.
     pub now: Rect,
-    /// Where it would go (`None`: it stays where it is).
+    /// Where it would go (`None`: it stays where it is, or is minimised).
     pub then: Option<Rect>,
-    /// It would be a tab of the window already there.
-    pub tab: bool,
+    /// It would be minimised: every zone has a window.
+    pub minimized: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -547,7 +614,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":4,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":5,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -556,13 +623,13 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":4,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":5,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
     }
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":5,"id":1,"cmd":"state"}"#).unwrap_err();
-        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 5, server: 4 });
+        let err = decode_request(br#"{"v":6,"id":1,"cmd":"state"}"#).unwrap_err();
+        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 6, server: 5 });
         // Older clients are understood.
         assert!(decode_request(br#"{"v":1,"id":1,"cmd":"state"}"#).is_ok());
         assert!(err.to_string().contains("update Mosaïk"));
@@ -775,6 +842,23 @@ mod wire {
                 hotkey: Some("Win+Alt+J".into()),
             },
             Command::HoldHotkeys { hold: true },
+            Command::Apps {
+                workspace: "ship".into(),
+            },
+            Command::AddApp {
+                workspace: "ship".into(),
+                window: WindowHandle(0x2_04F2),
+                zone: Some(ZoneId::new("z2")),
+            },
+            Command::MoveApp {
+                workspace: "ship".into(),
+                app: SlotId("s1".into()),
+                zone: ZoneId::new("z1"),
+            },
+            Command::RemoveApp {
+                workspace: "ship".into(),
+                app: SlotId("s2".into()),
+            },
         ];
         let replies = vec![
             Reply::Hello {
@@ -846,22 +930,50 @@ mod wire {
                         label: "Visual Studio Code".into(),
                         now: Rect::new(120, 80, 1100, 760),
                         then: Some(Rect::new(2, 2, 958, 1030)),
-                        tab: false,
+                        minimized: false,
                     },
                     PreviewWindow {
                         label: "Google Chrome".into(),
                         now: Rect::new(700, 200, 1800, 980),
                         then: Some(Rect::new(962, 2, 1918, 1030)),
-                        tab: false,
+                        minimized: false,
                     },
                     PreviewWindow {
                         label: "Microsoft Edge".into(),
                         now: Rect::new(300, 300, 1200, 900),
-                        then: Some(Rect::new(962, 2, 1918, 1030)),
-                        tab: true,
+                        then: None,
+                        minimized: true,
                     },
                 ],
                 elsewhere: 1,
+            })),
+            Reply::Apps(Box::new(WorkspaceApps {
+                workspace: WorkspaceId("ship".into()),
+                name: "Ship the release".into(),
+                apps: vec![
+                    WorkspaceApp {
+                        id: SlotId("s1".into()),
+                        label: "Visual Studio Code".into(),
+                        zone: Some(ZoneId::new("z1")),
+                        tab: false,
+                    },
+                    WorkspaceApp {
+                        id: SlotId("s2".into()),
+                        label: "Windows Terminal".into(),
+                        zone: None,
+                        tab: false,
+                    },
+                ],
+                zones: vec![AppZone {
+                    id: ZoneId::new("z1"),
+                    name: "Code".into(),
+                    color: ZoneColor::Lapis,
+                }],
+                windows: vec![OpenWindow {
+                    window: WindowHandle(0x2_04F2),
+                    label: "Google Chrome".into(),
+                    title: "Release notes - Google Chrome".into(),
+                }],
             })),
         ];
         serde_json::json!({ "commands": commands, "replies": replies })

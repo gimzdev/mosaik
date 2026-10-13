@@ -399,10 +399,9 @@ impl TabBar {
                 },
                 strip::Metrics::at(s),
             );
-            let layout = match place {
-                BarPlace::Band => layout,
-                BarPlace::TitleBar => layout.align_right(f(band.width())),
-            };
+            // Against the right end, in a title bar or a band: in the same place on every
+            // window, next to its buttons.
+            let layout = layout.align_right(f(band.width()));
             let panel = if look.dark {
                 hex(0x1B1E26, 0.96)
             } else {

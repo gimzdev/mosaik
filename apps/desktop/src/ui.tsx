@@ -299,11 +299,26 @@ export function MenuButton({
   label,
   children,
   items,
+  align = 'right',
+  quiet = false,
 }: {
   /** The button's full name for screen readers ("More for “Brand”"). */
   label: string;
   children: ReactNode;
-  items: readonly { label: string; onSelect: () => void; danger?: boolean; icon?: ReactNode }[];
+  items: readonly {
+    label: string;
+    /** A second line, quieter ("Release notes - Google Chrome"). */
+    detail?: string | undefined;
+    /** Tells items with the same label apart. */
+    key?: string;
+    onSelect: () => void;
+    danger?: boolean;
+    icon?: ReactNode;
+  }[];
+  /** Which edge of the button the list lines up with. */
+  align?: 'left' | 'right';
+  /** The button in the accent colour, like a quiet button, rather than muted. */
+  quiet?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -357,18 +372,22 @@ export function MenuButton({
         onClick={() => {
           setOpen((o) => !o);
         }}
-        className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg px-2 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)]"
+        className={`inline-flex min-h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg px-2 text-small font-semibold hover:bg-[var(--hover)] ${
+          quiet ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
+        }`}
       >
         {children}
       </button>
       {open ? (
         <div
           id={id}
-          className="absolute right-0 z-20 mt-1 flex min-w-44 flex-col rounded-xl border border-[var(--line)] bg-[var(--surface)] p-1 shadow-lg"
+          className={`absolute z-20 mt-1 flex max-h-72 w-max max-w-80 min-w-44 flex-col overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--surface)] p-1 shadow-lg ${
+            align === 'left' ? 'left-0' : 'right-0'
+          }`}
         >
           {items.map((item) => (
             <button
-              key={item.label}
+              key={item.key ?? item.label}
               type="button"
               data-item
               onClick={() => {
@@ -380,7 +399,14 @@ export function MenuButton({
               }`}
             >
               {item.icon}
-              {item.label}
+              {item.detail ? (
+                <span className="flex min-w-0 flex-col">
+                  <span>{item.label}</span>
+                  <span className="truncate text-caption font-normal text-[var(--muted)]">{item.detail}</span>
+                </span>
+              ) : (
+                item.label
+              )}
             </button>
           ))}
         </div>

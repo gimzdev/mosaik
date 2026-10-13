@@ -42,7 +42,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.3.0"
+MK_VERSION="1.4.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -300,7 +300,7 @@ export default function ConditionsPage() {
 __MK_EOF__
 put app/download/page.tsx <<'__MK_EOF__'
 import type { Metadata } from 'next';
-import { Check, DownloadButton, Keys, PlatformList } from '@/components/ui';
+import { DownloadButton } from '@/components/ui';
 import { site } from '@/lib/site';
 
 export const metadata: Metadata = {
@@ -308,36 +308,14 @@ export const metadata: Metadata = {
   description: 'Download Mosaïk for Windows 11 and Windows 10: free, installed and kept up to date by the Microsoft Store.',
 };
 
-/* The same three steps as the welcome page in the app. */
-const STEPS: [string, React.ReactNode][] = [
-  ['Arrange', 'Open the apps of one project. On Mosaïk’s home page, click Arrange windows, or pick a layout: every window snaps into its place.'],
-  ['Keep', 'Mosaïk remembers the arrangement as a workspace. Each zone wears its own colour.'],
-  [
-    'Come back',
-    <>
-      Press <Keys k="Win Alt Space" /> and pick a workspace: its windows return, and closed apps open again.
-    </>,
-  ],
-];
-
-const INSIDE = [
-  'Window zones and saved layouts: see where your windows will go, then arrange them in one click',
-  'Tabs for any app',
-  'One-click switching from the tray, the screen’s edge or the keyboard',
-  'Multiple monitors, including different scaling',
-  'Layouts stored on your computer only',
-];
-
 const NOTES: [string, React.ReactNode][] = [
+  ['Requirements', 'Windows 11, or Windows 10 version 22H2, on a 64-bit (x64) PC.'],
+  ['Privacy', 'Mosaïk never connects to the internet. Your layouts stay on your PC.'],
+  ['Uninstall', 'Settings, Apps, Installed apps, then Uninstall next to Mosaïk.'],
   [
-    'Why the Microsoft Store',
-    'Windows trusts what the Store installs, so there is no warning about an unknown publisher, and the Store keeps Mosaïk up to date. Mosaïk itself never connects to the internet.',
-  ],
-  ['Uninstalling', 'Settings, Apps, Installed apps, then Uninstall next to Mosaïk. Windows removes the app and the layouts it saved.'],
-  [
-    'The source',
+    'Source',
     <>
-      Every line is on{' '}
+      On{' '}
       <a href={site.repo} rel="noopener noreferrer" className="font-semibold text-lapis underline underline-offset-4">
         GitHub
       </a>
@@ -346,73 +324,25 @@ const NOTES: [string, React.ReactNode][] = [
   ],
 ];
 
-const Row = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <section className="mt-20 grid gap-10 border-t border-grout pt-14 lg:grid-cols-12">
-    <h2 className="h2 lg:col-span-5">{title}</h2>
-    <div className="lg:col-span-7">{children}</div>
-  </section>
-);
-
 export default function DownloadPage() {
   return (
     <div className="page-x pb-24 pt-32 sm:pt-40">
-      <div className="max-w-[calc(100%*8/12)] max-lg:max-w-none">
-        <p className="mb-5 inline-flex items-center gap-2.5 rounded-full border border-grout bg-paper px-4 py-1.5 text-sm font-semibold">
-          <span className="h-2.5 w-2.5 rounded-full bg-verdigris" aria-hidden="true" />
-          Free, for Windows 11 and Windows 10
-        </p>
-        <h1 className="h1">Download Mosaïk for Windows.</h1>
-        <p className="mt-6 max-w-xl text-lg text-slate">One click gets Microsoft’s installer. It installs Mosaïk from the Microsoft Store, then starts it.</p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <DownloadButton className="btn btn-lapis" />
-          <a href={site.storePage} rel="noopener noreferrer" className="btn btn-line">
-            See it in the Microsoft Store
-          </a>
-        </div>
-        <p className="mt-4 text-sm text-slate">Windows 11, or Windows 10 version 22H2, on a 64-bit (x64) PC.</p>
+      <h1 className="h1">Download Mosaïk for Windows.</h1>
+      <p className="mt-5 max-w-xl text-lg text-slate">Free. Installed from the Microsoft Store, which keeps it up to date.</p>
+      <div className="mt-8 flex flex-wrap gap-3">
+        <DownloadButton className="btn btn-lapis" />
+        <a href={site.storePage} rel="noopener noreferrer" className="btn btn-line">
+          See it in the Microsoft Store
+        </a>
       </div>
-
-      <Row title="Your first workspace in three steps">
-        <ol className="space-y-7">
-          {STEPS.map(([title, body], i) => (
-            <li key={title} className="flex gap-4">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink font-display font-bold text-paper" aria-hidden="true">
-                {i + 1}
-              </span>
-              <div>
-                <h3 className="font-display text-xl font-bold tracking-[-0.02em]">{title}</h3>
-                <p className="mt-1 text-[17px] leading-relaxed text-slate">{body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </Row>
-
-      <Row title="What’s inside">
-        <ul className="space-y-3.5 text-[17px]">
-          {INSIDE.map((t) => (
-            <Check key={t} s={17} top={5}>
-              {t}
-            </Check>
-          ))}
-        </ul>
-      </Row>
-
-      <Row title="Good to know">
-        <dl className="space-y-6">
-          {NOTES.map(([t, d]) => (
-            <div key={t}>
-              <dt className="font-semibold">{t}</dt>
-              <dd className="mt-1 text-[17px] leading-relaxed text-slate">{d}</dd>
-            </div>
-          ))}
-        </dl>
-      </Row>
-
-      <section className="mt-20 border-t border-grout pt-14">
-        <h2 className="h2 mb-10">Platforms</h2>
-        <PlatformList />
-      </section>
+      <dl className="mt-16 grid max-w-3xl gap-x-10 gap-y-5 border-t border-grout pt-10 sm:grid-cols-[9rem_1fr]">
+        {NOTES.map(([t, d]) => (
+          <div key={t} className="contents">
+            <dt className="font-semibold">{t}</dt>
+            <dd className="-mt-4 text-[16px] leading-relaxed text-slate sm:mt-0">{d}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
@@ -591,9 +521,8 @@ export default function NotFound() {
 __MK_EOF__
 put app/page.tsx <<'__MK_EOF__'
 import Link from 'next/link';
-import { DeskThumb, Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
+import { Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
 import { Check, DownloadButton, PlatformList } from '@/components/ui';
-import { WORKSPACES } from '@/lib/data';
 import { site } from '@/lib/site';
 
 const FEATURES = [
@@ -615,7 +544,7 @@ const FEATURES = [
     id: 'layouts',
     title: 'Switch projects, not just windows',
     body: 'Save a workspace once and bring it back whenever you need it. Positions, sizes and tabs return together, so changing task takes a keystroke instead of ten minutes of rearranging.',
-    points: ['One workspace per project, role or mood', 'Saved on your computer, never in a cloud', 'Switch from the tray, the screen’s edge, or press Win+Alt+Space'],
+    points: ['Add or remove a workspace’s apps in one click', 'Saved on your computer, never in a cloud', 'Switch from the tray, the screen’s edge, or press Win+Alt+Space'],
     Art: SwitcherArt,
   },
 ];
@@ -678,26 +607,6 @@ export default function Home() {
                   <Art />
                 </div>
               </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="people" className="scroll-mt-16 border-t border-grout py-20 md:py-28">
-        <div className="page-x">
-          <Intro title="One desktop, many kinds of work.">A workspace is whatever you need open together. These four are the ones we kept reaching for.</Intro>
-          <div className="mt-12 grid gap-x-8 gap-y-12 sm:grid-cols-2">
-            {WORKSPACES.map((w, i) => (
-              <div key={w.id}>
-                <div className="overflow-hidden rounded-[16px] ring-1 ring-black/10">
-                  <DeskThumb index={i} />
-                </div>
-                <div className="mt-4 flex items-baseline justify-between gap-4">
-                  <h3 className="font-display text-[1.35rem] font-bold tracking-[-0.02em]">{w.name}</h3>
-                  <p className="shrink-0 text-sm font-semibold text-lapis">{w.role}</p>
-                </div>
-                <p className="mt-1.5 max-w-md text-[15.5px] leading-relaxed text-slate">{w.about}</p>
-              </div>
             ))}
           </div>
         </div>
@@ -1632,7 +1541,7 @@ put components/desk.tsx <<'__MK_EOF__'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppBody, AppWindow, EditorApp, ZoneFrame } from '@/components/apps';
 import { Icon } from '@/components/ui';
-import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
+import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
 const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
@@ -1995,24 +1904,6 @@ export function SwitcherArt() {
     </div>
   );
 }
-
-/** A whole workspace as a still desktop, for thumbnails. */
-export function DeskThumb({ index }: { index: number }) {
-  return (
-    <Scaled className="bg-ink">
-      <Wallpaper />
-      <Taskbar />
-      {WORKSPACES[index].windows.map((w) => {
-        const b = slotBox(w.slot, DESK_H);
-        return (
-          <div key={w.id} className="absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height }}>
-            <AppWindow win={w} />
-          </div>
-        );
-      })}
-    </Scaled>
-  );
-}
 __MK_EOF__
 put components/header.tsx <<'__MK_EOF__'
 'use client';
@@ -2022,7 +1913,6 @@ import { DownloadButton, Wordmark } from '@/components/ui';
 
 const NAV = [
   ['/#how', 'How it works'],
-  ['/#people', 'Who it’s for'],
   ['/#platforms', 'Platforms'],
 ];
 
@@ -2219,7 +2109,7 @@ export type Kind = 'editor' | 'terminal' | 'browser' | 'chat' | 'design' | 'note
 /** [column, row, columns, rows] on a 12 x 8 grid */
 export type Slot = [number, number, number, number];
 export interface Win { id: string; kind: Kind; variant?: string; tag: string; zone: Zone; slot: Slot }
-export interface Workspace { id: string; label: string; name: string; role: string; summary: string; about: string; windows: Win[] }
+export interface Workspace { id: string; label: string; name: string; summary: string; windows: Win[] }
 export interface Rect { left: number; top: number; width: number; height: number }
 
 export const ZONE: Record<Zone, { bg: string; fg: string }> = {
@@ -2237,9 +2127,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'release',
     label: 'Release',
     name: 'Ship the release',
-    role: 'Developers',
     summary: 'Editor, terminal, pull request and team chat, switched as one.',
-    about: 'Editor, terminal, pull request and team chat, all in place the moment you pick up a task.',
     windows: [
       w('ed', 'editor', 'Code', 'lapis', [0, 0, 7, 5]),
       w('tm', 'terminal', 'Terminal', 'verdigris', [0, 5, 7, 3]),
@@ -2251,9 +2139,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'brand',
     label: 'Brand',
     name: 'Brand refresh',
-    role: 'Designers',
     summary: 'Canvas, references, the brief and the client thread, side by side.',
-    about: 'The canvas, your references, the brief and the client thread, side by side instead of buried.',
     windows: [
       w('cv', 'design', 'Canvas', 'lapis', [0, 0, 8, 8]),
       w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 3], 'refs'),
@@ -2265,9 +2151,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'thesis',
     label: 'Thesis',
     name: 'Thesis, chapter 3',
-    role: 'Researchers',
     summary: 'The paper you are reading, the draft you are writing and the data behind both.',
-    about: 'The paper you are reading, the draft you are writing and the data behind both, one switch from the next project.',
     windows: [
       w('pp', 'paper', 'Reading', 'madder', [0, 0, 4, 8]),
       w('dr', 'notes', 'Draft', 'verdigris', [4, 0, 4, 8], 'draft'),
@@ -2279,9 +2163,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'stream',
     label: 'Stream',
     name: 'Friday stream',
-    role: 'Streamers',
     summary: 'Broadcast software, live chat and your dashboards, ready before you go live.',
-    about: 'Broadcast software, live chat and dashboards, arranged before you go live and again for the next show.',
     windows: [
       w('ob', 'stream', 'Broadcast', 'lapis', [0, 0, 8, 5]),
       w('lc', 'chat', 'Chat', 'madder', [8, 0, 4, 8], 'live'),

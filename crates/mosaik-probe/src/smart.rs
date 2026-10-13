@@ -10,8 +10,11 @@
 //! 3. Arrange: windows with no workspace open go into a new one (a window of a fixed size keeps
 //!    it, centred across its zone and at its top); Undo puts everything back; arranging again
 //!    moves nothing, and the home page's picture shows nothing moving; a window more than the
-//!    zones joins another as a tab, and Undo takes it out; a layout picked (thirds) shows where
-//!    each window would go without moving any, puts them there, and Undo puts back the zones.
+//!    zones is minimised, and Undo brings it back; a layout picked (thirds) shows where
+//!    each window would go without moving any, puts them there, and Undo puts back the zones;
+//!    brought to the front one after another, as Alt+Tab does, no window moves; the open
+//!    workspace's apps are listed, and a window added to a zone, moved to another and taken out
+//!    goes where it is told.
 //! 4. The quick menu: its handle on the right edge, the menu opening when the pointer rests on
 //!    it without taking the keyboard, Arrange from it, closing a moment after the pointer
 //!    leaves, the handle dragged along its edge and kept there, and out of the way of a game in
@@ -28,7 +31,9 @@ use mosaik_core::geometry::{Point, Rect};
 use mosaik_core::presets::Preset;
 use mosaik_core::zone::ZoneId;
 use mosaik_engine::{Config, Engine, Scope, UiEvent, UiSink};
-use mosaik_ipc::protocol::{ArrangePreview, Command, PreviewWindow, QuickMenuState, Reply, StateSnapshot};
+use mosaik_ipc::protocol::{
+    ArrangePreview, Command, PreviewWindow, QuickMenuState, Reply, StateSnapshot, WorkspaceApps,
+};
 use mosaik_win::events::pump_until;
 use mosaik_win::input::{self, Chord, LeftButton};
 use mosaik_win::place::{edge_error, move_frame};
@@ -720,8 +725,8 @@ fn arrange(
         }),
     );
 
-    // 3d. A fifth window for four zones: it joins a window as a tab; Undo takes it out, back
-    // where it was.
+    // 3d. A fifth window for four zones: it is minimised (it stays in the taskbar), the others
+    // stay; Undo brings it back where it was.
     let e = open(
         opened,
         "Probe E",
@@ -736,12 +741,8 @@ fn arrange(
     pump_until(400, || false);
     let e_before = frame_rect(e).ok_or("Probe E vanished")?;
     let fifth = done(&ask(engine, Command::Arrange { preset: None }).0)?;
-    let st = settled(engine)?;
-    let strip = st
-        .tab_strips
-        .iter()
-        .find(|s| s.tabs.iter().any(|t| t.window == handle(e)));
-    let tabs = strip.map_or(0, |s| s.tabs.len());
+    let _ = settled(engine)?;
+    let e_minimized = mosaik_win::window::geometry(e).is_some_and(|g| g.minimized);
     let others_kept = most_moved(&frames(&w), &second);
     let undo = done(&ask(engine, Command::UndoArrange).0)?;
     let st = settled(engine)?;
@@ -754,23 +755,184 @@ fn arrange(
         "fifth_window".into(),
         json!({
             "message": fifth,
-            "tabs_in_its_strip": tabs,
+            "minimized": e_minimized,
             "others_moved_px": others_kept,
             "undo": undo,
             "back_px": e_back,
             "still_a_tab": e_grouped,
             "shown": e_shown,
-            "ok": fifth.contains("; 1 window as a tab.") && tabs == 2 && others_kept <= SLACK
+            "ok": fifth.contains("; 1 window minimized.") && e_minimized && others_kept <= SLACK
                 && e_back.is_some_and(|b| b <= SLACK) && !e_grouped && e_shown,
         }),
     );
     crate::apps::close(e);
     pump_until(600, || false);
     out.insert("layout".into(), layout(engine, styles, work, &w)?);
+    out.insert("to_front".into(), to_front(engine, &w)?);
+    out.insert("apps".into(), apps(engine, styles, work, opened, &w)?);
     *arranged = w;
     let ok = out.values().all(|v| v["ok"] == json!(true));
     out.insert("ok".into(), json!(ok));
     Ok(Value::Object(out))
+}
+
+/// 3f. The windows in their zones brought to the front one after the other, as Alt+Tab does,
+/// once Mosaïk is done placing them: none moves or changes size (the owner: windows were
+/// resized when brought forward).
+fn to_front(engine: &Engine, w: &[HWND]) -> Result<Value, String> {
+    let _ = settled(engine)?;
+    // Past the moment after an action when title bars may still move windows.
+    pump_until(3500, || false);
+    let before = frames(w);
+    let mut brought = 0;
+    for _ in 0..2 {
+        for h in w {
+            if give_keyboard(*h) {
+                brought += 1;
+            }
+            pump_until(600, || false);
+        }
+    }
+    // Their title bars are read again as they come forward: time for that.
+    pump_until(1500, || false);
+    let moved = most_moved(&before, &frames(w));
+    Ok(json!({
+        "brought_forward": brought,
+        "most_moved_px": moved,
+        "ok": brought > 0 && moved <= SLACK,
+    }))
+}
+
+/// A workspace's apps (`apps`), as the Workspaces page asks for them.
+fn apps_of(engine: &Engine, command: Command) -> Result<WorkspaceApps, String> {
+    match engine.request(command, TIMEOUT) {
+        Reply::Apps(a) => Ok(*a),
+        other => Err(format!("apps: {other:?}")),
+    }
+}
+
+/// 3g. The open workspace's apps, edited as on the Workspaces page: its four windows are listed
+/// with their zones and a new window is offered; added to a zone, the window goes into it at
+/// once; moved to another zone, it follows; taken out, it stays where it is. The workspace's
+/// own windows do not move meanwhile.
+fn apps(
+    engine: &Engine,
+    styles: Styles,
+    work: Rect,
+    opened: &mut Vec<Opened>,
+    w: &[HWND],
+) -> Result<Value, String> {
+    let st = settled(engine)?;
+    let ws = st
+        .active_workspace
+        .clone()
+        .ok_or("no workspace open for its apps")?;
+    let zs = zones(engine, &ws.0, work)?;
+    let g = open(
+        opened,
+        "Probe G",
+        Rect::from_origin_size(work.left + 80, work.top + 120, 520, 380),
+        " --topmost",
+    )?;
+    pump_until(500, || false);
+    let before = frames(w);
+    let g_handle = handle(g);
+    let workspace = || ws.0.clone();
+    let listed = apps_of(
+        engine,
+        Command::Apps {
+            workspace: workspace(),
+        },
+    )?;
+    let zoned = listed.apps.iter().filter(|a| a.zone.is_some()).count();
+    let offered = listed.windows.iter().any(|x| x.window == g_handle);
+    let own_offered = w
+        .iter()
+        .any(|h| listed.windows.iter().any(|x| x.window == handle(*h)));
+    let zone_a = zone_of(&st, &zs, w[0])
+        .and_then(|r| zs.iter().find(|(_, z)| *z == r))
+        .map(|(id, _)| id.clone());
+    let zone_b = zone_of(&st, &zs, w[1])
+        .and_then(|r| zs.iter().find(|(_, z)| *z == r))
+        .map(|(id, _)| id.clone());
+    let (Some(zone_a), Some(zone_b)) = (zone_a, zone_b) else {
+        return Err("the arranged windows are in no zone".into());
+    };
+
+    let start = Instant::now();
+    let added = apps_of(
+        engine,
+        Command::AddApp {
+            workspace: workspace(),
+            window: g_handle,
+            zone: Some(zone_a.clone()),
+        },
+    )?;
+    let add_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let st = settled(engine)?;
+    let new_app = added
+        .apps
+        .iter()
+        .find(|a| !listed.apps.iter().any(|b| b.id == a.id))
+        .cloned();
+    let in_a = new_app.as_ref().is_some_and(|a| a.zone.as_ref() == Some(&zone_a));
+    let fit_a = fit(&st, &zs, styles, &[g]);
+
+    let moved = match &new_app {
+        Some(app) => Some(apps_of(
+            engine,
+            Command::MoveApp {
+                workspace: workspace(),
+                app: app.id.clone(),
+                zone: zone_b.clone(),
+            },
+        )?),
+        None => None,
+    };
+    let st = settled(engine)?;
+    let in_b = moved.as_ref().zip(new_app.as_ref()).is_some_and(|(m, app)| {
+        m.apps
+            .iter()
+            .any(|a| a.id == app.id && a.zone.as_ref() == Some(&zone_b))
+    });
+    let fit_b = fit(&st, &zs, styles, &[g]);
+    let g_in_b = frame_rect(g);
+
+    let removed = match &new_app {
+        Some(app) => Some(apps_of(
+            engine,
+            Command::RemoveApp {
+                workspace: workspace(),
+                app: app.id.clone(),
+            },
+        )?),
+        None => None,
+    };
+    let _ = settled(engine)?;
+    let gone = removed
+        .as_ref()
+        .is_some_and(|r| r.apps.len() == listed.apps.len() && r.windows.iter().any(|x| x.window == g_handle));
+    let stayed = g_in_b.zip(frame_rect(g)).map(|(a, b)| edge_error(a, b));
+    let others_moved = most_moved(&before, &frames(w));
+    crate::apps::close(g);
+    pump_until(500, || false);
+    Ok(json!({
+        "apps": listed.apps.len(),
+        "apps_in_zones": zoned,
+        "new_window_offered": offered,
+        "own_windows_offered": own_offered,
+        "add_ms": add_ms,
+        "added_in_zone": in_a,
+        "added_fit_px": fit_a,
+        "moved_in_zone": in_b,
+        "moved_fit_px": fit_b,
+        "removed": gone,
+        "stayed_px": stayed,
+        "others_moved_px": others_moved,
+        "ok": listed.apps.len() == 4 && zoned == 4 && offered && !own_offered
+            && in_a && all_fit(&fit_a) && in_b && all_fit(&fit_b)
+            && gone && stayed.is_some_and(|d| d <= SLACK) && others_moved <= SLACK,
+    }))
 }
 
 /// What Arrange would do now (`preview_arrange`), with a layout or without.
@@ -788,7 +950,7 @@ fn preview(engine: &Engine, preset: Option<&str>) -> Result<ArrangePreview, Stri
 
 /// 3e. A layout picked on the home page, with the four windows arranged in quarters: the
 /// picture shows the main monitor in thirds and where each window would go, changing nothing;
-/// Arrange puts them there (the window left over as a tab); Undo puts back the zones and the
+/// Arrange puts them there (the window left over minimised); Undo puts back the zones and the
 /// windows.
 fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
     let st = settled(engine)?;
@@ -833,7 +995,7 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
             shown.windows.iter().find(|x| edge_error(x.now, f) <= 1)
         })
         .collect();
-    let tabs_shown = planned.iter().flatten().filter(|x| x.tab).count();
+    let minimized_shown = planned.iter().flatten().filter(|x| x.minimized).count();
     let untouched =
         most_moved(&frames(w), &before) <= SLACK && rects(&zones(engine, &ws.0, work)?) == zones_before;
 
@@ -856,10 +1018,9 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
             let Some(p) = p else {
                 return json!({ "in_picture": false, "ok": false });
             };
-            let state = st.windows.iter().find(|x| x.handle == handle(*h));
-            if p.tab {
-                let grouped = state.is_some_and(|x| x.tab_group.is_some());
-                return json!({ "tab": true, "grouped": grouped, "ok": grouped });
+            if p.minimized {
+                let minimized = mosaik_win::window::geometry(*h).is_some_and(|g| g.minimized);
+                return json!({ "minimized": minimized, "ok": minimized });
             }
             let (Some(then), Some(f)) = (p.then, frame_rect(*h)) else {
                 return json!({ "then": p.then.map(|t| [t.left, t.top, t.right, t.bottom]), "ok": false });
@@ -886,18 +1047,20 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     let st = settled(engine)?;
     let back = most_moved(&frames(w), &before);
     let zones_back = rects(&zones(engine, &ws.0, work)?) == zones_before;
+    // Every window on screen again, none minimised, hidden or in a group.
     let all_shown = w.iter().all(|h| {
         st.windows
             .iter()
             .find(|x| x.handle == handle(*h))
             .is_some_and(|x| x.hidden.is_none() && x.tab_group.is_none())
+            && mosaik_win::window::geometry(*h).is_some_and(|g| !g.minimized)
     });
     Ok(json!({
         "preview_ms": preview_ms,
         "preview_zones": shown_zones,
         "thirds": thirds,
         "preview_windows": shown.windows.len(),
-        "preview_tabs": tabs_shown,
+        "preview_minimized": minimized_shown,
         "elsewhere": shown.elsewhere,
         "preview_changed_nothing": untouched,
         "message": message,
@@ -910,10 +1073,10 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         "all_shown": all_shown,
         "ok": shown_zones == thirds
             && planned.iter().all(Option::is_some)
-            && tabs_shown == 1
+            && minimized_shown == 1
             && untouched
             && message.contains("\u{201c}Thirds\u{201d} layout")
-            && message.contains("1 window as a tab")
+            && message.contains("1 window minimized")
             && got == thirds
             && landed.iter().all(|x| x["ok"] == json!(true))
             && back <= SLACK
@@ -1115,6 +1278,12 @@ fn quick_menu(
 
     // 4b. With a window in front and two windows moved out of their zones, the pointer rests
     // on the handle: the menu opens, and the window in front keeps the keyboard.
+    let ws_name = match engine.request(Command::Workspaces, TIMEOUT) {
+        Reply::Workspaces { workspaces, active } => active
+            .and_then(|a| workspaces.into_iter().find(|w| w.id == a))
+            .map_or_else(|| "No workspace open".to_owned(), |w| w.name),
+        _ => String::new(),
+    };
     let front = w[2];
     let focused = give_keyboard(front);
     for (i, h) in w.iter().take(2).enumerate() {
@@ -1182,7 +1351,11 @@ fn quick_menu(
             "rect": [menu.rect.left, menu.rect.top, menu.rect.right, menu.rect.bottom],
             "front_window_focused_first": focused,
             "front_window_kept_keyboard": kept_keyboard,
-            "ok": rested && labels.first() == Some(&"Arrange windows") && labels.contains(&"Switch workspace")
+            // It opens as soon as the pointer stops on the handle (the owner: "instantly"),
+            // Mosaïk and the workspace on its first line, and no Undo row.
+            "ok": rested && open_ms <= 250 && labels.get(1) == Some(&"Arrange windows")
+                && labels.contains(&"Switch workspace") && !labels.contains(&"Undo arrange")
+                && menu.rows.first().is_some_and(|r| r.label == ws_name)
                 && (!focused || kept_keyboard),
         }),
     );

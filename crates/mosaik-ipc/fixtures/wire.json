@@ -136,12 +136,33 @@
     {
       "cmd": "hold_hotkeys",
       "hold": true
+    },
+    {
+      "cmd": "apps",
+      "workspace": "ship"
+    },
+    {
+      "cmd": "add_app",
+      "window": 132338,
+      "workspace": "ship",
+      "zone": "z2"
+    },
+    {
+      "app": "s1",
+      "cmd": "move_app",
+      "workspace": "ship",
+      "zone": "z1"
+    },
+    {
+      "app": "s2",
+      "cmd": "remove_app",
+      "workspace": "ship"
     }
   ],
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 4,
+      "protocol": 5,
       "reply": "hello"
     },
     {
@@ -268,13 +289,13 @@
       "windows": [
         {
           "label": "Visual Studio Code",
+          "minimized": false,
           "now": {
             "bottom": 760,
             "left": 120,
             "right": 1100,
             "top": 80
           },
-          "tab": false,
           "then": {
             "bottom": 1030,
             "left": 2,
@@ -284,13 +305,13 @@
         },
         {
           "label": "Google Chrome",
+          "minimized": false,
           "now": {
             "bottom": 980,
             "left": 700,
             "right": 1800,
             "top": 200
           },
-          "tab": false,
           "then": {
             "bottom": 1030,
             "left": 962,
@@ -300,19 +321,14 @@
         },
         {
           "label": "Microsoft Edge",
+          "minimized": true,
           "now": {
             "bottom": 900,
             "left": 300,
             "right": 1200,
             "top": 300
           },
-          "tab": true,
-          "then": {
-            "bottom": 1030,
-            "left": 962,
-            "right": 1918,
-            "top": 2
-          }
+          "then": null
         }
       ],
       "work_area": {
@@ -341,6 +357,39 @@
             "right": 1920,
             "top": 0
           }
+        }
+      ]
+    },
+    {
+      "apps": [
+        {
+          "id": "s1",
+          "label": "Visual Studio Code",
+          "tab": false,
+          "zone": "z1"
+        },
+        {
+          "id": "s2",
+          "label": "Windows Terminal",
+          "tab": false,
+          "zone": null
+        }
+      ],
+      "name": "Ship the release",
+      "reply": "apps",
+      "windows": [
+        {
+          "label": "Google Chrome",
+          "title": "Release notes - Google Chrome",
+          "window": 132338
+        }
+      ],
+      "workspace": "ship",
+      "zones": [
+        {
+          "color": "lapis",
+          "id": "z1",
+          "name": "Code"
         }
       ]
     }

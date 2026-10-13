@@ -3,22 +3,24 @@
 //! Each window (or tab group, which goes as one) is scored against each zone, and the best pairs
 //! are taken first, one window per zone:
 //!
+//! - **Where it is.** A window already in a zone of the open workspace stays there, unless the
+//!   zone is named after another app; windows do not change monitors unless a zone on the other
+//!   one is named for them.
 //! - **What the zone is called.** A zone named after the app ("Chrome", "Notepad++") or for its
 //!   kind ("Code", "Browser", "Terminal", "Chat", "Notes"...) draws it; a zone named for another
-//!   kind keeps it out.
-//! - **Where it is.** A window already in a zone, or mostly over one, tends to stay; windows do
-//!   not change monitors unless a zone on the other one is named for them.
+//!   kind keeps it out while another window wants the zone.
 //! - **What matters most.** Editors, browsers and design tools, and the windows used last, get
 //!   the largest zones; chat, terminals and players the smaller ones; a window that cannot be
 //!   resized takes a small zone rather than waste a large one.
 //!
-//! A monitor with windows and no zones gets a preset that suits how many windows it has
-//! ([`Preset::for_windows`]), its zones named after the windows that land in them. Windows left
-//! over once every zone has one become tabs in the zone that suits them best, so nothing is left
-//! lying around. The plan is pure; the engine applies it, and can undo it.
+//! A monitor with windows and no zones gets zones for them ([`zones_for_windows`]): the preset
+//! that suits up to four, a grid for more, as many as the monitor holds well, named after the
+//! windows that land in them. Windows left over take the empty zones on their monitor; once
+//! every zone has one, the rest are minimised, so they stay in the taskbar rather than disappear.
+//! The plan is pure; the engine applies it, and can undo it.
 
 use crate::geometry::{RatioRect, Rect};
-use crate::presets::Preset;
+use crate::presets::{Preset, zones_for_windows};
 
 /// What an app is for, as far as arranging goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -543,8 +545,9 @@ pub enum ZoneRef {
 pub enum Goes {
     /// It fills this zone.
     Zone(ZoneRef),
-    /// It becomes a tab of the unit at this index (which fills a zone).
-    TabOf(usize),
+    /// It is minimised: every zone on its monitor has a window. It stays in the taskbar, where
+    /// it can be found, rather than disappear as a tab.
+    Minimize,
     /// It stays where it is: there is no zone for it (no monitor to make one on).
     Stay,
 }
@@ -580,10 +583,6 @@ fn covering(a: Rect, b: Rect) -> f64 {
     let f = a.overlap_area(b) as f64 / larger as f64;
     f
 }
-
-/// A score at which a zone is the window's own (named after its app or for its kind): a window
-/// left over goes there as a tab rather than into an empty zone.
-const BELONGS: f64 = 50.0;
 
 /// Whether a zone called `name` is named after the unit's app.
 fn named_after(name: &str, unit: &Unit) -> bool {
@@ -629,10 +628,11 @@ fn score(unit: &Unit, importance: f64, zone: &Candidate) -> f64 {
             None => {}
         }
     }
+    // Where the user put it: it stays, unless the zone is another app's by name.
     if let ZoneRef::Existing(i) = zone.zone
         && unit.zone == Some(i)
     {
-        s += 45.0;
+        s += 100.0;
     }
     s += 30.0 * covering(unit.frame, zone.rect);
     if unit.resizable {
@@ -681,24 +681,24 @@ pub fn plan(units: &[Unit], zones: &[Spot], monitors: &[Rect]) -> Plan {
 }
 
 /// [`plan`], with a layout the user picked for one monitor: its zones are left out and the
-/// preset's made there, whatever windows it has; windows beyond them become tabs.
+/// preset's made there, whatever windows it has; windows beyond them are minimised.
 pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Option<Chosen>) -> Plan {
     let replaced = |monitor: usize| chosen.is_some_and(|c| c.monitor == monitor);
     // The picked layout's monitor gets its preset; other monitors with windows and no zones
     // get one that suits them.
     let mut new_zones: Vec<NewZone> = Vec::new();
     for (m, work) in monitors.iter().enumerate() {
-        let preset = match chosen {
-            Some(c) if c.monitor == m => c.preset,
+        let areas = match chosen {
+            Some(c) if c.monitor == m => c.preset.zones(),
             _ => {
                 let here = units.iter().filter(|u| u.monitor == m).count();
                 if here == 0 || zones.iter().any(|z| z.monitor == m) {
                     continue;
                 }
-                Preset::for_windows(here, work.width(), work.height())
+                zones_for_windows(here, work.width(), work.height())
             }
         };
-        for area in preset.zones() {
+        for area in areas {
             new_zones.push(NewZone {
                 monitor: m,
                 area,
@@ -789,19 +789,13 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
         }
     }
 
-    // Windows left over: into an empty zone, unless a zone with a window in it is their own
-    // (named after their app or for their kind): then as a tab there.
+    // Windows left over, the ones used last first: into an empty zone on their monitor, even
+    // one named for something else (a window seen beats a name), else minimised.
     let left_over: Vec<usize> = (0..units.len()).filter(|u| unit_zone[*u].is_none()).collect();
     for u in left_over {
-        let best = |taken: bool| {
-            pairs
-                .iter()
-                .find(|&&(_, pu, c)| pu == u && zone_unit[c].is_some() == taken)
-                .map(|&(s, _, c)| (s, c))
-        };
-        if let Some((_, c)) = best(false)
-            && best(true).is_none_or(|(s, _)| s < BELONGS)
-        {
+        if let Some(&(_, _, c)) = pairs.iter().find(|&&(_, pu, c)| {
+            pu == u && zone_unit[c].is_none() && candidates[c].monitor == units[u].monitor
+        }) {
             unit_zone[u] = Some(c);
             zone_unit[c] = Some(u);
         }
@@ -810,12 +804,9 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
     let goes: Vec<Goes> = (0..units.len())
         .map(|u| match unit_zone[u] {
             Some(c) => Goes::Zone(candidates[c].zone),
-            // Every zone has a window: a tab beside the window in the zone that suits it best.
-            None => pairs
-                .iter()
-                .find(|&&(_, pu, c)| pu == u && zone_unit[c].is_some())
-                .and_then(|&(_, _, c)| zone_unit[c])
-                .map_or(Goes::Stay, Goes::TabOf),
+            // Every zone on its monitor has a window; with no zone there at all, it stays.
+            None if candidates.iter().any(|c| c.monitor == units[u].monitor) => Goes::Minimize,
+            None => Goes::Stay,
         })
         .collect();
 
@@ -874,7 +865,7 @@ mod tests {
     fn zone_of(plan: &Plan, u: usize) -> ZoneRef {
         match plan.goes[u] {
             Goes::Zone(z) => z,
-            Goes::TabOf(o) => zone_of(plan, o),
+            Goes::Minimize => panic!("unit {u} is minimized"),
             Goes::Stay => panic!("unit {u} stays"),
         }
     }
@@ -1001,7 +992,10 @@ mod tests {
     }
 
     #[test]
-    fn windows_left_over_become_tabs_where_they_belong() {
+    fn windows_left_over_are_minimized_rather_than_hidden_as_tabs() {
+        // Every zone has a window: the windows left over go to the taskbar, where they can be
+        // found, instead of disappearing as tabs (the owner: Arrange put 8 of 11 windows away as
+        // tabs in a workspace of 3 zones).
         let zones = [
             spot("Code", Rect::new(0, 0, 960, 1032)),
             spot("Browser", Rect::new(960, 0, 1920, 1032)),
@@ -1015,13 +1009,95 @@ mod tests {
         let plan = plan(&units, &zones, &[WORK]);
         assert_eq!(plan.goes[0], Goes::Zone(ZoneRef::Existing(1)));
         assert_eq!(plan.goes[1], Goes::Zone(ZoneRef::Existing(0)));
-        // Firefox goes with the other browser; Slack wherever it suits best, as a tab.
-        assert_eq!(plan.goes[2], Goes::TabOf(0));
-        assert!(matches!(plan.goes[3], Goes::TabOf(0 | 1)));
+        assert_eq!(plan.goes[2], Goes::Minimize);
+        assert_eq!(plan.goes[3], Goes::Minimize);
     }
 
     #[test]
-    fn a_window_kept_out_of_a_zone_named_for_something_else_becomes_a_tab() {
+    fn a_workspace_with_few_zones_keeps_them_and_minimizes_the_rest() {
+        // The owner's "Check": three zones, eleven windows. Its zones stay as they are; the
+        // windows in them, and the ones used last, fill them; the others are minimized.
+        let zones = [
+            spot("Notepad++", Rect::new(0, 0, 1920, 344)),
+            spot("Zone 1", Rect::new(0, 344, 1920, 688)),
+            spot("Zone 2", Rect::new(0, 688, 1920, 1032)),
+        ];
+        let mut units: Vec<Unit> = (0..11)
+            .map(|i| {
+                unit(
+                    &format!("app{i}.exe"),
+                    &format!("App {i}"),
+                    Rect::new(100 + i * 20, 100, 900, 800),
+                )
+            })
+            .collect();
+        units[3] = unit("notepad++.exe", "Notepad++", Rect::new(2, 2, 1918, 342));
+        units[3].zone = Some(0);
+        units[6] = unit("chrome.exe", "Google Chrome", Rect::new(2, 690, 1918, 1030));
+        units[6].zone = Some(2);
+        let plan = plan(&units, &zones, &[WORK]);
+        assert!(plan.new_zones.is_empty(), "the workspace's zones stay");
+        assert_eq!(plan.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count(), 3);
+        assert_eq!(plan.goes.iter().filter(|g| **g == Goes::Minimize).count(), 8);
+        assert_eq!(
+            plan.goes[3],
+            Goes::Zone(ZoneRef::Existing(0)),
+            "it stays in its zone"
+        );
+        assert_eq!(
+            plan.goes[6],
+            Goes::Zone(ZoneRef::Existing(2)),
+            "and so does this one"
+        );
+        // The window used last fills the zone left.
+        assert_eq!(plan.goes[0], Goes::Zone(ZoneRef::Existing(1)));
+    }
+
+    #[test]
+    fn five_or_six_windows_on_a_bare_monitor_get_a_grid_and_nothing_is_minimized() {
+        for n in [5_i32, 6] {
+            let units: Vec<Unit> = (0..n)
+                .map(|i| {
+                    unit(
+                        &format!("app{i}.exe"),
+                        &format!("App {i}"),
+                        Rect::new(i * 30, 0, 900 + i * 30, 900),
+                    )
+                })
+                .collect();
+            let plan = plan(&units, &[], &[WORK]);
+            assert_eq!(plan.new_zones.len(), usize::try_from(n).unwrap_or(0));
+            let mut used: Vec<ZoneRef> = (0..units.len()).map(|u| zone_of(&plan, u)).collect();
+            used.sort_by_key(|z| format!("{z:?}"));
+            used.dedup();
+            assert_eq!(used.len(), units.len(), "one window per zone: {:?}", plan.goes);
+        }
+    }
+
+    #[test]
+    fn a_bare_monitor_takes_as_many_windows_as_it_holds_well() {
+        let units: Vec<Unit> = (0..9)
+            .map(|i| {
+                unit(
+                    &format!("app{i}.exe"),
+                    &format!("App {i}"),
+                    Rect::new(i * 30, 0, 900, 900),
+                )
+            })
+            .collect();
+        let plan = plan(&units, &[], &[WORK]);
+        assert_eq!(plan.new_zones.len(), 6);
+        assert_eq!(plan.goes.iter().filter(|g| **g == Goes::Minimize).count(), 3);
+        // The windows used last are the ones that stay on screen.
+        assert!(
+            plan.goes[..6].iter().all(|g| matches!(g, Goes::Zone(_))),
+            "{:?}",
+            plan.goes
+        );
+    }
+
+    #[test]
+    fn a_window_with_no_zone_of_its_own_takes_an_empty_one_rather_than_go_away() {
         let zones = [
             spot("Browser", Rect::new(0, 0, 960, 1032)),
             spot("Notes", Rect::new(960, 0, 1920, 1032)),
@@ -1032,7 +1108,31 @@ mod tests {
         ];
         let plan = plan(&units, &zones, &[WORK]);
         assert_eq!(plan.goes[0], Goes::Zone(ZoneRef::Existing(0)));
-        assert_eq!(plan.goes[1], Goes::TabOf(0), "Edge is no note");
+        assert_eq!(
+            plan.goes[1],
+            Goes::Zone(ZoneRef::Existing(1)),
+            "seen, in the empty zone"
+        );
+    }
+
+    #[test]
+    fn a_window_does_not_leave_its_monitor_for_an_empty_zone_elsewhere() {
+        let side = Rect::new(1920, 0, 3840, 1032);
+        let zones = [
+            spot("Code", WORK),
+            Spot {
+                name: "Zone".into(),
+                monitor: 1,
+                rect: side,
+            },
+        ];
+        let units = [
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1900, 1000)),
+            unit("slack.exe", "Slack", Rect::new(300, 300, 800, 800)),
+        ];
+        let plan = plan(&units, &zones, &[WORK, side]);
+        assert_eq!(plan.goes[0], Goes::Zone(ZoneRef::Existing(0)));
+        assert_eq!(plan.goes[1], Goes::Minimize);
     }
 
     #[test]
@@ -1158,7 +1258,7 @@ mod tests {
     }
 
     #[test]
-    fn a_layout_with_fewer_zones_than_windows_makes_tabs_of_the_rest() {
+    fn a_layout_with_fewer_zones_than_windows_minimizes_the_rest() {
         let units = [
             unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
             unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
@@ -1173,7 +1273,7 @@ mod tests {
         assert_eq!(plan.new_zones.len(), 2);
         assert_eq!(plan.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count(), 2);
         assert_eq!(
-            plan.goes.iter().filter(|g| matches!(g, Goes::TabOf(_))).count(),
+            plan.goes.iter().filter(|g| **g == Goes::Minimize).count(),
             2,
             "{:?}",
             plan.goes

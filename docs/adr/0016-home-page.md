@@ -63,3 +63,10 @@ click would do to their windows before it did it.
   known only once the group exists.
 - Only the main monitor is pictured and takes a layout; the others are arranged by Arrange's own
   choice, as the caption says.
+
+## Amended by ADR 0017 (2026-10-12)
+
+Arrange and the layouts make no tabs: a window they have no zone for would be minimised, and the
+picture shows it shrinking to the taskbar (`PreviewWindow.minimized`, protocol 5). The page says
+less: one line under its title, no explanation under Arrange, and the switcher's shortcut alone
+at the bottom.

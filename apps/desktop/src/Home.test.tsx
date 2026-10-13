@@ -42,7 +42,7 @@ function preview(layout: 'auto' | 'thirds', windows = 2): Reply & ArrangePreview
       return {
         ...w,
         then: z ? { left: z.rect.left + 2, top: 2, right: z.rect.right - 2, bottom: 1030 } : null,
-        tab: false,
+        minimized: false,
       };
     }),
     elsewhere: 0,
@@ -60,7 +60,7 @@ const onManage = vi.fn();
 function page() {
   return render(
     <Feedback>
-      <Home shortcut="Win+Alt+Space" edge={{ enabled: true, side: 'right' }} onManage={onManage} />
+      <Home shortcut="Win+Alt+Space" onManage={onManage} />
     </Feedback>,
   );
 }
@@ -206,15 +206,34 @@ describe('the home page', () => {
     expect(onManage).toHaveBeenCalled();
   });
 
-  it('tells where the quick menu is, or nothing of it when it is off', async () => {
+  it('says which shortcut switches workspaces, and nothing more', async () => {
     answer();
-    const { rerender } = page();
-    expect(await screen.findByText(/the thin line at the right edge of your screen opens the quick menu/)).toBeTruthy();
-    rerender(
-      <Feedback>
-        <Home shortcut="Win+Alt+Space" edge={{ enabled: false, side: 'right' }} onManage={onManage} />
-      </Feedback>,
-    );
+    page();
+    const line = await screen.findByText(/switches workspaces from anywhere\./);
+    expect(line.textContent).toBe('Win plus Alt plus Space switches workspaces from anywhere.');
     expect(screen.queryByText(/quick menu/)).toBeNull();
+  });
+
+  it('says how many windows a layout with fewer zones would minimise', async () => {
+    answer((c) => {
+      if (c.cmd !== 'preview_arrange' || c.preset !== 'full') return null;
+      const p = preview('auto');
+      const whole: ArrangePreview = {
+        work_area: WORK,
+        zones: [{ name: 'Zone', color: 'lapis', rect: WORK }],
+        windows: p.windows.map((w, i) =>
+          i === 0
+            ? { ...w, then: { left: 2, top: 2, right: 1918, bottom: 1030 } }
+            : { ...w, then: null, minimized: true },
+        ),
+        elsewhere: 0,
+      };
+      return { reply: 'preview', ...whole };
+    });
+    page();
+    await screen.findByText('Your main screen now: 2 windows');
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Whole screen' }));
+    expect(await screen.findByText('With Whole screen: 1 window minimized')).toBeTruthy();
+    expect(picture().getAttribute('aria-label')).toBe('Visual Studio Code in Zone, Google Chrome minimized.');
   });
 });

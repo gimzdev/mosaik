@@ -7,7 +7,7 @@
 - Mosaïk opens on a picture of your main screen and its windows. Point at Arrange windows,
   or at one of ten layouts (halves, thirds, main and side, quarters, rows...), and the windows
   glide to where they would go; click, and they do. Undo puts everything back.
-- A layout replaces the zones of your main screen; windows more than its zones become tabs.
+- A layout replaces the zones of your main screen; windows more than its zones are minimised.
 - Your workspaces are a click away below, and the welcome shows Arrange at work before you
   start.
 - The tray menu's and the quick menu's Settings is now Open Mosaïk. A click on the tray icon
@@ -19,8 +19,8 @@
 - A window whose title bar has little room for its zone's tag no longer sits lower than its
   neighbours: it stays at the top of its zone, and its tag is cut short, then to the zone's
   initial in a small round chip; with no room even for that, it wears its coloured ring alone.
-  Only the tab that shows of a group with no room for its tabs sits below a bar, so the tabs
-  stay in reach. Every window fills its zone; no band of empty space sits above any of them.
+  A tab group's tabs sit at the right end of its title bar, in the same place on every
+  window. Every window fills its zone; no band of empty space sits above any of them.
 - A window that cannot be resized keeps its size centred across its zone and at its top, on the
   same line as its neighbours, no longer in the middle.
 - Zones sit closer together: windows are as far apart as their coloured rings are wide, so no
@@ -40,18 +40,33 @@
 - One click puts every window on screen in the zone that suits it: from the home page, the tray
   menu, the quick menu or `mosaikctl arrange`. Zones named after an app or a kind of app
   ("Browser", "Terminal") draw those windows; the windows you use most get the largest zones;
-  windows already in a zone stay there; windows more than the zones become tabs.
+  windows already in a zone stay there; windows more than the zones are minimised, and wait in
+  the taskbar.
 - A monitor without zones gets a layout for its windows: halves, a half beside two stacked
-  zones, quarters; columns on an ultrawide, rows on a monitor turned on its side. With no
-  workspace open, Arrange makes a new one.
-- Undo arrange puts every window back where it was, for ten minutes.
+  zones, quarters; columns on an ultrawide, rows on a monitor turned on its side; for more than
+  four windows, a grid with as many zones as the screen holds well. With no workspace open,
+  Arrange makes a new one.
+- Undo puts every window back where it was, for ten minutes.
+
+### Windows move only when you ask
+
+- Mosaïk moves or resizes a window only when you ask it to: Arrange, a layout, opening or
+  saving a workspace, a drop, the zone editor. Bringing a window forward (Alt+Tab) or opening
+  one never moves it.
+
+### Your workspaces' apps
+
+- On the Workspaces page, Apps lists a workspace's apps and the zone each goes in: pick another
+  zone, remove an app, or add a window that is open. In the open workspace, the window moves at
+  once.
 
 ### The quick menu
 
-- A thin line at the right edge of the main screen. Rest the pointer on it for Arrange, Undo
-  arrange, the switcher, Save layout, Edit zones, snapping on or off, and Open Mosaïk. It never
-  takes the keyboard from the app you are typing in, steps aside for a game or a video in full
-  screen, and stays where you drag it along the edge. Settings: show it, and on which edge.
+- A thin line at the right edge of the main screen. Point at it and it slides open: Mosaïk and
+  your open workspace (click to open Mosaïk), Arrange, the switcher, Save layout, Edit zones,
+  snapping on or off. It never takes the keyboard from the app you are typing in, steps aside
+  for a game or a video in full screen, and stays where you drag it along the edge. Settings:
+  show it, and on which edge.
 
 ### Zone editor
 
@@ -61,8 +76,10 @@
 
 - `mosaikctl state` lists the quick menu, where it is and its rows. `mosaikctl arrange <layout>`
   uses a layout, and `mosaikctl preview [<layout>]` says what Arrange would do without doing it.
-  The protocol is version 4; settings are format 4, and settings from 1.0 move to it on their
+  `mosaikctl apps`, `add-app`, `move-app` and `remove-app` list and change a workspace's apps.
+  The protocol is version 5; settings are format 4, and settings from 1.0 move to it on their
   own.
+- The app and the site say less: shorter pages, the essentials only.
 
 ## 1.0.0
 

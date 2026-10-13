@@ -246,7 +246,6 @@ export function App() {
           return (
             <Home
               shortcut={shortcut}
-              edge={settings.edge}
               demo={welcomed}
               onManage={() => {
                 setView({ page: 'workspaces' });
@@ -256,7 +255,6 @@ export function App() {
         case 'workspaces':
           return (
             <Workspaces
-              shortcut={shortcut}
               onEditZones={(workspace) => {
                 setView({ page: 'zones', workspace });
               }}

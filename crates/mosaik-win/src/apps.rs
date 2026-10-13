@@ -49,15 +49,8 @@ impl Apps {
         if let Some(name) = w.exe.as_deref().and_then(mosaik_core::window::known_app_name) {
             return name.to_owned();
         }
-        if let Some(p) = path {
-            let d = self
-                .descriptions
-                .entry(p.to_lowercase())
-                .or_insert_with(|| file_description(p))
-                .clone();
-            if let Some(d) = d {
-                return d;
-            }
+        if let Some(d) = path.and_then(|p| self.description(p)) {
+            return d;
         }
         let stem = w
             .exe
@@ -69,6 +62,16 @@ impl Apps {
             || "App".to_owned(),
             |first| first.to_uppercase().chain(chars).collect(),
         )
+    }
+}
+
+impl Apps {
+    /// The "File description" of a program file ("Google Chrome"), if it has a useful one.
+    pub fn description(&mut self, path: &str) -> Option<String> {
+        self.descriptions
+            .entry(path.to_lowercase())
+            .or_insert_with(|| file_description(path))
+            .clone()
     }
 }
 

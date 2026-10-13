@@ -1,5 +1,5 @@
-// The saved workspaces: open one, edit its zones, give it a shortcut, rename or delete it.
-// (Arranging the screen, with or without a layout, is the home page's.)
+// The saved workspaces: open one, see and change its apps, edit its zones, give it a shortcut,
+// rename or delete it. (Arranging the screen, with or without a layout, is the home page's.)
 
 import { type SyntheticEvent, useCallback, useEffect, useId, useState } from 'react';
 
@@ -7,8 +7,9 @@ import { onWorkspacesChanged, request } from './engine';
 import { MAX_NAME, errorMessage, type WorkspaceSummary } from './protocol';
 import { ShortcutRecorder } from './shortcut';
 import { Button, Confirm, Keys, MenuButton, PageTitle, Status, useSay } from './ui';
+import { AppsPanel } from './WorkspaceApps';
 
-type Panel = { kind: 'rename' | 'shortcut'; id: string } | null;
+type Panel = { kind: 'rename' | 'shortcut' | 'apps'; id: string } | null;
 
 function plural(n: number, one: string, many: string) {
   return `${String(n)} ${n === 1 ? one : many}`;
@@ -108,11 +109,9 @@ function EmptyPicture() {
 }
 
 export function Workspaces({
-  shortcut,
   onEditZones,
   onHome,
 }: {
-  shortcut: string;
   onEditZones: (workspace: string) => void;
   /** Goes to the home page, where the screen is arranged. */
   onHome: () => void;
@@ -169,10 +168,7 @@ export function Workspaces({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <PageTitle id="workspaces-title">Workspaces</PageTitle>
-          <p className="mt-2 text-[var(--muted)]">
-            Open one to bring its windows back where you left them. To save the windows on screen as a workspace, press{' '}
-            <Keys shortcut={shortcut} /> then <Keys shortcut="S" />.
-          </p>
+          <p className="mt-1.5 text-[var(--muted)]">Open one to bring its apps back where you left them.</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {list?.length ? <Button onClick={openSwitcher}>Open the switcher</Button> : null}
@@ -195,7 +191,7 @@ export function Workspaces({
           <EmptyPicture />
           <h2 className="mt-5 font-display text-heading font-semibold">No workspaces yet</h2>
           <p className="mx-auto mt-1 max-w-md text-small text-[var(--muted)]">
-            Open the apps of one project and arrange them: Mosaïk keeps them as a workspace.
+            Arrange your windows: Mosaïk keeps them as a workspace.
           </p>
           <div className="mt-5">
             <Button tone="primary" onClick={onHome}>
@@ -218,7 +214,7 @@ export function Workspaces({
                     ) : null}
                   </h2>
                   <p className="mt-0.5 text-small text-[var(--muted)]">
-                    {plural(w.windows, 'window', 'windows')} · {plural(w.zones, 'zone', 'zones')}
+                    {plural(w.windows, 'app', 'apps')} · {plural(w.zones, 'zone', 'zones')}
                     {w.hotkey ? (
                       <>
                         {' · '}
@@ -240,6 +236,16 @@ export function Workspaces({
                       Open
                     </Button>
                   </span>
+                  <Button
+                    label={`Apps of “${w.name}”`}
+                    expanded={panel?.id === w.id && panel.kind === 'apps'}
+                    controls={`apps-${w.id}`}
+                    onClick={() => {
+                      setPanel((p) => (p?.id === w.id && p.kind === 'apps' ? null : { kind: 'apps', id: w.id }));
+                    }}
+                  >
+                    Apps
+                  </Button>
                   <Button
                     label={`Edit zones of “${w.name}”`}
                     onClick={() => {
@@ -278,6 +284,7 @@ export function Workspaces({
                   </MenuButton>
                 </div>
               </div>
+              {panel?.id === w.id && panel.kind === 'apps' ? <AppsPanel workspace={w.id} id={`apps-${w.id}`} /> : null}
               {panel?.id === w.id && panel.kind === 'rename' ? (
                 <Rename
                   workspace={w}

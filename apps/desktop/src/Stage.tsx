@@ -1,6 +1,7 @@
 // A small picture of the main screen: its windows where they are now and, while the user points
 // at Arrange or a layout, where they would go. The windows glide from one to the other; the zones
-// they would fill appear, and each window wears its zone's colour and name, as on screen.
+// they would fill appear, each window wears its zone's colour and name, as on screen, and a window
+// left without a zone shrinks away to the taskbar.
 
 import type { CSSProperties, ReactNode } from 'react';
 
@@ -46,14 +47,21 @@ export function describe(preview: ArrangePreview, mode: StageMode): string {
     return `Your main screen now: ${preview.windows.map((w) => w.label).join(', ')}.`;
   }
   const parts = preview.windows.map((w) => {
+    if (w.minimized) return `${w.label} minimized`;
     const zone = zoneOf(preview, w);
-    if (!zone) return `${w.label} stays where it is`;
-    return w.tab ? `${w.label} as a tab in ${zone.name}` : `${w.label} in ${zone.name}`;
+    return zone ? `${w.label} in ${zone.name}` : `${w.label} stays where it is`;
   });
   return `${parts.join(', ')}.`;
 }
 
 const ring = (color: ZoneColor) => `var(--zone-${color})`;
+
+/** Where a window being minimised shrinks to: a sliver at the bottom, below its middle. */
+function toTaskbar(r: Rect, area: Rect): Rect {
+  const x = (r.left + r.right) / 2;
+  const w = (area.right - area.left) / 12;
+  return { left: x - w / 2, top: area.bottom - 8, right: x + w / 2, bottom: area.bottom };
+}
 
 export function Stage({
   preview,
@@ -76,18 +84,6 @@ export function Stage({
   const ratio = (area.right - area.left) / Math.max(1, area.bottom - area.top);
   const then = mode === 'then';
   const windows = preview?.windows ?? [];
-  // Windows that would become tabs, counted on the window that keeps showing in their zone.
-  const tabsOn = new Map<number, number>();
-  if (preview && then) {
-    windows.forEach((w, i) => {
-      const t = w.then;
-      if (!w.tab || !t) return;
-      const owner = windows.findIndex(
-        (o, j) => j !== i && !o.tab && o.then !== null && o.then.left === t.left && o.then.top === t.top,
-      );
-      if (owner >= 0) tabsOn.set(owner, (tabsOn.get(owner) ?? 0) + 1);
-    });
-  }
   const empty = preview !== null && windows.length === 0;
 
   return (
@@ -138,8 +134,8 @@ export function Stage({
               // on screen, before anything moves.
               const settled = w.then !== null && near(w.now, w.then);
               const zone = (then || settled) && preview ? zoneOf(preview, w) : null;
-              const target = then && w.then ? w.then : w.now;
-              const tabs = tabsOn.get(i) ?? 0;
+              const gone = then && w.minimized;
+              const target = gone ? toTaskbar(w.now, area) : then && w.then ? w.then : w.now;
               return (
                 <div
                   key={`${w.label}-${String(i)}`}
@@ -147,9 +143,9 @@ export function Stage({
                   className="stage-window absolute flex flex-col overflow-hidden rounded-[6px] border border-[var(--desk-line)] bg-[var(--desk-window)] shadow-[0_6px_18px_-8px_rgb(0_0_0/0.55)] forced-colors:border-[CanvasText]"
                   style={{
                     ...place(target, area),
-                    zIndex: w.tab && then ? 1 : windows.length - i + 1,
-                    opacity: w.tab && then ? 0 : 1,
-                    boxShadow: zone && !w.tab ? `0 0 0 2px ${ring(zone.color)}` : undefined,
+                    zIndex: windows.length - i + 1,
+                    opacity: gone ? 0 : 1,
+                    boxShadow: zone ? `0 0 0 2px ${ring(zone.color)}` : undefined,
                     transitionDelay: `${String(Math.min(i, 6) * 45)}ms`,
                   }}
                 >
@@ -157,7 +153,7 @@ export function Stage({
                     <span className="min-w-0 flex-1 truncate text-[9.5px] leading-none font-semibold text-[var(--desk-text)]">
                       {w.label}
                     </span>
-                    {zone && !w.tab ? (
+                    {zone ? (
                       <span
                         className="zone-chip shrink-0 truncate rounded-full px-1.5 text-[8.5px] leading-[11px] font-semibold"
                         style={
@@ -169,7 +165,6 @@ export function Stage({
                         }
                       >
                         {zone.name}
-                        {tabs ? ` +${String(tabs)}` : ''}
                       </span>
                     ) : null}
                   </div>

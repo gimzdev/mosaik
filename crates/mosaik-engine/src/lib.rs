@@ -26,6 +26,7 @@ mod titles;
 mod watch;
 pub mod watchdog;
 mod workspace;
+mod workspace_apps;
 
 use std::path::PathBuf;
 use std::sync::Arc;

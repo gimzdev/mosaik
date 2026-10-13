@@ -27,6 +27,10 @@ const COMMANDS = [
   'delete_workspace',
   'set_workspace_hotkey',
   'hold_hotkeys',
+  'apps',
+  'add_app',
+  'move_app',
+  'remove_app',
 ] as const satisfies readonly Command['cmd'][];
 type AllListed = Exclude<Command['cmd'], (typeof COMMANDS)[number]> extends never ? true : never;
 const allListed: AllListed = true;

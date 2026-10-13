@@ -1180,6 +1180,18 @@ fn tabs_and_snap(
     let after_join = settled(engine)?;
     shot(shots, "2-joined", &[terminal.hwnd], styles.dpi);
     let strip = after_join.tab_strips.first().cloned();
+    // Where the strip sits, from the right end of the visible tab's frame: the same whichever
+    // tab shows (the owner: tab strips sat in different places).
+    let from_right = |st: &mosaik_ipc::protocol::StateSnapshot, w: HWND| {
+        let strip = st.tab_strips.first()?;
+        let f = frame_rect(w)?;
+        Some([
+            f.right - strip.rect.right,
+            strip.rect.top - f.top,
+            strip.rect.width(),
+        ])
+    };
+    let joined_at = from_right(&after_join, terminal.hwnd);
     let joined = json!({
         "strips": after_join.tab_strips.len(),
         "tabs": strip.as_ref().map_or(0, |st| st.tabs.len()),
@@ -1197,10 +1209,15 @@ fn tabs_and_snap(
             let at = tab.chip.center();
             drag(at, at, code.hwnd)?;
             let st = settled(engine)?;
+            shot(shots, "3-code-shown", &[code.hwnd], styles.dpi);
+            let code_at = from_right(&st, code.hwnd);
             json!({
                 "code_hidden": hidden(&st, code.hwnd),
                 "terminal_hidden": hidden(&st, terminal.hwnd),
                 "code_error_px": frame_rect(code.hwnd).map(|f| edge_error(f, styles.area(code.tiled, false))),
+                "strip_with_terminal": joined_at,
+                "strip_with_code": code_at,
+                "strip_same_place": joined_at.is_some() && joined_at == code_at,
             })
         }
         None => json!({ "skipped": "no strip with the code tab" }),
@@ -1218,6 +1235,7 @@ fn tabs_and_snap(
         Some(tab) => {
             drag(tab.chip.center(), review.tiled.center(), terminal.hwnd)?;
             let st = settled(engine)?;
+            shot(shots, "4-pulled-out", &[code.hwnd, terminal.hwnd], styles.dpi);
             json!({
                 "strips": st.tab_strips.len(),
                 "terminal_hidden": hidden(&st, terminal.hwnd),

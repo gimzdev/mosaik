@@ -16,6 +16,7 @@ import type {
   Rect,
   Reply,
   Settings,
+  WorkspaceApp,
   WorkspaceSummary,
   ZoneColor,
   ZoneEdit,
@@ -76,6 +77,7 @@ function hotkey(): HotkeyState {
 
 interface Workspace extends WorkspaceSummary {
   zoneList: ZoneEdit[];
+  appList: WorkspaceApp[];
 }
 
 const workspaces: Workspace[] =
@@ -88,6 +90,12 @@ const workspaces: Workspace[] =
           windows: 4,
           zones: 3,
           hotkey: 'Win+Alt+J',
+          appList: [
+            { id: 's1', label: 'Visual Studio Code', zone: 'z1', tab: false },
+            { id: 's2', label: 'Google Chrome', zone: 'z2', tab: false },
+            { id: 's3', label: 'Windows Terminal', zone: 'z3', tab: true },
+            { id: 's4', label: 'Slack', zone: 'z3', tab: true },
+          ],
           zoneList: [
             { id: 'z1', name: 'Code', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.6, bottom: 1 } },
             {
@@ -112,6 +120,10 @@ const workspaces: Workspace[] =
           windows: 2,
           zones: 2,
           hotkey: null,
+          appList: [
+            { id: 's1', label: 'Figma', zone: 'z1', tab: false },
+            { id: 's2', label: 'Notepad', zone: 'z2', tab: false },
+          ],
           zoneList: [
             {
               id: 'z1',
@@ -175,7 +187,7 @@ function preview(preset: Preset | undefined): ArrangePreview {
     right: Math.round(work.left + a.right * w),
     bottom: Math.round(work.top + a.bottom * h),
   }));
-  // The windows used last take the largest zones; the rest become tabs of the first.
+  // The windows used last take the largest zones; the rest are minimised.
   const order = rects
     .map((r, i) => ({ i, area: (r.right - r.left) * (r.bottom - r.top) }))
     .sort((a, b) => b.area - a.area || a.i - b.i)
@@ -183,9 +195,9 @@ function preview(preset: Preset | undefined): ArrangePreview {
   const inset = (r: Rect): Rect => ({ left: r.left + 2, top: r.top + 2, right: r.right - 2, bottom: r.bottom - 2 });
   const windows: PreviewWindow[] = onScreen.map((s, n) => {
     const zone = order[n];
-    if (zone !== undefined) return { label: s.label, now: s.now, then: inset(rects[zone] as Rect), tab: false };
-    const first = order[0];
-    return { label: s.label, now: s.now, then: first === undefined ? null : inset(rects[first] as Rect), tab: true };
+    return zone === undefined
+      ? { label: s.label, now: s.now, then: null, minimized: true }
+      : { label: s.label, now: s.now, then: inset(rects[zone] as Rect), minimized: false };
   });
   return {
     work_area: work,
@@ -222,15 +234,19 @@ function arrange(preset: string | undefined): Reply {
   }
   const p = preview(known?.id);
   beforeArrange = onScreen;
-  onScreen = onScreen.map((s, i) => ({ ...s, now: p.windows[i]?.then ?? s.now }));
-  const tabs = p.windows.filter((x) => x.tab).length;
+  // Minimised windows leave the screen, as they leave the picture.
+  onScreen = onScreen.flatMap((s, i) => {
+    const w = p.windows[i];
+    return w?.minimized ? [] : [{ ...s, now: w?.then ?? s.now }];
+  });
+  const gone = p.windows.length - onScreen.length;
   const what = known
     ? `in the “${known.label}” layout`
     : `in ${String(p.zones.length)} ${p.zones.length === 1 ? 'zone' : 'zones'}`;
   const n = onScreen.length;
   return done(
     `Arranged ${String(n)} ${n === 1 ? 'window' : 'windows'} ${what}${
-      tabs ? `; ${tabs === 1 ? '1 window as a tab' : `${String(tabs)} windows as tabs`}` : ''
+      gone ? `; ${gone === 1 ? '1 window' : `${String(gone)} windows`} minimized` : ''
     }.`,
   );
 }
@@ -270,6 +286,21 @@ function zones(w: Workspace): Reply {
   };
 }
 
+/** A workspace's apps, and the windows on screen it does not have yet (by name, here). */
+function apps(w: Workspace): Reply {
+  w.windows = w.appList.length;
+  return {
+    reply: 'apps',
+    workspace: w.id,
+    name: w.name,
+    apps: structuredClone(w.appList),
+    zones: w.zoneList.flatMap((z) => (z.id ? [{ id: z.id, name: z.name, color: z.color }] : [])),
+    windows: onScreen
+      .map((s, i) => ({ window: 0x10000 + i, label: s.label, title: `${s.label} window` }))
+      .filter((o) => !w.appList.some((a) => a.label === o.label)),
+  };
+}
+
 function checkHotkey(text: string): Reply {
   const h = text.trim();
   const problem = /^Ctrl\+Alt\+[A-Z0-9]$/i.test(h)
@@ -297,7 +328,7 @@ export const mock = {
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.1.0-dev', protocol: 4 };
+      return { reply: 'hello', app_version: '1.1.0-dev', protocol: 5 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -373,6 +404,47 @@ function answer(command: Command): Reply {
         command.hotkey ? `${command.hotkey} now switches to “${w.name}”.` : `“${w.name}” has no shortcut now.`,
       );
     }
+    case 'apps': {
+      const w = find(command.workspace);
+      return w ? apps(w) : missing(command.workspace);
+    }
+    case 'add_app': {
+      const w = find(command.workspace);
+      if (!w) return missing(command.workspace);
+      const s = onScreen[command.window - 0x10000];
+      if (!s) {
+        return {
+          reply: 'error',
+          code: 'bad_request',
+          message: 'This window is not on screen any more.',
+          hint: 'Pick it again from the list.',
+        };
+      }
+      const empty = w.zoneList.find((z) => !w.appList.some((a) => a.zone === z.id))?.id ?? null;
+      let n = w.appList.length;
+      do {
+        n += 1;
+      } while (w.appList.some((a) => a.id === `s${String(n)}`));
+      w.appList.push({ id: `s${String(n)}`, label: s.label, zone: command.zone ?? empty, tab: false });
+      return apps(w);
+    }
+    case 'move_app':
+    case 'remove_app': {
+      const w = find(command.workspace);
+      if (!w) return missing(command.workspace);
+      const app = w.appList.find((a) => a.id === command.app);
+      if (!app) {
+        return {
+          reply: 'error',
+          code: 'bad_request',
+          message: 'This app is not in the workspace any more.',
+          hint: 'Look at the list again.',
+        };
+      }
+      if (command.cmd === 'remove_app') w.appList.splice(w.appList.indexOf(app), 1);
+      else Object.assign(app, { zone: command.zone, tab: false });
+      return apps(w);
+    }
     case 'rescue':
       return done('Nothing was hidden: every window is already on screen.');
     case 'arrange':
@@ -398,7 +470,7 @@ function answer(command: Command): Reply {
       return {
         reply: 'state',
         app_version: '1.1.0-dev',
-        protocol: 4,
+        protocol: 5,
         safe_mode: false,
         watchdog: true,
         monitors,
