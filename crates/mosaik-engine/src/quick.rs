@@ -829,13 +829,17 @@ impl Engine {
     fn run_quick(&mut self, action: Action, tile: Option<usize>) {
         tracing::info!(?action, ?tile, "side menu");
         let reply = match action {
-            Action::Arrange => self.handle(Command::Arrange { preset: None }),
+            Action::Arrange => self.handle(Command::Arrange {
+                preset: None,
+                moves: Vec::new(),
+            }),
             Action::Layouts => {
                 let Some(preset) = tile.and_then(|k| LAYOUTS.get(k)) else {
                     return;
                 };
                 self.handle(Command::Arrange {
                     preset: Some(preset.id().to_owned()),
+                    moves: Vec::new(),
                 })
             }
             Action::Workspace(i) => {

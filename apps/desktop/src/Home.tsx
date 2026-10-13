@@ -1,7 +1,8 @@
 // Home: the main screen as the chosen layout would leave it, with Arrange beside it, and the
 // workspaces in a column of their own. The smart layout is chosen first (Arrange reads what the
 // windows are for); any of the ten layouts can be chosen instead, and the picture shows it before
-// anything moves. Arrange does it; Undo puts everything back.
+// anything moves. Windows dragged onto each other in the picture trade places. Arrange does it;
+// Undo puts everything back.
 
 import { useCallback, useEffect, useId, useState } from 'react';
 
@@ -9,8 +10,8 @@ import { PRESETS, type Preset, presetShape } from './editor/model';
 import { onWorkspacesChanged, request } from './engine';
 import { Glyph } from './icons';
 import { LayoutGlyph } from './Layouts';
-import { type ArrangePreview, TASK_WORDS, errorMessage } from './protocol';
-import { Screen, settled } from './Screen';
+import { type ArrangeMove, type ArrangePreview, type Command, TASK_WORDS, errorMessage } from './protocol';
+import { Screen, moved, settled } from './Screen';
 import { Button, PageTitle, Status, useAnnounce } from './ui';
 import { Workspaces } from './Workspaces';
 
@@ -31,6 +32,9 @@ const LAYOUTS = ORDER.map((id) => PRESETS.find((p) => p.id === id)).filter((p) =
 
 /** What Arrange will do: lay the windows out by itself (`smart`), or in a layout. */
 type Choice = Preset | 'smart';
+
+/** No window put elsewhere: one list, so the pictures asked for do not change with each render. */
+const NO_MOVES: ArrangeMove[] = [];
 
 /** "Slack", "Slack and Teams", "Slack, Teams and Mail". */
 function names(list: string[]): string {
@@ -75,6 +79,12 @@ export function Home({
   /** What the last Arrange or Undo did, said under the picture. */
   const [outcome, setOutcome] = useState<{ text: string; error: boolean } | null>(null);
   const [undoable, setUndoable] = useState(false);
+  /** The windows put elsewhere on the picture, in order, for the layout chosen. */
+  const [moves, setMoves] = useState<ArrangeMove[]>(NO_MOVES);
+  /** The picture right after a window is put elsewhere, until Mosaïk's answer comes. */
+  const [early, setEarly] = useState<ArrangePreview | null>(null);
+  /** The window picked on the picture (its app's name), waiting to be put elsewhere. */
+  const [picking, setPicking] = useState<string | null>(null);
   /** Counts the times the screen is read again: windows moved, a workspace opened… */
   const [reads, setReads] = useState(0);
   const readAgain = useCallback(() => {
@@ -92,48 +102,68 @@ export function Home({
     };
   }, [readAgain]);
 
+  // The smart layout (with the windows put elsewhere, while it is the one chosen).
+  const smartMoves = choice === 'smart' ? moves : NO_MOVES;
   useEffect(() => {
     let live = true;
-    void request({ cmd: 'preview_arrange' }).then((reply) => {
-      if (!live) return;
-      if (reply.reply === 'preview') {
-        setSmart(reply);
-        setProblem(null);
-      } else {
-        setProblem(errorMessage(reply) ?? 'Mosaïk could not read your screen.');
-      }
-    });
+    void request(smartMoves.length ? { cmd: 'preview_arrange', moves: smartMoves } : { cmd: 'preview_arrange' }).then(
+      (reply) => {
+        if (!live) return;
+        if (reply.reply === 'preview') {
+          setSmart(reply);
+          setEarly(null);
+          setProblem(null);
+        } else {
+          setProblem(errorMessage(reply) ?? 'Mosaïk could not read your screen.');
+        }
+      },
+    );
     return () => {
       live = false;
     };
-  }, [reads]);
+  }, [reads, smartMoves]);
 
   // The layout chosen is asked for; an answer for one chosen before is dropped.
   useEffect(() => {
     if (choice === 'smart') return;
     let live = true;
-    void request({ cmd: 'preview_arrange', preset: choice }).then((reply) => {
-      if (live && reply.reply === 'preview') setChosen({ choice, preview: reply });
+    void request(
+      moves.length ? { cmd: 'preview_arrange', preset: choice, moves } : { cmd: 'preview_arrange', preset: choice },
+    ).then((reply) => {
+      if (live && reply.reply === 'preview') {
+        setChosen({ choice, preview: reply });
+        setEarly(null);
+      }
     });
     return () => {
       live = false;
     };
-  }, [choice, reads]);
+  }, [choice, reads, moves]);
 
   const arrange = () => {
     setBusy(true);
     setOutcome(null);
-    void request(choice === 'smart' ? { cmd: 'arrange' } : { cmd: 'arrange', preset: choice }).then((reply) => {
+    const command: Command = choice === 'smart' ? { cmd: 'arrange' } : { cmd: 'arrange', preset: choice };
+    if (moves.length) command.moves = moves;
+    void request(command).then((reply) => {
       setBusy(false);
       if (reply.reply === 'done') {
         setOutcome({ text: reply.message, error: false });
         setUndoable(true);
+        setMoves(NO_MOVES);
         announce(reply.message);
       } else {
         setOutcome({ text: errorMessage(reply) ?? 'Your windows could not be arranged.', error: true });
       }
       readAgain();
     });
+  };
+
+  /** A window put in another zone of the picture: it shows there at once, then as Mosaïk says. */
+  const move = (window: number, zone: number) => {
+    if (picture) setEarly(moved(picture, window, zone));
+    setMoves((list) => [...list, { window, zone }]);
+    setOutcome(null);
   };
 
   const undo = () => {
@@ -150,7 +180,8 @@ export function Home({
   };
 
   // While a layout's answer is on its way, the last picture stays.
-  const picture = choice === 'smart' ? smart : chosen?.choice === choice ? chosen.preview : (chosen?.preview ?? smart);
+  const picture =
+    early ?? (choice === 'smart' ? smart : chosen?.choice === choice ? chosen.preview : (chosen?.preview ?? smart));
   const hasWindows = (smart?.windows.length ?? 0) > 0;
   const words = smart?.task ? TASK_WORDS[smart.task] : null;
   const title =
@@ -159,7 +190,7 @@ export function Home({
         ? `Smart layout for ${words}`
         : 'Smart layout'
       : (PRESETS.find((p) => p.id === choice)?.label ?? 'Layout');
-  const said = note(picture, choice);
+  const said = picking ? `Choose where ${picking} goes. Esc cancels.` : note(picture, choice);
 
   return (
     <article aria-labelledby="home-title">
@@ -184,7 +215,12 @@ export function Home({
           </div>
 
           <div className="mt-4">
-            <Screen preview={picture} unread={problem !== null} />
+            <Screen
+              preview={picture}
+              unread={problem !== null}
+              onMove={hasWindows && !busy ? move : undefined}
+              onPick={setPicking}
+            />
           </div>
 
           {/* The layouts, drawn: the one chosen is named; the others say their name when pointed at,
@@ -212,6 +248,8 @@ export function Home({
                       disabled={!hasWindows}
                       onChange={() => {
                         setChoice(option.id);
+                        setMoves(NO_MOVES);
+                        setEarly(null);
                         setOutcome(null);
                       }}
                       // Over the whole chip, unseen: a click anywhere on it chooses it.
@@ -240,6 +278,19 @@ export function Home({
               <Button tone="quiet" size="sm" onClick={undo}>
                 <Glyph name="undo" size={14} />
                 Undo
+              </Button>
+            ) : null}
+            {moves.length && !busy ? (
+              <Button
+                tone="quiet"
+                size="sm"
+                hint="Put the windows back where the layout places them"
+                onClick={() => {
+                  setMoves(NO_MOVES);
+                  setEarly(null);
+                }}
+              >
+                Reset
               </Button>
             ) : null}
           </div>

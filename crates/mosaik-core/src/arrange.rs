@@ -430,6 +430,19 @@ pub struct NewZone {
     pub monitor: usize,
     pub area: RatioRect,
     pub name: String,
+    /// Its colour: the n-th of the plan's zones. A window the user moved keeps the colour of the
+    /// zone it was in, as its name goes with it (zones are named after their windows).
+    pub color: usize,
+}
+
+/// A window the user moved on the picture of the screen: unit `unit` into the `zone`-th of the
+/// zones the plan makes on `monitor` (in the plan's order, as the picture lists them). The
+/// window there takes its place, or is minimised when it had none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Move {
+    pub unit: usize,
+    pub monitor: usize,
+    pub zone: usize,
 }
 
 /// Where a unit goes.
@@ -634,6 +647,19 @@ pub fn plan(units: &[Unit], zones: &[Spot], monitors: &[Rect]) -> Plan {
 /// workspace's, for the windows that fit them and matter most to the task; the others are
 /// minimised.
 pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Option<Chosen>) -> Plan {
+    plan_moved(units, zones, monitors, chosen, &[])
+}
+
+/// [`plan_with`], then the windows the user moved on the picture of the screen ([`Move`]), in
+/// the order they were moved: each into the zone it was dropped on, the window there into its
+/// place. The zones of a monitor with moves make room again for the windows now in them.
+pub fn plan_moved(
+    units: &[Unit],
+    zones: &[Spot],
+    monitors: &[Rect],
+    chosen: Option<Chosen>,
+    moves: &[Move],
+) -> Plan {
     let chosen = chosen.filter(|c| c.monitor < monitors.len());
     let picked = |monitor: usize| chosen.is_some_and(|c| c.monitor == monitor);
     // The windows of each monitor, front to back, and the task they say.
@@ -652,6 +678,9 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
     let mut new_zones: Vec<NewZone> = Vec::new();
     // The window each new zone was made for, once known: it names the zone.
     let mut new_zone_window: Vec<Option<usize>> = Vec::new();
+    // Each new zone's area as its layout made it, before making room for a window: moves make
+    // room again from there.
+    let mut made_areas: Vec<RatioRect> = Vec::new();
     let mut goes: Vec<Option<Goes>> = vec![None; units.len()];
     let mut tasks: Vec<Option<Task>> = vec![None; monitors.len()];
 
@@ -681,6 +710,7 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
                 monitor: m,
                 area: p.area,
                 name: String::new(),
+                color: new_zones.len(),
             });
             new_zone_window.push(Some(u));
         }
@@ -703,6 +733,7 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
                 monitor: c.monitor,
                 area,
                 name: String::new(),
+                color: new_zones.len(),
             });
             new_zone_window.push(None);
         }
@@ -759,6 +790,7 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
                 in_zone[k] = Some(u);
             }
         }
+        made_areas = new_zones.iter().map(|z| z.area).collect();
         let fitted = make_room_for(&areas, &mut in_zone, units, work);
         for (k, area) in fitted.into_iter().enumerate() {
             new_zones[from + k].area = area;
@@ -772,6 +804,88 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
         // A window left without a zone waits in the taskbar.
         for &u in &kept {
             goes[u].get_or_insert(Goes::Minimize);
+        }
+    }
+    if made_areas.len() < new_zones.len() {
+        made_areas = new_zones.iter().map(|z| z.area).collect();
+    }
+
+    // 3. The windows the user moved on the picture of the screen.
+    let mut moved = vec![false; monitors.len()];
+    for mv in moves {
+        let Some(unit) = units.get(mv.unit) else {
+            continue;
+        };
+        if unit.monitor != mv.monitor || mv.monitor >= monitors.len() {
+            continue;
+        }
+        let Some(r) = (0..new_zones.len())
+            .filter(|&r| new_zones[r].monitor == mv.monitor)
+            .nth(mv.zone)
+        else {
+            continue;
+        };
+        let was = goes[mv.unit];
+        if was == Some(Goes::Zone(r)) {
+            continue;
+        }
+        let there = new_zone_window[r];
+        new_zone_window[r] = Some(mv.unit);
+        goes[mv.unit] = Some(Goes::Zone(r));
+        if let Some(Goes::Zone(q)) = was {
+            // The two trade places, and their zones' colours with them.
+            new_zone_window[q] = there;
+            let (cq, cr) = (new_zones[q].color, new_zones[r].color);
+            new_zones[q].color = cr;
+            new_zones[r].color = cq;
+            if let Some(v) = there {
+                goes[v] = Some(Goes::Zone(q));
+            }
+        } else if let Some(v) = there {
+            goes[v] = Some(Goes::Minimize);
+        }
+        moved[mv.monitor] = true;
+    }
+    for (m, work) in monitors.iter().enumerate().filter(|(m, _)| moved[*m]) {
+        let here: Vec<usize> = (0..new_zones.len())
+            .filter(|&r| new_zones[r].monitor == m)
+            .collect();
+        let areas: Vec<RatioRect> = here.iter().map(|&r| made_areas[r]).collect();
+        let before: Vec<Option<usize>> = here.iter().map(|&r| new_zone_window[r]).collect();
+        let mut in_zone = before.clone();
+        let fitted = make_room_for(&areas, &mut in_zone, units, *work);
+        // A window that had to trade places to fit keeps its colour; the empty zones keep the
+        // colours left over.
+        let color_of: Vec<(usize, usize)> = here
+            .iter()
+            .zip(&before)
+            .filter_map(|(&r, u)| u.map(|u| (u, new_zones[r].color)))
+            .collect();
+        let mut spare: Vec<usize> = here.iter().map(|&r| new_zones[r].color).collect();
+        for (k, &r) in here.iter().enumerate() {
+            new_zones[r].area = fitted[k];
+            new_zone_window[r] = in_zone[k];
+            if let Some(u) = in_zone[k] {
+                goes[u] = Some(Goes::Zone(r));
+                if let Some(&(_, c)) = color_of.iter().find(|(v, _)| *v == u) {
+                    new_zones[r].color = c;
+                    spare.retain(|&s| s != c);
+                }
+            }
+        }
+        let mut spare = spare.into_iter();
+        for &r in &here {
+            if new_zone_window[r].is_none()
+                && let Some(c) = spare.next()
+            {
+                new_zones[r].color = c;
+            }
+        }
+        // A window no zone has room for any more waits in the taskbar.
+        for u in before.into_iter().flatten() {
+            if !in_zone.contains(&Some(u)) {
+                goes[u] = Some(Goes::Minimize);
+            }
         }
     }
     let goes: Vec<Goes> = goes.into_iter().map(|g| g.unwrap_or(Goes::Stay)).collect();
@@ -1315,6 +1429,180 @@ mod tests {
             "{:?}",
             plan.new_zones
         );
+    }
+
+    /// The zones the plan makes on the main monitor, in its order: what the picture shows.
+    fn on_main(plan: &Plan) -> Vec<usize> {
+        (0..plan.new_zones.len())
+            .filter(|&r| plan.new_zones[r].monitor == 0)
+            .collect()
+    }
+
+    #[test]
+    fn a_window_moved_on_the_picture_trades_places_with_the_window_there() {
+        // The owner: "we should be able to drag drop apps to permute them". The editor dropped
+        // on the browser's zone: the two trade places; each zone keeps its place and size, and
+        // its name and colour go with the window, as a tile moved in a mosaic.
+        let units = [
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
+            unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
+            unit("windowsterminal.exe", "Terminal", Rect::new(800, 400, 1600, 1000)),
+        ];
+        let base = plan(&units, &[], &[WORK]);
+        let (code, browser) = (zone_of(&base, 0), zone_of(&base, 1));
+        let k = on_main(&base).iter().position(|&r| r == browser).unwrap();
+        let moved = plan_moved(
+            &units,
+            &[],
+            &[WORK],
+            None,
+            &[Move {
+                unit: 0,
+                monitor: 0,
+                zone: k,
+            }],
+        );
+        assert_eq!(zone_of(&moved, 0), browser);
+        assert_eq!(zone_of(&moved, 1), code);
+        assert_eq!(moved.goes[2], base.goes[2], "the terminal stays");
+        for r in 0..base.new_zones.len() {
+            assert_eq!(
+                moved.new_zones[r].area, base.new_zones[r].area,
+                "zone {r} keeps its place"
+            );
+        }
+        assert_eq!(moved.new_zones[browser].name, "Code");
+        assert_eq!(moved.new_zones[code].name, "Browser");
+        assert_eq!(moved.new_zones[browser].color, base.new_zones[code].color);
+        assert_eq!(moved.new_zones[code].color, base.new_zones[browser].color);
+        assert_eq!(moved.tasks, base.tasks);
+        // Without moves, each zone has the colour of its place.
+        assert!(base.new_zones.iter().enumerate().all(|(r, z)| z.color == r));
+    }
+
+    #[test]
+    fn a_window_moved_into_an_empty_zone_leaves_its_own_empty() {
+        // Quarters for three windows: one quarter waits empty. The editor dropped there.
+        let units = [
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
+            unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
+            unit("windowsterminal.exe", "Terminal", Rect::new(800, 400, 1600, 1000)),
+        ];
+        let quarters = Chosen {
+            monitor: 0,
+            preset: Preset::Quarters,
+        };
+        let base = plan_with(&units, &[], &[WORK], Some(quarters));
+        let used: Vec<usize> = (0..3).map(|u| zone_of(&base, u)).collect();
+        let empty = (0..4).find(|r| !used.contains(r)).unwrap();
+        let moved = plan_moved(
+            &units,
+            &[],
+            &[WORK],
+            Some(quarters),
+            &[Move {
+                unit: 0,
+                monitor: 0,
+                zone: empty,
+            }],
+        );
+        assert_eq!(zone_of(&moved, 0), empty);
+        assert_eq!(zone_of(&moved, 1), used[1]);
+        assert_eq!(zone_of(&moved, 2), used[2]);
+        assert_eq!(moved.new_zones[empty].name, "Code");
+        assert_eq!(moved.new_zones[used[0]].name, "Zone");
+        let mut colors: Vec<usize> = moved.new_zones.iter().map(|z| z.color).collect();
+        colors.sort_unstable();
+        assert_eq!(colors, vec![0, 1, 2, 3], "every zone a colour of its own");
+        assert_eq!(moved.new_zones[empty].color, base.new_zones[used[0]].color);
+    }
+
+    #[test]
+    fn a_window_moved_where_it_does_not_fit_gets_the_room_it_needs() {
+        // Halves: Battle.net keeps 1280 x 720, so its half grows to 1280 px. Chrome dropped on
+        // it: Battle.net goes to the other half, which grows in its turn; Chrome takes the rest.
+        let mut battle = unit("battle.net.exe", "Battle.net", Rect::new(100, 100, 1380, 820));
+        battle.least = Size::new(1280, 720);
+        let units = [
+            battle,
+            unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
+        ];
+        let halves = Chosen {
+            monitor: 0,
+            preset: Preset::Halves,
+        };
+        let base = plan_with(&units, &[], &[WORK], Some(halves));
+        let (b, c) = (zone_of(&base, 0), zone_of(&base, 1));
+        assert!(base.new_zones[b].area.to_rect(WORK).width() >= 1278);
+        let moved = plan_moved(
+            &units,
+            &[],
+            &[WORK],
+            Some(halves),
+            &[Move {
+                unit: 1,
+                monitor: 0,
+                zone: b,
+            }],
+        );
+        assert_eq!(zone_of(&moved, 1), b);
+        assert_eq!(zone_of(&moved, 0), c);
+        let now = moved.new_zones[c].area.to_rect(WORK);
+        assert!(now.width() >= 1278 && now.height() >= 718, "{now:?}");
+        let chrome = moved.new_zones[b].area.to_rect(WORK);
+        assert!(
+            (chrome.width() + now.width() - WORK.width()).abs() <= 2,
+            "{chrome:?} {now:?}"
+        );
+    }
+
+    #[test]
+    fn moves_that_name_no_window_or_zone_change_nothing() {
+        let units = [
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
+            unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
+        ];
+        let base = plan(&units, &[], &[WORK]);
+        for mv in [
+            Move {
+                unit: 0,
+                monitor: 0,
+                zone: 9,
+            },
+            Move {
+                unit: 7,
+                monitor: 0,
+                zone: 0,
+            },
+            Move {
+                unit: 0,
+                monitor: 3,
+                zone: 0,
+            },
+            // Onto the zone it is in already.
+            Move {
+                unit: 0,
+                monitor: 0,
+                zone: on_main(&base)
+                    .iter()
+                    .position(|&r| r == zone_of(&base, 0))
+                    .unwrap(),
+            },
+        ] {
+            assert_eq!(plan_moved(&units, &[], &[WORK], None, &[mv]), base, "{mv:?}");
+        }
+        // A window on another monitor is not moved to this one.
+        let side = Rect::new(1920, 0, 2720, 552);
+        let mut chat = unit("discord.exe", "Discord", Rect::new(2000, 50, 2600, 500));
+        chat.monitor = 1;
+        let two = [units[0].clone(), chat];
+        let base = plan(&two, &[], &[WORK, side]);
+        let mv = Move {
+            unit: 1,
+            monitor: 0,
+            zone: 0,
+        };
+        assert_eq!(plan_moved(&two, &[], &[WORK, side], None, &[mv]), base);
     }
 
     #[test]

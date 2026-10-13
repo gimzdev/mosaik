@@ -51,6 +51,7 @@ export const coding: ArrangePreview = {
   ],
   windows: [
     {
+      window: 101,
       label: 'Visual Studio Code',
       icon: 'exe:C:\\Code.exe',
       now: { left: 200, top: 100, right: 1300, bottom: 900 },
@@ -58,6 +59,7 @@ export const coding: ArrangePreview = {
       minimized: false,
     },
     {
+      window: 102,
       label: 'Google Chrome',
       icon: 'app:Chrome',
       now: { left: 600, top: 200, right: 1800, bottom: 1000 },

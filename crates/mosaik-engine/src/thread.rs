@@ -722,8 +722,8 @@ impl Engine {
             Command::Workspaces => self.workspaces(),
             Command::Switch { workspace } => self.switch(&workspace),
             Command::Save { workspace } => self.save(workspace),
-            Command::Arrange { preset } => self.arrange(preset.as_deref()),
-            Command::PreviewArrange { preset } => self.preview_arrange(preset.as_deref()),
+            Command::Arrange { preset, moves } => self.arrange(preset.as_deref(), &moves),
+            Command::PreviewArrange { preset, moves } => self.preview_arrange(preset.as_deref(), &moves),
             Command::UndoArrange => self.undo_arrange(),
             Command::Rescue => self.rescue(),
             Command::ShowSwitcher => {

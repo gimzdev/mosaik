@@ -26,6 +26,12 @@
     },
     {
       "cmd": "arrange",
+      "moves": [
+        {
+          "window": 197794,
+          "zone": 2
+        }
+      ],
       "preset": "half-stack"
     },
     {
@@ -33,6 +39,12 @@
     },
     {
       "cmd": "preview_arrange",
+      "moves": [
+        {
+          "window": 197794,
+          "zone": 0
+        }
+      ],
       "preset": "thirds"
     },
     {
@@ -172,7 +184,7 @@
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 7,
+      "protocol": 8,
       "reply": "hello"
     },
     {
@@ -351,7 +363,8 @@
             "left": 0,
             "right": 960,
             "top": 0
-          }
+          },
+          "window": 197794
         },
         {
           "icon": "exe:C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -368,7 +381,8 @@
             "left": 960,
             "right": 1920,
             "top": 0
-          }
+          },
+          "window": 66296
         },
         {
           "icon": null,
@@ -380,7 +394,8 @@
             "right": 1200,
             "top": 300
           },
-          "then": null
+          "then": null,
+          "window": 330782
         }
       ],
       "work_area": {

@@ -36,7 +36,7 @@ use mosaik_core::task;
 use mosaik_core::zone::ZoneId;
 use mosaik_engine::{Config, Engine, Scope, UiEvent, UiSink};
 use mosaik_ipc::protocol::{
-    ArrangePreview, Command, PreviewWindow, QuickMenuState, Reply, StateSnapshot, WorkspaceApps,
+    ArrangeMove, ArrangePreview, Command, PreviewWindow, QuickMenuState, Reply, StateSnapshot, WorkspaceApps,
 };
 use mosaik_win::events::pump_until;
 use mosaik_win::input::{self, Chord, LeftButton};
@@ -225,7 +225,16 @@ pub fn menu_shot(args: &[String]) -> Result<Value, String> {
             )?;
         }
         pump_until(400, || false);
-        let arranged = done(&ask(&engine, Command::Arrange { preset: None }).0)?;
+        let arranged = done(
+            &ask(
+                &engine,
+                Command::Arrange {
+                    preset: None,
+                    moves: Vec::new(),
+                },
+            )
+            .0,
+        )?;
         let _ = settled(&engine)?;
         let away = Point::new(work.left + work.width() / 2, work.top + work.height() / 2);
         let mut pictures = Vec::new();
@@ -769,7 +778,13 @@ fn arrange(
         })
         .collect();
     let expected = task::layout(&kinds, work.width(), work.height());
-    let (reply, ms) = ask(engine, Command::Arrange { preset: None });
+    let (reply, ms) = ask(
+        engine,
+        Command::Arrange {
+            preset: None,
+            moves: Vec::new(),
+        },
+    );
     let message = done(&reply)?;
     let st = settled(engine)?;
     let ws = st.active_workspace.clone().ok_or("Arrange opened no workspace")?;
@@ -858,7 +873,16 @@ fn arrange(
 
     // 3c. Arrange, then Arrange again: the second moves nothing, and the home page's picture of
     // it shows nothing moving (the window of a fixed size included).
-    let again = done(&ask(engine, Command::Arrange { preset: None }).0)?;
+    let again = done(
+        &ask(
+            engine,
+            Command::Arrange {
+                preset: None,
+                moves: Vec::new(),
+            },
+        )
+        .0,
+    )?;
     let _ = settled(engine)?;
     let first = frames(&w);
     let still = preview(engine, None)?;
@@ -868,7 +892,13 @@ fn arrange(
         .map(|x| x.then.map_or(0, |t| edge_error(t, x.now)))
         .max()
         .unwrap_or(0);
-    let (reply, ms) = ask(engine, Command::Arrange { preset: None });
+    let (reply, ms) = ask(
+        engine,
+        Command::Arrange {
+            preset: None,
+            moves: Vec::new(),
+        },
+    );
     let twice = done(&reply)?;
     let _ = settled(engine)?;
     let second = frames(&w);
@@ -903,7 +933,16 @@ fn arrange(
     pump_until(400, || false);
     let e_before = frame_rect(e).ok_or("Probe E vanished")?;
     let five: Vec<HWND> = w.iter().copied().chain(std::iter::once(e)).collect();
-    let fifth = done(&ask(engine, Command::Arrange { preset: None }).0)?;
+    let fifth = done(
+        &ask(
+            engine,
+            Command::Arrange {
+                preset: None,
+                moves: Vec::new(),
+            },
+        )
+        .0,
+    )?;
     let st = settled(engine)?;
     let zs = st
         .active_workspace
@@ -951,6 +990,7 @@ fn arrange(
     crate::apps::close(e);
     pump_until(600, || false);
     out.insert("layout".into(), layout(engine, styles, work, &w)?);
+    out.insert("moved".into(), put_elsewhere(engine, styles, work, &w)?);
     out.insert("to_front".into(), to_front(engine, &w)?);
     out.insert("apps".into(), apps(engine, styles, work, opened, &w)?);
     out.insert("least".into(), least(engine, styles, work, opened, &w)?);
@@ -1034,6 +1074,7 @@ fn least(
             engine,
             Command::Arrange {
                 preset: Some("quarters".into()),
+                moves: Vec::new(),
             },
         )
         .0,
@@ -1311,15 +1352,133 @@ fn apps(
 
 /// What Arrange would do now (`preview_arrange`), with a layout or without.
 fn preview(engine: &Engine, preset: Option<&str>) -> Result<ArrangePreview, String> {
+    preview_moved(engine, preset, Vec::new())
+}
+
+/// [`preview`], with windows put elsewhere on the picture.
+fn preview_moved(
+    engine: &Engine,
+    preset: Option<&str>,
+    moves: Vec<ArrangeMove>,
+) -> Result<ArrangePreview, String> {
     match engine.request(
         Command::PreviewArrange {
             preset: preset.map(str::to_owned),
+            moves,
         },
         TIMEOUT,
     ) {
         Reply::Preview(p) => Ok(*p),
         other => Err(format!("preview: {other:?}")),
     }
+}
+
+/// The zone a window of a preview goes in, by its index in the preview's zones.
+fn zone_index(p: &ArrangePreview, x: &PreviewWindow) -> Option<usize> {
+    let then = x.then?;
+    let c = then.center();
+    p.zones.iter().position(|z| z.rect.contains(c))
+}
+
+/// 3e2. Windows put elsewhere on the home page's picture (the owner: "we should be able to drag
+/// drop apps to permute them"). In Halves, the window of one half dropped on the other: the
+/// picture shows the two traded, each zone's name and colour going with its window, and nothing
+/// moves; Arrange with that move puts them so; Undo puts everything back.
+fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
+    let before = frames(w);
+    let base = preview(engine, Some("halves"))?;
+    let placed: Vec<&PreviewWindow> = base
+        .windows
+        .iter()
+        .filter(|x| !x.minimized && x.then.is_some())
+        .collect();
+    let (Some(a), Some(b)) = (placed.first().copied(), placed.get(1).copied()) else {
+        return Ok(json!({ "placed": placed.len(), "ok": false }));
+    };
+    let (Some(za), Some(zb)) = (zone_index(&base, a), zone_index(&base, b)) else {
+        return Ok(json!({ "zones_found": false, "ok": false }));
+    };
+    let mv = ArrangeMove {
+        window: a.window,
+        zone: u32::try_from(zb).unwrap_or(u32::MAX),
+    };
+    let start = Instant::now();
+    let shown = preview_moved(engine, Some("halves"), vec![mv])?;
+    let preview_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let find = |p: &ArrangePreview, h| p.windows.iter().find(|x| x.window == h).cloned();
+    let (a2, b2) = (find(&shown, a.window), find(&shown, b.window));
+    let traded = a2.as_ref().and_then(|x| zone_index(&shown, x)) == Some(zb)
+        && b2.as_ref().and_then(|x| zone_index(&shown, x)) == Some(za);
+    let same = |x: usize, y: usize| {
+        shown
+            .zones
+            .get(x)
+            .zip(base.zones.get(y))
+            .is_some_and(|(n, o)| n.name == o.name && n.color == o.color)
+    };
+    let with_windows = same(zb, za) && same(za, zb);
+    let untouched = most_moved(&frames(w), &before) <= SLACK;
+
+    let (reply, ms) = ask(
+        engine,
+        Command::Arrange {
+            preset: Some("halves".into()),
+            moves: vec![mv],
+        },
+    );
+    let message = done(&reply)?;
+    let st = settled(engine)?;
+    let ws = st
+        .active_workspace
+        .clone()
+        .ok_or("no workspace open after the move")?;
+    let zs = zones(engine, &ws.0, work)?;
+    // Each of the two against where the picture said it would go (below a strip's band when it
+    // wears one, as in 3e).
+    let landed: Vec<Value> = [(a.window, a2), (b.window, b2)]
+        .into_iter()
+        .map(|(h, p)| {
+            let hwnd = w.iter().copied().find(|x| handle(*x) == h);
+            let (Some(hwnd), Some(then)) = (hwnd, p.and_then(|p| p.then)) else {
+                return json!({ "found": false, "ok": false });
+            };
+            let Some(f) = frame_rect(hwnd) else {
+                return json!({ "frame": false, "ok": false });
+            };
+            let above = wears_above(&st, hwnd);
+            let wanted = match zone_of(&st, &zs, hwnd) {
+                Some(zone) if above => {
+                    Rect::new(then.left, styles.area(zone, true).top, then.right, then.bottom)
+                }
+                _ => then,
+            };
+            let off = edge_error(f, wanted);
+            json!({
+                "frame": [f.left, f.top, f.right, f.bottom],
+                "then": [then.left, then.top, then.right, then.bottom],
+                "off_px": off,
+                "ok": off <= SLACK,
+            })
+        })
+        .collect();
+    let undo = done(&ask(engine, Command::UndoArrange).0)?;
+    let _ = settled(engine)?;
+    let back = most_moved(&frames(w), &before);
+    Ok(json!({
+        "preview_ms": preview_ms,
+        "traded_in_picture": traded,
+        "names_and_colours_with_windows": with_windows,
+        "preview_changed_nothing": untouched,
+        "message": message,
+        "ms": ms,
+        "windows": landed,
+        "undo": undo,
+        "back_px": back,
+        "ok": traded && with_windows && untouched
+            && message.contains("\u{201c}Halves\u{201d} layout")
+            && landed.iter().all(|x| x["ok"] == json!(true))
+            && back <= SLACK,
+    }))
 }
 
 /// 3e. A layout picked on the home page, with the three windows arranged: the picture shows the
@@ -1376,6 +1535,7 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         engine,
         Command::Arrange {
             preset: Some("halves".into()),
+            moves: Vec::new(),
         },
     );
     let message = done(&reply)?;

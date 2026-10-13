@@ -12,7 +12,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use mosaik_core::arrange::{Chosen, Goes, Kind, Spot, Unit, plan_with};
+use mosaik_core::arrange::{Chosen, Goes, Kind, Move, Spot, Unit, plan_moved};
 use mosaik_core::editing::without_zones;
 use mosaik_core::geometry::Rect;
 use mosaik_core::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
@@ -23,7 +23,7 @@ use mosaik_core::topology::Topology;
 use mosaik_core::window::{WindowFacts, WindowHandle};
 use mosaik_core::workspace::{app_match, suggested_name, workspace_id};
 use mosaik_core::zone::{Zone, ZoneColor, ZoneId};
-use mosaik_ipc::protocol::{ArrangePreview, ErrorCode, PreviewWindow, PreviewZone, Reply};
+use mosaik_ipc::protocol::{ArrangeMove, ArrangePreview, ErrorCode, PreviewWindow, PreviewZone, Reply};
 use mosaik_win::{apps, window};
 
 use crate::mover::{self, To};
@@ -103,7 +103,8 @@ impl Engine {
 
     /// Works out what Arrange would do now, changing nothing: the plan, the workspace as it
     /// would be, and where each window would go. Arrange applies it; the home page shows it.
-    fn prepare_arrange(&mut self, preset: Option<&str>) -> Result<Prepared, Reply> {
+    /// `moves` are the windows the user moved on the home page's picture of the main screen.
+    fn prepare_arrange(&mut self, preset: Option<&str>, moves: &[ArrangeMove]) -> Result<Prepared, Reply> {
         let preset = match preset.map(|id| Preset::from_id(id).ok_or(id)) {
             None => None,
             Some(Ok(p)) => Some(p),
@@ -190,7 +191,19 @@ impl Engine {
             monitor: main,
             preset,
         });
-        let plan = plan_with(&units, &spots, &monitors, chosen);
+        // The picture shows the main monitor's zones, so a move's zone is one of those; a move
+        // of a window that has gone since is dropped.
+        let moves: Vec<Move> = moves
+            .iter()
+            .filter_map(|m| {
+                Some(Move {
+                    unit: windows.iter().position(|w| w.handle == m.window)?,
+                    monitor: main,
+                    zone: usize::try_from(m.zone).ok()?,
+                })
+            })
+            .collect();
+        let plan = plan_moved(&units, &spots, &monitors, chosen, &moves);
 
         // The workspace that takes them: the open one, or a new one.
         let index = self
@@ -224,8 +237,10 @@ impl Engine {
             ws = without_zones(&ws, &gone, &topology, style);
         }
 
-        // The plan's zones, in its order.
+        // The plan's zones, in its order, in the colours that follow on from the zones kept (a
+        // window the user moved keeps its colour: `NewZone::color`).
         let mut zone_ids: HashSet<String> = ws.layout.zones.iter().map(|z| z.id.0.clone()).collect();
+        let first_color = ws.layout.zones.len();
         let mut made: Vec<Option<ZoneId>> = Vec::with_capacity(plan.new_zones.len());
         for z in &plan.new_zones {
             let Some(monitor) = topology.monitors().get(z.monitor) else {
@@ -237,7 +252,7 @@ impl Engine {
             ws.layout.zones.push(Zone {
                 id: id.clone(),
                 name: z.name.clone(),
-                color: ZoneColor::nth(ws.layout.zones.len()),
+                color: ZoneColor::nth(first_color + z.color),
                 monitor,
                 area: z.area,
             });
@@ -350,9 +365,10 @@ impl Engine {
     }
 
     /// Puts every window on screen in the zone that suits it; with `preset` (a layout's id),
-    /// the main monitor takes that layout first.
-    pub(crate) fn arrange(&mut self, preset: Option<&str>) -> Reply {
-        let p = match self.prepare_arrange(preset) {
+    /// the main monitor takes that layout first; `moves` are the windows the user moved on the
+    /// home page's picture.
+    pub(crate) fn arrange(&mut self, preset: Option<&str>, moves: &[ArrangeMove]) -> Reply {
+        let p = match self.prepare_arrange(preset, moves) {
             Ok(p) => p,
             Err(reply) => return reply,
         };
@@ -451,10 +467,10 @@ impl Engine {
     }
 
     /// What Arrange would do now on the main monitor, without doing it: where its windows are,
-    /// where they would go, and the zones they would fill (the home page shows it while the
-    /// pointer is on a layout).
-    pub(crate) fn preview_arrange(&mut self, preset: Option<&str>) -> Reply {
-        let p = match self.prepare_arrange(preset) {
+    /// where they would go, and the zones they would fill (the home page shows it, with the
+    /// windows the user moved on it).
+    pub(crate) fn preview_arrange(&mut self, preset: Option<&str>, moves: &[ArrangeMove]) -> Reply {
+        let p = match self.prepare_arrange(preset, moves) {
             Ok(p) => p,
             Err(reply) => return reply,
         };
@@ -512,6 +528,7 @@ impl Engine {
             };
             let path = self.scanner.process_path(w.pid);
             windows.push(PreviewWindow {
+                window: w.handle,
                 label: p.labels[i].clone(),
                 icon: mosaik_core::icons::key(w.aumid.as_deref(), path.as_deref()),
                 now: w.frame_rect,

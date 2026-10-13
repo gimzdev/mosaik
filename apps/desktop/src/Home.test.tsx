@@ -55,6 +55,35 @@ const full: ArrangePreview = {
 /** The screen as the smart layout would leave it already. */
 const arranged: ArrangePreview = { ...coding, windows: coding.windows.map((w) => ({ ...w, now: w.then ?? w.now })) };
 
+/** The smart layout with the editor and the browser traded: each keeps its zone's name and colour. */
+const traded: ArrangePreview = {
+  ...coding,
+  zones: [
+    { name: 'Browser', color: 'verdigris', rect: { left: 0, top: 0, right: 1152, bottom: 1032 } },
+    { name: 'Code', color: 'lapis', rect: { left: 1152, top: 0, right: 1920, bottom: 1032 } },
+  ],
+  windows: coding.windows.map((w, i) => ({
+    ...w,
+    then: i === 0 ? { left: 1152, top: 0, right: 1920, bottom: 1032 } : { left: 0, top: 0, right: 1152, bottom: 1032 },
+  })),
+};
+
+/** Quarters for two windows: the third and fourth quarters are empty. */
+const quarters: ArrangePreview = {
+  ...coding,
+  task: null,
+  zones: [
+    { name: 'Code', color: 'lapis', rect: { left: 0, top: 0, right: 960, bottom: 516 } },
+    { name: 'Browser', color: 'verdigris', rect: { left: 960, top: 0, right: 1920, bottom: 516 } },
+    { name: 'Zone', color: 'saffron', rect: { left: 0, top: 516, right: 960, bottom: 1032 } },
+    { name: 'Zone 2', color: 'madder', rect: { left: 960, top: 516, right: 1920, bottom: 1032 } },
+  ],
+  windows: coding.windows.map((w, i) => ({
+    ...w,
+    then: i === 0 ? { left: 0, top: 0, right: 960, bottom: 516 } : { left: 960, top: 0, right: 1920, bottom: 516 },
+  })),
+};
+
 function answer(smart: ArrangePreview = coding, extra: (c: Command) => Reply | null = () => null) {
   const asked: Command[] = [];
   engine.request.mockImplementation((c) => {
@@ -64,8 +93,9 @@ function answer(smart: ArrangePreview = coding, extra: (c: Command) => Reply | n
     switch (c.cmd) {
       case 'preview_arrange':
         if (c.preset === 'full') return Promise.resolve(preview(full));
+        if (c.preset === 'quarters') return Promise.resolve(preview(quarters));
         if (c.preset) return Promise.resolve(preview(halves));
-        return Promise.resolve(preview(smart));
+        return Promise.resolve(preview(c.moves?.length ? traded : smart));
       case 'arrange':
         return Promise.resolve(done('Arranged 2 windows for coding.'));
       case 'undo_arrange':
@@ -89,7 +119,8 @@ function home() {
   );
 }
 
-const picture = () => screen.getByRole('img', { name: /main screen|Visual Studio Code|Nothing is open/ });
+const picture = () => screen.getByRole('group', { name: /main screen|Visual Studio Code|Nothing is open/ });
+const tile = (name: string) => screen.getByRole('button', { name });
 const arrange = () => screen.getByRole('button', { name: 'Arrange' });
 
 describe('Home', () => {
@@ -178,7 +209,87 @@ describe('Home', () => {
     answer(coding, (c) => (c.cmd === 'preview_arrange' ? failed('Safe mode: Mosaïk does not read windows.') : null));
     home();
     expect(await screen.findByRole('alert')).toHaveTextContent('Safe mode: Mosaïk does not read windows.');
-    expect(screen.getByRole('img', { name: 'Your main screen could not be read.' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Your main screen could not be read.' })).toBeInTheDocument();
+  });
+
+  it('trades two windows picked on the picture, shows it at once, and arranges them so', async () => {
+    // The owner: "in this view we should be able to drag drop apps to permute them". A click
+    // (or Enter) picks a window; a click on another puts it there.
+    const asked = answer();
+    home();
+    await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in Code' }));
+    expect(tile('Visual Studio Code in Code')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Choose where Visual Studio Code goes. Esc cancels.')).toBeInTheDocument();
+    await userEvent.click(tile('Google Chrome in Browser'));
+    // At once, then as Mosaïk says: the editor on the right, its zone's name and colour with it.
+    expect(tile('Visual Studio Code in Code')).toHaveStyle({ left: '60%' });
+    expect(tile('Google Chrome in Browser')).toHaveStyle({ left: '0%' });
+    await waitFor(() => {
+      expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [{ window: 101, zone: 1 }] });
+    });
+    expect(tile('Visual Studio Code in Code')).toHaveAttribute('aria-pressed', 'false');
+    expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
+    await userEvent.click(arrange());
+    expect(asked).toContainEqual({ cmd: 'arrange', moves: [{ window: 101, zone: 1 }] });
+    expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
+  });
+
+  it('picks and puts a window with the keyboard alone, and lets go with Escape', async () => {
+    const asked = answer();
+    home();
+    await screen.findByRole('button', { name: 'Visual Studio Code in Code' });
+    tile('Visual Studio Code in Code').focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByText('Choose where Visual Studio Code goes. Esc cancels.')).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByText('Choose where Visual Studio Code goes. Esc cancels.')).not.toBeInTheDocument();
+    expect(tile('Visual Studio Code in Code')).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.keyboard('{Enter}');
+    await userEvent.tab();
+    expect(tile('Google Chrome in Browser')).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [{ window: 101, zone: 1 }] });
+    });
+  });
+
+  it('puts a window in an empty zone of a layout', async () => {
+    const asked = answer();
+    home();
+    await userEvent.click(await screen.findByRole('radio', { name: 'Quarters' }));
+    await waitFor(() => {
+      expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in Code, Google Chrome in Browser.');
+    });
+    expect(screen.queryByRole('button', { name: 'Empty zone' })).not.toBeInTheDocument();
+    await userEvent.click(tile('Visual Studio Code in Code'));
+    const free = screen.getAllByRole('button', { name: 'Empty zone' });
+    expect(free).toHaveLength(2);
+    const [, last] = free;
+    if (last) await userEvent.click(last);
+    await waitFor(() => {
+      expect(asked).toContainEqual({ cmd: 'preview_arrange', preset: 'quarters', moves: [{ window: 101, zone: 3 }] });
+    });
+  });
+
+  it('puts the windows back with Reset, and a layout chosen starts afresh', async () => {
+    const asked = answer();
+    home();
+    await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in Code' }));
+    await userEvent.click(tile('Google Chrome in Browser'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Reset' }));
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(tile('Visual Studio Code in Code')).toHaveStyle({ left: '0%' });
+    });
+    await userEvent.click(tile('Visual Studio Code in Code'));
+    await userEvent.click(tile('Google Chrome in Browser'));
+    await userEvent.click(screen.getByRole('radio', { name: 'Halves' }));
+    await waitFor(() => {
+      expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in Left, Google Chrome in Right.');
+    });
+    expect(asked.at(-1)).toEqual({ cmd: 'preview_arrange', preset: 'halves' });
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
   });
 
   it('offers Smart, then the ten layouts by name, beside the workspaces', async () => {

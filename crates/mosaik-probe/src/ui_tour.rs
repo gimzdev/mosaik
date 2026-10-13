@@ -4,8 +4,8 @@
 //! with no name, and the order the Tab key goes through them. Home (with a workspace's ⋯ menu),
 //! a workspace's page, the zone editor and Settings (with Advanced and About), in dark and
 //! light, at the window's usual and smallest size, and the switcher. On Home, a layout is also
-//! chosen, so the picture shows where the windows would go (Arrange is never clicked: no window
-//! moves).
+//! chosen, so the picture shows where the windows would go, and a window of the picture is
+//! dragged onto another, then Reset (Arrange is never clicked: no window moves).
 //!
 //! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Ship",
 //! with three zones and no windows, so nothing of the user's is touched. The profile has no
@@ -430,6 +430,81 @@ impl Tour {
         Ok(())
     }
 
+    /// Drags the first window of Home's picture onto the second, as a person does (the button
+    /// held down all the way), and takes the picture once the two have traded places; Reset then
+    /// puts them back. Only the picture changes: no window moves until Arrange.
+    fn drag_in_picture(&mut self, shot: &str) -> Result<(), String> {
+        let smart = self.find("radio", "Smart")?;
+        let title = self.find("", "Your screen")?;
+        let tiles = |tour: &Self| -> Vec<Control> {
+            tour.uia
+                .controls(tour.hwnd)
+                .into_iter()
+                .filter(|c| {
+                    c.role == "button"
+                        && c.name.contains(" in ")
+                        && c.rect.top >= title.rect.bottom
+                        && c.rect.bottom <= smart.rect.top
+                })
+                .collect()
+        };
+        let before = tiles(self);
+        let (Some(a), Some(b)) = (before.first().cloned(), before.get(1).cloned()) else {
+            let page = json!({ "page": shot, "skipped": format!("{} windows in the picture", before.len()) });
+            println!("page {shot}: {page}");
+            self.pages.push(page);
+            return Ok(());
+        };
+        let (from, to) = (a.rect.center(), b.rect.center());
+        // SAFETY: read-only hit test.
+        let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: from.x, y: from.y }), GA_ROOT) };
+        if under != self.hwnd {
+            return Err(format!("another window covers {}; not dragging", a.label()));
+        }
+        input::move_to(from);
+        pump_until(150, || false);
+        {
+            let _button = LeftButton::press();
+            pump_until(100, || false);
+            for k in 1..=16 {
+                input::move_to(Point::new(
+                    from.x + (to.x - from.x) * k / 16,
+                    from.y + (to.y - from.y) * k / 16,
+                ));
+                pump_until(20, || false);
+            }
+            pump_until(150, || false);
+        }
+        pump_until(1000, || false);
+        let after = tiles(self);
+        let at = |name: &str| after.iter().find(|c| c.name == name).map(|c| c.rect.center());
+        let traded = at(&a.name).is_some_and(|p| b.rect.contains(p))
+            && at(&b.name).is_some_and(|p| a.rect.contains(p));
+        let file = self.shot(shot)?;
+        let reset = self.find("button", "Reset");
+        if let Ok(r) = &reset {
+            self.click(r)?;
+            pump_until(900, || false);
+        }
+        let back = tiles(self);
+        let put_back = back
+            .iter()
+            .find(|c| c.name == a.name)
+            .is_some_and(|c| a.rect.contains(c.rect.center()));
+        let page = json!({
+            "page": shot,
+            "shot": file,
+            "dragged": a.name,
+            "onto": b.name,
+            "traded": traded,
+            "reset": reset.is_ok(),
+            "put_back": put_back,
+        });
+        println!("page {shot}: {page}");
+        self.pages.push(page);
+        Ok(())
+    }
+
     /// The zone editor of the tour's workspace, from its menu on the home page.
     fn zones(&self) -> Result<(), String> {
         self.nav("Home")?;
@@ -549,6 +624,7 @@ impl Tour {
         self.page("home", true)?;
         self.choose_layout("Thirds", "home-thirds")?;
         self.choose_layout("Smart", "home-smart")?;
+        self.drag_in_picture("home-dragged")?;
 
         // The workspace's menu, then its page, with the windows on screen it could take: shown,
         // none added.

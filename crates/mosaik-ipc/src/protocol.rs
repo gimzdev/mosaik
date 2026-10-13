@@ -22,7 +22,9 @@ use thiserror::Error;
 /// 7: apps' icons (`icon` and `icons`: keys for the window's `app_icons`), a workspace's zones in
 /// small (`layout`), and in `settings` where the side menu is, whether the settings can be saved,
 /// and whether Mosaïk runs as installed (`side_menu`, `read_only`, `packaged`).
-pub const PROTOCOL_VERSION: u32 = 7;
+/// 8: windows moved on the home page's picture of the screen (`moves` on `arrange` and
+/// `preview_arrange`), and each preview window's handle (`window`).
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -65,12 +67,18 @@ pub enum Command {
     Arrange {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         preset: Option<String>,
+        /// The windows the user moved on the home page's picture of the main screen, in the
+        /// order they were moved.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        moves: Vec<ArrangeMove>,
     },
-    /// What `arrange` (with this `preset`, if any) would do now on the main monitor, without
-    /// doing it: the home page shows it while the pointer is on a layout.
+    /// What `arrange` (with this `preset` and these `moves`, if any) would do now on the main
+    /// monitor, without doing it: the home page shows it.
     PreviewArrange {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         preset: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        moves: Vec<ArrangeMove>,
     },
     /// Put back what the last `arrange` changed (for ten minutes, until a workspace is opened,
     /// saved or edited).
@@ -326,6 +334,14 @@ pub struct ArrangePreview {
     pub task: Option<Task>,
 }
 
+/// A window the user moved on the picture of the main screen: into the `zone`-th of the
+/// preview's zones (its index in [`ArrangePreview::zones`]). The window there takes its place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArrangeMove {
+    pub window: WindowHandle,
+    pub zone: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewZone {
     pub name: String,
@@ -335,6 +351,9 @@ pub struct PreviewZone {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewWindow {
+    /// The window, for a move ([`ArrangeMove`]).
+    #[serde(default)]
+    pub window: WindowHandle,
     /// The app's name ("Visual Studio Code").
     pub label: String,
     /// Its app's icon key (`mosaik_core::icons`).
@@ -633,12 +652,20 @@ mod tests {
             },
             Command::Save { workspace: None },
             Command::Rescue,
-            Command::Arrange { preset: None },
+            Command::Arrange {
+                preset: None,
+                moves: Vec::new(),
+            },
             Command::Arrange {
                 preset: Some("thirds".into()),
+                moves: Vec::new(),
             },
             Command::PreviewArrange {
                 preset: Some("halves".into()),
+                moves: vec![ArrangeMove {
+                    window: WindowHandle(42),
+                    zone: 1,
+                }],
             },
             Command::UndoArrange,
             Command::Settings,
@@ -701,7 +728,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":7,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":8,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -710,13 +737,41 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":7,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":8,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+    }
+
+    #[test]
+    fn an_arrange_without_moves_reads_as_before() {
+        // Protocol 7 clients (and the side menu) send no moves: nothing moved.
+        let r: Request = serde_json::from_str(r#"{"v":7,"id":3,"cmd":"arrange","preset":"thirds"}"#).unwrap();
+        assert_eq!(
+            r.command,
+            Command::Arrange {
+                preset: Some("thirds".into()),
+                moves: Vec::new(),
+            }
+        );
+        let line = serde_json::to_string(&Request::new(
+            4,
+            Command::PreviewArrange {
+                preset: None,
+                moves: Vec::new(),
+            },
+        ))
+        .unwrap();
+        assert!(!line.contains("moves"), "{line}");
+        // A preview window from Mosaïk 7 has no handle: 0, which no window has.
+        let w: PreviewWindow = serde_json::from_str(
+            r#"{"label":"Code","icon":null,"now":{"left":0,"top":0,"right":9,"bottom":9},"then":null,"minimized":true}"#,
+        )
+        .unwrap();
+        assert_eq!(w.window, WindowHandle(0));
     }
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":8,"id":1,"cmd":"state"}"#).unwrap_err();
-        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 8, server: 7 });
+        let err = decode_request(br#"{"v":9,"id":1,"cmd":"state"}"#).unwrap_err();
+        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 9, server: 8 });
         // Older clients are understood.
         assert!(decode_request(br#"{"v":1,"id":1,"cmd":"state"}"#).is_ok());
         assert!(err.to_string().contains("update Mosaïk"));
@@ -889,13 +944,27 @@ mod wire {
             },
             Command::Save { workspace: None },
             Command::Rescue,
-            Command::Arrange { preset: None },
+            Command::Arrange {
+                preset: None,
+                moves: Vec::new(),
+            },
             Command::Arrange {
                 preset: Some("half-stack".into()),
+                moves: vec![ArrangeMove {
+                    window: WindowHandle(0x0003_04a2),
+                    zone: 2,
+                }],
             },
-            Command::PreviewArrange { preset: None },
+            Command::PreviewArrange {
+                preset: None,
+                moves: Vec::new(),
+            },
             Command::PreviewArrange {
                 preset: Some("thirds".into()),
+                moves: vec![ArrangeMove {
+                    window: WindowHandle(0x0003_04a2),
+                    zone: 0,
+                }],
             },
             Command::UndoArrange,
             Command::ShowSwitcher,
@@ -1047,6 +1116,7 @@ mod wire {
                 ],
                 windows: vec![
                     PreviewWindow {
+                        window: WindowHandle(0x0003_04a2),
                         label: "Visual Studio Code".into(),
                         icon: Some(
                             r"exe:C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe".into(),
@@ -1056,6 +1126,7 @@ mod wire {
                         minimized: false,
                     },
                     PreviewWindow {
+                        window: WindowHandle(0x0001_02f8),
                         label: "Google Chrome".into(),
                         icon: Some(r"exe:C:\Program Files\Google\Chrome\Application\chrome.exe".into()),
                         now: Rect::new(700, 200, 1800, 980),
@@ -1063,6 +1134,7 @@ mod wire {
                         minimized: false,
                     },
                     PreviewWindow {
+                        window: WindowHandle(0x0005_0c1e),
                         label: "Microsoft Edge".into(),
                         icon: None,
                         now: Rect::new(300, 300, 1200, 900),

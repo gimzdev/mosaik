@@ -148,13 +148,21 @@ A <workspace> is its name or its id.";
                 workspace: (*w).to_owned(),
                 app: SlotId((*app).to_owned()),
             },
-            ("arrange", []) => Command::Arrange { preset: None },
+            ("arrange", []) => Command::Arrange {
+                preset: None,
+                moves: Vec::new(),
+            },
             ("arrange", [layout]) => Command::Arrange {
                 preset: Some((*layout).to_owned()),
+                moves: Vec::new(),
             },
-            ("preview", []) => Command::PreviewArrange { preset: None },
+            ("preview", []) => Command::PreviewArrange {
+                preset: None,
+                moves: Vec::new(),
+            },
             ("preview", [layout]) => Command::PreviewArrange {
                 preset: Some((*layout).to_owned()),
+                moves: Vec::new(),
             },
             ("undo-arrange", []) => Command::UndoArrange,
             ("sets", []) => Command::Sets,

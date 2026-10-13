@@ -11,6 +11,7 @@
 import { PRESETS, type Preset, presetShape } from './editor/model';
 import {
   type AppSet,
+  type ArrangeMove,
   type ArrangePreview,
   type Command,
   type HotkeyState,
@@ -219,6 +220,8 @@ function changed() {
 
 /** The windows on the main screen, front to back, as `preview_arrange` reports them. */
 interface OnScreen {
+  /** Its handle. */
+  window: number;
   label: string;
   /** What it is, as `arrange::Kind` says. */
   kind: 'code' | 'browser' | 'terminal' | 'chat';
@@ -231,24 +234,33 @@ let onScreen: OnScreen[] =
     ? []
     : [
         {
+          window: 0x30a2,
           label: 'Visual Studio Code',
           kind: 'code',
           zone: 'Code',
           now: { left: 180, top: 120, right: 1500, bottom: 980 },
         },
         {
+          window: 0x12f8,
           label: 'Google Chrome',
           kind: 'browser',
           zone: 'Browser',
           now: { left: 900, top: 260, right: 2300, bottom: 1240 },
         },
         {
+          window: 0x5c1e,
           label: 'Windows Terminal',
           kind: 'terminal',
           zone: 'Terminal',
           now: { left: 1400, top: 760, right: 2200, bottom: 1300 },
         },
-        { label: 'Slack', kind: 'chat', zone: 'Chat', now: { left: 300, top: 640, right: 1100, bottom: 1250 } },
+        {
+          window: 0x7d04,
+          label: 'Slack',
+          kind: 'chat',
+          zone: 'Chat',
+          now: { left: 300, top: 640, right: 1100, bottom: 1250 },
+        },
       ];
 /** Where the windows were before the last Arrange, for Undo. */
 let beforeArrange: OnScreen[] | null = null;
@@ -305,8 +317,10 @@ function autoLayout(): { task: Task; shape: RatioRect[]; takes: (number | undefi
   return { task: 'coding', shape, takes };
 }
 
-/** What Arrange would do with `preset` (or its own choice), as the engine reports it. */
-function preview(preset: Preset | undefined): ArrangePreview {
+/** What Arrange would do with `preset` (or its own choice), with the windows the user moved, as
+ * the engine reports it (`arrange::plan_moved`): a window moved trades places with the window in
+ * the zone it was put in, and keeps its zone's name and colour. */
+function preview(preset: Preset | undefined, moves: ArrangeMove[] = []): ArrangePreview {
   const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
   const w = work.right - work.left;
   const h = work.bottom - work.top;
@@ -324,21 +338,35 @@ function preview(preset: Preset | undefined): ArrangePreview {
     .map((r, i) => ({ i, area: (r.right - r.left) * (r.bottom - r.top) }))
     .sort((a, b) => b.area - a.area || a.i - b.i)
     .map((x) => x.i);
-  const takes = (n: number) => (auto ? auto.takes[n] : order[n]);
+  const zoneOf: (number | undefined)[] = onScreen.map((_, n) => (auto ? auto.takes[n] : order[n]));
+  const colorOf = rects.map((_, i) => i);
+  for (const m of moves) {
+    const n = onScreen.findIndex((s) => s.window === m.window);
+    const from = zoneOf[n];
+    if (n < 0 || m.zone >= rects.length || from === m.zone) continue;
+    const there = zoneOf.indexOf(m.zone);
+    zoneOf[n] = m.zone;
+    if (from === undefined) {
+      if (there >= 0) zoneOf[there] = undefined;
+    } else {
+      if (there >= 0) zoneOf[there] = from;
+      [colorOf[from], colorOf[m.zone]] = [colorOf[m.zone] ?? m.zone, colorOf[from] ?? from];
+    }
+  }
   const windows: PreviewWindow[] = onScreen.map((s, n) => {
-    const zone = takes(n);
+    const zone = zoneOf[n];
     const rect = zone === undefined ? undefined : rects[zone];
     return rect === undefined
-      ? { label: s.label, icon: null, now: s.now, then: null, minimized: true }
-      : { label: s.label, icon: null, now: s.now, then: rect, minimized: false };
+      ? { window: s.window, label: s.label, icon: null, now: s.now, then: null, minimized: true }
+      : { window: s.window, label: s.label, icon: null, now: s.now, then: rect, minimized: false };
   });
   return {
     work_area: work,
     zones: rects.map((rect, i) => {
-      const n = onScreen.findIndex((_, k) => takes(k) === i);
+      const n = zoneOf.indexOf(i);
       return {
         name: onScreen[n]?.zone ?? (i === 0 ? 'Zone' : `Zone ${String(i + 1)}`),
-        color: ZONE_COLORS[i % ZONE_COLORS.length] ?? 'slate',
+        color: ZONE_COLORS[(colorOf[i] ?? i) % ZONE_COLORS.length] ?? 'slate',
         rect,
       };
     }),
@@ -348,7 +376,7 @@ function preview(preset: Preset | undefined): ArrangePreview {
   };
 }
 
-function arrange(preset: string | undefined): Reply {
+function arrange(preset: string | undefined, moves: ArrangeMove[] = []): Reply {
   const known = PRESETS.find((p) => p.id === preset);
   if (preset !== undefined && !known) {
     return {
@@ -366,7 +394,7 @@ function arrange(preset: string | undefined): Reply {
       hint: 'Open the apps you work with, then arrange them.',
     };
   }
-  const p = preview(known?.id);
+  const p = preview(known?.id, moves);
   beforeArrange = onScreen;
   // Minimised windows leave the screen, as they leave the picture.
   onScreen = onScreen.flatMap((s, i) => {
@@ -487,7 +515,7 @@ const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '2.0.0-dev', protocol: 7 };
+      return { reply: 'hello', app_version: '2.0.0-dev', protocol: 8 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -625,11 +653,11 @@ function answer(command: Command): Reply {
     case 'rescue':
       return done('Nothing was hidden: every window is already on screen.');
     case 'arrange':
-      return arrange(command.preset);
+      return arrange(command.preset, command.moves);
     case 'preview_arrange': {
       const known = PRESETS.find((p) => p.id === command.preset);
       if (command.preset !== undefined && !known) return arrange(command.preset);
-      return { reply: 'preview', ...preview(known?.id) };
+      return { reply: 'preview', ...preview(known?.id, command.moves) };
     }
     case 'undo_arrange':
       if (!beforeArrange) {
@@ -647,7 +675,7 @@ function answer(command: Command): Reply {
       return {
         reply: 'state',
         app_version: '2.0.0-dev',
-        protocol: 7,
+        protocol: 8,
         safe_mode: false,
         watchdog: true,
         monitors,

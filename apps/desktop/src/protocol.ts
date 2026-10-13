@@ -75,8 +75,8 @@ export type Command =
   | { cmd: 'switch'; workspace: string }
   | { cmd: 'save'; workspace: string | null }
   | { cmd: 'rescue' }
-  | { cmd: 'arrange'; preset?: string }
-  | { cmd: 'preview_arrange'; preset?: string }
+  | { cmd: 'arrange'; preset?: string; moves?: ArrangeMove[] }
+  | { cmd: 'preview_arrange'; preset?: string; moves?: ArrangeMove[] }
   | { cmd: 'undo_arrange' }
   | { cmd: 'show_switcher' }
   | { cmd: 'show_settings' }
@@ -130,6 +130,13 @@ export interface HotkeyState {
   problem: string | null;
 }
 
+/** A window the user put in another zone of the picture of the main screen: the `zone`-th of the
+ * preview's zones. The window there takes its place. */
+export interface ArrangeMove {
+  window: number;
+  zone: number;
+}
+
 /** A zone of the main screen once arranged (`preview_arrange`). */
 export interface PreviewZone {
   name: string;
@@ -139,6 +146,8 @@ export interface PreviewZone {
 
 /** A window of the main screen: where it is, and where Arrange would put it. */
 export interface PreviewWindow {
+  /** The window, for a move (`ArrangeMove`). */
+  window: number;
   /** The app's name. */
   label: string;
   /** Its app's icon (a key for `appIcons`). */
@@ -377,6 +386,7 @@ function isPreviewZone(x: unknown): x is PreviewZone {
 function isPreviewWindow(x: unknown): x is PreviewWindow {
   return (
     isObject(x) &&
+    isNumber(x.window) &&
     isString(x.label) &&
     isNullableString(x.icon) &&
     isRect(x.now) &&

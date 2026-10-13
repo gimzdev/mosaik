@@ -38,7 +38,7 @@ async function editZones(page: Page) {
 test.describe('Home', () => {
   test('shows the smart layout for the screen, Arrange and the ten layouts, and is accessible', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('img', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
     await expect(shown(page, 'Smart layout for coding')).toBeVisible();
     const layouts = page.getByRole('region', { name: 'Your screen' }).getByRole('radio');
     await expect(layouts).toHaveCount(11);
@@ -50,11 +50,11 @@ test.describe('Home', () => {
 
   test('a layout shows where the windows would go; Arrange puts them there; Undo puts them back', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('img', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
     await page.getByRole('radio', { name: 'Thirds' }).check();
     await expect(shown(page, 'Slack will be minimized.')).toBeVisible();
     await expect(
-      page.getByRole('img', {
+      page.getByRole('group', {
         name: 'Visual Studio Code in Code, Google Chrome in Browser, Windows Terminal in Terminal, Slack minimized.',
       }),
     ).toBeVisible();
@@ -67,7 +67,7 @@ test.describe('Home', () => {
 
   test('Arrange lays the screen out for its task, and can be undone', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('img', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
     await arrange(page).click();
     await expect(shown(page, 'Arranged 4 windows for coding.')).toBeVisible();
     await expect(shown(page, 'Your windows are already like this.')).toBeHidden();
@@ -75,9 +75,40 @@ test.describe('Home', () => {
     await expect(shown(page, 'Windows are back where they were.')).toBeVisible();
   });
 
+  test('a window dragged onto another trades places with it, and Arrange puts them so', async ({ page }) => {
+    // The owner: "we should be able to drag drop apps to permute them".
+    await page.goto('/');
+    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
+    const code = page.getByRole('button', { name: 'Visual Studio Code in Code' });
+    const browser = page.getByRole('button', { name: 'Google Chrome in Browser' });
+    const [a, b] = [await code.boundingBox(), await browser.boundingBox()];
+    if (!a || !b) throw new Error('the windows are not drawn');
+    await page.mouse.move(a.x + a.width / 2, a.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(a.x + a.width / 2 + 20, a.y + 20, { steps: 4 });
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+    await page.mouse.up();
+    // Each lands in the other's place, with its zone's name and colour.
+    await expect
+      .poll(async () => {
+        const [c, d] = [await code.boundingBox(), await browser.boundingBox()];
+        return c && d ? Math.abs(c.x - b.x) < 3 && Math.abs(d.x - a.x) < 3 && Math.abs(c.y - b.y) < 3 : false;
+      })
+      .toBe(true);
+    await expect(page.getByRole('button', { name: 'Reset' })).toBeVisible();
+    await accessible(page);
+    await arrange(page).click();
+    await expect(shown(page, 'Arranged 4 windows for coding.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reset' })).toBeHidden();
+    // Arranged as they were put: the picture shows them there now.
+    const [c, d] = [await code.boundingBox(), await browser.boundingBox()];
+    expect(c && Math.abs(c.x - b.x) < 3).toBe(true);
+    expect(d && Math.abs(d.x - a.x) < 3).toBe(true);
+  });
+
   test('the arrow keys go through the layouts, and the picture follows', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('img', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
     await page.getByRole('radio', { name: 'Smart' }).focus();
     await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('radio', { name: 'Halves' })).toBeChecked();
@@ -198,7 +229,7 @@ test.describe('Settings', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await accessible(page);
     await page.getByRole('button', { name: 'Home' }).click();
-    await expect(page.getByRole('img', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
     await accessible(page);
   });
 
@@ -316,7 +347,7 @@ test.describe('the zone editor', () => {
 
 test('the first run has no tour: Home shows what Arrange will do, and Mosaïk starts with Windows', async ({ page }) => {
   await page.goto('/?first=1');
-  await expect(page.getByRole('img', { name: SMART })).toBeVisible();
+  await expect(page.getByRole('group', { name: SMART })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('switch', { name: 'Start with Windows' })).toBeChecked();
@@ -348,7 +379,7 @@ test.describe('at the smallest window size', () => {
 
   test('every page is usable and accessible', async ({ page }) => {
     await page.goto('/?second=1');
-    await expect(page.getByRole('img', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
     await expect(page.getByRole('radio', { name: 'Halves' })).toBeInViewport();
     await accessible(page);
     await windowDoesNotScroll(page);
