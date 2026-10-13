@@ -46,6 +46,9 @@ impl Apps {
         if w.exe.as_deref() == Some("explorer.exe") {
             return "File Explorer".to_owned();
         }
+        if let Some(name) = w.exe.as_deref().and_then(mosaik_core::window::known_app_name) {
+            return name.to_owned();
+        }
         if let Some(p) = path {
             let d = self
                 .descriptions

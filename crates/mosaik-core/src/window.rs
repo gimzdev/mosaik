@@ -105,6 +105,22 @@ impl WindowFacts {
     }
 }
 
+/// Programs whose file describes something other than the app people know (Steam's windows
+/// belong to its web helper, "Steam Client WebHelper"), by file name in lower case.
+const APP_NAMES: &[(&str, &str)] = &[
+    ("steamwebhelper.exe", "Steam"),
+    ("steam.exe", "Steam"),
+    ("windowsterminal.exe", "Windows Terminal"),
+    ("conhost.exe", "Console"),
+];
+
+/// The name people know an app by, for the few programs whose file says something else
+/// (`None`: its file's description says it).
+pub fn known_app_name(exe: &str) -> Option<&'static str> {
+    let exe = exe.to_lowercase();
+    APP_NAMES.iter().find(|(e, _)| *e == exe).map(|(_, name)| *name)
+}
+
 /// Whether a window whose visible frame is `frame` is a game or a video in full screen: over the
 /// whole of its monitor (`monitor`, its bounds), taskbar included, within 2 px, and not
 /// maximised. A window with Windows' title bar and resize frame is not, even there: it is a
@@ -130,6 +146,18 @@ pub fn covers_monitor(frame: Rect, monitor: Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apps_whose_files_say_something_else_have_their_own_names() {
+        // Job 0100, on the owner's screen: Steam's window belongs to its web helper, Windows
+        // Terminal's file calls itself a host, and a console window belongs to its host.
+        assert_eq!(known_app_name("steamwebhelper.exe"), Some("Steam"));
+        assert_eq!(known_app_name("SteamWebHelper.exe"), Some("Steam"));
+        assert_eq!(known_app_name("WindowsTerminal.exe"), Some("Windows Terminal"));
+        assert_eq!(known_app_name("conhost.exe"), Some("Console"));
+        // Others go by their file's description.
+        assert_eq!(known_app_name("chrome.exe"), None);
+    }
 
     #[test]
     fn full_screen_is_the_whole_monitor_without_a_window_frame() {

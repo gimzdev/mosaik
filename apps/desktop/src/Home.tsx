@@ -237,12 +237,16 @@ export function Home({
     <article aria-labelledby="home-title">
       <div className="text-center">
         <PageTitle id="home-title">Tidy your screen</PageTitle>
-        <p className="mx-auto mt-1.5 max-w-lg text-[var(--muted)]">
-          Point at a layout to see where your windows would go. Click it to use it; Undo puts everything back.
+        <p className="mx-auto mt-1.5 max-w-2xl text-balance text-[var(--muted)]">
+          Point at a layout to see where your windows would go. Click to use it; Undo puts them back.
         </p>
       </div>
 
-      <div className="mt-5">
+      {/* The picture stays in view while the page scrolls, so pointing at a layout lower down
+          still shows what it would do. It sticks to the very top of the page's scrolling area:
+          `-top-8` undoes the page's own top padding (py-8 in App), which would show the tiles
+          scrolling by above it. */}
+      <div className="sticky -top-8 z-10 -mx-3 mt-1 bg-[var(--bg)] px-3 pt-4 pb-2">
         <Stage
           preview={picture}
           unread={problem !== null}
