@@ -13,6 +13,7 @@
     .\mosaik.ps1 test              run the tests and checks
     .\mosaik.ps1 run               start the Mosaik just built
     .\mosaik.ps1 package           make the Store package (MSIX) to upload in Partner Center
+    .\mosaik.ps1 publish           test, build and package it, then send it to the Microsoft Store
     .\mosaik.ps1 pack [folder]     make a new mosaik.ps1 with the source of a folder inside
     .\mosaik.ps1 verify [folder]   check that the source inside matches a folder
 
@@ -22,7 +23,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Position = 0)]
-  [ValidateSet('menu', 'unpack', 'check', 'build', 'test', 'run', 'package', 'pack', 'verify')]
+  [ValidateSet('menu', 'unpack', 'check', 'build', 'test', 'run', 'package', 'publish', 'pack', 'verify')]
   [string]$Command = 'menu',
   [Parameter(Position = 1)]
   [string]$Folder
@@ -367,10 +368,29 @@ function Invoke-Cargo([string]$In, [string[]]$Arguments) {
   }
 }
 
+# The Mosaik of this folder's build that is running, if one is: Windows keeps its files from being
+# built over.
+function Get-RunningBuild([string]$Source) {
+  $release = [IO.Path]::GetFullPath((Under $Source 'target' 'release')) + '\'
+  @(Get-Process -Name 'mosaik' -ErrorAction SilentlyContinue | Where-Object {
+      $path = try { $_.Path } catch { $null }
+      $path -and $path.StartsWith($release, [StringComparison]::OrdinalIgnoreCase)
+    })
+}
+
 function Invoke-Build {
   $source = Get-Source
   Use-Cargo
   $ui = Under $source 'apps' 'desktop'
+  # A Mosaik of this build that is running is asked to quit first (every window it hid comes
+  # back), then started again in the tray once the new build is made.
+  $running = Get-RunningBuild $source
+  if ($running.Count -gt 0) {
+    Say 'Mosaik from this folder is running: it quits for the build, and starts again after.' Yellow
+    $ctl = Under $source 'target' 'release' 'mosaikctl.exe'
+    if (Test-Path $ctl) { & $ctl quit | Out-Null }
+    foreach ($p in $running) { if (-not $p.WaitForExit(10000)) { Fail 'Mosaik from this folder did not quit. Quit it from its tray icon, then build again.' } }
+  }
   Step 'Building the interface'
   Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund')
   Invoke-Tool $ui 'npm' @('run', 'build')
@@ -378,7 +398,12 @@ function Invoke-Build {
   Invoke-Cargo $source @('build', '--release', '-p', 'mosaik-desktop', '-p', 'mosaik-watchdog', '-p', 'mosaik-ipc')
   # The licences of what Mosaik is built with, where About finds them: beside mosaik.exe.
   Copy-Item (Under $source 'THIRD-PARTY-NOTICES.txt') (Under $source 'target' 'release')
-  Say ("Done: {0}" -f (Under $source 'target' 'release' 'mosaik.exe')) Green
+  $exe = Under $source 'target' 'release' 'mosaik.exe'
+  Say ("Done: {0}" -f $exe) Green
+  if ($running.Count -gt 0) {
+    Start-Process $exe -ArgumentList '--background'
+    Say 'Mosaik is running again, in the tray.' Green
+  }
 }
 
 function Invoke-Test {
@@ -392,6 +417,8 @@ function Invoke-Test {
   Step 'Interface checks and tests'
   Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund')
   foreach ($script in 'typecheck', 'lint', 'format:check', 'test') { Invoke-Tool $ui 'npm' @('run', $script) }
+  Step 'Sending to the Store, against a stand-in of its services'
+  & (Under $source 'installer' 'msix' 'test-publish.ps1')
   Say 'Every test passed.' Green
 }
 
@@ -406,6 +433,19 @@ function Invoke-Run {
 function Invoke-Package {
   $source = Get-Source
   & (Under $source 'installer' 'msix' 'package.ps1')
+}
+
+# Tests, builds and packages Mosaik, then sends the package to the Microsoft Store (after asking):
+# installer\msix\publish.ps1, which needs, once, the Entra application of the Partner Center
+# account (docs/RELEASE.md).
+function Invoke-Publish {
+  $source = Get-Source
+  Invoke-Test
+  Invoke-Build
+  Invoke-Package
+  Step 'Sending it to the Microsoft Store'
+  & (Under $source 'installer' 'msix' 'publish.ps1')
+  if ($LASTEXITCODE -ne 0) { Fail 'The package was not sent to the Store; the lines above say why.' }
 }
 
 # --- The menu ------------------------------------------------------------------------------------
@@ -424,7 +464,8 @@ function Show-Menu {
     Say '  4  Run the tests'
     Say '  5  Start Mosaik'
     Say '  6  Make the Store package'
-    Say '  7  Make a new mosaik.ps1 from the source'
+    Say '  7  Send it to the Microsoft Store (tests, builds and packages it first)'
+    Say '  8  Make a new mosaik.ps1 from the source'
     Say '  Q  Quit'
     Say ''
     $choice = (Read-Host 'Choose').Trim().ToUpperInvariant()
@@ -437,7 +478,8 @@ function Show-Menu {
         '4' { Invoke-Test }
         '5' { Invoke-Run }
         '6' { Invoke-Package }
-        '7' { Invoke-Pack }
+        '7' { Invoke-Publish }
+        '8' { Invoke-Pack }
         default { Say 'Type a number from the list, or Q.' Yellow }
       }
     }
@@ -455,6 +497,7 @@ try {
     'test' { Invoke-Test }
     'run' { Invoke-Run }
     'package' { Invoke-Package }
+    'publish' { Invoke-Publish }
     'pack' { Invoke-Pack }
     'verify' { Invoke-Verify }
   }

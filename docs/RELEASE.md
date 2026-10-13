@@ -1,8 +1,9 @@
 # Releasing Mosaïk
 
-Everything up to the package is automated; publishing is the owner's (Store submission, the
-GitHub push and release, the site deploy). Version 2.0.0 is set in `Cargo.toml` and
-`apps/desktop/package.json`; `CHANGELOG.md` says what is in it.
+Everything up to the package is automated, and sending it is one line; publishing stays the
+owner's (the Store submission, the GitHub push, the site deploy). Version 2.0.0 is set in
+`Cargo.toml` and `apps/desktop/package.json`; `CHANGELOG.md` says what is in it, and
+`installer/msix/whats-new.txt` is what the Store shows as "What's new in this version".
 
 ## 1. Build, test and package (on Windows)
 
@@ -11,6 +12,9 @@ GitHub push and release, the site deploy). Version 2.0.0 is set in `Cargo.toml` 
 .\mosaik.ps1 test       # every test, clippy and the interface checks
 .\mosaik.ps1 package    # target\msix\Mosaik_2.0.0.0_x64.msix
 ```
+
+A Mosaïk running from the same folder quits for the build (every window it hid comes back) and
+starts again after.
 
 ## 2. Check by hand on real machines
 
@@ -29,21 +33,50 @@ on Windows 11 and, if one is at hand, Windows 10 22H2:
 - Narrator on Mosaïk's window: each page's controls are read with their names (the probe lists
   what UI Automation gives Narrator; this is the check by ear).
 
-## 3. Submit to the Microsoft Store (Partner Center)
+## 3. Ship it: the site and the app in one line
 
-Apps and games, Mosaïk (Store ID `9PHR0L7S1QVD`), Start submission. Submit by 2027-01-11 or the
-reserved name is released.
+From the folder with `mosaik1.sh` and the repository (`mosaik/`) beside it, in Git Bash:
 
-1.0.0 was published on 2026-10-12. 2.0.0 is the next submission (1.1 was never submitted):
-Partner Center copies the last submission, so only the package, "What's new in this version"
-and the listing below change.
+```bash
+./mosaik1.sh --deploy --app
+```
+
+`--app` runs the app's `.\mosaik.ps1 publish` first: the tests, the build and the package, then,
+after you say yes, the package goes to the Microsoft Store (ADR 0025) with "What's new" from
+`installer/msix/whats-new.txt`; nothing else of the listing changes. If the app is not sent, the
+site is not deployed either. Then `--deploy` puts the site online. The Store checks the new
+version, usually within a day or two, and then updates everyone. `./mosaik1.sh --app` sends the
+app alone; `.\mosaik.ps1 publish` does the same from PowerShell.
+
+### Sending from a script: set up once
+
+The Store's submission API acts for your Partner Center account through a Microsoft Entra
+application:
+
+1. Partner Center, **Settings** (gear), **Account settings**, **Tenants**: if the account has no
+   Microsoft Entra tenant yet, create one (free) and sign in to it once.
+2. **Account settings**, **User management**, **Microsoft Entra applications**: **Create Microsoft
+   Entra application** (or add an existing one), with the **Manager** role.
+3. Select it: note its **Tenant ID** and **Client ID**, then **Add new key** and copy the **Key**
+   (it is shown once).
+4. The first `--app` (or `.\mosaik.ps1 publish`) asks for the three and keeps them for your
+   Windows user only, encrypted (`%APPDATA%\Mosaik\store-publishing.xml`; delete it to give them
+   again). Keys expire: Partner Center shows when, and makes a new one the same way.
+
+### By hand, in Partner Center
+
+Apps and games, Mosaïk (Store ID `9PHR0L7S1QVD`), Start submission. 1.0.0 was published on
+2026-10-12; Partner Center copies the last submission, so only the package and "What's new"
+change. Upload `target\msix\Mosaik_2.0.0.0_x64.msix` (and remove the older package), paste
+`installer/msix/whats-new.txt` into "What's new in this version", and submit.
+
+The rest of the submission, for reference (already set by submission 1):
 
 - **Pricing and availability**: free, all markets.
 - **Properties**: category Productivity; privacy policy `https://xn--mosak-fta.com/conditions`;
   website `https://xn--mosak-fta.com`; support `https://github.com/gimzdev/mosaik/issues`.
 - **Age ratings**: the questionnaire (no user-generated content, no purchases, no data shared).
-- **Packages**: upload `Mosaik_2.0.0.0_x64.msix` (and remove the older package). The
-  `runFullTrust` capability, when asked why:
+- **Packages**: the `runFullTrust` capability, when asked why:
   "Mosaïk is a desktop app that arranges the windows of the user's other apps (moves, resizes,
   groups them into tabs) and registers one global keyboard shortcut. It needs full trust to see
   and move those windows. It makes no network requests."
@@ -62,21 +95,18 @@ and the listing below change.
     moves · Sets of the apps you use together, opened in one click · Tabs for any app, not only
     the browser · One shortcut to switch workspaces · Works across monitors and scales · Your
     layouts stay on your computer · A safety net brings back every window, always.
-  - *What's new in this version* (2.0.0): "Mosaïk 2: a new window, dark by default. See your
-    screen as it will be before anything moves: Smart lays it out for what you are doing, or
-    pick one of ten layouts, then Arrange (with undo). Your workspaces beside it, your apps by
-    their own icons, no more pop-ups. Zones make room for a window that needs more, windows meet
-    edge to edge, and the side menu at the screen's edge has Arrange, layouts and workspaces."
   - *Screenshots*: at least one, 1920x1080, of Mosaïk in use (Home with a layout chosen, zones
     with tags, a tab strip, the switcher, the side menu).
   - *Search terms*: window manager, workspaces, tabs, zones, tiling.
-- **Submission options**: publish as soon as it passes certification (a day or two), or by hand.
+- Submit by 2027-01-11 or the reserved name is released (done: 1.0.0 is published).
 
-## 4. After the Store listing is live
+## 4. After the Store has the new version
 
 - The Download buttons install from the Store's web installer; check one on a clean account.
-- Deploy the site: `./mosaik1.sh --deploy`.
-- Push and release on GitHub: push `v1-build` to `main`, tag the version (`v1.0.0`, then
-  `v2.0.0`), and create the release with that version's section of `CHANGELOG.md` (no files to
+- The site: `./mosaik1.sh --deploy` (already done by the line in section 3).
+- GitHub: from the folder above the repositories, `./deploy.sh push mosaik` force-pushes this
+  repository to `master` as it is (its README included); the full `./deploy.sh` does every
+  repository, and leaves Mosaïk's README as it is written here. Then, if wanted, a release
+  tagged with the version (`v2.0.0`) with that version's section of `CHANGELOG.md` (no files to
   attach: Mosaïk installs from the Store).
 - `winget install 9PHR0L7S1QVD` works through winget's Store source once the listing is live.

@@ -31,7 +31,12 @@ interrupted with a dialog or a banner.
     named, the picture shows it before anything moves, and a line says what it would minimise.
     **Arrange** does it; Undo puts everything back. Choosing, then arranging, replaces pointing to
     preview and clicking to arrange at once: the picture shows what will happen, never a pile of
-    overlapping windows. **Workspaces**: a column of rows, each with its layout in small, its
+    overlapping windows. A window of the picture dragged onto another trades places with it (the
+    owner: "we should be able to drag drop apps to permute them"), or takes an empty zone of the
+    layout; a click or Enter picks one and a second puts it there, Escape lets go. Each window
+    keeps its zone's name and colour as it moves, and Arrange puts them there (protocol 8: the
+    moves go with `preview_arrange` and `arrange`; `mosaik_core::arrange::plan_moved` makes room
+    again for a window that needs more). Reset puts the picture back. **Workspaces**: a column of rows, each with its layout in small, its
     apps' icons and its shortcut; one click opens one. The suggested sets of apps (ADR 0022) follow
     under **Suggested**. **Save layout** keeps the screen as a new workspace, under a name that
     is free.

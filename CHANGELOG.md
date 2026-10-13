@@ -14,6 +14,10 @@ Mosaïk 2 is a new window on the same engine, with everything the 1.1 builds add
   for what you are doing ("Smart layout for coding"); the ten layouts are drawn beside it. Choose
   one and the picture changes before anything moves, with the windows it would minimise named
   under it. Arrange does it; Undo puts everything back.
+- Drag a window onto another in that picture and the two trade places, each with its zone's name
+  and colour; drop one on an empty zone of a layout and it moves there. Without a mouse: Enter
+  picks a window, Enter on another puts it there, Escape lets go. Arrange puts them so; Reset puts
+  the picture back.
 - Your workspaces sit beside the screen, each with its layout in small, its apps' icons and its
   shortcut: one click opens one. Suggested sets of the apps you have that go together are under
   them. Save layout keeps what is on screen as a new workspace.
@@ -33,6 +37,12 @@ Mosaïk 2 is a new window on the same engine, with everything the 1.1 builds add
   workspaces, and Mosaïk installed from the Store starts with Windows (Settings turns that off).
 - Settings saved by a newer Mosaïk are read as well as they can be, shown, and never written
   over.
+
+### Making a release
+
+- `.\mosaik.ps1 publish` runs the tests, builds and packages Mosaïk, then sends the package to the
+  Microsoft Store with "What's new" (after asking); the site script's `--app` does it too, so
+  `./mosaik1.sh --deploy --app` ships the site and the app in one line.
 
 ## 1.1.0 (development builds, not released on their own)
 

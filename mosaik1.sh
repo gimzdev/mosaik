@@ -16,6 +16,9 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    ./mosaik1.sh --fresh     reinstall dependencies, rebuild from scratch
 #    ./mosaik1.sh --port 4000 another port (default 3000, or the next free one)
 #    ./mosaik1.sh --dir ~/m   install somewhere else (default ./mosaik_site)
+#    ./mosaik1.sh --deploy --app   also send the app to the Microsoft Store
+#    ./mosaik1.sh --app       only send the app (Windows: it is tested, built
+#                             and packaged first, then you are asked)
 #
 #  Updating
 #    This file is the source of truth. Change the settings below and run it
@@ -28,6 +31,13 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    VERCEL_TOKEN, plus VERCEL_SCOPE for a team), creates the project named
 #    below and ships it to production. Point your domain at it once with:
 #      npx vercel domains add <your-domain>
+#
+#  The app (--app)
+#    Runs the app's own mosaik.ps1 publish: the repository's (./mosaik/) when
+#    it is beside this file, else the one-file mosaik.ps1 beside it. The Store
+#    then checks the new version, usually within a day or two. The first time
+#    it asks for the Partner Center app's tenant ID, client ID and key (the
+#    app's docs/RELEASE.md says where they are) and keeps them, encrypted.
 # ════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
 # The copy made for Windows line endings (line 2) goes when the script ends.
@@ -42,7 +52,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.8.0"
+MK_VERSION="1.9.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -63,18 +73,20 @@ usage() { awk '/^#  Usage$/ { on = 1 } on && /^#$/ { exit } on { sub(/^#  ?/, ""
 
 # ── Options ──────────────────────────────────────────────────────────────
 APP_DIR=""; PORT="${PORT:-3000}"; PORT_SET=0; MODE="dev"; START=1; FRESH=0; DEPLOY=0; PREVIEW=0
+APP=0; SITE=0   # --app: send the app to the Store; SITE: an option about the site was given too
 while [ $# -gt 0 ]; do
   case "$1" in
-    --dir) [ $# -ge 2 ] || die "--dir needs a path"; APP_DIR="$2"; shift 2 ;;
-    --dir=*) APP_DIR="${1#*=}"; shift ;;
-    --port) [ $# -ge 2 ] || die "--port needs a number"; PORT="$2"; PORT_SET=1; shift 2 ;;
-    --port=*) PORT="${1#*=}"; PORT_SET=1; shift ;;
-    --prod) MODE="prod"; shift ;;
-    --build) MODE="prod"; START=0; shift ;;
-    --no-start) START=0; shift ;;
-    --fresh) FRESH=1; shift ;;
-    --deploy) DEPLOY=1; shift ;;
-    --preview) DEPLOY=1; PREVIEW=1; shift ;;
+    --dir) [ $# -ge 2 ] || die "--dir needs a path"; APP_DIR="$2"; SITE=1; shift 2 ;;
+    --dir=*) APP_DIR="${1#*=}"; SITE=1; shift ;;
+    --port) [ $# -ge 2 ] || die "--port needs a number"; PORT="$2"; PORT_SET=1; SITE=1; shift 2 ;;
+    --port=*) PORT="${1#*=}"; PORT_SET=1; SITE=1; shift ;;
+    --prod) MODE="prod"; SITE=1; shift ;;
+    --build) MODE="prod"; START=0; SITE=1; shift ;;
+    --no-start) START=0; SITE=1; shift ;;
+    --fresh) FRESH=1; SITE=1; shift ;;
+    --deploy) DEPLOY=1; SITE=1; shift ;;
+    --preview) DEPLOY=1; PREVIEW=1; SITE=1; shift ;;
+    --app) APP=1; shift ;;
     -h|--help) usage ;;
     *) die "Unknown option: $1 (try --help)" ;;
   esac
@@ -88,6 +100,32 @@ case "$STORE_ID" in *[!0-9A-Z]*) die "STORE_ID has only capital letters and digi
 case "$VERCEL_PROJECT" in ''|*[!a-z0-9._-]*) die "VERCEL_PROJECT may only use lowercase letters, digits, '.', '_' and '-'" ;; esac
 
 printf '\n%s%s  %s site%s  %s%s %s%s\n\n' "$CB" "$CA" "$SITE_NAME" "$C0" "$CD" "$SCRIPT_NAME" "$MK_VERSION" "$C0"
+
+# ── The app (--app) ──────────────────────────────────────────────────────
+# Tested, built and packaged by the app's own mosaik.ps1, then sent to the Microsoft Store after
+# asking (its "publish"). Before the site: when the app is not sent, nothing else is done.
+if [ "$APP" = 1 ]; then
+  command -v powershell.exe >/dev/null 2>&1 ||
+    die "--app builds Mosaïk and sends it to the Microsoft Store: run it on Windows (Git Bash), where Mosaïk builds."
+  HERE="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+  APP_PS1=""
+  if [ -f "$HERE/mosaik/Cargo.toml" ] && [ -f "$HERE/mosaik/mosaik.ps1" ]; then APP_PS1="$HERE/mosaik/mosaik.ps1"
+  elif [ -f "$HERE/mosaik.ps1" ]; then APP_PS1="$HERE/mosaik.ps1"
+  else die "--app needs the app beside this file: its repository (mosaik/) or the one-file mosaik.ps1."; fi
+  step "Sending Mosaïk to the Microsoft Store with $APP_PS1"
+  note "Its tests, build and package first (a few minutes), then the Store, after you say yes."
+  APP_PS1_WIN="$(cygpath -w "$APP_PS1" 2>/dev/null || printf '%s' "$APP_PS1")"
+  # mintty (Git Bash's own window) is no Windows console: winpty gives PowerShell one, so it can ask.
+  if [ "${TERM_PROGRAM:-}" = "mintty" ] && command -v winpty >/dev/null 2>&1; then
+    winpty powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$APP_PS1_WIN" publish ||
+      die "Mosaïk was not sent to the Store; the lines above say why. Nothing else was done."
+  else
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$APP_PS1_WIN" publish ||
+      die "Mosaïk was not sent to the Store; the lines above say why. Nothing else was done."
+  fi
+  ok "The app's part is done"
+  [ "$SITE" = 1 ] || exit 0
+fi
 
 # ── Requirements ─────────────────────────────────────────────────────────
 command -v node >/dev/null 2>&1 || die "Node.js 20.9 or newer is required (https://nodejs.org)."

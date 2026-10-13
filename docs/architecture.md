@@ -129,7 +129,10 @@ the engine gathers windows and applies the result.
 - **Home** (ADR 0016, 0024): a picture of the main monitor as the layout chosen would leave it,
   drawn from `preview_arrange` (the same preparation as Arrange, changing nothing): Smart first
   (Arrange's own layout for the task it reads), or one of ten layouts; the windows it would
-  minimise are named under it. Arrange does it, and Undo brings everything back. Beside it,
+  minimise are named under it. A window dragged onto another in the picture trades places with
+  it (a click or Enter picks one, a second puts it there); the moves go with the preview and with
+  Arrange (`mosaik_core::arrange::plan_moved`), each window keeping its zone's name and colour.
+  Arrange does it, and Undo brings everything back. Beside it,
   every workspace with its apps' icons, opened in one click, a ⋯ menu for the rest, and the
   suggested sets. Mosaïk's window has two places, Home and Settings (with About at its end).
 - **Apps' icons** (ADR 0024): replies name each app's icon by a key (`app:<AppUserModelID>` or

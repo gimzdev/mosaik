@@ -98,7 +98,8 @@ if Mosaïk stops
 <h2>Using it</h2>
 
 <p>Open Mosaïk from the Start menu or its tray icon: <b>Your screen</b> shows your windows as <b>Smart</b> would lay them out,<br>
-each in its zone. Choose one of ten layouts instead to see it first. <b>Arrange</b> does it; <b>Undo</b> puts them back.</p>
+each in its zone. Choose one of ten layouts instead to see it first, and drag a window onto another to swap them.<br>
+<b>Arrange</b> does it; <b>Undo</b> puts them back.</p>
 
 <p>Beside it, your workspaces open in one click, and <b>Suggested</b> offers sets of your apps that go together, such as <b>Coding</b>:<br>
 one click opens them side by side, three to a view, and starts the ones that are not open.</p>
@@ -160,6 +161,7 @@ or deploys it.<br>
 .\mosaik.ps1 test       # every test and check
 .\mosaik.ps1 run        # start the Mosaïk just built
 .\mosaik.ps1 package    # the Store package (MSIX)
+.\mosaik.ps1 publish    # tests, builds and packages it, then sends it to the Microsoft Store
 .\mosaik.ps1 pack       # a one-file copy with this source inside (target\mosaik.ps1)
 ```
 
