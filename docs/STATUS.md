@@ -777,6 +777,16 @@ process, its own windows, a scratch folder).
   that failed first, 17 in all). Opened by hand, Mosaïk's window could not be told from .NET's
   "main window" (the quick menu's handle, a window with no title, came first); job 0101 looks
   for it by title. A second copy started with `--background` left at once (exit 0).
+- **The last build** (job 0101, commit 1d7908b): `mosaik.ps1 test` passed in 53 s (core 191,
+  Win32 9 and 7, IPC 10 and 10, overlays 5, engine, the interface's 59); the release build
+  (79 s) and the Store package (2.74 MB). Opened by hand, Mosaïk's window showed 0.3 s after it
+  started; started with `--background`, no window, and a second such copy left at once (exit 0)
+  without showing the first one's. The tour: 31 pictures, the home page's picture in view with
+  Thirds pointed at. On the owner's screen, asked only (no workspace opened, nothing moved):
+  Arrange in 10 ms, zones Steam, Terminal, Settings, Browser for Steam, Windows Terminal,
+  Settings and Google Chrome, Claude and File Explorer as tabs; Thirds in 10 ms, zones Browser,
+  Files, Chat. `pack`: 240 files, checked against the repository; `mosaik.ps1` (1.09 MB) and
+  `mosaik1.sh` (site 1.3.0) beside it. Mosaïk 1.1 left running in the tray.
 
 ## Owner decisions
 
