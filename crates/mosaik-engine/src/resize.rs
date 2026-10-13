@@ -222,7 +222,12 @@ impl Engine {
 
     /// Gives the open workspace's zones `ids` the areas `now` (they had `before`) and saves the
     /// workspace. Returns the zones that changed.
-    fn set_zone_areas(&mut self, ids: &[ZoneId], before: &[RatioRect], now: &[RatioRect]) -> HashSet<ZoneId> {
+    pub(crate) fn set_zone_areas(
+        &mut self,
+        ids: &[ZoneId],
+        before: &[RatioRect],
+        now: &[RatioRect],
+    ) -> HashSet<ZoneId> {
         let changed: HashSet<ZoneId> = ids
             .iter()
             .zip(before.iter().zip(now))

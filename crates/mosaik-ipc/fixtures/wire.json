@@ -157,12 +157,22 @@
       "app": "s2",
       "cmd": "remove_app",
       "workspace": "ship"
+    },
+    {
+      "cmd": "sets"
+    },
+    {
+      "cmd": "open_set",
+      "set": "coding"
+    },
+    {
+      "cmd": "sort_windows"
     }
   ],
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 5,
+      "protocol": 6,
       "reply": "hello"
     },
     {
@@ -397,6 +407,24 @@
           "color": "lapis",
           "id": "z1",
           "name": "Code"
+        }
+      ]
+    },
+    {
+      "reply": "sets",
+      "sets": [
+        {
+          "apps": [
+            "Visual Studio Code",
+            "Terminal",
+            "Google Chrome",
+            "Claude",
+            "File Explorer"
+          ],
+          "id": "coding",
+          "name": "Coding",
+          "open": 2,
+          "workspace": null
         }
       ]
     }

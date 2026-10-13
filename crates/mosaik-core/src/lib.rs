@@ -5,6 +5,7 @@
 pub mod arrange;
 pub mod classify;
 pub mod editing;
+pub mod fit;
 pub mod geometry;
 pub mod hotkey;
 pub mod journal;
@@ -14,6 +15,7 @@ pub mod matching;
 pub mod others;
 pub mod place;
 pub mod presets;
+pub mod sets;
 pub mod settings;
 pub mod snap;
 pub mod store;

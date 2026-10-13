@@ -69,3 +69,10 @@ and that the home page list each workspace's apps.
   nothing), 3d (a new window becomes the main one; the one used longest ago is minimised), and
   3h (a window that will not get as small as a quarter: its minimum read from another process,
   and Quarters minimises it), in `docs/STATUS.md`.
+
+## Amended by ADR 0021 (2026-10-13)
+
+A window too big for its zone no longer waits in the taskbar: the zones make room for it, its
+zone growing just enough and the zones beside it giving up the room, and it keeps its place in
+the layout. The main zone's cap (three quarters of the screen) is gone. A window is minimised
+only when the windows cannot all fit.

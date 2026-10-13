@@ -252,6 +252,42 @@ describe('the home page', () => {
     expect(await screen.findByText('With Whole screen: 1 window minimized')).toBeTruthy();
     expect(picture().getAttribute('aria-label')).toBe('Visual Studio Code in Zone, Google Chrome minimized.');
   });
+  it('offers sets of the apps that go together, and opens one in a click', async () => {
+    answer((c) => {
+      if (c.cmd === 'sets') {
+        return {
+          reply: 'sets',
+          sets: [
+            {
+              id: 'coding',
+              name: 'Coding',
+              apps: ['Visual Studio Code', 'Terminal', 'Google Chrome', 'Claude', 'File Explorer'],
+              open: 1,
+              workspace: null,
+            },
+          ],
+        };
+      }
+      if (c.cmd === 'open_set') return { reply: 'done', message: 'Opened “Coding”.' };
+      return null;
+    });
+    page();
+    const set = await screen.findByRole('button', {
+      name: 'Open Coding: Visual Studio Code, Terminal, Google Chrome, Claude, File Explorer',
+    });
+    expect(screen.getByRole('heading', { name: 'Sets of apps' })).toBeTruthy();
+    await userEvent.click(set);
+    expect(engine.request).toHaveBeenCalledWith({ cmd: 'open_set', set: 'coding' });
+    expect(await screen.findByText('Opened “Coding”.')).toBeTruthy();
+  });
+
+  it('shows no sets when Mosaïk finds none', async () => {
+    answer((c) => (c.cmd === 'sets' ? { reply: 'sets', sets: [] } : null));
+    page();
+    await screen.findByText('Your main screen now: 2 windows');
+    expect(screen.queryByRole('heading', { name: 'Sets of apps' })).toBeNull();
+  });
+
   it('shows each workspace’s apps, and the full list to change them', async () => {
     answer(
       (c) => {

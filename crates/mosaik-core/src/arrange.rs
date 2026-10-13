@@ -13,6 +13,7 @@
 //! the windows that matter most. Minimised windows stay in the taskbar rather than disappear.
 //! The plan is pure; the engine applies it, and can undo it.
 
+use crate::fit;
 use crate::geometry::{RatioRect, Rect, Size};
 use crate::presets::Preset;
 use crate::task::{self, Role, Task};
@@ -349,6 +350,19 @@ impl Kind {
         }
     }
 
+    /// The kind of an app known by its program file or its package's id (lower case), and its
+    /// place among the apps of that kind Mosaïk knows (the best known first).
+    pub fn listed(key: &str) -> Option<(Kind, usize)> {
+        PROGRAMS
+            .iter()
+            .find_map(|(k, list)| list.iter().position(|p| *p == key).map(|i| (*k, i)))
+            .or_else(|| {
+                PACKAGES
+                    .iter()
+                    .find_map(|(k, list)| list.iter().position(|p| key.starts_with(p)).map(|i| (*k, i)))
+            })
+    }
+
     /// How much a window of this kind gains from a large zone, from 0 to 1.
     pub const fn weight(self) -> f64 {
         match self {
@@ -444,8 +458,6 @@ pub struct Plan {
 
 /// A zone of a picked layout, as the planner sees it.
 struct Candidate {
-    /// Its index in the plan's new zones.
-    zone: usize,
     rect: Rect,
     /// Its area over the largest zone's.
     share: f64,
@@ -528,6 +540,63 @@ fn steady(placed: &mut [task::Placement], here: &[usize], units: &[Unit], work: 
         if fits(&units[here[b]], area) && fits(&units[here[a]], other) {
             placed[p].window = b;
             placed[q].window = a;
+        }
+    }
+}
+
+/// The areas of a picked layout on `work`, made to fit the windows in its zones (`in_zone`):
+/// the zones make room for the windows that need more. When they cannot all fit, a window too
+/// big for its zone tries the other zones first (trading places with the window there); failing
+/// that, the window that needs the most room is taken out of its zone (it waits in the taskbar),
+/// until the others fit.
+fn make_room_for(
+    areas: &[RatioRect],
+    in_zone: &mut [Option<usize>],
+    units: &[Unit],
+    work: Rect,
+) -> Vec<RatioRect> {
+    let room = |in_zone: &[Option<usize>]| {
+        let least: Vec<Size> = in_zone
+            .iter()
+            .map(|u| u.map_or_else(Size::default, |u| units[u].least))
+            .collect();
+        fit::make_room(areas, &least, work.width(), work.height())
+    };
+    loop {
+        if let Some(fitted) = room(in_zone) {
+            return fitted;
+        }
+        // The windows too big for their zones, the biggest first.
+        let mut misfits: Vec<usize> = (0..in_zone.len())
+            .filter(|&k| in_zone[k].is_some_and(|u| !fits(&units[u], areas[k].to_rect(work))))
+            .collect();
+        let need = |k: usize| {
+            in_zone[k].map_or(0, |u| {
+                i64::from(units[u].least.width) * i64::from(units[u].least.height)
+            })
+        };
+        misfits.sort_by_key(|&k| std::cmp::Reverse(need(k)));
+        let traded = misfits.iter().find_map(|&k| {
+            (0..in_zone.len()).filter(|&j| j != k).find_map(|j| {
+                let mut trial = in_zone.to_vec();
+                trial.swap(k, j);
+                room(&trial).map(|_| trial)
+            })
+        });
+        if let Some(trial) = traded {
+            in_zone.copy_from_slice(&trial);
+            continue;
+        }
+        // Out of a zone: the window that needs the most room, among those too big for theirs,
+        // else among all.
+        let k = misfits.first().copied().or_else(|| {
+            (0..in_zone.len())
+                .filter(|&k| in_zone[k].is_some())
+                .max_by_key(|&k| need(k))
+        });
+        match k {
+            Some(k) => in_zone[k] = None,
+            None => return areas.to_vec(),
         }
     }
 }
@@ -620,13 +689,16 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
         }
     }
 
-    // 2. A layout picked for a monitor: its zones, for the windows there that fit one of them,
-    //    as many as it has zones, the ones that matter most to the task first (then the ones
-    //    used last). Each goes into the zone that suits it best, by score.
+    // 2. A layout picked for a monitor: its zones, for as many windows there as it has zones,
+    //    the ones that matter most to the task first (then the ones used last). Each goes into
+    //    the zone that suits it best, by score; then the zones make room for the windows that
+    //    need more ([`fit::make_room`]). Only when they cannot all fit does a window wait in the
+    //    taskbar: the one that needs the most room.
     if let Some(c) = chosen {
         let work = monitors[c.monitor];
         let from = new_zones.len();
-        for area in c.preset.zones() {
+        let areas = c.preset.zones();
+        for &area in &areas {
             new_zones.push(NewZone {
                 monitor: c.monitor,
                 area,
@@ -634,12 +706,11 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
             });
             new_zone_window.push(None);
         }
-        let rects: Vec<Rect> = new_zones[from..].iter().map(|z| z.area.to_rect(work)).collect();
+        let rects: Vec<Rect> = areas.iter().map(|a| a.to_rect(work)).collect();
         let largest = rects.iter().map(|r| r.area()).max().unwrap_or(0);
         let candidates: Vec<Candidate> = rects
             .iter()
-            .enumerate()
-            .map(|(k, &rect)| {
+            .map(|&rect| {
                 // Areas of real screens are far below 2^52, so the conversions are exact.
                 #[allow(clippy::cast_precision_loss)]
                 let share = if largest > 0 {
@@ -647,11 +718,7 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
                 } else {
                     1.0
                 };
-                Candidate {
-                    zone: from + k,
-                    rect,
-                    share,
-                }
+                Candidate { rect, share }
             })
             .collect();
         let priority = |rank: usize, u: usize| {
@@ -666,9 +733,10 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
             .map(|(rank, &u)| (u, priority(rank, u)))
             .collect();
         here.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        // A window larger than the whole screen fits no zone of it.
         let mut kept: Vec<usize> = Vec::new();
         for &(u, _) in &here {
-            if kept.len() < candidates.len() && candidates.iter().any(|c| fits(&units[u], c.rect)) {
+            if kept.len() < candidates.len() && fits(&units[u], work) {
                 kept.push(u);
             } else {
                 goes[u] = Some(Goes::Minimize);
@@ -679,22 +747,29 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
         for &u in &kept {
             let importance = importance(&units[u], fit(u), u, units.len());
             for (k, cand) in candidates.iter().enumerate() {
-                if fits(&units[u], cand.rect) {
-                    pairs.push((score(&units[u], importance, cand), u, k));
-                }
+                pairs.push((score(&units[u], importance, cand), u, k));
             }
         }
         // Best first; ties go to the window used last, then to the zone listed first.
         pairs.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
-        let mut taken: Vec<bool> = vec![false; candidates.len()];
+        // The window in each zone.
+        let mut in_zone: Vec<Option<usize>> = vec![None; candidates.len()];
         for &(_, u, k) in &pairs {
-            if goes[u].is_none() && !taken[k] {
-                taken[k] = true;
-                goes[u] = Some(Goes::Zone(candidates[k].zone));
-                new_zone_window[candidates[k].zone] = Some(u);
+            if !in_zone.contains(&Some(u)) && in_zone[k].is_none() {
+                in_zone[k] = Some(u);
             }
         }
-        // A window whose zones all went to others waits in the taskbar.
+        let fitted = make_room_for(&areas, &mut in_zone, units, work);
+        for (k, area) in fitted.into_iter().enumerate() {
+            new_zones[from + k].area = area;
+        }
+        for (k, u) in in_zone.iter().enumerate() {
+            if let Some(u) = *u {
+                goes[u] = Some(Goes::Zone(from + k));
+                new_zone_window[from + k] = Some(u);
+            }
+        }
+        // A window left without a zone waits in the taskbar.
         for &u in &kept {
             goes[u].get_or_insert(Goes::Minimize);
         }
@@ -1148,11 +1223,12 @@ mod tests {
     }
 
     #[test]
-    fn a_window_too_big_for_every_zone_of_a_layout_is_minimized_rather_than_spill_over() {
+    fn the_zones_of_a_layout_make_room_for_a_window_too_big_for_them() {
         // The owner, in Quarters: "some windows still can't fit, like Battle.net, it's too
-        // tall". Battle.net will not go below about 1280 x 720, and a quarter of a 1080p screen
-        // is 960 x 516: it would spill over its neighbours. It waits in the taskbar instead, and
-        // the windows that fit take the quarters.
+        // tall", then: "instead of letting it overlap or minimising it, reorganise the size of
+        // the zones; it's the whole point of the app". Battle.net keeps 1280 x 720; a quarter of
+        // a 1080p screen is 960 x 516. Its quarter grows to 1280 x 720, no more, and the others
+        // give up the room; every window keeps a zone.
         let mut battle = unit("battle.net.exe", "Battle.net", Rect::new(100, 100, 1380, 820));
         battle.least = Size::new(1280, 720);
         let units = [
@@ -1166,23 +1242,49 @@ mod tests {
             preset: Preset::Quarters,
         };
         let plan = plan_with(&units, &[], &[WORK], Some(quarters));
-        assert_eq!(plan.goes[0], Goes::Minimize, "{:?}", plan.goes);
-        for u in 1..units.len() {
+        for u in 0..units.len() {
             assert!(matches!(plan.goes[u], Goes::Zone(_)), "unit {u}: {:?}", plan.goes);
         }
-        // In Main and side, its 1280 px fit the main zone: it takes it, whatever else would.
-        let main_side = Chosen {
-            monitor: 0,
-            preset: Preset::MainSide,
-        };
-        let plan = plan_with(&units[..2], &[], &[WORK], Some(main_side));
-        let z = zone_of(&plan, 0);
+        let z = plan.new_zones[zone_of(&plan, 0)].area.to_rect(WORK);
         assert!(
-            plan.new_zones[z].area.to_rect(WORK).width() >= 1280,
-            "{:?}",
-            plan.new_zones
+            (z.width() - 1280).abs() <= 2 && (z.height() - 720).abs() <= 2,
+            "{z:?}"
         );
-        assert!(matches!(plan.goes[1], Goes::Zone(_)), "{:?}", plan.goes);
+        let total: f64 = plan
+            .new_zones
+            .iter()
+            .map(|z| z.area.width() * z.area.height())
+            .sum();
+        assert!((total - 1.0).abs() < 1e-9, "the zones still fill the screen");
+        // In Thirds, its third grows to 1280 px and the other two share what is left.
+        let thirds = Chosen {
+            monitor: 0,
+            preset: Preset::Thirds,
+        };
+        let plan = plan_with(&units[..3], &[], &[WORK], Some(thirds));
+        let z = plan.new_zones[zone_of(&plan, 0)].area.to_rect(WORK);
+        assert!((z.width() - 1280).abs() <= 2, "{z:?}");
+        assert!(
+            (1..3).all(|u| matches!(plan.goes[u], Goes::Zone(_))),
+            "{:?}",
+            plan.goes
+        );
+        // Two windows of 1280 px cannot sit side by side on 1920: in Halves, the one that
+        // matters less waits in the taskbar.
+        let mut second = unit("blizzard.exe", "Game", Rect::new(500, 100, 1780, 820));
+        second.least = Size::new(1280, 720);
+        let two = [units[0].clone(), second];
+        let halves = Chosen {
+            monitor: 0,
+            preset: Preset::Halves,
+        };
+        let plan = plan_with(&two, &[], &[WORK], Some(halves));
+        assert_eq!(
+            plan.goes.iter().filter(|g| **g == Goes::Minimize).count(),
+            1,
+            "{:?}",
+            plan.goes
+        );
     }
 
     #[test]

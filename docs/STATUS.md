@@ -904,3 +904,9 @@ process, its own windows, a scratch folder).
 - 2026-10-12 (1.1): Arrange lays every screen out for the task its windows say, the main window
   the most room, in place of the open workspace's zones (ADR 0019); no coloured borders and no
   space between windows (ADR 0020).
+- 2026-10-13 (1.1): zones make room for a window too big for them, as little as it needs,
+  rather than minimising it or letting it overlap; the window keeps its place in the layout and
+  is not made the main one (ADR 0021). Sets of the apps installed that go together, offered on
+  the home page, secondary but in view; the windows open the first time sorted into workspaces
+  by task; "clean, concise, non-invasive" (ADR 0022). On the site, the header's Download button
+  alone; the hero is the title and the desktop.

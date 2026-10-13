@@ -149,6 +149,54 @@ const workspaces: Workspace[] =
 let active: string | null = workspaces[0]?.id ?? null;
 let revision = 1;
 
+/** The sets the stand-in offers: the apps of a developer's Start menu that go together. */
+const SETS: { id: string; name: string; apps: string[] }[] =
+  params.get('empty') === '1'
+    ? []
+    : [
+        {
+          id: 'coding',
+          name: 'Coding',
+          apps: ['Visual Studio Code', 'Terminal', 'Google Chrome', 'Claude', 'File Explorer'],
+        },
+        { id: 'playing', name: 'Games', apps: ['Steam', 'Battle.net', 'Discord'] },
+      ];
+
+/** Opens a set: its workspace, made the first time with a zone per app. */
+function openSet(id: string): Reply {
+  const set = SETS.find((s) => s.id === id);
+  if (!set) {
+    return {
+      reply: 'error',
+      code: 'not_found',
+      message: `There is no set called “${id}”.`,
+      hint: 'The sets are listed by `mosaikctl sets`.',
+    };
+  }
+  let w = find(set.name);
+  if (!w) {
+    const n = set.apps.length;
+    w = {
+      id: set.id,
+      name: set.name,
+      windows: n,
+      zones: n,
+      hotkey: null,
+      appList: set.apps.map((label, i) => ({ id: `s${String(i + 1)}`, label, zone: `z${String(i + 1)}`, tab: false })),
+      zoneList: set.apps.map((label, i) => ({
+        id: `z${String(i + 1)}`,
+        name: label,
+        color: ZONE_COLORS[i % ZONE_COLORS.length] ?? 'slate',
+        monitor: 'm1',
+        area: { left: i / n, top: 0, right: (i + 1) / n, bottom: 1 },
+      })),
+    };
+    workspaces.push(w);
+  }
+  active = w.id;
+  return done(`Opened “${w.name}”.`);
+}
+
 /** The windows on the main screen, front to back, as `preview_arrange` reports them. */
 interface OnScreen {
   label: string;
@@ -398,7 +446,7 @@ export const mock = {
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.1.0-dev', protocol: 5 };
+      return { reply: 'hello', app_version: '1.1.0-dev', protocol: 6 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -540,12 +588,21 @@ function answer(command: Command): Reply {
       return {
         reply: 'state',
         app_version: '1.1.0-dev',
-        protocol: 5,
+        protocol: 6,
         safe_mode: false,
         watchdog: true,
         monitors,
         hotkey: hotkey(),
       };
+    case 'sets':
+      return {
+        reply: 'sets',
+        sets: SETS.map((set) => ({ ...set, open: 0, workspace: find(set.name)?.id ?? null })),
+      };
+    case 'open_set':
+      return openSet(command.set);
+    case 'sort_windows':
+      return done('No windows open now go together as a workspace.');
     case 'save':
     case 'show_switcher':
     case 'show_settings':

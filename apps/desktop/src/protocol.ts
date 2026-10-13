@@ -86,7 +86,10 @@ export type Command =
   | { cmd: 'apps'; workspace: string }
   | { cmd: 'add_app'; workspace: string; window: number; zone: string | null }
   | { cmd: 'move_app'; workspace: string; app: string; zone: string }
-  | { cmd: 'remove_app'; workspace: string; app: string };
+  | { cmd: 'remove_app'; workspace: string; app: string }
+  | { cmd: 'sets' }
+  | { cmd: 'open_set'; set: string }
+  | { cmd: 'sort_windows' };
 
 export type ErrorCode = 'unsupported_version' | 'bad_request' | 'not_found' | 'busy' | 'failed' | 'unknown';
 
@@ -195,8 +198,22 @@ export interface ArrangePreview {
   task?: Task | null;
 }
 
+/** Apps installed that go together for a task (`sets`). */
+export interface AppSet {
+  /** What `open_set` takes ("coding"). */
+  id: string;
+  /** Its name, and its workspace's ("Coding"). */
+  name: string;
+  apps: string[];
+  /** How many of its apps are open now. */
+  open: number;
+  /** Its workspace, once it has one. */
+  workspace: string | null;
+}
+
 export type Reply =
   | { reply: 'hello'; app_version: string; protocol: number }
+  | { reply: 'sets'; sets: AppSet[] }
   | ({ reply: 'preview' } & ArrangePreview)
   | ({ reply: 'apps' } & WorkspaceApps)
   | { reply: 'workspaces'; workspaces: WorkspaceSummary[]; active: string | null }
@@ -350,6 +367,18 @@ function isWorkspace(x: unknown): x is WorkspaceSummary {
   );
 }
 
+function isAppSet(x: unknown): x is AppSet {
+  return (
+    isObject(x) &&
+    isString(x.id) &&
+    isString(x.name) &&
+    Array.isArray(x.apps) &&
+    x.apps.every(isString) &&
+    isNumber(x.open) &&
+    isNullableString(x.workspace)
+  );
+}
+
 /** Checks a reply's shape at run time, so a mismatch with the engine shows as an error. */
 export function isReply(x: unknown): x is Reply {
   if (!isObject(x)) return false;
@@ -358,6 +387,8 @@ export function isReply(x: unknown): x is Reply {
       return isString(x.app_version) && isNumber(x.protocol);
     case 'workspaces':
       return Array.isArray(x.workspaces) && x.workspaces.every(isWorkspace) && isNullableString(x.active);
+    case 'sets':
+      return Array.isArray(x.sets) && x.sets.every(isAppSet);
     case 'done':
       return isString(x.message);
     case 'error':

@@ -180,6 +180,8 @@ pub(crate) struct Engine {
     pub(crate) undo: Option<crate::arranging::Undo>,
     /// The quick menu at the screen's edge.
     pub(crate) quick: crate::quick::Quick,
+    /// The apps of the Start menu, for sets.
+    pub(crate) start_apps: crate::sets::StartApps,
 }
 
 pub(crate) fn run(
@@ -271,7 +273,10 @@ pub(crate) fn run(
         told: HashSet::new(),
         undo: None,
         quick: crate::quick::Quick::default(),
+        start_apps: crate::sets::StartApps::default(),
     };
+    // Read early: the home page asks for sets as soon as it opens.
+    engine.start_apps.refresh();
     for n in notices {
         engine.notice("Mosaïk's settings", n);
     }
@@ -629,6 +634,8 @@ impl Engine {
                 | Command::AddApp { .. }
                 | Command::MoveApp { .. }
                 | Command::RemoveApp { .. }
+                | Command::OpenSet { .. }
+                | Command::SortWindows
         );
         // Once a workspace is opened, saved or edited, what Arrange did is part of it.
         let keeps_arrange = matches!(
@@ -702,6 +709,9 @@ impl Engine {
             } => self.add_app_to(&workspace, window, zone),
             Command::MoveApp { workspace, app, zone } => self.move_app_to(&workspace, &app, &zone),
             Command::RemoveApp { workspace, app } => self.remove_app_from(&workspace, &app),
+            Command::Sets => self.sets_reply(),
+            Command::OpenSet { set } => self.open_set(&set),
+            Command::SortWindows => self.sort_windows(),
             Command::Quit => {
                 // SAFETY: a one-shot timer on our own window; the exit happens when it fires.
                 let timer = unsafe { SetTimer(Some(self.window), timer::EXIT, 250, None) };

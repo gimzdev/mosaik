@@ -17,7 +17,9 @@ use thiserror::Error;
 /// 5: a workspace's apps (`apps`, `add_app`, `move_app`, `remove_app`, and their names in
 /// `workspaces`); Arrange minimises the windows it has no zone for, rather than making them
 /// tabs, and its preview says the task the main monitor is laid out for.
-pub const PROTOCOL_VERSION: u32 = 5;
+/// 6: sets of apps (`sets`, `open_set`), and the windows open sorted into workspaces
+/// (`sort_windows`).
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -143,6 +145,16 @@ pub enum Command {
     HoldHotkeys {
         hold: bool,
     },
+    /// Sets of the apps installed that go together for a task (coding, games...).
+    Sets,
+    /// Opens a set (its id, from `sets`): its workspace, made the first time, laid out for its
+    /// task; the apps that are not open start.
+    OpenSet {
+        set: String,
+    },
+    /// Sorts the windows open now into workspaces, one per task they say (the first time
+    /// Mosaïk runs). No window moves; a workspace with the same name is left as it is.
+    SortWindows,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -200,6 +212,25 @@ pub enum Reply {
     Preview(Box<ArrangePreview>),
     /// What `apps` found (also the answer to `add_app`, `move_app` and `remove_app`).
     Apps(Box<WorkspaceApps>),
+    /// The sets `sets` found.
+    Sets {
+        sets: Vec<AppSetInfo>,
+    },
+}
+
+/// A set of apps that go together for a task.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppSetInfo {
+    /// What `open_set` takes ("coding").
+    pub id: String,
+    /// Its name, and its workspace's ("Coding").
+    pub name: String,
+    /// Its apps' names, in the order of their zones.
+    pub apps: Vec<String>,
+    /// How many of them are open now.
+    pub open: u32,
+    /// Its workspace, once it has one.
+    pub workspace: Option<WorkspaceId>,
 }
 
 /// A workspace's apps (front to back), its zones, and the windows on screen it could take.
@@ -623,7 +654,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":5,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":6,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -632,13 +663,13 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":5,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":6,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
     }
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":6,"id":1,"cmd":"state"}"#).unwrap_err();
-        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 6, server: 5 });
+        let err = decode_request(br#"{"v":7,"id":1,"cmd":"state"}"#).unwrap_err();
+        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 7, server: 6 });
         // Older clients are understood.
         assert!(decode_request(br#"{"v":1,"id":1,"cmd":"state"}"#).is_ok());
         assert!(err.to_string().contains("update Mosaïk"));
@@ -868,6 +899,9 @@ mod wire {
                 workspace: "ship".into(),
                 app: SlotId("s2".into()),
             },
+            Command::Sets,
+            Command::OpenSet { set: "coding".into() },
+            Command::SortWindows,
         ];
         let replies = vec![
             Reply::Hello {
@@ -991,6 +1025,21 @@ mod wire {
                     title: "Release notes - Google Chrome".into(),
                 }],
             })),
+            Reply::Sets {
+                sets: vec![AppSetInfo {
+                    id: "coding".into(),
+                    name: "Coding".into(),
+                    apps: vec![
+                        "Visual Studio Code".into(),
+                        "Terminal".into(),
+                        "Google Chrome".into(),
+                        "Claude".into(),
+                        "File Explorer".into(),
+                    ],
+                    open: 2,
+                    workspace: None,
+                }],
+            },
         ];
         serde_json::json!({ "commands": commands, "replies": replies })
     }

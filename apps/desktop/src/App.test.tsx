@@ -95,6 +95,24 @@ describe('Mosaïk’s window', () => {
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Tidy your screen' }));
   });
 
+  it('sorts the windows open into workspaces when a new user gets started, and says so', async () => {
+    const asked: string[] = [];
+    engine.request.mockImplementation((c) => {
+      asked.push(c.cmd);
+      if (c.cmd === 'set_settings') return Promise.resolve({ reply: 'done', message: 'Settings saved.' });
+      if (c.cmd === 'sort_windows') {
+        return Promise.resolve({ reply: 'done', message: 'Your open windows make 2 workspaces: Coding and Games.' });
+      }
+      if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
+      return Promise.resolve(settingsReply(firstRun));
+    });
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Get started' }));
+    expect(await screen.findByText('Your open windows make 2 workspaces: Coding and Games.')).toBeTruthy();
+    expect(asked.indexOf('sort_windows')).toBeGreaterThan(asked.indexOf('set_settings'));
+  });
+
   it('says why Windows kept Mosaïk from starting with it', async () => {
     engine.request.mockImplementation((c) => {
       if (c.cmd === 'set_settings') {
@@ -113,6 +131,29 @@ describe('Mosaïk’s window', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Get started' }));
     const message = await screen.findByText(/Windows did not let Mosaïk start with it/);
     expect(message.closest('[role="alert"]')).not.toBeNull();
+  });
+
+  it('still says why Windows kept Mosaïk from starting with it when the windows are sorted too', async () => {
+    engine.request.mockImplementation((c) => {
+      if (c.cmd === 'set_settings') {
+        return Promise.resolve({
+          reply: 'done',
+          message: 'Settings saved. Windows did not let Mosaïk start with it: turn it on under Startup apps.',
+        });
+      }
+      if (c.cmd === 'sort_windows') {
+        return Promise.resolve({ reply: 'done', message: 'Your open windows make 1 workspace: Coding.' });
+      }
+      if (c.cmd === 'workspaces') return Promise.resolve(noWorkspaces);
+      if (c.cmd === 'preview_arrange') return Promise.resolve(emptyScreen);
+      return Promise.resolve(settingsReply(firstRun));
+    });
+    render(<App />);
+    await userEvent.click(await screen.findByRole('switch', { name: 'Start Mosaïk with Windows' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Get started' }));
+    const message = await screen.findByText(/Windows did not let Mosaïk start with it/);
+    expect(message.closest('[role="alert"]')).not.toBeNull();
+    expect(message.textContent).toContain('Your open windows make 1 workspace: Coding.');
   });
 
   it('shows the shortcut that really opens the switcher', async () => {

@@ -1315,19 +1315,23 @@ impl Engine {
             .banded_area(h, live.rect, live.dpi)
             .unwrap_or_else(|| style.window_area(live.rect, live.dpi));
         let moved = mover::move_all(&[(h, To::Frame(target))], mover::WAIT_ONE);
-        if let Some(Err(e)) = moved.into_iter().next().map(|o| o.result) {
-            if !window::exists(window::hwnd(h)) {
-                // Closed while it was being moved: nothing to tell.
+        let kept = match moved.into_iter().next().map(|o| o.result) {
+            Some(Err(e)) => {
+                if !window::exists(window::hwnd(h)) {
+                    // Closed while it was being moved: nothing to tell.
+                    return false;
+                }
+                tracing::warn!(error = %e, "window not pulled into its zone");
+                self.tell_once(
+                    "snap",
+                    "A window did not move into its zone",
+                    format!("{e}. It stays where it was dropped."),
+                );
                 return false;
             }
-            tracing::warn!(error = %e, "window not pulled into its zone");
-            self.tell_once(
-                "snap",
-                "A window did not move into its zone",
-                format!("{e}. It stays where it was dropped."),
-            );
-            return false;
-        }
+            Some(Ok(kept)) => Some(kept),
+            None => None,
+        };
         let place = Place::Zone { zone };
         match group {
             Some(id) => {
@@ -1344,6 +1348,10 @@ impl Engine {
                     }
                 });
             }
+        }
+        // A window its app keeps larger than the zone: the zones make room for it.
+        if let (Some(kept), Some(topology)) = (kept, self.topology.clone()) {
+            self.make_room(&topology, &[(h, target, kept)]);
         }
         self.refresh_frame(h);
         self.sync_location_hooks();

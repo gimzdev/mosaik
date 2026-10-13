@@ -66,6 +66,15 @@ test('the home page shows each workspace’s apps, and opens them to change them
   await accessible(page);
 });
 
+test('the home page offers sets of apps, and opens one as a workspace', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Sets of apps' })).toBeVisible();
+  await page.getByRole('button', { name: /^Open Coding: Visual Studio Code, Terminal/ }).click();
+  await expect(page.getByText('Opened “Coding”.')).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Coding' }).first()).toBeVisible();
+  await accessible(page);
+});
+
 test('the picture stays in view while the layouts scroll beneath it', async ({ page }) => {
   await pictureStaysClear(page, 760);
 });

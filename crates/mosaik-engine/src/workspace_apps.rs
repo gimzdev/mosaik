@@ -172,8 +172,10 @@ impl Engine {
             return;
         };
         let only: HashSet<ZoneId> = HashSet::from([zone.clone()]);
-        self.refit(&topology, Some(&only));
+        let placed = self.refit(&topology, Some(&only));
         self.sync_tabs();
+        // A window its app keeps larger than the zone: the zones make room for it.
+        self.make_room(&topology, &placed);
         self.refresh_frames();
     }
 

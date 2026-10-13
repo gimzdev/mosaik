@@ -602,7 +602,8 @@ impl Engine {
         );
 
         self.hide_frames();
-        let outcomes = mover::move_all(&self.to_moves(&plan.moves, &topology), mover::WAIT);
+        let moves = self.to_moves(&plan.moves, &topology);
+        let outcomes = mover::move_all(&moves, mover::WAIT);
         let mut placed = Vec::new();
         let mut trouble: Vec<String> = Vec::new();
         for o in outcomes {
@@ -628,9 +629,20 @@ impl Engine {
         // Tab groups: the visible tab shows, the others hide; windows hidden for the workspace
         // being left come back (minimised, unless this one uses them).
         self.hiding.resume();
+        let kept: Vec<(WindowHandle, Rect, Rect)> = placed
+            .iter()
+            .filter_map(|&(h, kept)| {
+                moves.iter().find(|(w, _)| *w == h).and_then(|(_, to)| match to {
+                    To::Frame(target) => Some((h, *target, kept)),
+                    To::Maximized(_) => None,
+                })
+            })
+            .collect();
         self.activate(ws.id.clone(), assigned, placed);
         self.name_open_apps();
         self.sync_tabs();
+        // Windows their apps keep larger than their zones: the zones make room for them.
+        self.make_room(&topology, &kept);
         for h in &plan.raise {
             let _ = arrange::raise(window::hwnd(*h));
         }
@@ -768,7 +780,9 @@ impl Engine {
     /// there. Hidden, minimised and other-desktop windows are left alone.
     pub(crate) fn refit_open_workspace(&mut self, topology: &Topology) {
         self.hide_frames();
-        self.refit(topology, None);
+        let placed = self.refit(topology, None);
+        // Zones that came out smaller than a window needs make room for it.
+        self.make_room(topology, &placed);
     }
 
     /// [`Engine::refit_open_workspace`] for the windows in some zones only (`only`), or all of

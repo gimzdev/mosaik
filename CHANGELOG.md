@@ -8,6 +8,10 @@
   or at one of ten layouts (halves, thirds, main and side, quarters, rows...), and the windows
   glide to where they would go; click, and they do. Undo puts everything back.
 - A layout replaces the zones of your main screen; windows more than its zones are minimised.
+- Sets of apps: below Arrange, the apps you have that go together, such as your editor, a
+  terminal, a browser, an assistant and File Explorer for coding, or your launchers and chat for
+  games. One click opens a set as a workspace laid out for it, and starts the apps that are not
+  open. Nothing shows when Mosaïk finds no set.
 - Your workspaces are a click away below, and the welcome shows Arrange at work before you
   start.
 - The tray menu's and the quick menu's Settings is now Open Mosaïk. A click on the tray icon
@@ -35,6 +39,14 @@
 - An app that will not get as small as its new zone (a browser keeps about 500 px) pushes the
   line back, so windows never overlap.
 
+### Zones that make room
+
+- A window that will not get as small as its zone (Battle.net keeps about 1280 x 720) gets a
+  zone just big enough for it: the zones beside it give up the room, as little as they can, and
+  the window keeps its place in the layout. With Arrange, with every layout, when a workspace
+  opens and when you drop a window in a zone. A window waits in the taskbar only when the
+  windows cannot all fit on the screen.
+
 ### Arrange
 
 - One click lays out every screen for what you are doing: from the home page, the tray menu, the
@@ -43,9 +55,8 @@
   terminal goes under your editor, and the windows that help sit beside it. The rest are
   minimised and wait in the taskbar. On an ultrawide screen the main window is in the middle; on
   one turned on its side, at the top. The home page says which task it read.
-- No window gets a zone smaller than it can go. The main zone grows to fit its window; a window
-  that fits nowhere (Battle.net keeps about 1280 x 720) waits in the taskbar instead of spilling
-  over its neighbours, with Arrange and with every layout.
+- The first time you start Mosaïk, the windows you have open are sorted into workspaces, one
+  for each task, each laid out for it. No window moves.
 - Arrange replaces the open workspace's zones on the screens it lays out, and arranging again
   moves nothing. With no workspace open, Arrange makes a new one.
 - Undo puts every window back where it was, for ten minutes.
@@ -82,8 +93,9 @@
 - `mosaikctl state` lists the quick menu, where it is and its rows. `mosaikctl arrange <layout>`
   uses a layout, and `mosaikctl preview [<layout>]` says what Arrange would do without doing it.
   `mosaikctl apps`, `add-app`, `move-app` and `remove-app` list and change a workspace's apps.
-  The protocol is version 5; settings are format 5, and settings from 1.0 move to it on their
-  own.
+  `mosaikctl sets`, `open-set` and `sort-windows` list the sets of apps, open one and sort the
+  windows open into workspaces. The protocol is version 6; settings are format 5, and settings
+  from 1.0 move to it on their own.
 - The app and the site say less: shorter pages, the essentials only.
 
 ## 1.0.0

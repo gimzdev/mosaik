@@ -956,9 +956,10 @@ fn to_front(engine: &Engine, w: &[HWND]) -> Result<Value, String> {
 }
 
 /// 3h. A window that will not get as small as a quarter of the screen (as Battle.net keeps about
-/// 1280 x 720): Mosaïk reads how small it goes from its app, and Quarters leaves it in the
-/// taskbar rather than let it spill over its neighbours, the others taking the quarters; Undo
-/// brings everything back.
+/// 1280 x 720): Mosaïk reads how small it goes from its app, and Quarters makes room for it: its
+/// quarter grows just enough, the others give up the room, and it is not minimised (the window
+/// used longest ago is, five windows for four quarters). Undo brings everything back. Then 3i:
+/// a window too tall for the zone it is dropped in: the zones there make room for it.
 fn least(
     engine: &Engine,
     styles: Styles,
@@ -966,7 +967,7 @@ fn least(
     opened: &mut Vec<Opened>,
     w: &[HWND],
 ) -> Result<Value, String> {
-    let (min_w, min_h) = (work.width() / 3, work.height() * 3 / 5);
+    let (min_w, min_h) = (work.width() * 3 / 5, work.height() * 3 / 5);
     let big = open(
         opened,
         "Probe Least",
@@ -995,7 +996,7 @@ fn least(
         .windows
         .iter()
         .find(|x| edge_error(x.now, big_before) <= 1)
-        .is_some_and(|x| x.minimized);
+        .map(|x| (x.minimized, x.then.map(|t| [t.width(), t.height()])));
     let message = done(
         &ask(
             engine,
@@ -1013,27 +1014,112 @@ fn least(
         .map(|ws| zones(engine, &ws.0, work))
         .transpose()?
         .unwrap_or_default();
-    let in_quarters = w.iter().filter(|h| zone_of(&st, &zs, **h).is_some()).count();
+    let big_zone = zone_of(&st, &zs, big);
+    let big_fit = fit(&st, &zs, styles, &[big]);
+    let big_frame = frame_rect(big);
+    let made_room =
+        big_frame.is_some_and(|f| f.width() + SLACK >= min_w - 20 && f.height() + SLACK >= min_h - 20);
+    let tiled = zs
+        .iter()
+        .map(|(_, r)| i64::from(r.width()) * i64::from(r.height()))
+        .sum::<i64>()
+        == i64::from(work.width()) * i64::from(work.height());
+    let minimized_others = w
+        .iter()
+        .filter(|h| mosaik_win::window::geometry(**h).is_some_and(|g| g.minimized))
+        .count();
     let undo = done(&ask(engine, Command::UndoArrange).0)?;
     let _ = settled(engine)?;
     let back = most_moved(&frames(w), &before);
     let big_back = frame_rect(big).map(|f| edge_error(f, big_before));
     crate::apps::close(big);
     pump_until(500, || false);
-    Ok(json!({
+    let quarters = json!({
         "told": [min_w, min_h],
         "read": read.map(|(l, _)| [l.width, l.height]),
         "read_off_px": read_off,
-        "picture_minimized": pictured,
+        "picture": pictured.map(|(m, t)| json!({ "minimized": m, "then": t })),
         "message": message,
-        "minimized": big_minimized,
-        "others_in_quarters": in_quarters,
+        "big_minimized": big_minimized,
+        "big_zone": big_zone.map(|z| [z.left, z.top, z.right, z.bottom]),
+        "big_fit_px": big_fit,
+        "made_room": made_room,
+        "zones_fill_the_screen": tiled,
+        "others_minimized": minimized_others,
         "undo": undo,
         "back_px": back,
         "big_back_px": big_back,
-        "ok": read_off.is_some_and(|d| d <= SLACK) && pictured && big_minimized
-            && in_quarters == w.len() && message.contains("1 window minimized")
-            && back <= SLACK && big_back.is_some_and(|d| d <= SLACK),
+        "ok": read_off.is_some_and(|d| d <= SLACK) && pictured.is_some_and(|(m, _)| !m) && !big_minimized
+            && all_fit(&big_fit) && made_room && tiled && minimized_others == 1
+            && message.contains("1 window minimized") && back <= SLACK
+            && big_back.is_some_and(|d| d <= SLACK),
+    });
+    let dropped = drop_tall(engine, styles, work, opened, w)?;
+    let ok = quarters["ok"] == json!(true) && dropped["ok"] == json!(true);
+    Ok(json!({ "quarters": quarters, "dropped": dropped, "ok": ok }))
+}
+
+/// 3i. A window that will not get shorter than 55% of the screen, dropped with the mouse into the
+/// smallest zone of the open workspace (a third of the column beside the main window): its zone
+/// grows to fit it, the zones beside it give up the room, every zone still fills the screen and
+/// every window fits its zone.
+fn drop_tall(
+    engine: &Engine,
+    styles: Styles,
+    work: Rect,
+    opened: &mut Vec<Opened>,
+    w: &[HWND],
+) -> Result<Value, String> {
+    let st = settled(engine)?;
+    let ws = st
+        .active_workspace
+        .clone()
+        .ok_or("no workspace open to drop into")?;
+    let zs = zones(engine, &ws.0, work)?;
+    let Some((_, small)) = zs
+        .iter()
+        .min_by_key(|(_, r)| i64::from(r.width()) * i64::from(r.height()))
+        .cloned()
+    else {
+        return Err("the workspace has no zones".into());
+    };
+    let min_h = work.height() * 11 / 20;
+    let tall = open(
+        opened,
+        "Probe Tall",
+        Rect::from_origin_size(work.left + 200, work.top + 120, 520, min_h + 20),
+        &format!(" --topmost --min-height {min_h}"),
+    )?;
+    pump_until(500, || false);
+    let f = frame_rect(tall).ok_or("Probe Tall vanished")?;
+    crate::workspace::drag(
+        Point::new(f.left + f.width() / 3, f.top + 12),
+        small.center(),
+        tall,
+    )?;
+    let st = settled(engine)?;
+    pump_until(600, || false);
+    let zs = zones(engine, &ws.0, work)?;
+    let zone = zone_of(&st, &zs, tall);
+    let grown = zone.is_some_and(|z| z.height() + SLACK >= min_h);
+    let tall_fit = fit(&st, &zs, styles, &[tall]);
+    let others_fit = fit(&st, &zs, styles, w);
+    let tiled = zs
+        .iter()
+        .map(|(_, r)| i64::from(r.width()) * i64::from(r.height()))
+        .sum::<i64>()
+        == i64::from(work.width()) * i64::from(work.height());
+    crate::apps::close(tall);
+    pump_until(500, || false);
+    Ok(json!({
+        "told_height": min_h,
+        "small_zone": [small.left, small.top, small.right, small.bottom],
+        "zone": zone.map(|z| [z.left, z.top, z.right, z.bottom]),
+        "zone_grew": grown,
+        "fit_px": tall_fit,
+        "others_fit_px": others_fit,
+        "zones_fill_the_screen": tiled,
+        "ok": grown && all_fit(&tall_fit) && others_fit.iter().all(|e| e.is_none_or(|e| e <= SLACK)) && tiled,
     }))
 }
 

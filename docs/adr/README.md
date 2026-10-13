@@ -24,5 +24,7 @@ what it costs. Measurements behind a decision are summarised in the record and i
 | [0016](0016-home-page.md) | A home page that shows what Arrange, or a layout, would do before it does it |
 | [0017](0017-arrange-minimises-and-moves-only-when-asked.md) | Arrange minimises what it has no zone for; windows move only on the user's actions; strips always in title bars; a quicker quick menu |
 | [0018](0018-a-workspaces-apps.md) | A workspace's apps, listed and edited on the Workspaces page |
-| [0019](0019-arrange-lays-out-for-the-task.md) | Arrange lays every screen out for its task, the main window the most room; no window gets a zone it cannot fit; proper app names |
+| [0019](0019-arrange-lays-out-for-the-task.md) | Arrange lays every screen out for its task, the main window the most room; no window gets a zone it cannot fit (since ADR 0021, the zones make room); proper app names |
 | [0020](0020-windows-edge-to-edge.md) | Windows meet edge to edge, without coloured rings by default |
+| [0021](0021-zones-make-room.md) | Zones make room for a window too big for them, as little as it needs; a window is minimised only when the windows cannot all fit |
+| [0022](0022-sets-of-apps.md) | Sets of the apps installed that go together, opened in one click; the windows open sorted into workspaces the first time |

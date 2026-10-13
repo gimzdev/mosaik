@@ -40,7 +40,7 @@ hands each move to a short-lived thread and keeps handling its messages while it
 2.5 s (`mover.rs`).
 
 Mosaïk's window is the same app: its commands reach the engine in process, in protocol
-version 5. A save from the zone editor carries the revision of the zones it was opened on, so it
+version 6. A save from the zone editor carries the revision of the zones it was opened on, so it
 is refused, with the reason, when the monitors or the zones changed meanwhile. While the shortcut
 recorder listens, Mosaïk's own shortcuts let go (`hold_hotkeys`, at most a minute), so pressing
 one records it instead of opening the switcher.
@@ -106,9 +106,16 @@ the engine gathers windows and applies the result.
   terminal goes under the editor when coding, and the windows that help most sit beside it; the
   others are minimised (ADR 0017). Its zones replace the open workspace's on that monitor; with
   no workspace open, a new one is made. No window gets a zone smaller than its app lets it go
-  (`window::least_frame`, from `WM_GETMINMAXINFO`): the main zone grows, fewer windows sit beside
-  it, and a window that fits nowhere is minimised. Arranging twice moves nothing. Undo puts
+  (`window::least_frame`, from `WM_GETMINMAXINFO`). Arranging twice moves nothing. Undo puts
   everything back, for ten minutes.
+- **Zones make room** (ADR 0021): a zone too small for its window grows just enough, and the
+  zones beside it give up the room, each keeping what its own windows need and at least
+  320 x 200 (`mosaik_core::fit`, which reads zones that tile a monitor as a tree of cuts and
+  moves them as little as it can). The window keeps its place in the layout; it is not made the
+  main one. Arrange fits every layout it considers this way, a layout picked does it after
+  putting each window in a zone, and the engine does it from the size a window kept after
+  opening a workspace, a drop or a display change (`room.rs`). A window is minimised only when
+  the windows cannot all fit.
 - **Windows move only on the user's actions** (ADR 0017): Arrange, a layout, opening or saving
   a workspace, a drop, the zone editor, a resize by hand, a tab clicked, an app added or moved.
   A title bar read again later (a window brought forward) changes no band and moves no window;
@@ -122,6 +129,11 @@ the engine gathers windows and applies the result.
   and the caption says the task Arrange read; a click does it. A layout replaces the main
   monitor's zones with its own, for the windows that fit them, and Undo brings them back. Below,
   each workspace lists its apps.
+- **Sets of apps** (ADR 0022): the apps of the Start menu (read from the shell's Apps folder on a
+  thread of their own, kept ten minutes) that go together for a task, chosen by
+  `mosaik_core::sets`, are offered on the home page. A click makes the set a workspace laid out
+  for its task, once, then opens it, starting the apps that are not open. At the end of the
+  welcome, the windows open are sorted into a workspace per task, without moving any.
 - **The quick menu** (ADR 0015, 0017): a thin line on an edge of the main monitor slides open
   as soon as the pointer stops on it, onto Mosaïk's window and the open workspace, Arrange, the
   switcher, saving, the zone editor and snapping, without taking the keyboard. It hides while a game or a video fills the main monitor.
@@ -173,8 +185,8 @@ shell's cloak (ADR 0003).
 
 | Crate | What it is |
 | --- | --- |
-| `mosaik-core` | Pure logic, no Win32: geometry, topologies, zones, layouts, matching, classification, snapping, placement maths, tabs, the journal, settings and the store. Tested on every platform. |
-| `mosaik-win` | The Win32 adapter: enumerating and classifying windows, placing them by their visible frame, hiding them, monitors and DPI, hooks, hotkeys, processes, rescue. Decides nothing. |
+| `mosaik-core` | Pure logic, no Win32: geometry, topologies, zones, layouts, matching, classification, snapping, placement maths, Arrange and its tasks, zones making room, sets of apps, tabs, the journal, settings and the store. Tested on every platform. |
+| `mosaik-win` | The Win32 adapter: enumerating and classifying windows, placing them by their visible frame, hiding them, monitors and DPI, hooks, hotkeys, processes, the Start menu's apps, rescue. Decides nothing. |
 | `mosaik-overlay` | Native overlays drawn with Direct2D in software: rings as four thin windows, name tags, the drop-target tint, tab strips, the quick menu. |
 | `mosaik-engine` | The engine thread, its commands, the pipe server and the watchdog launcher. |
 | `mosaik-ipc` | The versioned protocol, the named pipe and `mosaikctl`. |

@@ -1,14 +1,15 @@
 // The home page: tidy the screen in one click. A picture of the main screen shows where each
 // window would go while the pointer (or the keyboard) is on Arrange or a layout; a click does it,
-// and Undo puts everything back. Below, the saved workspaces with their apps, one click away
-// (Apps shows them in full, to change them). Words are few: the picture shows what each button
-// does.
+// and Undo puts everything back. Below, sets of the apps installed that go together, and the
+// saved workspaces with their apps, one click away (Apps shows them in full, to change them).
+// Words are few: the picture shows what each button does.
 
 import { useCallback, useEffect, useState } from 'react';
 
 import { PRESETS, type Preset, presetShape } from './editor/model';
 import { onWorkspacesChanged, request } from './engine';
 import { type ArrangePreview, TASK_WORDS, type WorkspaceSummary, type ZoneColor, errorMessage } from './protocol';
+import { Sets } from './Sets';
 import { Stage } from './Stage';
 import { Button, Keys, PageTitle, useSay } from './ui';
 import { AppsPanel } from './WorkspaceApps';
@@ -304,6 +305,8 @@ export function Home({
           Open the apps you work with, then come back here.
         </p>
       ) : null}
+
+      <Sets />
 
       <section aria-labelledby="layouts-title" className="below-picture mt-8">
         <h2 id="layouts-title" className="font-display text-heading font-semibold tracking-tight">

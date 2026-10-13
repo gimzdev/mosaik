@@ -393,9 +393,23 @@ impl Engine {
         for h in &p.minimize {
             mosaik_win::arrange::minimize(window::hwnd(*h));
         }
+        let kept: Vec<(WindowHandle, Rect, Rect)> = placed
+            .iter()
+            .filter_map(|&(h, kept)| {
+                p.moves
+                    .iter()
+                    .find(|(w, _)| *w == h)
+                    .and_then(|(_, to)| match to {
+                        To::Frame(target) => Some((h, *target, kept)),
+                        To::Maximized(_) => None,
+                    })
+            })
+            .collect();
         self.activate(id, p.assigned, placed);
         self.hiding.resume();
         self.sync_tabs();
+        // An app that kept more than it said it would: the zones make room for it.
+        self.make_room(&p.topology, &kept);
         self.refresh_frames();
         self.set_timer(timer::SETTLE, 400);
         self.persist();

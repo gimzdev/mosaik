@@ -42,7 +42,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.5.0"
+MK_VERSION="1.6.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -520,7 +520,6 @@ export default function NotFound() {
 }
 __MK_EOF__
 put app/page.tsx <<'__MK_EOF__'
-import Link from 'next/link';
 import { Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
 import { Check, DownloadButton, PlatformList } from '@/components/ui';
 import { site } from '@/lib/site';
@@ -529,7 +528,7 @@ const FEATURES = [
   {
     id: 'zones',
     title: 'Zones give every window a home',
-    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, the windows that help sit beside it, and the rest wait in the taskbar. Or pick one of ten layouts, or carve the screen into your own named areas. Before you click, Mosaïk shows where each window would go.',
+    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it, each zone as big as its window needs. Or pick one of ten layouts, or carve the screen into your own named areas. Before you click, Mosaïk shows where each window would go.',
     points: ['Zones belong to the project, not the monitor', 'Windows meet edge to edge, so no space is lost', 'Works across multiple displays'],
     Art: ZonesArt,
   },
@@ -544,7 +543,7 @@ const FEATURES = [
     id: 'layouts',
     title: 'Switch projects, not just windows',
     body: 'Save a workspace once and bring it back whenever you need it. Positions, sizes and tabs return together, so changing task takes a keystroke instead of ten minutes of rearranging.',
-    points: ['Add or remove a workspace’s apps in one click', 'Saved on your computer, never in a cloud', 'Switch from the tray, the screen’s edge, or press Win+Alt+Space'],
+    points: ['Sets of the apps you use together, opened in one click', 'Saved on your computer, never in a cloud', 'Switch from the tray, the screen’s edge, or press Win+Alt+Space'],
     Art: SwitcherArt,
   },
 ];
@@ -561,22 +560,11 @@ export default function Home() {
     <>
       <section className="pb-20 pt-28 sm:pt-32 md:pb-28">
         <div className="page-x">
-          <div className="grid gap-7 lg:grid-cols-12 lg:items-end lg:gap-14">
-            <h1 className="font-display text-[clamp(2.4rem,4.7vw,4.1rem)] font-bold leading-[1.03] tracking-[-0.035em] lg:col-span-7">
-              Every window,
-              <br />
-              in its place.
-            </h1>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-3 lg:col-span-5 lg:justify-end lg:pb-3">
-              <DownloadButton className="btn btn-lapis" />
-              <p className="flex flex-col text-[15px] leading-snug text-slate">
-                <span>Free and open source.</span>
-                <Link href="/download" className="self-start font-semibold text-ink underline decoration-grout underline-offset-4 hover:decoration-ink">
-                  Requirements
-                </Link>
-              </p>
-            </div>
-          </div>
+          <h1 className="font-display text-[clamp(2.4rem,4.7vw,4.1rem)] font-bold leading-[1.03] tracking-[-0.035em]">
+            Every window,
+            <br />
+            in its place.
+          </h1>
           <div className="mt-10 md:mt-12">
             <Stage />
           </div>

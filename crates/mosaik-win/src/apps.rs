@@ -5,16 +5,19 @@ use std::ffi::c_void;
 
 use mosaik_core::layout::Launch;
 use mosaik_core::window::WindowFacts;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, PROPERTYKEY};
+use windows::Win32::Storage::EnhancedStorage::{PKEY_AppUserModel_ID, PKEY_Link_TargetParsingPath};
 use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
-use windows::Win32::System::Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance};
+use windows::Win32::System::Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance, CoTaskMemFree, IBindCtx};
 use windows::Win32::System::Threading::GetProcessId;
 use windows::Win32::UI::Shell::{
-    AO_NOERRORUI, ApplicationActivationManager, IApplicationActivationManager, SEE_MASK_FLAG_NO_UI,
-    SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+    AO_NOERRORUI, ApplicationActivationManager, BHID_EnumItems, FOLDERID_AppsFolder,
+    IApplicationActivationManager, IEnumShellItems, IShellItem, IShellItem2, KF_FLAG_DEFAULT,
+    SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, SHGetKnownFolderItem,
+    SIGDN_NORMALDISPLAY, ShellExecuteExW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-use windows::core::PCWSTR;
+use windows::core::{Interface, PCWSTR, PWSTR};
 
 use crate::error::{Context, Error, Result};
 use crate::text::{from_wide, wide};
@@ -72,6 +75,72 @@ impl Apps {
             .entry(path.to_lowercase())
             .or_insert_with(|| file_description(path))
             .clone()
+    }
+}
+
+/// An app of the Start menu, as Windows lists them: desktop apps and packaged (Store) apps.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartApp {
+    /// Its name in the Start menu ("Visual Studio Code").
+    pub name: String,
+    /// Its Application User Model ID ("Microsoft.WindowsTerminal_8wekyb3d8bbwe!App" for a
+    /// packaged app, "Chrome" or a program's path for a desktop app).
+    pub id: String,
+    /// The program a desktop app's entry starts, when Windows says.
+    pub path: Option<String>,
+}
+
+/// A string Windows allocated, read and freed.
+fn taken(p: PWSTR) -> Option<String> {
+    if p.is_null() {
+        return None;
+    }
+    // SAFETY: a NUL-terminated string from the shell, read once, then freed with the allocator
+    // it came from.
+    let text = unsafe { p.to_string() }.ok();
+    // SAFETY: as above.
+    unsafe { CoTaskMemFree(Some(p.0.cast::<c_void>().cast_const())) };
+    text.filter(|t| !t.trim().is_empty())
+}
+
+fn property(item: &IShellItem2, key: &PROPERTYKEY) -> Option<String> {
+    // SAFETY: a read of one property of a shell item; the string is ours to free.
+    unsafe { item.GetString(key) }.ok().and_then(taken)
+}
+
+/// Every app of the Start menu (the shell's Applications folder, as `Get-StartApps` lists
+/// them). Needs COM initialised on the calling thread, apartment-threaded.
+pub fn start_apps() -> Result<Vec<StartApp>> {
+    // SAFETY: shell calls on objects this function owns; each string is read and freed once.
+    unsafe {
+        let folder: IShellItem = SHGetKnownFolderItem(&FOLDERID_AppsFolder, KF_FLAG_DEFAULT, None)
+            .ctx("SHGetKnownFolderItem(AppsFolder)")?;
+        let items: IEnumShellItems = folder
+            .BindToHandler(None::<&IBindCtx>, &BHID_EnumItems)
+            .ctx("BindToHandler(EnumItems)")?;
+        let mut out = Vec::new();
+        loop {
+            let mut one = [None];
+            let mut fetched = 0u32;
+            if items.Next(&mut one, Some(&raw mut fetched)).is_err() || fetched == 0 {
+                break;
+            }
+            let Some(item) = one[0].take() else {
+                break;
+            };
+            let Some(name) = item.GetDisplayName(SIGDN_NORMALDISPLAY).ok().and_then(taken) else {
+                continue;
+            };
+            let Ok(item) = item.cast::<IShellItem2>() else {
+                continue;
+            };
+            let Some(id) = property(&item, &PKEY_AppUserModel_ID) else {
+                continue;
+            };
+            let path = property(&item, &PKEY_Link_TargetParsingPath);
+            out.push(StartApp { name, id, path });
+        }
+        Ok(out)
     }
 }
 

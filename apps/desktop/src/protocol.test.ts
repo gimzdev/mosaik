@@ -31,6 +31,9 @@ const COMMANDS = [
   'add_app',
   'move_app',
   'remove_app',
+  'sets',
+  'open_set',
+  'sort_windows',
 ] as const satisfies readonly Command['cmd'][];
 type AllListed = Exclude<Command['cmd'], (typeof COMMANDS)[number]> extends never ? true : never;
 const allListed: AllListed = true;

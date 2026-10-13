@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::arrange::Kind;
+use crate::fit;
 use crate::geometry::{RatioRect, Size};
 
 /// What the windows on a monitor say the user is doing.
@@ -26,6 +27,32 @@ pub enum Task {
 }
 
 impl Task {
+    /// How the protocol and `mosaikctl` name this task ("coding").
+    pub const fn id(self) -> &'static str {
+        match self {
+            Task::Coding => "coding",
+            Task::Design => "design",
+            Task::Writing => "writing",
+            Task::Browsing => "browsing",
+            Task::Talking => "talking",
+            Task::Playing => "playing",
+            Task::General => "general",
+        }
+    }
+
+    /// The name of a workspace made for this task ("Coding").
+    pub const fn title(self) -> &'static str {
+        match self {
+            Task::Coding => "Coding",
+            Task::Design => "Design",
+            Task::Writing => "Writing",
+            Task::Browsing => "Browsing",
+            Task::Talking => "Chat and mail",
+            Task::Playing => "Games",
+            Task::General => "Workspace",
+        }
+    }
+
     /// What a layout made for this task is for, in a few words ("coding"); `None` when nothing
     /// says.
     pub const fn words(self) -> Option<&'static str> {
@@ -50,7 +77,7 @@ impl Task {
     ];
 
     /// The kinds of window a task is done in: without one of them open, it is not this task.
-    fn anchors(self) -> &'static [Kind] {
+    pub fn anchors(self) -> &'static [Kind] {
         match self {
             Task::Coding => &[Kind::Code],
             Task::Design => &[Kind::Design],
@@ -72,9 +99,11 @@ impl Task {
                 K::Terminal => 0.85,
                 K::Browser => 0.7,
                 K::Assistant => 0.6,
+                // File Explorer is often open beside the code it holds.
+                K::Files => 0.5,
                 K::Notes | K::Chat => 0.45,
                 K::Other => 0.4,
-                K::Documents | K::Files => 0.35,
+                K::Documents => 0.35,
                 K::Design => 0.3,
                 K::Mail => 0.2,
                 K::Media => 0.1,
@@ -234,19 +263,20 @@ const KEEP: f64 = 0.4;
 /// Four windows beside the main one (a 2 x 2 block) must each belong to the task this much.
 const KEEP_FOURTH: f64 = 0.6;
 /// The main window's share of the width (landscape) or height (portrait), by how many windows
-/// sit beside it; more when the main window needs it, up to [`MAIN_SHARE_MOST`].
+/// sit beside it, before zones make room for windows that need more ([`crate::fit`]).
 const MAIN_SHARE: [f64; 5] = [1.0, 0.6, 0.58, 0.55, 0.5];
-/// With windows beside it, the main window never takes more than this: they would be too thin.
-const MAIN_SHARE_MOST: f64 = 0.75;
 /// The editor's share of its column when a terminal sits under it.
 const MAIN_OVER_BELOW: f64 = 0.68;
 /// Zones beside the main one are at least this tall and wide, in pixels.
 const SIDE_LEAST_HEIGHT: i32 = 320;
 const SIDE_LEAST_WIDTH: i32 = 460;
 /// A terminal goes under the editor only when it gets at least this many pixels of height.
-const BELOW_LEAST_HEIGHT: f64 = 260.0;
+const BELOW_LEAST_HEIGHT: i32 = 260;
 /// Pixels a window may need beyond its area, for rounding.
 const SLACK: f64 = 2.0;
+/// Of the windows that could sit beside the main one, the ones that help most are tried, at
+/// most this many.
+const POOL: usize = 8;
 
 /// The shape of a work area.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -299,10 +329,10 @@ fn room_beside(width: i32, height: i32) -> usize {
 }
 
 /// Arrange's layout for the windows of one monitor, given front to back, on a work area of
-/// `width` x `height` pixels. No window gets an area smaller than it goes: the main window's
-/// zone grows to fit it, a terminal too tall for under the editor goes beside it, and windows
-/// beside the main one are fewer, and taller, until each fits; a window that fits nowhere waits
-/// in the taskbar.
+/// `width` x `height` pixels. No window gets a zone smaller than it goes: zones make room for
+/// the windows that need more ([`fit::make_room`]), the others giving up what they can spare;
+/// only when the windows cannot all fit are fewer kept beside the main one, and a window that
+/// fits nowhere waits in the taskbar.
 pub fn layout(windows: &[Window], width: i32, height: i32) -> Layout {
     let kinds: Vec<Kind> = windows.iter().map(|w| w.kind).collect();
     let task = guess(&kinds);
@@ -330,132 +360,139 @@ pub fn layout(windows: &[Window], width: i32, height: i32) -> Layout {
         };
     };
     let shape = shape(width, height);
-    // How much of the width (of the height, on a monitor on its side) the main window needs.
-    let least = windows[main].least;
-    let needed = match shape {
-        Shape::Portrait => f64::from(least.height) / h,
-        Shape::Landscape | Shape::Ultrawide => f64::from(least.width) / w,
-    };
     // The others by how much they help, then how recently they were used.
     let priority = |i: usize| 0.7 * fit(i) + 0.3 * recency(i);
     let mut rest: Vec<usize> = wanted.iter().copied().filter(|&i| i != main).collect();
     rest.sort_by(|&a, &b| priority(b).total_cmp(&priority(a)).then(a.cmp(&b)));
-
-    // The areas for `sides` windows beside the main one, with a terminal under it or not.
-    let shaped = |sides: usize, below: bool| {
-        let share = if sides == 0 {
-            1.0
-        } else {
-            MAIN_SHARE[sides.min(MAIN_SHARE.len() - 1)].max(needed)
-        };
-        let middle = shape == Shape::Ultrawide && sides >= 2 && needed <= 0.5;
-        (share, areas(shape, sides, below, share, middle))
-    };
-    // The terminal used last goes under the editor when coding, where there is the height for
-    // both and it fits.
-    let below_for = |sides: usize| {
-        if task != Task::Coding
-            || shape == Shape::Portrait
-            || h * (1.0 - MAIN_OVER_BELOW) < BELOW_LEAST_HEIGHT
-            || f64::from(least.height) > MAIN_OVER_BELOW * h + SLACK
-        {
-            return None;
-        }
-        let (_, a) = shaped(sides, true);
-        let area = a.below?;
+    // When coding, the terminal used last goes under the editor, where there is the height.
+    let terminal = (task == Task::Coding
+        && shape != Shape::Portrait
+        && h * (1.0 - MAIN_OVER_BELOW) >= f64::from(BELOW_LEAST_HEIGHT))
+    .then(|| {
         rest.iter()
             .copied()
-            .find(|&i| windows[i].kind == Kind::Terminal && windows[i].resizable && fits(i, area))
+            .find(|&i| kinds[i] == Kind::Terminal && windows[i].resizable)
+    })
+    .flatten();
+    // The areas, made to fit the windows in them: the main window, the terminal under it (kept
+    // at least as tall as it must be there), then the others in the order of `sides`.
+    let made = |below: Option<usize>, sides: &[usize], a: &Areas| -> Option<Vec<Placement>> {
+        let placed = placements(main, below, sides, a);
+        let least: Vec<Size> = placed
+            .iter()
+            .map(|p| {
+                let l = windows[p.window].least;
+                match p.role {
+                    Role::Below => Size::new(l.width, l.height.max(BELOW_LEAST_HEIGHT)),
+                    Role::Main | Role::Side => l,
+                }
+            })
+            .collect();
+        let areas: Vec<RatioRect> = placed.iter().map(|p| p.area).collect();
+        let fitted = fit::make_room(&areas, &least, width, height)?;
+        Some(
+            placed
+                .into_iter()
+                .zip(fitted)
+                .map(|(p, area)| Placement { area, ..p })
+                .collect(),
+        )
     };
-    // A window goes beside the main one only if some count of windows there gives it an area
-    // it fits; one that fits none waits in the taskbar rather than keep the others away.
-    let most = room_beside(width, height).min(rest.len());
-    let fits_beside = |i: usize| {
-        (1..=most).any(|sides| {
-            let (share, a) = shaped(sides, false);
-            share <= MAIN_SHARE_MOST && a.sides.iter().any(|&area| fits(i, area))
-        })
+    // The terminal under the editor whenever it fits there; then as many windows beside the
+    // main one as the screen holds, down to none: the ones that help most that can all fit, the
+    // one that helps most in the first area.
+    let belows: Vec<Option<usize>> = match terminal {
+        Some(t) => vec![Some(t), None],
+        None => vec![None],
     };
-
-    // As many windows beside the main one as the screen holds, down to none, until those that
-    // help most each fit an area: the one that helps most in the first area it fits.
-    for sides in (0..=most).rev() {
-        let (share, _) = shaped(sides, false);
-        if sides > 0 && share > MAIN_SHARE_MOST {
-            continue;
-        }
-        let below = below_for(sides);
-        let (_, a) = shaped(sides, below.is_some());
-        let chosen: Vec<usize> = rest
+    for below in belows {
+        let pool: Vec<usize> = rest
             .iter()
             .copied()
-            .filter(|&i| Some(i) != below && fits_beside(i))
-            .take(sides)
+            .filter(|&i| Some(i) != below)
+            .take(POOL)
             .collect();
-        if chosen.len() < sides || (sides == 4 && chosen.iter().any(|&i| fit(i) < KEEP_FOURTH)) {
-            continue;
-        }
-        let Some(order) = matched(&chosen, &a.sides, &fits) else {
-            continue;
-        };
-        // Two windows of the same weight share the screen equally, when both fit a half.
-        if sides == 1 && below.is_none() {
-            let other = order[0];
-            let halves = areas(shape, 1, false, 0.5, false);
-            if windows[other].resizable
-                && fit(other) >= 0.9 * fit(main)
-                && fits(main, halves.main)
-                && fits(other, halves.sides[0])
-            {
-                return Layout {
-                    task,
-                    placed: placements(main, None, &order, &halves),
-                };
+        let most = room_beside(width, height).min(pool.len());
+        for sides in (0..=most).rev() {
+            for chosen in combinations(&pool, sides) {
+                if sides == 4 && chosen.iter().any(|&i| fit(i) < KEEP_FOURTH) {
+                    continue;
+                }
+                // Two windows of the same weight share the screen equally, when they fit.
+                if sides == 1 && below.is_none() {
+                    let other = chosen[0];
+                    if windows[other].resizable && fit(other) >= 0.9 * fit(main) {
+                        let halves = areas(shape, 1, false, 0.5, false);
+                        if let Some(placed) = made(None, &chosen, &halves) {
+                            return Layout { task, placed };
+                        }
+                    }
+                }
+                let middle = shape == Shape::Ultrawide && sides >= 2;
+                let a = areas(
+                    shape,
+                    sides,
+                    below.is_some(),
+                    MAIN_SHARE[sides.min(MAIN_SHARE.len() - 1)],
+                    middle,
+                );
+                for order in orders(&chosen) {
+                    if let Some(placed) = made(below, &order, &a) {
+                        return Layout { task, placed };
+                    }
+                }
             }
         }
-        return Layout {
-            task,
-            placed: placements(main, below, &order, &a),
-        };
     }
-    // Unreachable: no window beside the main one always fits.
+    // A main window larger than the screen, alone: it keeps its size.
     Layout {
         task,
-        placed: placements(main, None, &[], &shaped(0, false).1),
+        placed: vec![Placement {
+            window: main,
+            area: RatioRect::FULL,
+            role: Role::Main,
+        }],
     }
 }
 
-/// The windows `chosen` (by priority) matched to `areas`, each to one it fits, the window that
-/// helps most to the first area it can take: the windows in the areas' order. `None` when no
-/// matching fits them all.
-fn matched(
-    chosen: &[usize],
-    areas: &[RatioRect],
-    fits: &impl Fn(usize, RatioRect) -> bool,
-) -> Option<Vec<usize>> {
-    fn place(
-        k: usize,
-        chosen: &[usize],
-        areas: &[RatioRect],
-        fits: &impl Fn(usize, RatioRect) -> bool,
-        taken: &mut Vec<Option<usize>>,
-    ) -> bool {
-        let Some(&i) = chosen.get(k) else {
-            return true;
-        };
-        for (slot, &area) in areas.iter().enumerate() {
-            if taken[slot].is_none() && fits(i, area) {
-                taken[slot] = Some(i);
-                if place(k + 1, chosen, areas, fits, taken) {
-                    return true;
-                }
-                taken[slot] = None;
-            }
+/// Every choice of `n` of `items`, in order: the choices with the first items first.
+fn combinations(items: &[usize], n: usize) -> Vec<Vec<usize>> {
+    fn pick(items: &[usize], n: usize, from: usize, chosen: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+        if chosen.len() == n {
+            out.push(chosen.clone());
+            return;
         }
-        false
+        for k in from..items.len() {
+            if items.len() - k < n - chosen.len() {
+                break;
+            }
+            chosen.push(items[k]);
+            pick(items, n, k + 1, chosen, out);
+            chosen.pop();
+        }
     }
-    let mut taken = vec![None; areas.len()];
-    place(0, chosen, areas, fits, &mut taken).then(|| taken.into_iter().flatten().collect())
+    let mut out = Vec::new();
+    if n <= items.len() {
+        pick(items, n, 0, &mut Vec::with_capacity(n), &mut out);
+    }
+    out
+}
+
+/// Every order of `items`, the given order first.
+fn orders(items: &[usize]) -> Vec<Vec<usize>> {
+    if items.len() <= 1 {
+        return vec![items.to_vec()];
+    }
+    let mut out = Vec::new();
+    for k in 0..items.len() {
+        let mut rest = items.to_vec();
+        let first = rest.remove(k);
+        for mut tail in orders(&rest) {
+            tail.insert(0, first);
+            out.push(tail);
+        }
+    }
+    out
 }
 
 fn placements(main: usize, below: Option<usize>, sides: &[usize], areas: &Areas) -> Vec<Placement> {
@@ -799,35 +836,48 @@ mod tests {
             l.placed
         );
         assert!(tiles(&l.placed) && all_fit(&windows, &l.placed, 1920, 1032));
-        // One that needs more than three quarters of the screen leaves no room beside it.
-        let windows = [least(K::Code, 1600, 600), Window::of(K::Browser)];
+        // One that needs 1600 px leaves 320 beside it: room for a window that sets no minimum,
+        // not for a browser that keeps 500.
+        let windows = [least(K::Code, 1600, 600), Window::of(K::Notes)];
+        let l = layout(&windows, 1920, 1032);
+        assert_eq!(roles(&l), vec![(0, Role::Main), (1, Role::Side)]);
+        assert!(all_fit(&windows, &l.placed, 1920, 1032));
+        let windows = [least(K::Code, 1600, 600), least(K::Browser, 500, 300)];
         let l = layout(&windows, 1920, 1032);
         assert_eq!(roles(&l), vec![(0, Role::Main)]);
         assert_eq!(l.placed[0].area, RatioRect::FULL);
     }
 
     #[test]
-    fn a_terminal_too_tall_for_under_the_editor_goes_beside_it() {
-        // 32% of 1032 px is 330 px: a terminal that keeps 400 px goes beside the editor.
+    fn a_terminal_that_needs_more_height_under_the_editor_gets_it() {
+        // 32% of 1032 px is 330 px; a terminal that keeps 400 px gets 400, the editor above it
+        // the rest.
         let windows = [
             Window::of(K::Code),
             least(K::Terminal, 300, 400),
             Window::of(K::Browser),
         ];
         let l = layout(&windows, 1920, 1032);
-        assert!(!l.placed.iter().any(|p| p.role == Role::Below), "{:?}", l.placed);
-        assert!(l.placed.iter().any(|p| p.window == 1 && p.role == Role::Side));
+        assert_eq!(
+            roles(&l),
+            vec![(0, Role::Main), (1, Role::Below), (2, Role::Side)]
+        );
+        let below = l.placed[1]
+            .area
+            .to_rect(crate::geometry::Rect::new(0, 0, 1920, 1032));
+        assert!((below.height() - 400).abs() <= 2, "{:?}", l.placed);
         assert!(tiles(&l.placed) && all_fit(&windows, &l.placed, 1920, 1032));
-        // An editor that keeps more than 68% of the height leaves no room under it either.
+        // An editor that keeps 800 px of height leaves less than a terminal needs under it
+        // (260 px): the terminal goes beside it.
         let windows = [least(K::Code, 600, 800), Window::of(K::Terminal)];
         let l = layout(&windows, 1920, 1032);
         assert_eq!(roles(&l), vec![(0, Role::Main), (1, Role::Side)]);
     }
 
     #[test]
-    fn fewer_windows_beside_the_main_one_when_the_one_that_helps_most_needs_the_height() {
-        // Three beside the editor would be 344 px tall each; the browser keeps 500 px. Two
-        // beside it give the browser 567 px: it stays, and the chat waits in the taskbar.
+    fn a_window_beside_the_main_one_that_needs_more_height_gets_it_from_its_neighbours() {
+        // Three beside the editor are 344 px tall each; the browser keeps 500 px. Its zone grows
+        // to 500, and the two below it share the rest: none is minimised.
         let windows = [
             Window::of(K::Code),
             least(K::Browser, 400, 500),
@@ -837,17 +887,27 @@ mod tests {
         let l = layout(&windows, 1920, 1032);
         assert_eq!(
             roles(&l),
-            vec![(0, Role::Main), (1, Role::Side), (2, Role::Side)],
+            vec![(0, Role::Main), (1, Role::Side), (2, Role::Side), (3, Role::Side)],
             "{:?}",
             l.placed
+        );
+        let work = crate::geometry::Rect::new(0, 0, 1920, 1032);
+        let browser = l.placed[1].area.to_rect(work);
+        assert!((browser.height() - 500).abs() <= 2, "{:?}", l.placed);
+        assert_eq!(
+            l.placed[0].area,
+            r(0.0, 0.0, 0.55, 1.0),
+            "the editor's zone stays"
         );
         assert!(tiles(&l.placed) && all_fit(&windows, &l.placed, 1920, 1032));
     }
 
     #[test]
-    fn a_window_too_big_to_sit_beside_waits_in_the_taskbar_and_the_others_take_its_place() {
-        // Battle.net keeps 1280 x 720: beside the editor there are at most 768 px. It waits in
-        // the taskbar; the windows after it take the room.
+    fn a_big_window_beside_the_main_one_takes_the_room_it_needs() {
+        // The owner: "not becoming the main zone, just taking the minimal space even if big".
+        // A window that keeps 1280 x 720 sits beside the editor, in a column 1280 px wide; the
+        // editor gives up the room. With a browser above it there is no height left for a third
+        // window beside them, which waits in the taskbar.
         let windows = [
             Window::of(K::Code),
             least(K::Other, 1280, 720),
@@ -855,8 +915,23 @@ mod tests {
             Window::of(K::Notes),
         ];
         let l = layout(&windows, 1920, 1032);
-        assert!(!l.placed.iter().any(|p| p.window == 1), "{:?}", l.placed);
-        assert_eq!(l.placed.len(), 3, "{:?}", l.placed);
+        assert_eq!(l.placed[0].window, 0, "the editor stays the main window");
+        assert!(
+            l.placed.iter().any(|p| p.window == 1 && p.role == Role::Side),
+            "{:?}",
+            l.placed
+        );
+        assert!(!l.placed.iter().any(|p| p.window == 3), "{:?}", l.placed);
+        let work = crate::geometry::Rect::new(0, 0, 1920, 1032);
+        let big = l
+            .placed
+            .iter()
+            .find(|p| p.window == 1)
+            .map(|p| p.area.to_rect(work));
+        assert!(
+            big.is_some_and(|b| (b.width() - 1280).abs() <= 2 && (b.height() - 720).abs() <= 2),
+            "{big:?}"
+        );
         assert!(tiles(&l.placed) && all_fit(&windows, &l.placed, 1920, 1032));
     }
 

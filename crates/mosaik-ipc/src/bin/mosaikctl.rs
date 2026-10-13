@@ -74,6 +74,9 @@ mod windows_main {
   add-app <workspace> <window> [<zone>]  add a window's app (its handle, from apps)
   move-app <workspace> <app> <zone>      put an app in another zone
   remove-app <workspace> <app>   take an app out (its window stays)
+  sets [--json]                  sets of your apps that go together for a task
+  open-set <set>                 open a set (its id, from sets): its apps start, laid out
+  sort-windows                   sort the windows open now into workspaces, one per task
   rescue                         bring back every window Mosaïk hid
   switcher | settings | quit | version
 A <workspace> is its name or its id.";
@@ -154,6 +157,11 @@ A <workspace> is its name or its id.";
                 preset: Some((*layout).to_owned()),
             },
             ("undo-arrange", []) => Command::UndoArrange,
+            ("sets", []) => Command::Sets,
+            ("open-set", [set]) => Command::OpenSet {
+                set: (*set).to_owned(),
+            },
+            ("sort-windows", []) => Command::SortWindows,
             ("rescue", []) => Command::Rescue,
             ("switcher", []) => Command::ShowSwitcher,
             ("settings", []) => Command::ShowSettings,
@@ -342,6 +350,21 @@ A <workspace> is its name or its id.";
             }
             Reply::Settings { settings, .. } => print_json(settings),
             Reply::Zones { .. } | Reply::Preview(_) => print_json(reply),
+            Reply::Sets { .. } if json => print_json(reply),
+            Reply::Sets { sets } => {
+                if sets.is_empty() {
+                    println!("No sets: Mosaïk found no apps that go together.");
+                }
+                for set in sets {
+                    println!(
+                        "{:<16} {}  ({} open)",
+                        printable(&format!("{} ({})", set.name, set.id)),
+                        printable(&set.apps.join(", ")),
+                        set.open
+                    );
+                }
+                0
+            }
             Reply::Apps(_) if json => print_json(reply),
             Reply::Apps(list) => {
                 let WorkspaceApps {

@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 
 import type { SaveSettings } from './App';
+import { request } from './engine';
 import type { ArrangePreview, Settings } from './protocol';
 import { Stage } from './Stage';
 import { Button, Keys, Mark, PageTitle, Status, Toggle, useSay } from './ui';
@@ -98,7 +99,13 @@ export function Welcome({
       return;
     }
     // Windows may have kept Mosaïk from starting with it: the message says why.
-    if (saved.settings.start_with_windows !== startWithWindows) say(saved.message, true);
+    const refused = saved.settings.start_with_windows !== startWithWindows ? saved.message : null;
+    // The windows open now, sorted into a workspace per task; none moves. Said only when it
+    // made some, and after why Mosaïk will not start with Windows, never in its place.
+    const sorted = await request({ cmd: 'sort_windows' });
+    const made = sorted.reply === 'done' && sorted.message.startsWith('Your open windows') ? sorted.message : null;
+    if (refused) say(made ? `${refused} ${made}` : refused, true);
+    else if (made) say(made);
     onDone();
   };
 

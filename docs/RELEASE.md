@@ -60,13 +60,15 @@ new in this version" and the listing below change.
     stay on your computer."
   - *Features*: Zones that belong to the project, not the monitor · Arrange: every window in its
     place in one click, with undo · Ten layouts, previewed on your own windows before you pick
-    one · Tabs for any app, not only the browser · One shortcut to
-    switch workspaces, with a preview of each · Works across monitors and scales · Your layouts
-    stay on your computer · A safety net brings back every window, always.
+    one · Sets of the apps you use together, opened in one click · Tabs for any app, not only
+    the browser · One shortcut to switch workspaces, with a preview of each · Works across
+    monitors and scales · Your layouts stay on your computer · A safety net brings back every
+    window, always.
   - *What's new in this version* (1.1.0): "A home page: point at Arrange or one of ten layouts
-    and see your windows glide to where they would go; click, and they do, with undo. Every
-    window starts at the top of its zone, and zones sit closer together. Resize a window and the
-    zones beside it follow. A quick menu at the screen's edge. Four more zone presets."
+    and see your windows glide to where they would go; click, and they do, with undo. Arrange
+    lays out each screen for what you are doing, and zones make room for a window that needs
+    more. Sets of the apps you use together, opened in one click. Windows meet edge to edge.
+    Resize a window and the zones beside it follow. A quick menu at the screen's edge."
   - *Screenshots*: at least one, 1920x1080, of Mosaïk in use (the home page with a layout
     pointed at, zones with tags, a tab strip, the switcher).
   - *Search terms*: window manager, workspaces, tabs, zones, tiling.
