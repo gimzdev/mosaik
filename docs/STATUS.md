@@ -878,10 +878,10 @@ process, its own windows, a scratch folder).
   taking the minimal space"; on the site, the header's Download button alone; sets of the apps
   on the PC that go together ("terminal, Chrome, Claude, VS Code and File Explorer"), secondary
   but visible early, and the windows open the first time sorted into workspaces; "clean,
-  concise, non-invasive, easy to understand". Jobs 0110 to 0113 (commits 647f225 to the one
-  these lines came with):
-  - `mosaik.ps1 test`: every test passed in 57 to 59 s (core 221, among them zones that make
-    room in every preset, the owner's sets and the data folder; the interface's 68).
+  concise, non-invasive, easy to understand". Jobs 0110 to 0113 (commits 647f225 to 84f922b):
+  - `mosaik.ps1 test`: every test passed in 57 to 60 s (core 222 in job 0113, among them zones
+    that make room in every preset, the owner's sets, a set's workspace found by its apps and the
+    data folder; the interface's 68).
   - `smart`, every check passing (job 0111): 3h, a window told to go no smaller than 1152 x 619
     (read from another process as 1138 x 612, its frame, 0 px off): in Quarters its quarter
     grew to 1138 x 612 and the others gave up the room; it was not minimised, the zones still
@@ -896,16 +896,20 @@ process, its own windows, a scratch folder).
   - On the owner's screen, asked only (Claude, Notepad++, two File Explorer windows): Arrange
     read coding; Notepad++ in the main zone (1056 x 1032), and beside it Claude's zone made
     392 px tall for it, the two File Explorer zones 320 px each, rather than three of 344 (12 to
-    17 ms). Thirds put three in thirds and minimised one; Quarters fit all four.
+    17 ms). Thirds put three in thirds and minimised one; Quarters fit all four. With Windows
+    Terminal and Steam open too (job 0113): Notepad++ 1056 x 702 with the Terminal under it
+    (1056 x 330), Claude 864 x 392, the File Explorer windows 864 x 320, Steam minimised.
   - `mosaik-probe sets`: Mosaïk reads the same Start menu as Windows' own `Get-StartApps` (139
-    apps, 35 packaged, 104 with their program; 163 to 171 ms). Job 0110's choices took "Windows
+    apps, 35 packaged, 104 with their program; 163 to 172 ms). Job 0110's choices took "Windows
     Software Development Kit" (explorer.exe opening a folder) for File Explorer, offered both
     Teams and Calendar as chat and mail, and Notepad++ open would have taken VS Code's place;
     after the fixes, tests first (jobs 0111 and 0112): Coding, "Visual Studio Code, Terminal,
     Google Chrome, Claude, File Explorer"; Design, "Canva, Google Chrome, File Explorer, Claude";
     Writing, "Word, OneNote, Google Chrome, Claude". File Explorer started through its Start menu
     entry by Mosaïk's own code showed a new window in 5.4 s in job 0110 and none in jobs 0111
-    and 0112 (30 s); the probe now starts Character Map instead, on a thread like the engine's.
+    and 0112 (30 s). Character Map, started through its entry on a thread like the engine's,
+    with COM as `ShellExecuteEx` asks (job 0113): started in 216 ms, its window in 490 ms,
+    closed.
   - The windows open sorted into workspaces as at the end of the welcome, in the scratch data
     (job 0110): "Your open windows make 1 workspace: Coding." (Notepad++, Claude and the two File
     Explorer windows, each in a zone named for it); 0 of 30 windows moved.
@@ -915,11 +919,16 @@ process, its own windows, a scratch folder).
     folder from `MOSAIK_DATA`: its log says "Start menu read apps=139 packaged=35
     with_program=104", and it offers the three sets above. The tour then stopped at Thirds: the
     sets, as cards, took two rows and pushed the layouts out of view in Mosaïk's window
-    (980 x 720); they are now one line under Arrange, "Open the apps for" and a button per set.
-  - Release build (131 to 136 s), Store package (2.84 MB), opened by hand (window in 0.3 to
+    (980 x 720); they are now one line under Arrange, "Open the apps for" and a button per set,
+    and the tour passes (job 0113, 33 pictures). None of the three sets has a workspace yet: the
+    welcome's "Coding" (Notepad++, Claude, File Explorer) is not the Coding set's, which is found
+    by its apps; opening a set, which starts apps on the owner's screen, has not been run there.
+  - `workspace --drag` (job 0113): saved and opened again, 3 of 3 windows in their zones, as
+    before the apps' launch thread changed.
+  - Release build (81 to 136 s), Store package (2.84 MB), opened by hand (window in 0.3 to
     1.0 s), `--background` (no window; protocol 6, watchdog, Win+Alt+Space registered), `pack`
     (255 files, verified), both files beside the repository dated that day, the site folder made
-    again (1.6.0, job 0110).
+    again (1.6.0, job 0110); Mosaïk left running in the tray on the scratch data.
 
 ## Owner decisions
 
