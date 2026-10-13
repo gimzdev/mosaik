@@ -95,21 +95,34 @@ pub fn cursor() -> Point {
     Point::new(p.x, p.y)
 }
 
-/// An app has taken the pointer for itself, as a game does while the mouse turns the view: it
-/// hides the pointer, or keeps it inside part of the screen. Menus and edges must not answer
-/// it (the owner: "when playing an FPS, going sideways must never open the side bar").
-pub fn pointer_taken() -> bool {
-    use windows::Win32::Foundation::RECT;
-    use windows::Win32::UI::WindowsAndMessaging::{CURSOR_SHOWING, CURSORINFO, GetClipCursor, GetCursorInfo};
+/// The pointer as Windows shows it now, if it can be read.
+fn cursor_info() -> Option<windows::Win32::UI::WindowsAndMessaging::CURSORINFO> {
+    use windows::Win32::UI::WindowsAndMessaging::{CURSORINFO, GetCursorInfo};
     let mut info = CURSORINFO {
         cbSize: u32::try_from(std::mem::size_of::<CURSORINFO>()).unwrap_or(0),
         ..Default::default()
     };
     // SAFETY: fills a sized structure about the pointer.
-    let hidden = unsafe { GetCursorInfo(&mut info) }.is_ok() && info.flags.0 & CURSOR_SHOWING.0 == 0;
+    unsafe { GetCursorInfo(&raw mut info) }.ok().map(|()| info)
+}
+
+/// The pointer has no shape now: an app hid it by giving it none, as games built on SDL or GLFW
+/// do while the mouse turns the view. (An app that hides it with `ShowCursor` hides it over its
+/// own windows only.)
+pub fn pointer_shape_hidden() -> bool {
+    cursor_info().is_some_and(|i| i.hCursor.is_invalid())
+}
+
+/// An app has taken the pointer for itself, as a game does while the mouse turns the view: it
+/// hides the pointer, or keeps it inside part of the screen. Menus and edges must not answer
+/// it (the owner: "when playing an FPS, going sideways must never open the side bar").
+pub fn pointer_taken() -> bool {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{CURSOR_SHOWING, GetClipCursor};
+    let hidden = cursor_info().is_some_and(|i| i.flags.0 & CURSOR_SHOWING.0 == 0 || i.hCursor.is_invalid());
     let mut clip = RECT::default();
     // SAFETY: reads the rectangle the pointer is confined to (the whole desktop when none).
-    let clipped = unsafe { GetClipCursor(&mut clip) }.is_ok() && {
+    let clipped = unsafe { GetClipCursor(&raw mut clip) }.is_ok() && {
         // SAFETY: reads system metrics.
         let (x, y, w, h) = unsafe {
             (

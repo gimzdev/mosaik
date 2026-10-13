@@ -1859,6 +1859,62 @@ fn quick_menu(
             "ok": in_front && hidden.is_none() && back.is_some(),
         }),
     );
+
+    // 4g. A game in a window over the work area, in front, that hides the pointer while the mouse
+    // turns its view: the pointer, gone from it onto the handle, stays hidden and the menu does
+    // not open (the owner: "when playing an FPS, going sideways must never open the side bar").
+    // Once the game is closed, the pointer resting on the handle opens it again.
+    input::move_to(away);
+    let (_, _) = wait_menu(engine, 2000, is_handle)?;
+    let h = state(engine)?
+        .quick_menu
+        .ok_or("the handle is not on screen")?
+        .rect;
+    let game = open(opened, "Probe game hiding the pointer", work, " --hide-pointer")?;
+    let in_front = mosaik_win::arrange::focus(game) || {
+        let middle = Point::new(work.left + work.width() / 2, work.top + work.height() / 2);
+        input::move_to(middle);
+        pump_until(100, || false);
+        drop(LeftButton::press());
+        pump_until(300, || false);
+        mosaik_win::arrange::foreground() == Some(game)
+    };
+    // In the game, a little way in from the handle, then onto it.
+    let inside = Point::new(
+        if h.center().x > work.center().x {
+            h.left - px(160.0)
+        } else {
+            h.right + px(160.0)
+        },
+        h.center().y,
+    );
+    input::move_to(inside);
+    pump_until(300, || false);
+    let hidden_in_game = input::pointer_taken();
+    glide(inside, h.center());
+    let (in_game, _) = wait_menu(engine, 1500, is_open)?;
+    let opened_in_game = is_open(in_game.as_ref());
+    let hidden_on_handle = input::pointer_taken();
+    crate::apps::close(game);
+    pump_until(500, || false);
+    glide(h.center(), away);
+    let (_, _) = wait_menu(engine, 2000, is_handle)?;
+    glide(away, h.center());
+    let (after, _) = wait_menu(engine, 2000, is_open)?;
+    let opens_after = is_open(after.as_ref());
+    glide(h.center(), away);
+    let (_, _) = wait_menu(engine, 2000, is_handle)?;
+    out.insert(
+        "game_pointer".into(),
+        json!({
+            "game_in_front": in_front,
+            "pointer_hidden_in_the_game": hidden_in_game,
+            "pointer_hidden_on_the_handle": hidden_on_handle,
+            "menu_opened": opened_in_game,
+            "opens_once_the_game_closes": opens_after,
+            "ok": in_front && hidden_in_game && !opened_in_game && opens_after,
+        }),
+    );
     let ok = out.values().all(|v| v["ok"] == json!(true));
     out.insert("ok".into(), json!(ok));
     Ok(Value::Object(out))

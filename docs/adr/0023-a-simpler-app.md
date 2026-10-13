@@ -62,7 +62,9 @@ workspace was looked for when it showed, while still cloaked, and never placed.
   when that one does, which Mosaïk says once; with screens on both sides, on the edge chosen.
   **It never answers a game**: while an app hides the pointer or keeps it inside part of the
   screen (`mosaik_win::input::pointer_taken`), as a game does while the mouse turns the view,
-  the line does not open the menu. In a game's menus, with the pointer showing, it does.
+  the line does not open the menu: a pointer an app gave no shape stays shapeless over the line
+  (`WM_SETCURSOR`), and a pointer kept inside a rectangle smaller than the screens is seen as
+  taken. In a game's menus, with the pointer showing, the line answers.
 - **The site** says the same: a line beside the title (Mosaïk suggests sets of apps that go
   together and opens them in tidy views; you can make your own), three windows to a view in the
   hero's desktops, a thin line of desktop between windows so each reads as its own, and on the
@@ -75,7 +77,13 @@ workspace was looked for when it showed, while still cloaked, and never placed.
   at the end of Settings.
 - The workspace probe's started window shows cloaked first, and the workspace is opened twice
   before it shows: one window must start, and take its zone (`mosaik-probe workspace`, step 5).
+  The smart probe's game window hides the pointer over the work area: the line must not open
+  (`mosaik-probe smart`, 4g). Both run against the engine without these changes first.
   The tour reaches a workspace's ⋯ menu by focusing it, as the keyboard does, since the list is
   below the fold.
+- A game that hides the pointer with `ShowCursor` and lets it roam the screens is not seen as
+  taking it (over another program's window, Windows shows that program's pointer). Games that
+  turn the view with the mouse usually confine the pointer too, and a game in full screen hides
+  the line anyway (ADR 0015).
 - A workspace saved with more windows side by side keeps them: three to a view is how Mosaïk
   lays out, not a limit on what the user makes (a layout such as Quarters has four zones).

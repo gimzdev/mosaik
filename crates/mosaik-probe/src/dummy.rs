@@ -35,6 +35,10 @@ thread_local! {
     static MIN_HEIGHT: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
 }
 
+/// `--hide-pointer`: over the window, the pointer has no shape, as a game built on SDL or GLFW
+/// hides it while the mouse turns the view.
+static HIDE_POINTER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The timer that uncloaks a `--cloaked-first` window.
 const UNCLOAK_TIMER: usize = 1;
 
@@ -45,7 +49,7 @@ const RESIZE_EDGE: i32 = 6;
 
 /// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost] [--self-move] [--no-title-room]
 /// [--borderless] [--fixed] [--full-screen] [--min-width N] [--min-height N] [--cloaked-first
-/// MS]`: shows the window and runs until it is closed or the process is killed. `--topmost` keeps
+/// MS] [--hide-pointer]`: shows the window and runs until it is closed or the process is killed. `--topmost` keeps
 /// it above the user's windows, so a probe that presses the mouse on its title bar never lands on
 /// something else. `--full-screen` covers the main monitor, taskbar included, borderless, as a
 /// game in full screen. `--cloaked-first MS` shows the window cloaked and uncloaks it MS
@@ -68,6 +72,7 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
     MIN_WIDTH.with(|m| m.set(number("--min-width")));
     MIN_HEIGHT.with(|m| m.set(number("--min-height")));
     let cloaked_first = u32::try_from(number("--cloaked-first")).unwrap_or(0);
+    HIDE_POINTER.store(has("--hide-pointer"), std::sync::atomic::Ordering::Relaxed);
     let title = args
         .iter()
         .position(|a| a == "--title")
@@ -144,6 +149,14 @@ unsafe extern "system" fn dummy_proc(
         // SAFETY: ends this process's message loop.
         unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0) };
         return windows::Win32::Foundation::LRESULT(0);
+    }
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
+        && HIDE_POINTER.load(std::sync::atomic::Ordering::Relaxed)
+        && u32::try_from(lparam.0 & 0xFFFF) == Ok(windows::Win32::UI::WindowsAndMessaging::HTCLIENT)
+    {
+        // SAFETY: gives the pointer no shape over our own window's client area.
+        unsafe { windows::Win32::UI::WindowsAndMessaging::SetCursor(None) };
+        return windows::Win32::Foundation::LRESULT(1);
     }
     if msg == windows::Win32::UI::WindowsAndMessaging::WM_TIMER && wparam.0 == UNCLOAK_TIMER {
         // SAFETY: stops the timer set on our own window when it was shown cloaked.

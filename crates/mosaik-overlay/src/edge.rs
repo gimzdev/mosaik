@@ -20,7 +20,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, MA_NOACTIVATE, PostMessageW, WM_CANCELMODE, WM_CAPTURECHANGED, WM_CLOSE, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
+    WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_SETCURSOR,
 };
 
 use crate::canvas::{Align, Area, Canvas, Rgba, Weight};
@@ -155,6 +155,10 @@ unsafe extern "system" fn edge_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
                 push(EdgeInput::Cancel);
             }
         }
+        // A pointer an app hid (a game turning its view with the mouse) stays hidden over the
+        // handle, so the engine sees it hidden and the handle does not answer it
+        // (`mosaik_win::input::pointer_taken`).
+        WM_SETCURSOR if mosaik_win::input::pointer_shape_hidden() => return LRESULT(1),
         // It never takes the keyboard from the app the user is in.
         WM_MOUSEACTIVATE => return LRESULT(isize::try_from(MA_NOACTIVATE).unwrap_or(3)),
         // It closes with Mosaïk, not when another program asks every window to close.
