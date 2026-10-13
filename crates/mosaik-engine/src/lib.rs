@@ -104,6 +104,12 @@ pub enum UiEvent {
         title: String,
         body: String,
     },
+    /// Tell the user something that can wait until they open Mosaïk: it shows there, without
+    /// opening the window (the quick menu put on the other edge, at every start).
+    Note {
+        title: String,
+        body: String,
+    },
     /// The saved workspaces, or which one is open, changed (from the switcher, a shortcut,
     /// `mosaikctl` or the interface itself): lists showing them should read them again.
     WorkspacesChanged,

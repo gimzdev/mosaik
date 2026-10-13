@@ -91,7 +91,8 @@
   for a game or a video in full screen, and stays where you drag it along the edge. Settings:
   right edge, left edge, or off.
 - When another screen or the taskbar is beyond the edge you chose, the pointer does not stop
-  there: the line goes on the other edge, where it does, and Mosaïk says so once.
+  there: the line goes on the other edge, where it does, and Mosaïk says so once, the next time
+  you open it.
 - It never opens for a game: while a game hides the pointer to turn the view with the mouse, the
   line does not answer. In the game's menus, with the pointer showing, it does.
 

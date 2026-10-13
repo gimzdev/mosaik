@@ -267,7 +267,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     let sink: UiSink = {
         let notices = Arc::clone(&notices);
         Arc::new(move |event| {
-            if let UiEvent::Notice { title, body } = event
+            if let UiEvent::Notice { title, body } | UiEvent::Note { title, body } = event
                 && let Ok(mut n) = notices.lock()
             {
                 n.push(format!("{title}: {body}"));

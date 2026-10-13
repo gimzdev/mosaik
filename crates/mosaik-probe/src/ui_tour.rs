@@ -416,9 +416,10 @@ impl Tour {
     }
 
     /// Rests the pointer on the button `name` without clicking, as a person pointing at it, and
-    /// takes the picture once what it shows has settled.
+    /// takes the picture once what it shows has settled. The button is brought into view first
+    /// (a notice at the top of the page pushes the layouts down).
     fn point(&mut self, name: &str, shot: &str) -> Result<(), String> {
-        let c = self.find("button", name)?;
+        let c = self.reveal("button", name)?;
         let at = c.rect.center();
         // SAFETY: read-only hit test.
         let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: at.x, y: at.y }), GA_ROOT) };
@@ -551,7 +552,7 @@ impl Tour {
         let title = self.find("", "Welcome to Mosaïk")?;
         self.click(&title)?;
         self.page("welcome", true)?;
-        let start = self.find("button", "Get started")?;
+        let start = self.reveal("button", "Get started")?;
         self.click(&start)?;
 
         // The home page, where the window opens, once its first showing of Arrange is over; then

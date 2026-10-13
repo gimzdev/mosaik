@@ -59,7 +59,9 @@ workspace was looked for when it showed, while still cloaked, and never placed.
   once it shows.
 - **The quick menu's line is where the pointer stops** (`mosaik_core::edge::handle_edge`): on
   the edge chosen, when the main screen's edge there stops the pointer; else on the other edge
-  when that one does, which Mosaïk says once; with screens on both sides, on the edge chosen.
+  when that one does, which Mosaïk says once, ever, in its window the next time it is opened (a
+  note, `UiEvent::Note`: it does not open the window, since Mosaïk starts with Windows); with
+  screens on both sides, on the edge chosen.
   **It never answers a game**: while an app hides the pointer or keeps it inside part of the
   screen (`mosaik_win::input::pointer_taken`), as a game does while the mouse turns the view,
   the line does not open the menu: a pointer an app gave no shape stays shapeless over the line

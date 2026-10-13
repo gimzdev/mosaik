@@ -565,6 +565,14 @@ impl Engine {
         });
     }
 
+    /// Like [`Engine::notice`], for what can wait until the user opens Mosaïk.
+    pub(crate) fn note(&self, title: impl Into<String>, body: impl Into<String>) {
+        (self.ui)(UiEvent::Note {
+            title: title.into(),
+            body: body.into(),
+        });
+    }
+
     pub(crate) fn register_hotkey(&mut self) {
         let wanted = self.settings.switcher_hotkey;
         // Settings files can be edited by hand: a shortcut Mosaïk would refuse in the recorder

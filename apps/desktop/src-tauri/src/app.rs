@@ -386,6 +386,7 @@ fn on_ui_event(handle: &AppHandle, event: UiEvent) {
             let _ = h.emit("zones:edit", ());
         }
         UiEvent::Notice { title, body } => show_notice(&h, Notice { title, body }),
+        UiEvent::Note { title, body } => queue_notice(&h, Notice { title, body }),
         UiEvent::WorkspacesChanged => {
             let _ = h.emit("workspaces:changed", ());
             refresh_tray(&h);
@@ -399,13 +400,18 @@ fn on_ui_event(handle: &AppHandle, event: UiEvent) {
 
 /// Queues a notice for the interface and makes sure the user sees it.
 fn show_notice(app: &AppHandle, notice: Notice) {
+    queue_notice(app, notice);
+    show_settings(app);
+}
+
+/// Queues a notice for the interface: it shows the next time the window is open (now, if it is).
+fn queue_notice(app: &AppHandle, notice: Notice) {
     tracing::info!(title = %notice.title, "notice");
     if let Some(state) = app.try_state::<AppState>()
         && let Ok(mut n) = state.notices.lock()
     {
         n.push(notice);
     }
-    show_settings(app);
     let _ = app.emit("notices:changed", ());
 }
 

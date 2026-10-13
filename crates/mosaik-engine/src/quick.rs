@@ -142,9 +142,10 @@ impl Engine {
                 Side::Right => ("right", "left"),
                 Side::Left => ("left", "right"),
             };
-            self.tell_once(
-                "quick-edge-moved",
-                "The quick menu is on the other edge",
+            // Once, ever, and without opening Mosaïk's window: Mosaïk starts with Windows.
+            self.note_once_ever(
+                format!("quick-edge-moved-{here}"),
+                "The quick menu is on the other edge".to_owned(),
                 format!(
                     "The pointer does not stop at the {there} edge of your main screen (another screen or the taskbar is there), so the quick menu's line is on the {here} edge, where it does."
                 ),

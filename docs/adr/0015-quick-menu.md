@@ -60,6 +60,6 @@ over 110 ms (at once without Windows' animations). Its first row, "Mosaïk · <w
 
 The line goes on the edge chosen when the main screen's edge there stops the pointer, else on the
 other edge when that one does (another screen or the taskbar beyond the edge chosen), which
-Mosaïk says once. While an app hides the pointer or keeps it inside part of the screen, as a game
+Mosaïk says once, ever, the next time its window is opened. While an app hides the pointer or keeps it inside part of the screen, as a game
 does while the mouse turns the view, the line does not open the menu. In Settings, the quick menu
 is one choice: right edge, left edge, or off.

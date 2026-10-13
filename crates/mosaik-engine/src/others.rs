@@ -10,10 +10,24 @@ impl Engine {
     /// Tells the user something once, ever: the key is kept in the settings (in memory only while
     /// the settings file could not be read, so Mosaïk's defaults never replace it).
     pub(crate) fn tell_once_ever(&mut self, key: String, title: String, body: String) {
+        self.once_ever(key, title, body, false);
+    }
+
+    /// Like [`Engine::tell_once_ever`], for what can wait until the user opens Mosaïk: it shows
+    /// there, without opening the window.
+    pub(crate) fn note_once_ever(&mut self, key: String, title: String, body: String) {
+        self.once_ever(key, title, body, true);
+    }
+
+    fn once_ever(&mut self, key: String, title: String, body: String, quiet: bool) {
         if self.settings.notices_shown.contains(&key) {
             return;
         }
-        self.notice(title, body);
+        if quiet {
+            self.note(title, body);
+        } else {
+            self.notice(title, body);
+        }
         if self.settings.notice_shown(&key, self.settings_on_disk)
             && let Err(e) = self.store.save(&self.settings)
         {
