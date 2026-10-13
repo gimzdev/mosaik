@@ -940,7 +940,7 @@ process, its own windows, a scratch folder).
   the options of the last on the list doesn't show them"; the quick menu's line "has to be pixel
   perfect" and should "never open while playing an FPS"; on the site, a line beside the title,
   and the first picture's windows "kind of overlap"; "what is the Check workspace"; and the
-  installer (the owner kept the Store's). Jobs 0116 to 0118 (commits 63b7e9b to d85ece2):
+  installer (the owner kept the Store's). Jobs 0116 to 0119 (commits 63b7e9b to 617e0a4):
   - `mosaik.ps1 test`: every test passed in about 60 s (core 231, among them three windows to a
     view, a set's other apps as tabs with the app they go with, the writing and design sets
     without an assistant, apps the same by id without case or by program, where the quick menu's
@@ -1000,8 +1000,10 @@ process, its own windows, a scratch folder).
     owner's own data with `--background` (the welcome, once: Mosaïk had not been set up there),
     `pack` (258 files, verified), both files beside the repository dated that day, the site
     folder made again (1.7.0, job 0116); Mosaïk left running in the tray on the owner's own data.
-  - A Character Map window stayed open on the owner's screen after job 0116: the sets probe had
-    closed another window of the program; it now closes the window the engine would manage.
+  - A Character Map window stayed open on the owner's screen after job 0116 (started 04:34:56 by
+    its sets probe, which had closed another window of the program): closed in job 0119, as its
+    close button does. The probe now closes the window the engine would manage; run again (job
+    0119): Character Map's window in 465 ms, 1 window, closed, none left open.
 
 ## Owner decisions
 
