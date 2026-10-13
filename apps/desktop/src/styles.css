@@ -239,6 +239,12 @@
   }
 }
 
+/* Home: what the keyboard reaches below the picture comes into view below it, never under it
+   (the picture sticks to the top of the page; its height is Stage's, plus its caption). */
+main:has(.below-picture) {
+  scroll-padding-top: calc(min(260px, 36vh) + 4.5rem);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

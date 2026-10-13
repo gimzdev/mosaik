@@ -14,6 +14,40 @@ async function windowDoesNotScroll(page: Page) {
   expect(overflow).toBeLessThanOrEqual(0);
 }
 
+/** On the home page, the picture stays at the top while the page scrolls, and every control the
+ * keyboard reaches below it, going down and back up, is in view below it, never under it. */
+async function pictureStaysClear(page: Page, height: number) {
+  await page.goto('/');
+  await expect(page.getByText('Your main screen now: 4 windows')).toBeVisible();
+  const picture = page.getByRole('img');
+  const clear = async () => {
+    const p = await picture.boundingBox();
+    const f = await page.evaluate(() => {
+      const r = document.activeElement?.getBoundingClientRect();
+      return r ? { y: r.y, bottom: r.bottom, name: document.activeElement?.textContent ?? '' } : null;
+    });
+    if (!p || !f) throw new Error('not on screen');
+    expect(p.y, 'the picture stays at the top').toBeGreaterThanOrEqual(0);
+    expect(f.y, `${f.name} below the picture`).toBeGreaterThanOrEqual(p.y + p.height);
+    // (A fraction of a pixel over is the browser's rounding.)
+    expect(f.bottom, `${f.name} in the window`).toBeLessThanOrEqual(height + 1);
+  };
+  // Through the layouts and the workspaces, then back up.
+  await page.getByRole('button', { name: 'Arrange windows' }).focus();
+  for (let i = 0; i < 13; i++) {
+    await page.keyboard.press('Tab');
+    await clear();
+  }
+  for (let i = 0; i < 13; i++) {
+    await page.keyboard.press('Shift+Tab');
+    if (i < 12) await clear();
+  }
+  await expect(page.getByRole('button', { name: 'Arrange windows' })).toBeFocused();
+  // The last layout, reached by the keyboard, shows in the picture.
+  await page.getByRole('button', { name: 'Whole screen' }).focus();
+  await expect(page.getByText('With Whole screen: 3 windows as tabs')).toBeVisible();
+}
+
 test('the home page shows the screen and the layouts, and is accessible', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Tidy your screen', level: 1 })).toBeVisible();
@@ -23,6 +57,10 @@ test('the home page shows the screen and the layouts, and is accessible', async 
   ).toHaveCount(10);
   await accessible(page);
   await windowDoesNotScroll(page);
+});
+
+test('the picture stays in view while the layouts scroll beneath it', async ({ page }) => {
+  await pictureStaysClear(page, 760);
 });
 
 test('workspaces are listed and the page is accessible', async ({ page }) => {
@@ -172,6 +210,10 @@ test.describe('at the smallest window size', () => {
     await page.getByRole('button', { name: /Portrait/ }).click();
     await expect(page.getByText('No zones on this monitor. Start from a preset.')).toBeVisible();
     await accessible(page);
+  });
+
+  test('the picture stays in view, and what the keyboard reaches below it is not hidden under it', async ({ page }) => {
+    await pictureStaysClear(page, 560);
   });
 });
 

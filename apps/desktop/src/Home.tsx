@@ -281,7 +281,7 @@ export function Home({
           : 'Open the apps you work with, then come back here.'}
       </p>
 
-      <section aria-labelledby="layouts-title" className="mt-8">
+      <section aria-labelledby="layouts-title" className="below-picture mt-8">
         <h2 id="layouts-title" className="font-display text-heading font-semibold tracking-tight">
           Or pick a layout for your main screen
         </h2>
@@ -310,7 +310,7 @@ export function Home({
         </ul>
       </section>
 
-      <section aria-labelledby="home-workspaces-title" className="mt-8">
+      <section aria-labelledby="home-workspaces-title" className="below-picture mt-8">
         <div className="flex items-baseline justify-between gap-4">
           <h2 id="home-workspaces-title" className="font-display text-heading font-semibold tracking-tight">
             Your workspaces
