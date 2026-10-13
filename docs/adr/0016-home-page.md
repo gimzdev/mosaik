@@ -43,6 +43,11 @@ click would do to their windows before it did it.
   terminal.
 - **One name for the window**: the tray's and the quick menu's "Settings" row is now "Open
   Mosaïk": it opens the window, on its home page when it was closed.
+- **The window is where a beginner looks for it.** Opened by hand (the Start menu, the
+  installer's last step), Mosaïk shows its window; started with Windows, it waits in the tray
+  (the Run key's entry carries `--background`; the package's startup task is told by its
+  activation, `AppInstance::GetActivatedEventArgs`). A click on the tray icon opens the window;
+  it opened the switcher, which stays in the icon's menu and on its shortcut.
 - **The welcome shows rather than tells**: a made-up screen arranges itself once (again on
   "Show it again"), then three steps (Arrange, Keep, Come back) and one choice, starting with
   Windows.

@@ -180,14 +180,18 @@ enum Side {
     Bottom,
 }
 
-/// The point half way along `f`'s `side`, `k` pixels out from its visible border (`k` 0: the
-/// border's own pixels; negative: inside).
-fn side_point(f: Rect, side: Side, k: i32) -> Point {
+/// The point `along` (a fraction, from the top or the left) of `f`'s `side`, `k` pixels out from
+/// its visible border (`k` 0: the border's own pixels; negative: inside).
+fn side_point(f: Rect, side: Side, along: f64, k: i32) -> Point {
+    // Whole pixels: a window is at most a few thousand pixels across.
+    #[allow(clippy::cast_possible_truncation)]
+    let at = |from: i32, length: i32| from + (f64::from(length) * along).round() as i32;
+    let (x, y) = (at(f.left, f.width()), at(f.top, f.height()));
     match side {
-        Side::Left => Point::new(f.left - k, f.center().y),
-        Side::Right => Point::new(f.right - 1 + k, f.center().y),
-        Side::Top => Point::new(f.center().x, f.top - k),
-        Side::Bottom => Point::new(f.center().x, f.bottom - 1 + k),
+        Side::Left => Point::new(f.left - k, y),
+        Side::Right => Point::new(f.right - 1 + k, y),
+        Side::Top => Point::new(x, f.top - k),
+        Side::Bottom => Point::new(x, f.bottom - 1 + k),
     }
 }
 
@@ -211,18 +215,20 @@ fn hit_code(side: Side) -> Option<i32> {
     .ok()
 }
 
-/// Where a press resizes `w` by its `side`, half way along it: a point where Windows answers that
-/// side's hit-test code and `w` is the window under the pointer. Zones are only as far apart as
-/// their rings, so the neighbour across the line can be the window there (its invisible resize
-/// border reaches over): then its facing side is grabbed, which moves the same line. Returns the
-/// point, the window grabbed and its side.
+/// Where a press resizes `w` by its `side`: a point where Windows answers that side's hit-test
+/// code and `w` is the window under the pointer. Zones are only as far apart as their rings, so
+/// the neighbour across the line can be the window there (its invisible resize border reaches
+/// over): then its facing side is grabbed, which moves the same line. Half way along first, then
+/// nearer the ends: half way along a side can be where two neighbours meet across the line, and
+/// there the one above answers with a corner (job 0099). Returns the point, the window grabbed
+/// and its side.
 fn grab(w: HWND, side: Side) -> Option<(Point, HWND, Side)> {
     let f = frame_rect(w)?;
     // From the visible border out (Windows' resize border reaches a few pixels beyond it), then
     // a pixel or two in.
-    let points: Vec<Point> = [0, 1, 2, 3, 4, 5, -1, -2]
+    let points: Vec<Point> = [0.5, 0.3, 0.7, 0.2, 0.8]
         .into_iter()
-        .map(|k| side_point(f, side, k))
+        .flat_map(|along| [0, 1, 2, 3, 4, 5, -1, -2].map(|k| side_point(f, side, along, k)))
         .collect();
     // SAFETY: read-only hit test.
     let under = |p: Point| unsafe { GetAncestor(WindowFromPoint(POINT { x: p.x, y: p.y }), GA_ROOT) };
@@ -754,7 +760,7 @@ fn arrange(
             "back_px": e_back,
             "still_a_tab": e_grouped,
             "shown": e_shown,
-            "ok": fifth.contains("as tabs") && tabs == 2 && others_kept <= SLACK
+            "ok": fifth.contains("; 1 window as a tab.") && tabs == 2 && others_kept <= SLACK
                 && e_back.is_some_and(|b| b <= SLACK) && !e_grouped && e_shown,
         }),
     );
@@ -914,6 +920,29 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
             && zones_back
             && all_shown,
     }))
+}
+
+/// Gives `w` the keyboard as a person does. Windows refuses it to a program in the background
+/// that asks (job 0099: the probe, started by a job, could not), so then a click in the middle of
+/// the window, only when the window there is `w`.
+fn give_keyboard(w: HWND) -> bool {
+    if mosaik_win::arrange::focus(w) {
+        return true;
+    }
+    let Some(f) = frame_rect(w) else {
+        return false;
+    };
+    let at = f.center();
+    // SAFETY: read-only hit test.
+    let under = unsafe { GetAncestor(WindowFromPoint(POINT { x: at.x, y: at.y }), GA_ROOT) };
+    if under != w {
+        return false;
+    }
+    input::move_to(at);
+    pump_until(80, || false);
+    drop(LeftButton::press());
+    pump_until(300, || false);
+    mosaik_win::arrange::foreground() == Some(w)
 }
 
 /// Reads the quick menu's state until `ok` holds or `ms` milliseconds pass; returns it and the
@@ -1087,7 +1116,7 @@ fn quick_menu(
     // 4b. With a window in front and two windows moved out of their zones, the pointer rests
     // on the handle: the menu opens, and the window in front keeps the keyboard.
     let front = w[2];
-    let focused = mosaik_win::arrange::focus(front);
+    let focused = give_keyboard(front);
     for (i, h) in w.iter().take(2).enumerate() {
         let off = i32::try_from(i).unwrap_or(0) * 80;
         let _ = move_frame(

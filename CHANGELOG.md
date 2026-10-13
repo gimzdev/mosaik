@@ -10,7 +10,9 @@
 - A layout replaces the zones of your main screen; windows more than its zones become tabs.
 - Your workspaces are a click away below, and the welcome shows Arrange at work before you
   start.
-- The tray menu's and the quick menu's Settings is now Open Mosaïk.
+- The tray menu's and the quick menu's Settings is now Open Mosaïk. A click on the tray icon
+  opens it too, and so does opening Mosaïk from the Start menu; started with Windows, it waits
+  in the tray.
 
 ### Every window at the top of its zone
 

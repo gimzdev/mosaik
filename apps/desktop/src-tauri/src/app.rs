@@ -94,6 +94,8 @@ fn claim_instance() -> Result<Instance, String> {
 
 pub fn run(args: Vec<String>) -> i32 {
     let safe_mode = args.iter().any(|a| a == "--safe-mode");
+    // Started with Windows it waits in the tray; started by hand it opens its window.
+    let background = mosaik_win::startup::started_with_windows(&args);
     let log = crate::logging::start();
     // A panic aborts the process (release profile): log it first. The watchdog then restores
     // windows and tells the user, since it sees the process end abnormally.
@@ -116,6 +118,9 @@ pub fn run(args: Vec<String>) -> i32 {
         Ok(Instance::AlreadyRunning) => {
             return if args.iter().any(|a| a == "--rescue") {
                 ask_running(Command::Rescue)
+            } else if background {
+                // Windows started a second copy as the user signed in: the first one is enough.
+                0
             } else {
                 ask_running(Command::ShowSettings)
             };
@@ -190,7 +195,7 @@ pub fn run(args: Vec<String>) -> i32 {
         ])
         .setup(move |app| {
             // Tauri turns an error returned here into a panic; report it instead.
-            if let Err(e) = setup(app.handle(), config, server, startup_notices, data_dir) {
+            if let Err(e) = setup(app.handle(), config, server, startup_notices, data_dir, background) {
                 tracing::error!(error = %e, "Mosaïk could not start");
                 message(
                     "Mosaïk cannot start",
@@ -234,6 +239,7 @@ fn setup(
     server: Option<Server>,
     startup_notices: Vec<Notice>,
     data_dir: PathBuf,
+    background: bool,
 ) -> Result<(), String> {
     let handle = app.clone();
     let sink: UiSink = Arc::new(move |event| on_ui_event(&handle, event));
@@ -256,15 +262,26 @@ fn setup(
         edit_zones: Mutex::new(None),
         data_dir,
     });
-    let first_run = app
+    let settings = app
         .try_state::<AppState>()
         .map(|s| s.engine.request(Command::Settings, ENGINE_TIMEOUT))
-        .is_some_and(|r| matches!(r, Reply::Settings { settings, .. } if !settings.onboarding_done));
+        .and_then(|r| match r {
+            Reply::Settings { settings, .. } => Some(settings),
+            _ => None,
+        });
+    let first_run = settings.as_ref().is_some_and(|s| !s.onboarding_done);
+    // A build run from a folder starts with Windows from the user's Run key: its entry is written
+    // again, so it names this program and starts it in the tray (entries from before 1.1 did not).
+    if settings.as_ref().is_some_and(|s| s.start_with_windows)
+        && let Err(e) = mosaik_win::startup::refresh_run_key()
+    {
+        tracing::warn!(error = %e, "the Run entry was not refreshed");
+    }
     for n in startup_notices {
         show_notice(app, n);
     }
-    // The welcome, once: it explains the one shortcut to know.
-    if first_run {
+    // The welcome, once; then the window, on its home page, whenever Mosaïk is opened by hand.
+    if first_run || !background {
         show_settings(app);
     }
     Ok(())
@@ -516,6 +533,8 @@ fn build_tray(app: &AppHandle, engine: &Engine) -> tauri::Result<()> {
                 }
             }
         })
+        // A click on the icon opens Mosaïk's window, as with any app in the tray; its menu (and
+        // the shortcut) has the switcher.
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -523,7 +542,7 @@ fn build_tray(app: &AppHandle, engine: &Engine) -> tauri::Result<()> {
                 ..
             } = event
             {
-                ask_engine(tray.app_handle(), Command::ShowSwitcher);
+                show_settings(tray.app_handle());
             }
         });
     if let Some(icon) = app.default_window_icon() {

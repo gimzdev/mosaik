@@ -33,7 +33,8 @@ use windows::Win32::UI::Accessibility::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_ESCAPE, VK_TAB};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GetAncestor, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos, WindowFromPoint,
+    GA_ROOT, GetAncestor, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SetWindowPos, WindowFromPoint,
 };
 
 use crate::capture::save_bmp;
@@ -467,7 +468,35 @@ impl Tour {
         pump_until(600, || false);
     }
 
+    /// Keeps Mosaïk's window above the others for the tour (`true`), or lets it go back among
+    /// them. Started by a job, Mosaïk opens its window behind the app the user is in, which
+    /// Windows keeps in front (job 0099: the Claude app covered the welcome, so nothing could be
+    /// clicked); nothing of the user's moves.
+    fn above_all(&self, on: bool) {
+        let after = if on { HWND_TOPMOST } else { HWND_NOTOPMOST };
+        // SAFETY: changes the stacking of the Mosaïk under test only; no move, size or focus.
+        let _ = unsafe {
+            SetWindowPos(
+                self.hwnd,
+                Some(after),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        };
+        pump_until(200, || false);
+    }
+
     fn run(&mut self) -> Result<Value, String> {
+        self.above_all(true);
+        let result = self.tour();
+        self.above_all(false);
+        result
+    }
+
+    fn tour(&mut self) -> Result<Value, String> {
         // First run: the welcome. The click on its title puts the window in front and starts
         // the Tab key from there.
         pump_until(1500, || false);

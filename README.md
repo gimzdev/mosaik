@@ -97,7 +97,7 @@ if Mosaïk stops
 
 <h2>Using it</h2>
 
-<p>Open Mosaïk from the tray icon and point at <b>Arrange windows</b>, or at a layout:<br>
+<p>Open Mosaïk from the Start menu or its tray icon and point at <b>Arrange windows</b>, or at a layout:<br>
 the picture of your screen shows where each window would go. Click, and they go; <b>Undo</b> puts them back.</p>
 
 <p>Arrange the apps of one project, press <kbd>Win</kbd> <kbd>Alt</kbd> <kbd>Space</kbd>, then <kbd>S</kbd> and a name.<br>

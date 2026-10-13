@@ -1,13 +1,19 @@
 //! Starting Mosaïk with Windows, the way that fits how it was installed: the Store package's
 //! startup task (which the user can also turn off in Task Manager), or for a build run from a
 //! folder, an entry in the user's own "Run" key. Nothing needs administrator rights.
+//!
+//! Started with Windows, Mosaïk waits in the tray; started by hand (from the Start menu, say), it
+//! opens its window, so a click on its icon never seems to do nothing.
 
 use std::sync::mpsc;
 use std::time::Duration;
 
-use windows::ApplicationModel::{StartupTask, StartupTaskState};
+use windows::ApplicationModel::Activation::ActivationKind;
+use windows::ApplicationModel::{AppInstance, StartupTask, StartupTaskState};
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
-use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW};
+use windows::Win32::System::Registry::{
+    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
+};
 use windows::core::{HSTRING, PCWSTR};
 
 use crate::error::{Error, Result};
@@ -19,6 +25,9 @@ const TASK_ID: &str = "MosaikStartup";
 const TASK_TIMEOUT: Duration = Duration::from_secs(5);
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const RUN_VALUE: &str = "Mosaik";
+/// On Mosaïk's command line when Windows starts it: it waits in the tray. The Run key's entry
+/// carries it; the package's startup task cannot, and is told by how it was activated.
+pub const BACKGROUND: &str = "--background";
 
 /// How starting with Windows ended up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +38,61 @@ pub enum Startup {
     /// Manager or Settings), or declined, or a policy forbids it. Only the user can change that,
     /// there.
     Refused,
+}
+
+/// Whether Windows started this process as the user signed in (so it waits in the tray), rather
+/// than the user (so it shows its window).
+pub fn started_with_windows(args: &[String]) -> bool {
+    args.iter().any(|a| a == BACKGROUND) || (crate::package::is_packaged() && activated_by_startup_task())
+}
+
+/// Whether the package's startup task started this process. Asked on a thread of its own, like
+/// the startup task itself: it is a WinRT call, and the caller's thread may set up COM its own way
+/// later. Not knowing counts as no.
+fn activated_by_startup_task() -> bool {
+    let (send, answer) = mpsc::channel();
+    let asked = std::thread::Builder::new()
+        .name("mosaik-activation".into())
+        .spawn(move || {
+            let kind = AppInstance::GetActivatedEventArgs().and_then(|a| a.Kind());
+            let _ = send.send(kind.is_ok_and(|k| k == ActivationKind::StartupTask));
+        });
+    asked.is_ok() && answer.recv_timeout(TASK_TIMEOUT).unwrap_or(false)
+}
+
+/// The Run key's command line for Mosaïk at `exe`: started with Windows, it waits in the tray.
+fn run_command(exe: &std::path::Path) -> String {
+    format!("\"{}\" {BACKGROUND}", exe.display())
+}
+
+/// For a build run from a folder: its Run entry, when there is one, written again, so it names
+/// this program and starts it in the tray (entries from before 1.1 had no `--background`). A
+/// missing entry stays missing.
+pub fn refresh_run_key() -> Result<()> {
+    if crate::package::is_packaged() || !run_key_exists() {
+        return Ok(());
+    }
+    run_key(true).map(|_| ())
+}
+
+fn run_key_exists() -> bool {
+    let key = wide(RUN_KEY);
+    let name = wide(RUN_VALUE);
+    let mut size = 0u32;
+    // SAFETY: asks for the size of one string value under the user's own Run key; no data is
+    // read, and both names are NUL-terminated.
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key.as_ptr()),
+            PCWSTR(name.as_ptr()),
+            RRF_RT_REG_SZ,
+            None,
+            None,
+            Some(&raw mut size),
+        )
+    };
+    r == ERROR_SUCCESS
 }
 
 /// Turns starting with Windows on or off.
@@ -94,7 +158,7 @@ fn run_key(enabled: bool) -> Result<Startup> {
     }
     let exe =
         std::env::current_exe().map_err(|e| Error::Other(format!("Mosaïk's own path is unknown: {e}")))?;
-    let command = wide(&format!("\"{}\"", exe.display()));
+    let command = wide(&run_command(&exe));
     let bytes = u32::try_from(command.len() * 2).map_err(|_| Error::Other("path too long".into()))?;
     // SAFETY: writes one string value under the user's own Run key; the data is the
     // NUL-terminated UTF-16 command line and `bytes` is its size including the NUL.
@@ -115,5 +179,33 @@ fn run_key(enabled: bool) -> Result<Startup> {
             "the Run entry could not be written (error {})",
             r.0
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn started_by_the_run_key_it_waits_in_the_tray() {
+        let args: Vec<String> = ["mosaik.exe", BACKGROUND].map(String::from).into();
+        assert!(started_with_windows(&args));
+    }
+
+    #[test]
+    fn started_by_hand_it_shows_its_window() {
+        // A build run from a folder (not the package): only the flag tells.
+        let args: Vec<String> = vec!["mosaik.exe".into()];
+        assert!(!started_with_windows(&args));
+        let args: Vec<String> = ["mosaik.exe", "--safe-mode"].map(String::from).into();
+        assert!(!started_with_windows(&args));
+    }
+
+    #[test]
+    fn the_run_key_starts_it_in_the_tray() {
+        let command = run_command(Path::new(r"C:\Program Files\Mosaik\mosaik.exe"));
+        assert_eq!(command, r#""C:\Program Files\Mosaik\mosaik.exe" --background"#);
     }
 }

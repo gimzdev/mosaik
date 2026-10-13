@@ -622,8 +622,13 @@ fn self_moved_as(
                 "tag": tag_place(&st, w),
             });
         }
-        // 4. Dragged by its band, which works as its title bar.
-        out["by_band"] = by_band(engine, w, t).unwrap_or_else(|e| json!({ "failed": e }));
+        // 4. Wearing its tag above it: dragged by that band, which works as its title bar. A
+        // window alone wears its tag in its title bar and has no band (job 0099: the probe
+        // pressed where the band had been, on the window above).
+        let st = settled(engine)?;
+        if wears_above(&st, w) {
+            out["by_band"] = by_band(engine, w, t).unwrap_or_else(|e| json!({ "failed": e }));
+        }
         Ok(out)
     })();
     close(w);
