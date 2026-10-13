@@ -917,7 +917,7 @@ mod tests {
         );
         assert_eq!(
             r.target(&w.layout.slots[1].place),
-            Some(Target::Frame(Rect::new(962, 30, 1918, 514)))
+            Some(Target::Frame(Rect::new(960, 28, 1920, 516)))
         );
     }
 
@@ -1247,7 +1247,7 @@ mod tests {
         );
         assert_eq!(plan.moves.len(), 2);
         assert_eq!(plan.moves[0].window, WindowHandle(1));
-        assert_eq!(plan.moves[0].target, Target::Frame(Rect::new(2, 30, 958, 1030)));
+        assert_eq!(plan.moves[0].target, Target::Frame(Rect::new(0, 28, 960, 1032)));
         assert_eq!(plan.launch.len(), 1, "the terminal is started");
         assert_eq!(
             plan.minimize,

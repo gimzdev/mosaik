@@ -1,7 +1,7 @@
 // A small picture of the main screen: its windows where they are now and, while the user points
-// at Arrange or a layout, where they would go. The windows glide from one to the other; the zones
-// they would fill appear, each window wears its zone's colour and name, as on screen, and a window
-// left without a zone shrinks away to the taskbar.
+// at Arrange or a layout, where they would go. The windows glide from one to the other, edge to
+// edge; the zones they would fill appear, each window wears its zone's tag, as on screen, and a
+// window left without a zone shrinks away to the taskbar.
 
 import type { CSSProperties, ReactNode } from 'react';
 
@@ -130,8 +130,8 @@ export function Stage({
             .map((w, i) => ({ w, i }))
             .reverse()
             .map(({ w, i }) => {
-              // A window already where Arrange would put it wears its zone's colour and name, as
-              // on screen, before anything moves.
+              // A window already where Arrange would put it wears its zone's tag, as on screen,
+              // before anything moves.
               const settled = w.then !== null && near(w.now, w.then);
               const zone = (then || settled) && preview ? zoneOf(preview, w) : null;
               const gone = then && w.minimized;
@@ -145,7 +145,6 @@ export function Stage({
                     ...place(target, area),
                     zIndex: windows.length - i + 1,
                     opacity: gone ? 0 : 1,
-                    boxShadow: zone ? `0 0 0 2px ${ring(zone.color)}` : undefined,
                     transitionDelay: `${String(Math.min(i, 6) * 45)}ms`,
                   }}
                 >

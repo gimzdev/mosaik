@@ -44,7 +44,7 @@ const emptyScreen: Reply = {
 };
 const ship: Reply = {
   reply: 'workspaces',
-  workspaces: [{ id: 'ship', name: 'Ship', windows: 2, zones: 2, hotkey: null }],
+  workspaces: [{ id: 'ship', name: 'Ship', windows: 2, zones: 2, hotkey: null, apps: ['Code', 'Chrome'] }],
   active: null,
 };
 const shipZones: Reply = {

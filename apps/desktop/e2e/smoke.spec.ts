@@ -57,6 +57,15 @@ test('the home page shows the screen and the layouts, and is accessible', async 
   await windowDoesNotScroll(page);
 });
 
+test('the home page shows each workspace’s apps, and opens them to change them', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByRole('listitem').filter({ hasText: 'Ship the release' });
+  await expect(row.getByRole('list', { name: 'Its apps' }).getByRole('listitem')).toHaveCount(4);
+  await row.getByRole('button', { name: 'Apps of “Ship the release”' }).click();
+  await expect(page.getByRole('list', { name: 'Apps of “Ship the release”' }).getByRole('listitem')).toHaveCount(4);
+  await accessible(page);
+});
+
 test('the picture stays in view while the layouts scroll beneath it', async ({ page }) => {
   await pictureStaysClear(page, 760);
 });
@@ -165,10 +174,12 @@ test('zones can be resized from the keyboard and saved', async ({ page }) => {
   await windowDoesNotScroll(page);
 });
 
-test('Arrange puts the windows in zones and can be undone', async ({ page }) => {
+test('Arrange lays the screen out for its task and can be undone', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Arrange windows' }).hover();
+  await expect(page.getByText('With Arrange, for coding: every window in its own zone')).toBeVisible();
   await page.getByRole('button', { name: 'Arrange windows' }).click();
-  await expect(page.getByText('Arranged 4 windows in 4 zones.')).toBeVisible();
+  await expect(page.getByText('Arranged 4 windows for coding.')).toBeVisible();
   await expect(page.getByRole('img', { name: /^Your main screen now/ })).toBeVisible();
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByText('Windows are back where they were.')).toBeVisible();

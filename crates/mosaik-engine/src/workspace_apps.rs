@@ -40,11 +40,52 @@ impl Engine {
         slot.name()
     }
 
+    /// The open workspace's apps saved before apps had names take the names of their windows
+    /// on screen, so lists show them as people know them from then on.
+    pub(crate) fn name_open_apps(&mut self) {
+        let Some(active) = &self.active else { return };
+        let (id, windows) = (active.id.clone(), active.windows.clone());
+        let Some(index) = self.file.workspaces.iter().position(|w| w.id == id) else {
+            return;
+        };
+        let unnamed: Vec<(SlotId, WindowHandle)> = self.file.workspaces[index]
+            .layout
+            .slots
+            .iter()
+            .filter(|s| s.label.is_none())
+            .filter_map(|s| windows.get(&s.id).map(|h| (s.id.clone(), *h)))
+            .collect();
+        let mut named = Vec::new();
+        for (slot, h) in unnamed {
+            if let Some(f) = self.scanner.facts(window::hwnd(h)) {
+                let path = self.scanner.process_path(f.pid);
+                named.push((slot, self.apps.label(&f, path.as_deref())));
+            }
+        }
+        if named.is_empty() {
+            return;
+        }
+        for (slot, label) in named {
+            if let Some(s) = self.file.workspaces[index]
+                .layout
+                .slots
+                .iter_mut()
+                .find(|s| s.id == slot)
+            {
+                s.label = Some(label);
+            }
+        }
+        self.persist();
+    }
+
     /// A workspace's apps, its zones, and the windows on screen it could take.
     pub(crate) fn apps_reply(&mut self, which: &str) -> Reply {
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
+        if self.is_open(index) {
+            self.name_open_apps();
+        }
         let id = self.file.workspaces[index].id.clone();
         let filled = self
             .active

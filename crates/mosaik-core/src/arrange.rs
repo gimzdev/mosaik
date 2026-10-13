@@ -1,27 +1,21 @@
-//! Arrange: every window on screen in the zone that suits it, in one click.
+//! Arrange: every screen laid out for what its windows say the user is doing, in one click.
 //!
-//! Each window (or tab group, which goes as one) is scored against each zone, and the best pairs
-//! are taken first, one window per zone:
+//! Each monitor with windows gets the layout of its task ([`crate::task`]), in place of the open
+//! workspace's zones there: the window the task is done in takes the most room (an editor when
+//! coding, with the terminal under it), the windows that help sit beside it, and the ones that
+//! have nothing to do with it wait in the taskbar. New zones are named after their windows. No
+//! window gets a zone smaller than it goes ([`Unit::least`]): a window that fits nowhere is
+//! minimised rather than spill over its neighbours. Arranging twice moves nothing.
 //!
-//! - **Where it is.** A window already in a zone of the open workspace stays there, unless the
-//!   zone is named after another app; windows do not change monitors unless a zone on the other
-//!   one is named for them.
-//! - **What the zone is called.** A zone named after the app ("Chrome", "Notepad++") or for its
-//!   kind ("Code", "Browser", "Terminal", "Chat", "Notes"...) draws it; a zone named for another
-//!   kind keeps it out while another window wants the zone.
-//! - **What matters most.** Editors, browsers and design tools, and the windows used last, get
-//!   the largest zones; chat, terminals and players the smaller ones; a window that cannot be
-//!   resized takes a small zone rather than waste a large one.
-//!
-//! A monitor with windows and no zones gets zones for them ([`zones_for_windows`]): the preset
-//! that suits up to four, a grid for more, as many as the monitor holds well, named after the
-//! windows that land in them; when it holds fewer than its windows, the windows used last take
-//! them. Windows left over take the empty zones on their monitor; once every zone has one, the
-//! rest are minimised, so they stay in the taskbar rather than disappear.
+//! A layout picked for a monitor (the home page's layouts) replaces its zones with the layout's,
+//! for the windows that fit them and matter most to the task; each goes into the zone that suits
+//! it, by score: where it is now (a window that fills a zone stays), and the largest zones for
+//! the windows that matter most. Minimised windows stay in the taskbar rather than disappear.
 //! The plan is pure; the engine applies it, and can undo it.
 
-use crate::geometry::{RatioRect, Rect};
-use crate::presets::{Preset, zones_for_windows};
+use crate::geometry::{RatioRect, Rect, Size};
+use crate::presets::Preset;
+use crate::task::{self, Role, Task};
 
 /// What an app is for, as far as arranging goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -30,12 +24,16 @@ pub enum Kind {
     Terminal,
     Browser,
     Chat,
+    /// An AI assistant (Claude, ChatGPT, Copilot): it helps with whatever the task is.
+    Assistant,
     Mail,
     Notes,
     Documents,
     Design,
     Media,
     Files,
+    /// Game stores and launchers (Steam, Battle.net): nothing to do with work.
+    Games,
     Other,
 }
 
@@ -74,6 +72,22 @@ const PROGRAMS: &[(Kind, &[&str])] = &[
             "lapce.exe",
             "kate.exe",
             "positron.exe",
+            "postman.exe",
+            "insomnia.exe",
+            "dbeaver.exe",
+            "docker desktop.exe",
+            "githubdesktop.exe",
+            "gitkraken.exe",
+            "sourcetree.exe",
+            "fork.exe",
+            "tableplus.exe",
+            "heidisql.exe",
+            "ssms.exe",
+            "pgadmin4.exe",
+            "mongodbcompass.exe",
+            "unity.exe",
+            "unrealeditor.exe",
+            "ue4editor.exe",
         ],
     ),
     (
@@ -135,13 +149,22 @@ const PROGRAMS: &[(Kind, &[&str])] = &[
             "zoom.exe",
             "skype.exe",
             "mattermost.exe",
-            "claude.exe",
-            "chatgpt.exe",
             "messenger.exe",
             "wechat.exe",
             "viber.exe",
             "zulip.exe",
             "beeper.exe",
+        ],
+    ),
+    (
+        Kind::Assistant,
+        &[
+            "claude.exe",
+            "chatgpt.exe",
+            "copilot.exe",
+            "perplexity.exe",
+            "msty.exe",
+            "lm studio.exe",
         ],
     ),
     (
@@ -241,6 +264,28 @@ const PROGRAMS: &[(Kind, &[&str])] = &[
             "files.exe",
         ],
     ),
+    (
+        Kind::Games,
+        &[
+            "steam.exe",
+            "steamwebhelper.exe",
+            "battle.net.exe",
+            "epicgameslauncher.exe",
+            "galaxyclient.exe",
+            "eadesktop.exe",
+            "origin.exe",
+            "upc.exe",
+            "ubisoftconnect.exe",
+            "riotclientservices.exe",
+            "riotclientux.exe",
+            "leagueclientux.exe",
+            "playnite.desktopapp.exe",
+            "heroic.exe",
+            "itch.exe",
+            "minecraftlauncher.exe",
+            "xboxpcapp.exe",
+        ],
+    ),
 ];
 
 /// Packaged apps by kind: the start of their Application User Model ID, in lower case.
@@ -262,13 +307,10 @@ const PACKAGES: &[(Kind, &[&str])] = &[
     ),
     (
         Kind::Chat,
-        &[
-            "5319275a.whatsappdesktop",
-            "openai.chatgpt",
-            "microsoftteams",
-            "msteams",
-        ],
+        &["5319275a.whatsappdesktop", "microsoftteams", "msteams"],
     ),
+    (Kind::Assistant, &["openai.chatgpt", "microsoft.copilot"]),
+    (Kind::Games, &["microsoft.gamingapp"]),
     (
         Kind::Media,
         &[
@@ -279,149 +321,6 @@ const PACKAGES: &[(Kind, &[&str])] = &[
     ),
     (Kind::Terminal, &["microsoft.windowsterminal"]),
     (Kind::Files, &["files_"]),
-];
-
-/// Words in a zone's name that say what it is for, in lower case.
-const WORDS: &[(Kind, &[&str])] = &[
-    (
-        Kind::Code,
-        &[
-            "code",
-            "coding",
-            "editor",
-            "ide",
-            "dev",
-            "develop",
-            "development",
-            "source",
-            "src",
-            "build",
-            "program",
-            "programming",
-            "vscode",
-        ],
-    ),
-    (
-        Kind::Terminal,
-        &[
-            "terminal", "term", "shell", "console", "cli", "cmd", "command", "commands", "logs", "log", "ssh",
-        ],
-    ),
-    (
-        Kind::Browser,
-        &[
-            "browser",
-            "web",
-            "chrome",
-            "edge",
-            "firefox",
-            "preview",
-            "review",
-            "research",
-            "internet",
-            "site",
-            "sites",
-            "localhost",
-            "docs",
-            "documentation",
-        ],
-    ),
-    (
-        Kind::Chat,
-        &[
-            "chat",
-            "slack",
-            "discord",
-            "teams",
-            "team",
-            "messages",
-            "messaging",
-            "comms",
-            "talk",
-            "social",
-            "meet",
-            "call",
-            "calls",
-            "ai",
-            "assistant",
-            "claude",
-            "gpt",
-        ],
-    ),
-    (Kind::Mail, &["mail", "email", "inbox", "outlook", "calendar"]),
-    (
-        Kind::Notes,
-        &[
-            "notes", "note", "notepad", "brief", "draft", "drafts", "writing", "journal", "todo", "tasks",
-            "ideas", "notion", "obsidian",
-        ],
-    ),
-    (
-        Kind::Documents,
-        &[
-            "documents",
-            "document",
-            "doc",
-            "paper",
-            "papers",
-            "reader",
-            "reading",
-            "read",
-            "pdf",
-            "data",
-            "sheet",
-            "sheets",
-            "spreadsheet",
-            "excel",
-            "word",
-            "slides",
-            "office",
-        ],
-    ),
-    (
-        Kind::Design,
-        &[
-            "design",
-            "canvas",
-            "figma",
-            "art",
-            "draw",
-            "drawing",
-            "photo",
-            "photos",
-            "image",
-            "images",
-            "references",
-            "reference",
-            "refs",
-            "mockup",
-            "mockups",
-            "sketch",
-        ],
-    ),
-    (
-        Kind::Media,
-        &[
-            "music",
-            "media",
-            "video",
-            "videos",
-            "player",
-            "stream",
-            "streaming",
-            "broadcast",
-            "obs",
-            "spotify",
-            "watch",
-            "listen",
-            "podcast",
-            "podcasts",
-        ],
-    ),
-    (
-        Kind::Files,
-        &["files", "file", "explorer", "folder", "folders", "downloads"],
-    ),
 ];
 
 impl Kind {
@@ -458,8 +357,8 @@ impl Kind {
             Kind::Documents => 0.85,
             Kind::Other => 0.7,
             Kind::Mail => 0.6,
-            Kind::Notes => 0.55,
-            Kind::Terminal => 0.5,
+            Kind::Notes | Kind::Assistant => 0.55,
+            Kind::Terminal | Kind::Games => 0.5,
             Kind::Chat => 0.45,
             Kind::Files => 0.4,
             Kind::Media => 0.3,
@@ -473,30 +372,16 @@ impl Kind {
             Kind::Terminal => Some("Terminal"),
             Kind::Browser => Some("Browser"),
             Kind::Chat => Some("Chat"),
+            Kind::Assistant => Some("Assistant"),
             Kind::Mail => Some("Mail"),
             Kind::Notes => Some("Notes"),
             Kind::Documents => Some("Documents"),
             Kind::Design => Some("Design"),
             Kind::Media => Some("Media"),
             Kind::Files => Some("Files"),
+            Kind::Games => Some("Games"),
             Kind::Other => None,
         }
-    }
-
-    /// The kind a zone's name is for: the kind whose words it uses most (`None` for a name that
-    /// says nothing, like "Zone 2" or "Ship").
-    pub fn of_zone_name(name: &str) -> Option<Kind> {
-        let lower = name.to_lowercase();
-        let tokens: Vec<&str> = lower
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|t| !t.is_empty())
-            .collect();
-        WORDS
-            .iter()
-            .map(|(k, words)| (*k, tokens.iter().filter(|t| words.contains(t)).count()))
-            .filter(|(_, n)| *n > 0)
-            .max_by_key(|(_, n)| *n)
-            .map(|(k, _)| k)
     }
 }
 
@@ -504,29 +389,28 @@ impl Kind {
 #[derive(Clone, Debug)]
 pub struct Unit {
     pub kind: Kind,
-    /// The app's name, as zones made from it are called ("Visual Studio Code").
+    /// The app's name, as zones made for it are called ("Visual Studio Code").
     pub label: String,
-    /// The program's file name in lower case, when known.
-    pub exe: Option<String>,
     /// Its visible frame now.
     pub frame: Rect,
     /// It can be resized (most windows); one that cannot keeps its size in its zone.
     pub resizable: bool,
+    /// The smallest its frame goes: its app's minimum size (Battle.net keeps about 1280 x 720),
+    /// or its size when it cannot be resized. Zero when its app sets none.
+    pub least: Size,
     /// The monitor it is on now (an index into the monitors given to [`plan`]).
     pub monitor: usize,
-    /// The zone it is in now (an index into the zones given to [`plan`]).
-    pub zone: Option<usize>,
 }
 
-/// A zone of the open workspace, as it is on screen now.
+/// A zone of the open workspace.
 #[derive(Clone, Debug)]
 pub struct Spot {
     pub name: String,
+    /// The monitor it is on now (an index into the monitors given to [`plan`]).
     pub monitor: usize,
-    pub rect: Rect,
 }
 
-/// A zone the plan makes, on a monitor that had none.
+/// A zone the plan makes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewZone {
     pub monitor: usize,
@@ -534,20 +418,13 @@ pub struct NewZone {
     pub name: String,
 }
 
-/// A zone of the plan: one the workspace has, or a new one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ZoneRef {
-    Existing(usize),
-    New(usize),
-}
-
 /// Where a unit goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Goes {
-    /// It fills this zone.
-    Zone(ZoneRef),
-    /// It is minimised: every zone on its monitor has a window. It stays in the taskbar, where
-    /// it can be found, rather than disappear as a tab.
+    /// It fills this zone (an index into [`Plan::new_zones`]).
+    Zone(usize),
+    /// It is minimised: it has nothing to do with the task, or every zone it fits has a window.
+    /// It stays in the taskbar, where it can be found, rather than disappear as a tab.
     Minimize,
     /// It stays where it is: there is no zone for it (no monitor to make one on).
     Stay,
@@ -558,18 +435,28 @@ pub struct Plan {
     pub new_zones: Vec<NewZone>,
     /// Where each unit goes, in the order of the units given.
     pub goes: Vec<Goes>,
+    /// The open workspace's zones that make way (indices into the zones given): those on the
+    /// monitors laid out anew.
+    pub gone: Vec<usize>,
+    /// For each monitor, the task its windows say, when it was given the layout of its task.
+    pub tasks: Vec<Option<Task>>,
 }
 
-/// A zone as the planner sees it: existing or new.
+/// A zone of a picked layout, as the planner sees it.
 struct Candidate {
-    zone: ZoneRef,
-    monitor: usize,
+    /// Its index in the plan's new zones.
+    zone: usize,
     rect: Rect,
-    /// Its area over the largest zone's on the same monitor.
+    /// Its area over the largest zone's.
     share: f64,
-    /// What its name is for (`None` for new zones and names that say nothing).
-    named_for: Option<Kind>,
-    name: String,
+}
+
+/// Pixels a window may need beyond its zone, for rounding.
+const SLACK: i32 = 2;
+
+/// Whether the unit's window fits `rect`: it goes as small as that.
+fn fits(unit: &Unit, rect: Rect) -> bool {
+    unit.least.width <= rect.width() + SLACK && unit.least.height <= rect.height() + SLACK
 }
 
 /// How much `a` and `b` cover each other: what they share over the larger of the two. A window
@@ -585,27 +472,10 @@ fn covering(a: Rect, b: Rect) -> f64 {
     f
 }
 
-/// Whether a zone called `name` is named after the unit's app.
-fn named_after(name: &str, unit: &Unit) -> bool {
-    let zone = name.trim().to_lowercase();
-    if zone.chars().count() < 3 {
-        return false;
-    }
-    let label = unit.label.trim().to_lowercase();
-    let stem = unit
-        .exe
-        .as_deref()
-        .map(|e| e.trim_end_matches(".exe").to_lowercase())
-        .unwrap_or_default();
-    zone == label
-        || (label.chars().count() >= 3 && (label.contains(&zone) || zone.contains(&label)))
-        || (stem.chars().count() >= 3 && zone.contains(&stem))
-}
-
-/// How much more important a window is, from 0 to 1: its kind, and how recently it was used
-/// (`rank` 0 is the front-most of `count`). A window that cannot be resized does not need a
-/// large zone.
-fn importance(unit: &Unit, rank: usize, count: usize) -> f64 {
+/// How much more important a window is, from 0 to 1: how much it belongs to the task on its
+/// monitor (`fit`), and how recently it was used (`rank` 0 is the front-most of `count`). A
+/// window that cannot be resized does not need a large zone.
+fn importance(unit: &Unit, fit: f64, rank: usize, count: usize) -> f64 {
     // Ranks and counts are small, so the conversions are exact.
     #[allow(clippy::cast_precision_loss)]
     let recency = if count <= 1 {
@@ -613,29 +483,14 @@ fn importance(unit: &Unit, rank: usize, count: usize) -> f64 {
     } else {
         1.0 - rank as f64 / (count - 1) as f64
     };
-    let i = 0.65 * unit.kind.weight() + 0.35 * recency;
+    let i = 0.65 * fit + 0.35 * recency;
     if unit.resizable { i } else { i * 0.4 }
 }
 
+/// How well a window suits a zone of a picked layout: where it is now (a window that fills the
+/// zone stays), and the larger zones for the windows that matter most.
 fn score(unit: &Unit, importance: f64, zone: &Candidate) -> f64 {
-    let mut s = 0.0;
-    if named_after(&zone.name, unit) {
-        s += 100.0;
-    } else {
-        match zone.named_for {
-            Some(k) if k == unit.kind => s += 60.0,
-            // Named for something else: a terminal does not belong in "Notes".
-            Some(_) => s -= 80.0,
-            None => {}
-        }
-    }
-    // Where the user put it: it stays, unless the zone is another app's by name.
-    if let ZoneRef::Existing(i) = zone.zone
-        && unit.zone == Some(i)
-    {
-        s += 100.0;
-    }
-    s += 30.0 * covering(unit.frame, zone.rect);
+    let mut s = 30.0 * covering(unit.frame, zone.rect);
     if unit.resizable {
         s += 25.0 * (1.0 - (importance - zone.share).abs());
     } else {
@@ -646,10 +501,35 @@ fn score(unit: &Unit, importance: f64, zone: &Candidate) -> f64 {
                 Rect::from_origin_size(0, 0, zone.rect.width(), zone.rect.height()),
             );
     }
-    if zone.monitor != unit.monitor {
-        s -= 60.0;
-    }
     s
+}
+
+/// Arranging twice moves nothing: a window beside the main one that already fills one of the
+/// areas beside it keeps that area, trading places with the window the layout gave it, when each
+/// fits the other's. (The windows used last count most, so the order of the windows beside the
+/// main one can change once others are minimised.)
+fn steady(placed: &mut [task::Placement], here: &[usize], units: &[Unit], work: Rect) {
+    let sides: Vec<usize> = (0..placed.len())
+        .filter(|&p| placed[p].role == Role::Side)
+        .collect();
+    for &p in &sides {
+        let area = placed[p].area.to_rect(work);
+        let Some(&q) = sides
+            .iter()
+            .find(|&&q| covering(units[here[placed[q].window]].frame, area) >= 0.9)
+        else {
+            continue;
+        };
+        if q == p {
+            continue;
+        }
+        let (a, b) = (placed[p].window, placed[q].window);
+        let other = placed[q].area.to_rect(work);
+        if fits(&units[here[b]], area) && fits(&units[here[a]], other) {
+            placed[p].window = b;
+            placed[q].window = a;
+        }
+    }
 }
 
 /// The first of `base`, `base 2`, `base 3`... not in `taken` (compared without case).
@@ -675,172 +555,164 @@ pub struct Chosen {
 }
 
 /// Plans where every unit goes. `units` are front to back (the window used last first);
-/// `zones` are the open workspace's zones on screen (none when no workspace is open);
-/// `monitors` are the work areas of the monitors connected now.
+/// `zones` are the open workspace's zones (none when no workspace is open); `monitors` are the
+/// work areas of the monitors connected now.
 pub fn plan(units: &[Unit], zones: &[Spot], monitors: &[Rect]) -> Plan {
     plan_with(units, zones, monitors, None)
 }
 
-/// [`plan`], with a layout the user picked for one monitor: its zones are left out and the
-/// preset's made there, whatever windows it has; windows beyond them are minimised.
+/// [`plan`], with a layout the user picked for one monitor: there, its zones replace the open
+/// workspace's, for the windows that fit them and matter most to the task; the others are
+/// minimised.
 pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Option<Chosen>) -> Plan {
-    let replaced = |monitor: usize| chosen.is_some_and(|c| c.monitor == monitor);
-    // The picked layout's monitor gets its preset; other monitors with windows and no zones
-    // get one that suits them.
+    let chosen = chosen.filter(|c| c.monitor < monitors.len());
+    let picked = |monitor: usize| chosen.is_some_and(|c| c.monitor == monitor);
+    // The windows of each monitor, front to back, and the task they say.
+    let on: Vec<Vec<usize>> = (0..monitors.len())
+        .map(|m| (0..units.len()).filter(|&u| units[u].monitor == m).collect())
+        .collect();
+    let guessed: Vec<Task> = on
+        .iter()
+        .map(|list| task::guess(&list.iter().map(|&u| units[u].kind).collect::<Vec<_>>()))
+        .collect();
+    let fit = |u: usize| {
+        guessed
+            .get(units[u].monitor)
+            .map_or_else(|| units[u].kind.weight(), |t| t.fit(units[u].kind))
+    };
     let mut new_zones: Vec<NewZone> = Vec::new();
+    // The window each new zone was made for, once known: it names the zone.
+    let mut new_zone_window: Vec<Option<usize>> = Vec::new();
+    let mut goes: Vec<Option<Goes>> = vec![None; units.len()];
+    let mut tasks: Vec<Option<Task>> = vec![None; monitors.len()];
+
+    // 1. Every monitor with windows gets the layout of its task, in place of the open
+    //    workspace's zones there: the main window the most room, the windows that help beside
+    //    it, each in an area it fits; the others minimised.
     for (m, work) in monitors.iter().enumerate() {
-        let areas = match chosen {
-            Some(c) if c.monitor == m => c.preset.zones(),
-            _ => {
-                let here = units.iter().filter(|u| u.monitor == m).count();
-                if here == 0 || zones.iter().any(|z| z.monitor == m) {
-                    continue;
-                }
-                zones_for_windows(here, work.width(), work.height())
-            }
-        };
-        for area in areas {
+        let here = &on[m];
+        if here.is_empty() || picked(m) {
+            continue;
+        }
+        let windows: Vec<task::Window> = here
+            .iter()
+            .map(|&u| task::Window {
+                kind: units[u].kind,
+                resizable: units[u].resizable,
+                least: units[u].least,
+            })
+            .collect();
+        let mut l = task::layout(&windows, work.width(), work.height());
+        tasks[m] = Some(l.task);
+        steady(&mut l.placed, here, units, *work);
+        for p in l.placed {
+            let u = here[p.window];
+            goes[u] = Some(Goes::Zone(new_zones.len()));
             new_zones.push(NewZone {
                 monitor: m,
+                area: p.area,
+                name: String::new(),
+            });
+            new_zone_window.push(Some(u));
+        }
+        for &u in here {
+            goes[u].get_or_insert(Goes::Minimize);
+        }
+    }
+
+    // 2. A layout picked for a monitor: its zones, for the windows there that fit one of them,
+    //    as many as it has zones, the ones that matter most to the task first (then the ones
+    //    used last). Each goes into the zone that suits it best, by score.
+    if let Some(c) = chosen {
+        let work = monitors[c.monitor];
+        let from = new_zones.len();
+        for area in c.preset.zones() {
+            new_zones.push(NewZone {
+                monitor: c.monitor,
                 area,
                 name: String::new(),
             });
+            new_zone_window.push(None);
         }
-    }
-    let mut candidates: Vec<Candidate> = zones
-        .iter()
-        .enumerate()
-        .filter(|(_, z)| !replaced(z.monitor))
-        .map(|(i, z)| Candidate {
-            zone: ZoneRef::Existing(i),
-            monitor: z.monitor,
-            rect: z.rect,
-            share: 1.0,
-            named_for: Kind::of_zone_name(&z.name),
-            name: z.name.clone(),
-        })
-        .chain(new_zones.iter().enumerate().map(|(i, z)| {
-            Candidate {
-                zone: ZoneRef::New(i),
-                monitor: z.monitor,
-                rect: monitors
-                    .get(z.monitor)
-                    .map_or_else(Rect::default, |w| z.area.to_rect(*w)),
-                share: 1.0,
-                named_for: None,
-                name: String::new(),
-            }
-        }))
-        .collect();
-    for m in 0..monitors.len() {
-        let largest = candidates
+        let rects: Vec<Rect> = new_zones[from..].iter().map(|z| z.area.to_rect(work)).collect();
+        let largest = rects.iter().map(|r| r.area()).max().unwrap_or(0);
+        let candidates: Vec<Candidate> = rects
             .iter()
-            .filter(|c| c.monitor == m)
-            .map(|c| c.rect.area())
-            .max()
-            .unwrap_or(0);
-        for c in candidates.iter_mut().filter(|c| c.monitor == m) {
-            // Areas of real screens are far below 2^52, so the conversions are exact.
+            .enumerate()
+            .map(|(k, &rect)| {
+                // Areas of real screens are far below 2^52, so the conversions are exact.
+                #[allow(clippy::cast_precision_loss)]
+                let share = if largest > 0 {
+                    rect.area() as f64 / largest as f64
+                } else {
+                    1.0
+                };
+                Candidate {
+                    zone: from + k,
+                    rect,
+                    share,
+                }
+            })
+            .collect();
+        let priority = |rank: usize, u: usize| {
+            // Small ranks: exact in f64.
             #[allow(clippy::cast_precision_loss)]
-            let share = if largest > 0 {
-                c.rect.area() as f64 / largest as f64
+            let recency = 1.0 / (1.0 + 0.6 * rank as f64);
+            0.7 * fit(u) + 0.3 * recency
+        };
+        let mut here: Vec<(usize, f64)> = on[c.monitor]
+            .iter()
+            .enumerate()
+            .map(|(rank, &u)| (u, priority(rank, u)))
+            .collect();
+        here.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        let mut kept: Vec<usize> = Vec::new();
+        for &(u, _) in &here {
+            if kept.len() < candidates.len() && candidates.iter().any(|c| fits(&units[u], c.rect)) {
+                kept.push(u);
             } else {
-                1.0
-            };
-            c.share = share;
+                goes[u] = Some(Goes::Minimize);
+            }
+        }
+        kept.sort_unstable();
+        let mut pairs: Vec<(f64, usize, usize)> = Vec::with_capacity(kept.len() * candidates.len());
+        for &u in &kept {
+            let importance = importance(&units[u], fit(u), u, units.len());
+            for (k, cand) in candidates.iter().enumerate() {
+                if fits(&units[u], cand.rect) {
+                    pairs.push((score(&units[u], importance, cand), u, k));
+                }
+            }
+        }
+        // Best first; ties go to the window used last, then to the zone listed first.
+        pairs.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        let mut taken: Vec<bool> = vec![false; candidates.len()];
+        for &(_, u, k) in &pairs {
+            if goes[u].is_none() && !taken[k] {
+                taken[k] = true;
+                goes[u] = Some(Goes::Zone(candidates[k].zone));
+                new_zone_window[candidates[k].zone] = Some(u);
+            }
+        }
+        // A window whose zones all went to others waits in the taskbar.
+        for &u in &kept {
+            goes[u].get_or_insert(Goes::Minimize);
         }
     }
+    let goes: Vec<Goes> = goes.into_iter().map(|g| g.unwrap_or(Goes::Stay)).collect();
 
-    // On a monitor whose zones are all new (it had none, or a layout was picked for it), the
-    // windows used last take them and the others are minimised: the window being worked in
-    // stays, whatever its kind.
-    let mut placed_here = vec![true; units.len()];
-    for m in 0..monitors.len() {
-        let room = candidates.iter().filter(|c| c.monitor == m).count();
-        if room == 0
-            || candidates
-                .iter()
-                .any(|c| c.monitor == m && matches!(c.zone, ZoneRef::Existing(_)))
-        {
-            continue;
-        }
-        for (n, u) in (0..units.len()).filter(|u| units[*u].monitor == m).enumerate() {
-            placed_here[u] = n < room;
-        }
-    }
+    // The open workspace's zones on the monitors laid out anew make way; the others stay.
+    let laid_out = |m: usize| tasks.get(m).is_some_and(Option::is_some) || picked(m);
+    let gone: Vec<usize> = (0..zones.len()).filter(|&i| laid_out(zones[i].monitor)).collect();
 
-    let importance: Vec<f64> = units
-        .iter()
-        .enumerate()
-        .map(|(rank, u)| importance(u, rank, units.len()))
-        .collect();
-    let mut pairs: Vec<(f64, usize, usize)> = Vec::with_capacity(units.len() * candidates.len());
-    for (u, unit) in units.iter().enumerate().filter(|(u, _)| placed_here[*u]) {
-        for (c, cand) in candidates.iter().enumerate() {
-            pairs.push((score(unit, importance[u], cand), u, c));
-        }
-    }
-    // Best first; ties go to the window used last, then to the zone listed first.
-    pairs.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
-    let mut unit_zone: Vec<Option<usize>> = vec![None; units.len()];
-    let mut zone_unit: Vec<Option<usize>> = vec![None; candidates.len()];
-    for &(s, u, c) in &pairs {
-        // A pair that scores below nothing is worse than a tab beside a window of its kind.
-        if s < 0.0 {
-            break;
-        }
-        if unit_zone[u].is_none() && zone_unit[c].is_none() {
-            unit_zone[u] = Some(c);
-            zone_unit[c] = Some(u);
-        }
-    }
-    // New zones are made for the windows on their monitor: a window pulled away to a zone named
-    // for it elsewhere can leave one empty; the next window on the monitor fills it.
-    for (c, cand) in candidates.iter().enumerate() {
-        if zone_unit[c].is_some() || !matches!(cand.zone, ZoneRef::New(_)) {
-            continue;
-        }
-        if let Some(u) = (0..units.len())
-            .find(|u| placed_here[*u] && unit_zone[*u].is_none() && units[*u].monitor == cand.monitor)
-        {
-            unit_zone[u] = Some(c);
-            zone_unit[c] = Some(u);
-        }
-    }
-
-    // Windows left over, the ones used last first: into an empty zone on their monitor, even
-    // one named for something else (a window seen beats a name), else minimised.
-    let left_over: Vec<usize> = (0..units.len())
-        .filter(|u| placed_here[*u] && unit_zone[*u].is_none())
-        .collect();
-    for u in left_over {
-        if let Some(&(_, _, c)) = pairs.iter().find(|&&(_, pu, c)| {
-            pu == u && zone_unit[c].is_none() && candidates[c].monitor == units[u].monitor
-        }) {
-            unit_zone[u] = Some(c);
-            zone_unit[c] = Some(u);
-        }
-    }
-
-    let goes: Vec<Goes> = (0..units.len())
-        .map(|u| match unit_zone[u] {
-            Some(c) => Goes::Zone(candidates[c].zone),
-            // Every zone on its monitor has a window; with no zone there at all, it stays.
-            None if candidates.iter().any(|c| c.monitor == units[u].monitor) => Goes::Minimize,
-            None => Goes::Stay,
-        })
-        .collect();
-
-    // New zones are named after the window in them: its kind, else its app. The names of zones
-    // that make way for a picked layout are free again.
+    // New zones are named after the window in them: its kind, else its app.
     let mut taken: Vec<String> = zones
         .iter()
-        .filter(|z| !replaced(z.monitor))
+        .filter(|z| !laid_out(z.monitor))
         .map(|z| z.name.clone())
         .collect();
-    for (c, cand) in candidates.iter().enumerate() {
-        let ZoneRef::New(i) = cand.zone else { continue };
-        let base = zone_unit[c]
+    for (i, zone) in new_zones.iter_mut().enumerate() {
+        let base = new_zone_window[i]
             .map(|u| &units[u])
             .and_then(|u| {
                 u.kind
@@ -852,9 +724,14 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
         let base: String = base.chars().take(crate::editing::MAX_NAME - 3).collect();
         let name = free_name(&base, &taken);
         taken.push(name.clone());
-        new_zones[i].name = name;
+        zone.name = name;
     }
-    Plan { new_zones, goes }
+    Plan {
+        new_zones,
+        goes,
+        gone,
+        tasks,
+    }
 }
 
 #[cfg(test)]
@@ -867,23 +744,22 @@ mod tests {
         Unit {
             kind: Kind::of(Some(exe), "", None),
             label: label.into(),
-            exe: Some(exe.into()),
             frame,
             resizable: true,
+            least: Size::default(),
             monitor: 0,
-            zone: None,
         }
     }
 
-    fn spot(name: &str, rect: Rect) -> Spot {
+    /// A zone of the open workspace on the main monitor.
+    fn spot(name: &str) -> Spot {
         Spot {
             name: name.into(),
             monitor: 0,
-            rect,
         }
     }
 
-    fn zone_of(plan: &Plan, u: usize) -> ZoneRef {
+    fn zone_of(plan: &Plan, u: usize) -> usize {
         match plan.goes[u] {
             Goes::Zone(z) => z,
             Goes::Minimize => panic!("unit {u} is minimized"),
@@ -914,169 +790,160 @@ mod tests {
     }
 
     #[test]
-    fn zone_names_say_what_they_are_for() {
-        assert_eq!(Kind::of_zone_name("Code"), Some(Kind::Code));
-        assert_eq!(Kind::of_zone_name("Team chat"), Some(Kind::Chat));
-        assert_eq!(Kind::of_zone_name("The brief"), Some(Kind::Notes));
-        assert_eq!(Kind::of_zone_name("Zone 2"), None);
-        assert_eq!(Kind::of_zone_name("Ship"), None);
-    }
-
-    #[test]
-    fn three_windows_on_a_bare_monitor_get_half_and_stack() {
-        // No workspace open: the editor (used last) gets the full-height half, the browser and
-        // the terminal the stacked zones, each zone named for its window.
+    fn three_windows_on_a_bare_monitor_get_the_layout_of_their_task() {
+        // No workspace open: an editor, a browser and a terminal say coding. The editor (the
+        // window the task is done in) takes the most room, the terminal sits under it, the
+        // browser beside them; each zone is named for its window.
         let units = [
-            unit("code.exe", "Visual Studio Code", Rect::new(100, 100, 900, 700)),
             unit("chrome.exe", "Google Chrome", Rect::new(300, 50, 1500, 900)),
+            unit("code.exe", "Visual Studio Code", Rect::new(100, 100, 900, 700)),
             unit("windowsterminal.exe", "Terminal", Rect::new(800, 400, 1600, 1000)),
         ];
         let plan = plan(&units, &[], &[WORK]);
         assert_eq!(plan.new_zones.len(), 3);
-        let names: Vec<&str> = plan.new_zones.iter().map(|z| z.name.as_str()).collect();
-        let ZoneRef::New(code) = zone_of(&plan, 0) else {
-            panic!()
-        };
-        assert_eq!(
-            plan.new_zones[code].area,
-            Preset::HalfAndStack.zones()[0],
-            "{names:?}"
+        assert_eq!(plan.tasks, vec![Some(Task::Coding)]);
+        let zone = |u: usize| &plan.new_zones[zone_of(&plan, u)];
+        assert_eq!(zone(1).name, "Code");
+        assert_eq!(zone(1).area, RatioRect::new(0.0, 0.0, 0.6, 0.68).unwrap());
+        assert_eq!(zone(2).name, "Terminal");
+        assert_eq!(zone(2).area, RatioRect::new(0.0, 0.68, 0.6, 1.0).unwrap());
+        assert_eq!(zone(0).name, "Browser");
+        assert_eq!(zone(0).area, RatioRect::new(0.6, 0.0, 1.0, 1.0).unwrap());
+    }
+
+    #[test]
+    fn the_open_workspaces_zones_make_way_for_the_layout_of_the_task() {
+        // The owner's "Check": three rows, open, and ten windows on screen. "Arrange is better
+        // but not good enough: it should assess the main window, VS Code is superior to a
+        // terminal, and make a split view depending on the task." The rows make way: the editor
+        // takes the most room, the terminal goes under it, the windows that help sit beside it.
+        let zones = [spot("Notepad++"), spot("Zone 1"), spot("Zone 2")];
+        let exes = [
+            ("claude.exe", "Claude"),
+            ("chrome.exe", "Google Chrome"),
+            ("steamwebhelper.exe", "Steam"),
+            ("notepad++.exe", "Notepad++"),
+            ("calculatorapp.exe", "Calculator"),
+            ("battle.net.exe", "Battle.net"),
+            ("mintty.exe", "MSYS2"),
+            ("windowsterminal.exe", "Windows Terminal"),
+            ("explorer.exe", "File Explorer"),
+        ];
+        let mut units: Vec<Unit> = exes
+            .iter()
+            .map(|(exe, label)| unit(exe, label, Rect::new(0, 0, 1920, 344)))
+            .collect();
+        units[6].kind = Kind::Terminal;
+        let plan = plan(&units, &zones, &[WORK]);
+        assert_eq!(plan.gone, vec![0, 1, 2], "the rows make way");
+        assert_eq!(plan.tasks, vec![Some(Task::Coding)]);
+        let main = zone_of(&plan, 3);
+        assert_eq!(plan.new_zones[main].name, "Code");
+        assert!(
+            plan.new_zones[main].area.width() >= 0.55 - 1e-9,
+            "{:?}",
+            plan.new_zones
         );
-        assert_eq!(plan.new_zones[code].name, "Code");
-        let ZoneRef::New(browser) = zone_of(&plan, 1) else {
-            panic!()
-        };
-        assert_eq!(plan.new_zones[browser].name, "Browser");
-        let ZoneRef::New(term) = zone_of(&plan, 2) else {
-            panic!()
-        };
-        assert_eq!(plan.new_zones[term].name, "Terminal");
-        assert!(plan.goes.iter().all(|g| matches!(g, Goes::Zone(_))));
+        let term = &plan.new_zones[zone_of(&plan, 6)];
+        assert!((term.area.top() - plan.new_zones[main].area.bottom()).abs() < 1e-9);
+        // Claude and Chrome beside it; Steam, the Calculator and Battle.net wait in the taskbar.
+        assert!(matches!(plan.goes[0], Goes::Zone(_)));
+        assert!(matches!(plan.goes[1], Goes::Zone(_)));
+        for u in [2, 4, 5] {
+            assert_eq!(plan.goes[u], Goes::Minimize, "unit {u}: {:?}", plan.goes);
+        }
     }
 
     #[test]
-    fn named_zones_draw_their_windows() {
+    fn zones_on_a_monitor_without_windows_stay() {
+        let side = Rect::new(1920, 0, 3840, 1032);
         let zones = [
-            spot("Notes", Rect::new(0, 0, 640, 1032)),
-            spot("Code", Rect::new(640, 0, 1280, 1032)),
-            spot("Browser", Rect::new(1280, 0, 1920, 1032)),
-        ];
-        // Each window is over the wrong zone now.
-        let units = [
-            unit("msedge.exe", "Microsoft Edge", Rect::new(0, 0, 640, 1032)),
-            unit("obsidian.exe", "Obsidian", Rect::new(640, 0, 1280, 1032)),
-            unit("cursor.exe", "Cursor", Rect::new(1280, 0, 1920, 1032)),
-        ];
-        let plan = plan(&units, &zones, &[WORK]);
-        assert!(plan.new_zones.is_empty());
-        assert_eq!(zone_of(&plan, 0), ZoneRef::Existing(2));
-        assert_eq!(zone_of(&plan, 1), ZoneRef::Existing(0));
-        assert_eq!(zone_of(&plan, 2), ZoneRef::Existing(1));
-    }
-
-    #[test]
-    fn a_zone_named_after_the_app_wins() {
-        // The owner's workspace: thirds, the first called "Notepad++".
-        let zones = [
-            spot("Notepad++", Rect::new(0, 0, 640, 1032)),
-            spot("Zone 1", Rect::new(640, 0, 1280, 1032)),
-            spot("Zone 2", Rect::new(1280, 0, 1920, 1032)),
+            spot("Code"),
+            Spot {
+                name: "Browser".into(),
+                monitor: 1,
+            },
         ];
         let units = [
-            unit("claude.exe", "Claude", Rect::new(0, 0, 1920, 1032)),
-            unit(
-                "notepad++.exe",
-                "Notepad++ : a free (GNU) source code editor",
-                Rect::new(1300, 40, 1900, 1000),
-            ),
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1900, 1000)),
+            unit("msedge.exe", "Microsoft Edge", Rect::new(300, 300, 800, 800)),
         ];
-        let plan = plan(&units, &zones, &[WORK]);
-        assert_eq!(zone_of(&plan, 1), ZoneRef::Existing(0));
-        assert!(matches!(zone_of(&plan, 0), ZoneRef::Existing(1 | 2)));
+        let plan = plan(&units, &zones, &[WORK, side]);
+        assert_eq!(plan.gone, vec![0]);
+        assert_eq!(plan.tasks, vec![Some(Task::Coding), None]);
+        // Windows stay on their monitor; a new zone's name is not one the workspace keeps.
+        assert!(plan.new_zones.iter().all(|z| z.monitor == 0));
+        let edge = &plan.new_zones[zone_of(&plan, 1)];
+        assert_eq!(edge.name, "Browser 2");
     }
 
     #[test]
-    fn windows_stay_in_the_zones_they_are_in_when_nothing_says_otherwise() {
-        let zones = [
-            spot("Left", Rect::new(0, 0, 960, 1032)),
-            spot("Right", Rect::new(960, 0, 1920, 1032)),
+    fn arranging_twice_moves_nothing() {
+        // The windows in their zones, the others minimised: Arrange again finds every window
+        // where it is (the order of those beside the main one does not change because the
+        // windows between them are gone).
+        let exes = [
+            ("claude.exe", "Claude"),
+            ("chrome.exe", "Google Chrome"),
+            ("steamwebhelper.exe", "Steam"),
+            ("notepad++.exe", "Notepad++"),
+            ("calculatorapp.exe", "Calculator"),
+            ("calculatorapp.exe", "Calculator"),
+            ("battle.net.exe", "Battle.net"),
+            ("mintty.exe", "MSYS2"),
+            ("windowsterminal.exe", "Windows Terminal"),
+            ("explorer.exe", "File Explorer"),
         ];
-        let mut a = unit("mygame.exe", "A", Rect::new(964, 32, 1916, 1028));
-        a.zone = Some(1);
-        let mut b = unit("other.exe", "B", Rect::new(4, 32, 956, 1028));
-        b.zone = Some(0);
-        let plan = plan(&[a, b], &zones, &[WORK]);
+        let mut units: Vec<Unit> = exes
+            .iter()
+            .map(|(exe, label)| unit(exe, label, Rect::new(100, 100, 900, 900)))
+            .collect();
+        units[7].kind = Kind::Terminal;
+        let first = plan(&units, &[], &[WORK]);
         assert_eq!(
-            plan.goes,
-            vec![Goes::Zone(ZoneRef::Existing(1)), Goes::Zone(ZoneRef::Existing(0))]
+            first.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count(),
+            5,
+            "{:?}",
+            first.goes
         );
-    }
-
-    #[test]
-    fn windows_left_over_are_minimized_rather_than_hidden_as_tabs() {
-        // Every zone has a window: the windows left over go to the taskbar, where they can be
-        // found, instead of disappearing as tabs (the owner: Arrange put 8 of 11 windows away as
-        // tabs in a workspace of 3 zones).
-        let zones = [
-            spot("Code", Rect::new(0, 0, 960, 1032)),
-            spot("Browser", Rect::new(960, 0, 1920, 1032)),
-        ];
-        let units = [
-            unit("chrome.exe", "Google Chrome", Rect::new(960, 0, 1920, 1032)),
-            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 960, 1032)),
-            unit("firefox.exe", "Firefox", Rect::new(200, 200, 900, 900)),
-            unit("slack.exe", "Slack", Rect::new(300, 300, 800, 800)),
-        ];
-        let plan = plan(&units, &zones, &[WORK]);
-        assert_eq!(plan.goes[0], Goes::Zone(ZoneRef::Existing(1)));
-        assert_eq!(plan.goes[1], Goes::Zone(ZoneRef::Existing(0)));
-        assert_eq!(plan.goes[2], Goes::Minimize);
-        assert_eq!(plan.goes[3], Goes::Minimize);
-    }
-
-    #[test]
-    fn a_workspace_with_few_zones_keeps_them_and_minimizes_the_rest() {
-        // The owner's "Check": three zones, eleven windows. Its zones stay as they are; the
-        // windows in them, and the ones used last, fill them; the others are minimized.
-        let zones = [
-            spot("Notepad++", Rect::new(0, 0, 1920, 344)),
-            spot("Zone 1", Rect::new(0, 344, 1920, 688)),
-            spot("Zone 2", Rect::new(0, 688, 1920, 1032)),
-        ];
-        let mut units: Vec<Unit> = (0..11)
-            .map(|i| {
-                unit(
-                    &format!("app{i}.exe"),
-                    &format!("App {i}"),
-                    Rect::new(100 + i * 20, 100, 900, 800),
-                )
+        let again: Vec<(usize, Unit)> = (0..units.len())
+            .filter_map(|u| match first.goes[u] {
+                Goes::Zone(z) => {
+                    let mut moved = units[u].clone();
+                    moved.frame = first.new_zones[z].area.to_rect(WORK);
+                    Some((u, moved))
+                }
+                _ => None,
             })
             .collect();
-        units[3] = unit("notepad++.exe", "Notepad++", Rect::new(2, 2, 1918, 342));
-        units[3].zone = Some(0);
-        units[6] = unit("chrome.exe", "Google Chrome", Rect::new(2, 690, 1918, 1030));
-        units[6].zone = Some(2);
-        let plan = plan(&units, &zones, &[WORK]);
-        assert!(plan.new_zones.is_empty(), "the workspace's zones stay");
-        assert_eq!(plan.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count(), 3);
-        assert_eq!(plan.goes.iter().filter(|g| **g == Goes::Minimize).count(), 8);
-        assert_eq!(
-            plan.goes[3],
-            Goes::Zone(ZoneRef::Existing(0)),
-            "it stays in its zone"
-        );
-        assert_eq!(
-            plan.goes[6],
-            Goes::Zone(ZoneRef::Existing(2)),
-            "and so does this one"
-        );
-        // The window used last fills the zone left.
-        assert_eq!(plan.goes[0], Goes::Zone(ZoneRef::Existing(1)));
+        let zones: Vec<Spot> = first
+            .new_zones
+            .iter()
+            .map(|z| Spot {
+                name: z.name.clone(),
+                monitor: z.monitor,
+            })
+            .collect();
+        let shown: Vec<Unit> = again.iter().map(|(_, u)| u.clone()).collect();
+        let second = plan(&shown, &zones, &[WORK]);
+        for (k, (u, _)) in again.iter().enumerate() {
+            let Goes::Zone(before) = first.goes[*u] else {
+                unreachable!()
+            };
+            let after = zone_of(&second, k);
+            assert_eq!(
+                second.new_zones[after].area, first.new_zones[before].area,
+                "unit {u} moved"
+            );
+            assert_eq!(second.new_zones[after].name, first.new_zones[before].name);
+        }
     }
 
     #[test]
-    fn five_or_six_windows_on_a_bare_monitor_get_a_grid_and_nothing_is_minimized() {
-        for n in [5_i32, 6] {
+    fn unknown_windows_get_one_main_zone_and_three_beside_it() {
+        // Nothing says what the task is: the window used last is the main one, the next three
+        // sit beside it, and the others wait in the taskbar.
+        for n in [5_i32, 6, 9] {
             let units: Vec<Unit> = (0..n)
                 .map(|i| {
                     unit(
@@ -1087,40 +954,30 @@ mod tests {
                 })
                 .collect();
             let plan = plan(&units, &[], &[WORK]);
-            assert_eq!(plan.new_zones.len(), usize::try_from(n).unwrap_or(0));
-            let mut used: Vec<ZoneRef> = (0..units.len()).map(|u| zone_of(&plan, u)).collect();
-            used.sort_by_key(|z| format!("{z:?}"));
-            used.dedup();
-            assert_eq!(used.len(), units.len(), "one window per zone: {:?}", plan.goes);
+            assert_eq!(plan.new_zones.len(), 4, "{n} windows");
+            assert!(
+                plan.goes[..4].iter().all(|g| matches!(g, Goes::Zone(_))),
+                "{:?}",
+                plan.goes
+            );
+            assert!(plan.goes[4..].iter().all(|g| *g == Goes::Minimize));
+            let main = zone_of(&plan, 0);
+            let largest = plan
+                .new_zones
+                .iter()
+                .map(|z| z.area.width() * z.area.height())
+                .fold(0.0_f64, f64::max);
+            let area = plan.new_zones[main].area;
+            assert!((area.width() * area.height() - largest).abs() < 1e-9);
         }
     }
 
     #[test]
-    fn a_bare_monitor_takes_as_many_windows_as_it_holds_well() {
-        let units: Vec<Unit> = (0..9)
-            .map(|i| {
-                unit(
-                    &format!("app{i}.exe"),
-                    &format!("App {i}"),
-                    Rect::new(i * 30, 0, 900, 900),
-                )
-            })
-            .collect();
-        let plan = plan(&units, &[], &[WORK]);
-        assert_eq!(plan.new_zones.len(), 6);
-        assert_eq!(plan.goes.iter().filter(|g| **g == Goes::Minimize).count(), 3);
-        // The windows used last are the ones that stay on screen.
-        assert!(
-            plan.goes[..6].iter().all(|g| matches!(g, Goes::Zone(_))),
-            "{:?}",
-            plan.goes
-        );
-    }
-
-    #[test]
-    fn the_windows_used_last_keep_the_zones_whatever_their_kind() {
-        // Job 0105, the owner's screen: ten windows, six zones; the one in front (Claude, a
-        // kind that counts little) was minimised for editors and browsers used longer ago.
+    fn the_task_keeps_its_windows_and_sends_the_others_away() {
+        // Job 0105, the owner's screen: ten windows. Claude in front, then Chrome, Steam,
+        // Notepad++... The task is coding: an editor takes the most room with the terminal
+        // under it, Claude and the browsers beside them; Steam, the Calculator, File Explorer
+        // and Figma wait in the taskbar.
         let exes = [
             ("claude.exe", "Claude"),
             ("chrome.exe", "Google Chrome"),
@@ -1142,18 +999,19 @@ mod tests {
             })
             .collect();
         let plan = plan(&units, &[], &[WORK]);
-        assert_eq!(plan.new_zones.len(), 6);
+        let placed: Vec<usize> = (0..units.len())
+            .filter(|&u| matches!(plan.goes[u], Goes::Zone(_)))
+            .collect();
+        assert_eq!(placed, vec![0, 1, 3, 6, 7, 9], "{:?}", plan.goes);
+        let main = zone_of(&plan, 3);
+        assert_eq!(plan.new_zones[main].name, "Code");
+        assert!(plan.new_zones[main].area.left().abs() < 1e-9, "on the left");
+        let term = zone_of(&plan, 9);
         assert!(
-            plan.goes[..6].iter().all(|g| matches!(g, Goes::Zone(_))),
-            "the six used last are arranged: {:?}",
-            plan.goes
+            (plan.new_zones[term].area.top() - plan.new_zones[main].area.bottom()).abs() < 1e-9,
+            "under it"
         );
-        assert!(
-            plan.goes[6..].iter().all(|g| *g == Goes::Minimize),
-            "{:?}",
-            plan.goes
-        );
-        // A layout picked keeps the windows used last too.
+        // A layout picked keeps the windows that matter most to the task: Steam goes.
         let thirds = plan_with(
             &units[..4],
             &[],
@@ -1163,50 +1021,37 @@ mod tests {
                 preset: Preset::Thirds,
             }),
         );
-        assert_eq!(thirds.goes[3], Goes::Minimize, "{:?}", thirds.goes);
+        assert_eq!(thirds.goes[2], Goes::Minimize, "{:?}", thirds.goes);
+        assert!(thirds.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count() == 3);
     }
 
     #[test]
-    fn a_window_with_no_zone_of_its_own_takes_an_empty_one_rather_than_go_away() {
-        let zones = [
-            spot("Browser", Rect::new(0, 0, 960, 1032)),
-            spot("Notes", Rect::new(960, 0, 1920, 1032)),
-        ];
+    fn arrange_never_gives_a_window_a_zone_smaller_than_it_goes() {
+        // Battle.net, in front, keeps 1280 x 720: it takes the main zone, grown to its width,
+        // and the windows beside it fit what is left.
+        let mut battle = unit("battle.net.exe", "Battle.net", Rect::new(100, 100, 1380, 820));
+        battle.least = Size::new(1280, 720);
         let units = [
-            unit("chrome.exe", "Google Chrome", Rect::new(0, 0, 960, 1032)),
-            unit("msedge.exe", "Microsoft Edge", Rect::new(960, 0, 1920, 1032)),
+            battle,
+            unit("discord.exe", "Discord", Rect::new(900, 0, 1900, 1000)),
+            unit("spotify.exe", "Spotify", Rect::new(800, 400, 1600, 1000)),
         ];
-        let plan = plan(&units, &zones, &[WORK]);
-        assert_eq!(plan.goes[0], Goes::Zone(ZoneRef::Existing(0)));
-        assert_eq!(
-            plan.goes[1],
-            Goes::Zone(ZoneRef::Existing(1)),
-            "seen, in the empty zone"
+        let plan = plan(&units, &[], &[WORK]);
+        let z = zone_of(&plan, 0);
+        assert!(
+            plan.new_zones[z].area.to_rect(WORK).width() >= 1280,
+            "{:?}",
+            plan.new_zones
         );
+        for (u, unit) in units.iter().enumerate() {
+            if let Goes::Zone(z) = plan.goes[u] {
+                assert!(fits(unit, plan.new_zones[z].area.to_rect(WORK)), "unit {u}");
+            }
+        }
     }
 
     #[test]
-    fn a_window_does_not_leave_its_monitor_for_an_empty_zone_elsewhere() {
-        let side = Rect::new(1920, 0, 3840, 1032);
-        let zones = [
-            spot("Code", WORK),
-            Spot {
-                name: "Zone".into(),
-                monitor: 1,
-                rect: side,
-            },
-        ];
-        let units = [
-            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1900, 1000)),
-            unit("slack.exe", "Slack", Rect::new(300, 300, 800, 800)),
-        ];
-        let plan = plan(&units, &zones, &[WORK, side]);
-        assert_eq!(plan.goes[0], Goes::Zone(ZoneRef::Existing(0)));
-        assert_eq!(plan.goes[1], Goes::Minimize);
-    }
-
-    #[test]
-    fn each_monitor_without_zones_gets_its_own() {
+    fn each_monitor_gets_the_layout_of_its_own_task() {
         let side = Rect::new(1920, 0, 2720, 552);
         let mut chat = unit("discord.exe", "Discord", Rect::new(2000, 50, 2600, 500));
         chat.monitor = 1;
@@ -1216,89 +1061,44 @@ mod tests {
             chat,
         ];
         let plan = plan(&units, &[], &[WORK, side]);
+        assert_eq!(plan.tasks, vec![Some(Task::Coding), Some(Task::Talking)]);
         assert_eq!(plan.new_zones.iter().filter(|z| z.monitor == 0).count(), 2);
         assert_eq!(plan.new_zones.iter().filter(|z| z.monitor == 1).count(), 1);
-        let ZoneRef::New(c) = zone_of(&plan, 2) else {
-            panic!()
-        };
+        let c = zone_of(&plan, 2);
         assert_eq!(plan.new_zones[c].monitor, 1);
         assert_eq!(plan.new_zones[c].name, "Chat");
     }
 
     #[test]
-    fn zones_already_named_are_not_named_again() {
-        let mut taken_unit = unit("chrome.exe", "Google Chrome", Rect::new(0, 0, 900, 900));
-        taken_unit.monitor = 1;
-        let side = Rect::new(1920, 0, 3840, 1032);
-        let zones = [Spot {
-            name: "Browser".into(),
-            monitor: 1,
-            rect: side,
-        }];
-        let units = [
-            unit("msedge.exe", "Microsoft Edge", Rect::new(0, 0, 900, 900)),
-            taken_unit,
-        ];
-        let plan = plan(&units, &zones, &[WORK, side]);
-        assert_eq!(plan.new_zones.len(), 1);
-        assert_eq!(plan.new_zones[0].name, "Browser 2");
-    }
-
-    #[test]
     fn a_window_that_cannot_be_resized_takes_the_small_zone() {
-        let zones = [
-            spot("A", Rect::new(0, 0, 1280, 1032)),
-            spot("B", Rect::new(1280, 0, 1920, 1032)),
-        ];
+        // Main and side picked: the game keeps its size, so it takes the side zone it fits, and
+        // the editor the large one.
         let mut game = unit("game.exe", "Game", Rect::new(500, 300, 1140, 780));
         game.resizable = false;
+        game.least = Size::new(640, 480);
         let units = [game, unit("code.exe", "Code", Rect::new(600, 200, 1300, 800))];
-        let plan = plan(&units, &zones, &[WORK]);
-        assert_eq!(
-            plan.goes[1],
-            Goes::Zone(ZoneRef::Existing(0)),
-            "the editor takes the large zone"
+        let plan = plan_with(
+            &units,
+            &[],
+            &[WORK],
+            Some(Chosen {
+                monitor: 0,
+                preset: Preset::MainSide,
+            }),
         );
-        assert_eq!(plan.goes[0], Goes::Zone(ZoneRef::Existing(1)));
-    }
-
-    #[test]
-    fn windows_with_no_zone_of_their_own_take_the_empty_ones() {
-        // Zones named for apps that are not open: the windows on screen still fill them, rather
-        // than pile up as tabs of one another.
-        let zones = [
-            spot("Code", Rect::new(0, 0, 960, 1032)),
-            spot("Browser", Rect::new(960, 0, 1920, 1032)),
-        ];
-        let units = [
-            unit("slack.exe", "Slack", Rect::new(100, 100, 700, 700)),
-            unit("spotify.exe", "Spotify", Rect::new(1000, 100, 1600, 700)),
-        ];
-        let plan = plan(&units, &zones, &[WORK]);
-        assert!(
-            plan.goes.iter().all(|g| matches!(g, Goes::Zone(_))),
-            "{:?}",
-            plan.goes
-        );
-        assert_ne!(plan.goes[0], plan.goes[1]);
+        let (game, code) = (zone_of(&plan, 0), zone_of(&plan, 1));
+        assert!(plan.new_zones[code].area.width() > plan.new_zones[game].area.width());
     }
 
     #[test]
     fn a_layout_picked_for_a_monitor_replaces_its_zones() {
         // The home page: the open workspace has two zones on the main screen; the user picks
-        // Thirds for it. Every window goes into a zone of the new shape, none into the old ones,
-        // and each new zone is named for its window.
-        let zones = [
-            spot("Code", Rect::new(0, 0, 960, 1032)),
-            spot("Browser", Rect::new(960, 0, 1920, 1032)),
-        ];
-        let mut code = unit("code.exe", "Visual Studio Code", Rect::new(4, 32, 956, 1028));
-        code.zone = Some(0);
-        let mut chrome = unit("chrome.exe", "Google Chrome", Rect::new(964, 32, 1916, 1028));
-        chrome.zone = Some(1);
+        // Thirds for it. Every window goes into a zone of the new shape, and each new zone is
+        // named for its window.
+        let zones = [spot("Code"), spot("Browser")];
         let units = [
-            code,
-            chrome,
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 960, 1032)),
+            unit("chrome.exe", "Google Chrome", Rect::new(960, 0, 1920, 1032)),
             unit("windowsterminal.exe", "Terminal", Rect::new(800, 400, 1600, 1000)),
         ];
         let chosen = Chosen {
@@ -1306,18 +1106,13 @@ mod tests {
             preset: Preset::Thirds,
         };
         let plan = plan_with(&units, &zones, &[WORK], Some(chosen));
+        assert_eq!(plan.gone, vec![0, 1]);
+        assert_eq!(plan.tasks, vec![None], "a picked layout is not the task's");
         assert_eq!(plan.new_zones.len(), 3);
         assert!(plan.new_zones.iter().all(|z| z.monitor == 0));
         let areas: Vec<RatioRect> = plan.new_zones.iter().map(|z| z.area).collect();
         assert_eq!(areas, Preset::Thirds.zones());
-        let mut used = Vec::new();
-        for u in 0..units.len() {
-            let ZoneRef::New(z) = zone_of(&plan, u) else {
-                panic!("unit {u} went to an old zone: {:?}", plan.goes)
-            };
-            assert!(matches!(plan.goes[u], Goes::Zone(_)), "{:?}", plan.goes);
-            used.push(z);
-        }
+        let mut used: Vec<usize> = (0..units.len()).map(|u| zone_of(&plan, u)).collect();
         used.sort_unstable();
         used.dedup();
         assert_eq!(used.len(), 3, "one window per zone");
@@ -1349,13 +1144,51 @@ mod tests {
             plan.goes
         );
         // The editor, used last, has a zone of its own.
-        assert!(matches!(plan.goes[0], Goes::Zone(ZoneRef::New(_))));
+        assert!(matches!(plan.goes[0], Goes::Zone(_)));
+    }
+
+    #[test]
+    fn a_window_too_big_for_every_zone_of_a_layout_is_minimized_rather_than_spill_over() {
+        // The owner, in Quarters: "some windows still can't fit, like Battle.net, it's too
+        // tall". Battle.net will not go below about 1280 x 720, and a quarter of a 1080p screen
+        // is 960 x 516: it would spill over its neighbours. It waits in the taskbar instead, and
+        // the windows that fit take the quarters.
+        let mut battle = unit("battle.net.exe", "Battle.net", Rect::new(100, 100, 1380, 820));
+        battle.least = Size::new(1280, 720);
+        let units = [
+            battle,
+            unit("steam.exe", "Steam", Rect::new(0, 0, 1000, 1000)),
+            unit("discord.exe", "Discord", Rect::new(900, 0, 1900, 1000)),
+            unit("spotify.exe", "Spotify", Rect::new(800, 400, 1600, 1000)),
+        ];
+        let quarters = Chosen {
+            monitor: 0,
+            preset: Preset::Quarters,
+        };
+        let plan = plan_with(&units, &[], &[WORK], Some(quarters));
+        assert_eq!(plan.goes[0], Goes::Minimize, "{:?}", plan.goes);
+        for u in 1..units.len() {
+            assert!(matches!(plan.goes[u], Goes::Zone(_)), "unit {u}: {:?}", plan.goes);
+        }
+        // In Main and side, its 1280 px fit the main zone: it takes it, whatever else would.
+        let main_side = Chosen {
+            monitor: 0,
+            preset: Preset::MainSide,
+        };
+        let plan = plan_with(&units[..2], &[], &[WORK], Some(main_side));
+        let z = zone_of(&plan, 0);
+        assert!(
+            plan.new_zones[z].area.to_rect(WORK).width() >= 1280,
+            "{:?}",
+            plan.new_zones
+        );
+        assert!(matches!(plan.goes[1], Goes::Zone(_)), "{:?}", plan.goes);
     }
 
     #[test]
     fn a_layout_picked_for_one_monitor_leaves_the_others_to_arrange() {
         // Thirds picked for the main screen, which has one window; the other screen has a
-        // window and no zones: it gets its own shape, as Arrange gives it.
+        // window: it gets the layout of its own task, as Arrange gives it.
         let side = Rect::new(1920, 0, 2720, 552);
         let mut chat = unit("discord.exe", "Discord", Rect::new(2000, 50, 2600, 500));
         chat.monitor = 1;
@@ -1370,10 +1203,7 @@ mod tests {
         let plan = plan_with(&units, &[], &[WORK, side], Some(chosen));
         assert_eq!(plan.new_zones.iter().filter(|z| z.monitor == 0).count(), 3);
         assert_eq!(plan.new_zones.iter().filter(|z| z.monitor == 1).count(), 1);
-        let ZoneRef::New(c) = zone_of(&plan, 1) else {
-            panic!()
-        };
-        assert_eq!(plan.new_zones[c].monitor, 1);
+        assert_eq!(plan.new_zones[zone_of(&plan, 1)].monitor, 1);
         // Zones of the picked layout with no window stay, ready for windows dragged in.
         assert!(
             plan.new_zones
@@ -1404,6 +1234,6 @@ mod tests {
     #[test]
     fn nothing_to_arrange_plans_nothing() {
         let plan = plan(&[], &[], &[WORK]);
-        assert!(plan.new_zones.is_empty() && plan.goes.is_empty());
+        assert!(plan.new_zones.is_empty() && plan.goes.is_empty() && plan.gone.is_empty());
     }
 }

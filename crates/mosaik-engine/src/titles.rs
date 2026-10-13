@@ -435,7 +435,7 @@ impl Engine {
     /// that shows of a group, and its title bar never answered (the way to the group's other
     /// tabs must stay in reach). A strip otherwise goes in the title bar, at its right end, room
     /// or not ([`TitleRoom::strip_spot`]). A window alone never goes below a band: one whose
-    /// title bar has too little room for its tag wears it cut short, or its ring alone, at the
+    /// title bar has too little room for its tag wears it cut short, or none, at the
     /// top of its zone like its neighbours (the owner: "we shouldn't have blank lost space").
     /// Unchanged while its title bar is not read.
     fn wants_band(&mut self, h: WindowHandle) -> bool {

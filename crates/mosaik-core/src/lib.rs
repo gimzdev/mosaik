@@ -20,6 +20,7 @@ pub mod store;
 pub mod strip;
 pub mod switcher;
 pub mod tabs;
+pub mod task;
 pub mod titlebar;
 pub mod topology;
 pub mod window;

@@ -9,35 +9,36 @@ import { Stage } from './Stage';
 import { Button, Keys, Mark, PageTitle, Status, Toggle, useSay } from './ui';
 
 /** A made-up screen for the welcome: three windows left where they fell, and where Arrange
- * puts them. */
+ * puts them: the editor the most room, the browser and the notes beside it, edge to edge. */
 const DEMO: ArrangePreview = {
   work_area: { left: 0, top: 0, right: 1600, bottom: 900 },
   zones: [
-    { name: 'Browser', color: 'lapis', rect: { left: 0, top: 0, right: 800, bottom: 900 } },
-    { name: 'Code', color: 'verdigris', rect: { left: 800, top: 0, right: 1600, bottom: 450 } },
-    { name: 'Notes', color: 'saffron', rect: { left: 800, top: 450, right: 1600, bottom: 900 } },
+    { name: 'Code', color: 'lapis', rect: { left: 0, top: 0, right: 928, bottom: 900 } },
+    { name: 'Browser', color: 'verdigris', rect: { left: 928, top: 0, right: 1600, bottom: 495 } },
+    { name: 'Notes', color: 'saffron', rect: { left: 928, top: 495, right: 1600, bottom: 900 } },
   ],
   windows: [
     {
       label: 'Browser',
       now: { left: 140, top: 90, right: 860, bottom: 610 },
-      then: { left: 3, top: 3, right: 797, bottom: 897 },
+      then: { left: 928, top: 0, right: 1600, bottom: 495 },
       minimized: false,
     },
     {
       label: 'Code editor',
       now: { left: 620, top: 220, right: 1380, bottom: 760 },
-      then: { left: 803, top: 3, right: 1597, bottom: 447 },
+      then: { left: 0, top: 0, right: 928, bottom: 900 },
       minimized: false,
     },
     {
       label: 'Notes',
       now: { left: 1040, top: 60, right: 1520, bottom: 420 },
-      then: { left: 803, top: 453, right: 1597, bottom: 897 },
+      then: { left: 928, top: 495, right: 1600, bottom: 900 },
       minimized: false,
     },
   ],
   elsewhere: 0,
+  task: 'coding',
 };
 
 export function Welcome({

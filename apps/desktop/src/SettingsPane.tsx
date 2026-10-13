@@ -122,8 +122,8 @@ export function SettingsPane({
           }}
         />
         <Toggle
-          label="Coloured frames"
-          description="Each window wears its zone’s colour."
+          label="Coloured borders"
+          description="Each window wears its zone’s colour, a little apart from the next."
           checked={settings.frames.show_frames}
           onChange={(on) => {
             save({ ...settings, frames: { ...settings.frames, show_frames: on } });

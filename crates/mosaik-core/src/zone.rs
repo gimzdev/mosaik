@@ -1,9 +1,9 @@
 //! Zones: named, coloured areas of a monitor that belong to a workspace.
 //!
 //! A zone is stored as a fraction of its monitor's work area, so it keeps its shape when the
-//! resolution, the scale or the taskbar changes. Inside the zone, with a small gap between
-//! neighbouring zones, the window wears the zone's tag in its own title bar, or sits below a band
-//! that carries the tag when tags are set to go above windows.
+//! resolution, the scale or the taskbar changes. The window fills its zone, edge to edge with its
+//! neighbours, and wears the zone's tag in its own title bar, or sits below a band that carries
+//! the tag when tags are set to go above windows.
 
 use serde::{Deserialize, Serialize};
 
@@ -90,14 +90,16 @@ pub struct Zone {
 }
 
 /// How a window sits inside its zone, in device-independent pixels (scaled by the monitor's DPI).
+/// A value missing from a settings file takes its default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FrameStyle {
-    /// Space between neighbouring zones: by default the width of the two zones' rings, so the
-    /// rings touch and no desktop shows between windows (half of it at the screen's edges).
+    /// Space between neighbouring windows (half of it at the screen's edges). None by default:
+    /// windows meet edge to edge, and no desktop shows between them.
     pub gap: i32,
     /// Height of the band above the window that carries the tag. 0 shows no tags.
     pub tag_band: i32,
-    /// Width of the coloured ring around the window.
+    /// Width of the coloured ring around the window, when rings are shown.
     pub border: i32,
     /// Tags and tab strips go in each window's own title bar (`crate::titlebar`): windows fill
     /// their zones, tab groups too. Set from the settings for the session; not saved with the
@@ -109,7 +111,7 @@ pub struct FrameStyle {
 impl Default for FrameStyle {
     fn default() -> Self {
         Self {
-            gap: 4,
+            gap: 0,
             tag_band: 28,
             border: 2,
             title_bars: false,
@@ -136,7 +138,7 @@ pub enum TagCut {
     Trimmed(i32),
     /// The zone's initial alone, this wide.
     Initial(i32),
-    /// No room: no tag (the window wears its ring alone).
+    /// No room: no tag.
     Hidden,
 }
 
@@ -241,25 +243,28 @@ mod tests {
     fn window_area_leaves_room_for_the_tag() {
         let zone = Rect::new(0, 0, 960, 1032);
         let style = FrameStyle::default();
-        assert_eq!(style.window_area(zone, 96), Rect::new(2, 30, 958, 1030));
-        assert_eq!(style.tag_area(zone, 96), Some(Rect::new(2, 2, 958, 30)));
+        assert_eq!(style.window_area(zone, 96), Rect::new(0, 28, 960, 1032));
+        assert_eq!(style.tag_area(zone, 96), Some(Rect::new(0, 0, 960, 28)));
         // At 200% everything doubles.
         assert_eq!(
             style.window_area(Rect::new(0, 0, 1920, 2064), 192),
-            Rect::new(4, 60, 1916, 2060)
+            Rect::new(0, 56, 1920, 2064)
         );
         assert_eq!(style.without_tags().tag_area(zone, 96), None);
         // A tab group keeps its strip's band when tags are hidden.
         assert_eq!(style.without_tags().for_tabs(), style);
         assert_eq!(style.for_tabs(), style);
-        // With tags in title bars, windows and tab groups fill their zones but for the gap.
+        // With tags in title bars, windows and tab groups fill their zones.
         let title_bars = FrameStyle {
             title_bars: true,
             ..style.without_tags()
         };
         assert_eq!(title_bars.for_tabs(), title_bars);
-        assert_eq!(title_bars.window_area(zone, 96), Rect::new(2, 2, 958, 1030));
+        assert_eq!(title_bars.window_area(zone, 96), zone);
         assert_eq!(title_bars.tag_area(zone, 96), None);
+        // A space between zones: half of it on each side of a window.
+        let apart = FrameStyle { gap: 8, ..title_bars };
+        assert_eq!(apart.window_area(zone, 96), Rect::new(4, 4, 956, 1028));
     }
 
     #[test]
@@ -278,19 +283,22 @@ mod tests {
     }
 
     #[test]
-    fn neighbours_are_apart_by_their_rings_only() {
-        // The owner: "space lost between zones". Two windows side by side are as far apart as
-        // their two rings are wide, so the rings touch and no desktop shows between them; a
-        // window at the screen's edge keeps room for its ring there.
-        let style = FrameStyle::default();
+    fn neighbouring_windows_meet_edge_to_edge() {
+        // The owner, again: "get rid of coloured borders, we lose space; just window to window".
+        // By default two windows side by side touch, and a window at the screen's edge reaches
+        // it: no desktop shows anywhere.
+        let style = FrameStyle {
+            title_bars: true,
+            ..FrameStyle::default().without_tags()
+        };
         let a = style.window_area(Rect::new(0, 0, 960, 1032), 96);
         let b = style.window_area(Rect::new(960, 0, 1920, 1032), 96);
-        assert_eq!(b.left - a.right, 2 * style.border);
-        assert_eq!(a.left, style.border);
+        assert_eq!((a.right, b.left), (960, 960));
+        assert_eq!((a.left, a.top, b.right, b.bottom), (0, 0, 1920, 1032));
         // At 200% too.
         let a = style.window_area(Rect::new(0, 0, 1920, 2064), 192);
         let b = style.window_area(Rect::new(1920, 0, 3840, 2064), 192);
-        assert_eq!(b.left - a.right, 2 * scale_for_dpi(style.border, 192));
+        assert_eq!(b.left - a.right, 0);
     }
 
     #[test]
@@ -305,7 +313,7 @@ mod tests {
         // (a browser full of tabs keeps a short stretch to be grabbed by).
         assert_eq!(tag_cut(81, 47, 96), TagCut::Initial(24));
         assert_eq!(tag_cut(81, 24, 96), TagCut::Initial(24));
-        // Less than that: no tag; the window wears its ring alone.
+        // Less than that: no tag.
         assert_eq!(tag_cut(81, 23, 96), TagCut::Hidden);
         assert_eq!(tag_cut(81, 0, 96), TagCut::Hidden);
         // A short name fits where its initial would.

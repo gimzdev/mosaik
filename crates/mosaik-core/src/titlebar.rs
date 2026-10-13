@@ -6,8 +6,8 @@
 //! terminals, Office). Mosaïk asks the same question along one row of the title bar ([`scan`]) and
 //! draws the tag, or the strip, in such a stretch ([`TitleRoom::spot`]), so the window keeps its
 //! whole zone. A tag with less room than its name needs is cut short, then to the zone's initial
-//! ([`crate::zone::tag_cut`]); a window with no stretch even for that wears its ring alone, at the
-//! top of its zone like its neighbours. A tab group's strip always goes at the right end of its
+//! ([`crate::zone::tag_cut`]); a window with no stretch even for that wears no tag (its ring
+//! alone, with rings on), at the top of its zone like its neighbours. A tab group's strip always goes at the right end of its
 //! visible tab's title bar ([`TitleRoom::strip_spot`]), over the end of a stretch too short for
 //! it: in the same place on every window, and no window moves for it. Only a window whose title
 //! bar never answers wears its strip above it, below a band, decided when it is placed.
@@ -370,7 +370,7 @@ mod tests {
             crate::zone::tag_cut(90, spot.width(), 96),
             crate::zone::TagCut::Initial(24)
         );
-        // 34 px of caption is too short even for that: the window wears its ring alone.
+        // 34 px of caption is too short even for that: the window wears no tag.
         let room = scan(frame, 96, bar(&[(1000, 1034)], 0, 40)).unwrap();
         assert_eq!(room.spot(frame, Fit::tag(90, 96)), None);
     }

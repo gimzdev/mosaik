@@ -96,6 +96,8 @@ export interface WorkspaceSummary {
   windows: number;
   zones: number;
   hotkey: string | null;
+  /** Its apps' names, front to back. */
+  apps: string[];
 }
 
 export interface MonitorState {
@@ -165,6 +167,22 @@ export interface WorkspaceApps {
   windows: OpenWindow[];
 }
 
+/** What a screen's windows say the user is doing (`task::Task`). */
+export type Task = 'coding' | 'design' | 'writing' | 'browsing' | 'talking' | 'playing' | 'general';
+
+/** What a layout made for a task is for, in a few words; none when nothing says. */
+export const TASK_WORDS: Record<Task, string | null> = {
+  coding: 'coding',
+  design: 'design',
+  writing: 'writing',
+  browsing: 'browsing',
+  talking: 'chat and mail',
+  playing: 'games',
+  general: null,
+};
+
+const isTask = (v: unknown): v is Task => typeof v === 'string' && Object.hasOwn(TASK_WORDS, v);
+
 /** What Arrange (with a layout, or without) would do on the main screen, in screen pixels. */
 export interface ArrangePreview {
   work_area: Rect;
@@ -172,6 +190,9 @@ export interface ArrangePreview {
   windows: PreviewWindow[];
   /** Windows on the other screens, which Arrange puts in zones there. */
   elsewhere: number;
+  /** What the main screen's windows say the user is doing, which Arrange lays it out for
+   * (none for a layout picked). */
+  task?: Task | null;
 }
 
 export type Reply =
@@ -323,7 +344,9 @@ function isWorkspace(x: unknown): x is WorkspaceSummary {
     isString(x.name) &&
     isNumber(x.windows) &&
     isNumber(x.zones) &&
-    isNullableString(x.hotkey)
+    isNullableString(x.hotkey) &&
+    Array.isArray(x.apps) &&
+    x.apps.every(isString)
   );
 }
 
@@ -364,7 +387,8 @@ export function isReply(x: unknown): x is Reply {
         x.zones.every(isPreviewZone) &&
         Array.isArray(x.windows) &&
         x.windows.every(isPreviewWindow) &&
-        isNumber(x.elsewhere)
+        isNumber(x.elsewhere) &&
+        (x.task === undefined || x.task === null || isTask(x.task))
       );
     case 'apps':
       return (

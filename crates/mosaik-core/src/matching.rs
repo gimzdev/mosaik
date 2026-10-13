@@ -58,6 +58,17 @@ fn title_parts(title: &str) -> Vec<String> {
 }
 
 impl TitleMatch {
+    /// The text it looks for.
+    pub fn text(&self) -> &str {
+        match self {
+            TitleMatch::Exact(s)
+            | TitleMatch::Contains(s)
+            | TitleMatch::StartsWith(s)
+            | TitleMatch::EndsWith(s)
+            | TitleMatch::Like(s) => s,
+        }
+    }
+
     pub fn matches(&self, title: &str) -> bool {
         self.bonus(title) > 0
     }

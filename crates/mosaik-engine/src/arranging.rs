@@ -1,21 +1,24 @@
-//! Arrange: every window on screen in the zone that suits it, and Undo.
+//! Arrange: every screen laid out for what its windows say the user is doing, and Undo.
 //!
-//! The plan is `mosaik_core::arrange::plan`; this applies it. The open workspace takes the
-//! windows it puts in zones (they join it if they were not part of it); with no workspace open,
-//! a new one is made from them. A monitor without zones gets zones for its windows. Windows left
-//! over once every zone has one are minimised. What Arrange changed can be undone for ten
-//! minutes, until a workspace is opened, saved or edited: the workspace goes back to what it
-//! was, and every window it moved or minimised goes back where it was.
+//! The plan is `mosaik_core::arrange::plan`; this applies it. Every monitor with windows gets
+//! the layout of its task, in place of the open workspace's zones there (a layout picked on the
+//! home page does the same on the main monitor); no window gets a zone smaller than its app lets
+//! it go. The open workspace takes the windows put in zones (they join it if they were not part
+//! of it); with no workspace open, a new one is made from them. The other windows are minimised.
+//! What Arrange changed can be undone for ten minutes, until a workspace is opened, saved or
+//! edited: the workspace goes back to what it was, and every window it moved or minimised goes
+//! back where it was.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use mosaik_core::arrange::{Chosen, Goes, Kind, Spot, Unit, ZoneRef, plan_with};
+use mosaik_core::arrange::{Chosen, Goes, Kind, Spot, Unit, plan_with};
 use mosaik_core::editing::without_zones;
 use mosaik_core::geometry::Rect;
 use mosaik_core::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
 use mosaik_core::place::{Resolver, Target, fit_size};
 use mosaik_core::presets::Preset;
+use mosaik_core::task::Task;
 use mosaik_core::topology::Topology;
 use mosaik_core::window::{WindowFacts, WindowHandle};
 use mosaik_core::workspace::{app_match, suggested_name, workspace_id};
@@ -54,6 +57,8 @@ struct Prepared {
     on_monitor: Vec<usize>,
     /// Where each window goes, in the order of `windows`.
     goes: Vec<Goes>,
+    /// What the main monitor's windows say the user is doing, when it is laid out for that.
+    task: Option<Task>,
     /// The workspace as it will be, where it goes in the list (`None`: a new one), and as it was.
     ws: Workspace,
     index: Option<usize>,
@@ -155,23 +160,27 @@ impl Engine {
             .map(|z| Spot {
                 name: z.name.clone(),
                 monitor: monitor_of(z.rect),
-                rect: z.rect,
             })
             .collect();
         let units: Vec<Unit> = windows
             .iter()
             .map(|w| {
                 let path = self.scanner.process_path(w.pid);
+                // How small it goes: what its app tells Windows, or its size when it keeps one.
+                let least = if w.resizable {
+                    let dpi = topology.monitor_for_rect(w.frame_rect).dpi;
+                    window::least_frame(window::hwnd(w.handle), w.window_rect, w.frame_rect, dpi)
+                        .unwrap_or_default()
+                } else {
+                    w.frame_rect.size()
+                };
                 Unit {
                     kind: Kind::of(w.exe.as_deref(), &w.class, w.aumid.as_deref()),
                     label: self.apps.label(w, path.as_deref()),
-                    exe: w.exe.clone(),
                     frame: w.frame_rect,
                     resizable: w.resizable,
+                    least,
                     monitor: monitor_of(w.frame_rect),
-                    zone: self
-                        .zone_of(w.handle, w.frame_rect, w.resizable, style)
-                        .and_then(|z| live.iter().position(|l| l.id == z.id)),
                 }
             })
             .collect();
@@ -204,27 +213,26 @@ impl Engine {
             }
         });
 
-        // The zones that make way for a picked layout go; windows in them keep their places
-        // until the plan moves them.
-        if let Some(c) = chosen {
-            let gone: Vec<ZoneId> = live
-                .iter()
-                .filter(|z| monitor_of(z.rect) == c.monitor)
-                .map(|z| z.id.clone())
-                .collect();
-            if !gone.is_empty() {
-                ws = without_zones(&ws, &gone, &topology, style);
-            }
+        // The open workspace's zones on the monitors laid out anew make way; windows in them
+        // keep their places until the plan moves them.
+        let gone: Vec<ZoneId> = plan
+            .gone
+            .iter()
+            .filter_map(|&i| live.get(i).map(|z| z.id.clone()))
+            .collect();
+        if !gone.is_empty() {
+            ws = without_zones(&ws, &gone, &topology, style);
         }
 
-        // New zones: on monitors that had none, and the picked layout's.
+        // The plan's zones, in its order.
         let mut zone_ids: HashSet<String> = ws.layout.zones.iter().map(|z| z.id.0.clone()).collect();
-        let mut made: Vec<ZoneId> = Vec::with_capacity(plan.new_zones.len());
+        let mut made: Vec<Option<ZoneId>> = Vec::with_capacity(plan.new_zones.len());
         for z in &plan.new_zones {
-            let id = ZoneId(fresh("z", &mut zone_ids));
             let Some(monitor) = topology.monitors().get(z.monitor) else {
+                made.push(None);
                 continue;
             };
+            let id = ZoneId(fresh("z", &mut zone_ids));
             let monitor = ws.layout.monitor_index(monitor, &topology);
             ws.layout.zones.push(Zone {
                 id: id.clone(),
@@ -233,12 +241,9 @@ impl Engine {
                 monitor,
                 area: z.area,
             });
-            made.push(id);
+            made.push(Some(id));
         }
-        let zone_id = |r: ZoneRef| match r {
-            ZoneRef::Existing(i) => live.get(i).map(|z| z.id.clone()),
-            ZoneRef::New(i) => made.get(i).cloned(),
-        };
+        let zone_id = |i: usize| made.get(i).cloned().flatten();
 
         // Each window's slot: the one it fills, or a new one for a window going into a zone (a
         // window minimised does not join the workspace).
@@ -323,6 +328,7 @@ impl Engine {
         }
         let on_monitor: Vec<usize> = units.iter().map(|u| u.monitor).collect();
         let labels: Vec<String> = units.into_iter().map(|u| u.label).collect();
+        let task = plan.tasks.get(main).copied().flatten();
         Ok(Prepared {
             preset,
             topology,
@@ -331,6 +337,7 @@ impl Engine {
             labels,
             on_monitor,
             goes: plan.goes,
+            task,
             ws,
             index,
             before,
@@ -338,7 +345,7 @@ impl Engine {
             moves,
             minimize,
             zoned,
-            made: made.len(),
+            made: made.iter().flatten().count(),
         })
     }
 
@@ -408,11 +415,14 @@ impl Engine {
                 plural(placed_n, "window", "windows"),
                 preset.label()
             ),
-            None => format!(
-                "Arranged {} in {}",
-                plural(placed_n, "window", "windows"),
-                plural(zones_n, "zone", "zones")
-            ),
+            None => match p.task.and_then(Task::words) {
+                Some(words) => format!("Arranged {} for {words}", plural(placed_n, "window", "windows")),
+                None => format!(
+                    "Arranged {} in {}",
+                    plural(placed_n, "window", "windows"),
+                    plural(zones_n, "zone", "zones")
+                ),
+            },
         };
         if p.index.is_none() {
             message.push_str(&format!(" of \u{201c}{name}\u{201d}, a new workspace"));
@@ -498,6 +508,7 @@ impl Engine {
             zones,
             windows,
             elsewhere,
+            task: p.task,
         }))
     }
 

@@ -117,11 +117,17 @@ pub(crate) fn band_is_solid(frame: Rect, tag: Option<Rect>, dpi: u32) -> Option<
     Some(got.is_some_and(|c| BANDS.iter().any(|b| close_to(c, *b))))
 }
 
-/// Checks the ring around a window and its tag (`tag`, as the engine reports it): the pixel just
-/// outside the middle of each side, and one inside the tag pill. A window wearing its tag above
-/// it, in a band, has the band inside its ring: the ring's top runs above the band, and the band
-/// is solid between the tag and the window's right edge.
-pub(crate) fn frame_colours(frame: Rect, color: ZoneColor, dpi: u32, tag: Option<Rect>) -> Value {
+/// Checks a window's tag (`tag`, as the engine reports it), one pixel inside the tag pill, and,
+/// with `rings` on, the ring around the window: the pixel just outside the middle of each side.
+/// A window wearing its tag above it, in a band, has the band inside its ring: the ring's top
+/// runs above the band, and the band is solid between the tag and the window's right edge.
+pub(crate) fn frame_colours(
+    frame: Rect,
+    color: ZoneColor,
+    dpi: u32,
+    tag: Option<Rect>,
+    rings: bool,
+) -> Value {
     let s = f64::from(dpi) / 96.0;
     #[allow(clippy::cast_possible_truncation)]
     let px = |v: f64| (v * s).round() as i32;
@@ -130,12 +136,16 @@ pub(crate) fn frame_colours(frame: Rect, color: ZoneColor, dpi: u32, tag: Option
     let top = above.map_or(frame.top, |t| t.top - px(3.0));
     // Inside the pill: a few pixels from its left end, half way down.
     let in_tag = tag.map(|t| Point::new(t.left + px(4.0), t.center().y));
-    let mut points = vec![
-        ("top", Point::new(frame.center().x, top - 1)),
-        ("bottom", Point::new(frame.center().x, frame.bottom)),
-        ("left", Point::new(frame.left - 1, frame.center().y)),
-        ("right", Point::new(frame.right, frame.center().y)),
-    ];
+    let mut points = if rings {
+        vec![
+            ("top", Point::new(frame.center().x, top - 1)),
+            ("bottom", Point::new(frame.center().x, frame.bottom)),
+            ("left", Point::new(frame.left - 1, frame.center().y)),
+            ("right", Point::new(frame.right, frame.center().y)),
+        ]
+    } else {
+        Vec::new()
+    };
     points.extend(in_tag.map(|t| ("tag", t)));
     let mut ok = tag.is_some();
     let mut seen = serde_json::Map::new();
@@ -150,7 +160,7 @@ pub(crate) fn frame_colours(frame: Rect, color: ZoneColor, dpi: u32, tag: Option
         ok &= got.is_some_and(|c| BANDS.iter().any(|b| close_to(c, *b)));
         seen.insert("band".into(), hex(got));
     }
-    json!({ "expected": format!("#{:02X}{:02X}{:02X}", color.fill().0, color.fill().1, color.fill().2), "ok": ok, "seen": seen })
+    json!({ "expected": format!("#{:02X}{:02X}{:02X}", color.fill().0, color.fill().1, color.fill().2), "rings": rings, "ok": ok, "seen": seen })
 }
 
 pub(crate) struct Probe {
@@ -167,6 +177,8 @@ pub(crate) struct Styles {
     pub style: FrameStyle,
     pub banded: FrameStyle,
     pub dpi: u32,
+    /// Windows wear coloured rings (off by default: windows meet edge to edge).
+    pub rings: bool,
 }
 
 impl Styles {
@@ -176,6 +188,7 @@ impl Styles {
                 style: settings.frames.effective_style(),
                 banded: settings.frames.banded_style().for_tabs(),
                 dpi,
+                rings: settings.frames.show_frames,
             }),
             other => Err(format!("settings: {other:?}")),
         }
@@ -408,7 +421,7 @@ fn scenario(
         }
         let frame = frame_rect(p.hwnd).ok_or("a probe window vanished")?;
         let wanted = styles.area(p.tiled, false);
-        let colours = colour_of(p.title).map(|c| frame_colours(frame, c, dpi, tag));
+        let colours = colour_of(p.title).map(|c| frame_colours(frame, c, dpi, tag, styles.rings));
         after_save.push(json!({
             "window": p.title,
             "error_px": edge_error(frame, wanted),
@@ -446,7 +459,7 @@ fn scenario(
         after_switch.push(json!({
             "window": p.title,
             "error_px": edge_error(frame, wanted),
-            "frame": colour_of(p.title).map(|c| frame_colours(frame, c, dpi, tag)),
+            "frame": colour_of(p.title).map(|c| frame_colours(frame, c, dpi, tag, styles.rings)),
         }));
     }
     let state = match engine.request(Command::State, TIMEOUT) {
@@ -1253,7 +1266,7 @@ fn tabs_and_snap(
     let back_tag = tag_of(engine, terminal.hwnd).ok().map(|(t, _)| t);
     let back = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
     // Its ring and tag, read now: the next step moves it again.
-    let back_colours = frame_colours(back, ZoneColor::Verdigris, styles.dpi, back_tag);
+    let back_colours = frame_colours(back, ZoneColor::Verdigris, styles.dpi, back_tag, styles.rings);
 
     // 5. Drop it on the code window again, at the left end of where a drop makes tabs: near the
     // screen's top-left corner, where Windows' own snapping also watches the pointer.

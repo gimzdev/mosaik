@@ -1,15 +1,17 @@
 // The home page: tidy the screen in one click. A picture of the main screen shows where each
 // window would go while the pointer (or the keyboard) is on Arrange or a layout; a click does it,
-// and Undo puts everything back. Below, the saved workspaces, one click away. Words are few: the
-// picture shows what each button does.
+// and Undo puts everything back. Below, the saved workspaces with their apps, one click away
+// (Apps shows them in full, to change them). Words are few: the picture shows what each button
+// does.
 
 import { useCallback, useEffect, useState } from 'react';
 
 import { PRESETS, type Preset, presetShape } from './editor/model';
 import { onWorkspacesChanged, request } from './engine';
-import { type ArrangePreview, type WorkspaceSummary, type ZoneColor, errorMessage } from './protocol';
+import { type ArrangePreview, TASK_WORDS, type WorkspaceSummary, type ZoneColor, errorMessage } from './protocol';
 import { Stage } from './Stage';
 import { Button, Keys, PageTitle, useSay } from './ui';
+import { AppsPanel } from './WorkspaceApps';
 
 /** The layouts, the most used first (landscape screens), then rows and the whole screen. */
 const ORDER: readonly Preset[] = [
@@ -54,6 +56,26 @@ function Tile({ preset }: { preset: Preset }) {
   );
 }
 
+/** A workspace's apps at a glance: the first few by name, then how many more. */
+function AppNames({ names }: { names: string[] }) {
+  if (names.length === 0) return <p className="mt-1 text-small text-[var(--muted)]">No apps yet.</p>;
+  const shown = names.slice(0, 5);
+  const more = names.length - shown.length;
+  return (
+    <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Its apps">
+      {shown.map((n, i) => (
+        <li
+          key={`${n}-${String(i)}`}
+          className="max-w-48 truncate rounded-full border border-[var(--line)] px-2 text-caption leading-5 text-[var(--muted)]"
+        >
+          {n}
+        </li>
+      ))}
+      {more > 0 ? <li className="px-1 text-caption leading-5 text-[var(--muted)]">+{String(more)}</li> : null}
+    </ul>
+  );
+}
+
 function plural(n: number, one: string, many: string) {
   return `${String(n)} ${n === 1 ? one : many}`;
 }
@@ -65,7 +87,13 @@ function caption(preview: ArrangePreview | null, pointing: Pointing, unread: boo
   const elsewhere = preview.elsewhere ? ` (+${String(preview.elsewhere)} on other screens)` : '';
   if (pointing === null)
     return n === 0 ? 'Your main screen now' : `Your main screen now: ${plural(n, 'window', 'windows')}${elsewhere}`;
-  const name = pointing === 'auto' ? 'Arrange' : (PRESETS.find((p) => p.id === pointing)?.label ?? pointing);
+  const words = preview.task ? TASK_WORDS[preview.task] : null;
+  const name =
+    pointing === 'auto'
+      ? words
+        ? `Arrange, for ${words}`
+        : 'Arrange'
+      : (PRESETS.find((p) => p.id === pointing)?.label ?? pointing);
   const gone = preview.windows.filter((w) => w.minimized).length;
   const what =
     n === 0
@@ -99,6 +127,8 @@ export function Home({
   const [list, setList] = useState<WorkspaceSummary[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  /** The workspace whose apps show in full, to change them. */
+  const [appsOf, setAppsOf] = useState<string | null>(null);
 
   const readScreen = useCallback(() => {
     void request({ cmd: 'preview_arrange' }).then((reply) => {
@@ -319,27 +349,46 @@ export function Home({
           <p className="mt-1 text-small text-[var(--muted)]">Arranged windows are kept here, one click away.</p>
         ) : (
           <ul className="mt-2 flex flex-col divide-y divide-[var(--line)] rounded-xl border border-[var(--line)] bg-[var(--surface)]">
-            {list.slice(0, 6).map((w) => (
-              <li key={w.id} className="flex items-center justify-between gap-3 px-4 py-2">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate font-semibold">{w.name}</span>
-                  {active === w.id ? (
-                    <span className="shrink-0 rounded-full border border-[var(--ok)] px-2 text-caption leading-5 font-semibold text-[var(--ok)]">
-                      Open now
+            {list.slice(0, 6).map((w) => {
+              const showing = appsOf === w.id;
+              return (
+                <li key={w.id} className="px-4 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-semibold">{w.name}</span>
+                      {active === w.id ? (
+                        <span className="shrink-0 rounded-full border border-[var(--ok)] px-2 text-caption leading-5 font-semibold text-[var(--ok)]">
+                          Open now
+                        </span>
+                      ) : null}
                     </span>
-                  ) : null}
-                </span>
-                <Button
-                  label={`Open “${w.name}”`}
-                  pending={opening === w.id}
-                  onClick={() => {
-                    open(w);
-                  }}
-                >
-                  Open
-                </Button>
-              </li>
-            ))}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <Button
+                        tone="quiet"
+                        label={`Apps of “${w.name}”`}
+                        expanded={showing}
+                        controls={`home-apps-${w.id}`}
+                        onClick={() => {
+                          setAppsOf(showing ? null : w.id);
+                        }}
+                      >
+                        Apps
+                      </Button>
+                      <Button
+                        label={`Open “${w.name}”`}
+                        pending={opening === w.id}
+                        onClick={() => {
+                          open(w);
+                        }}
+                      >
+                        Open
+                      </Button>
+                    </span>
+                  </div>
+                  {showing ? <AppsPanel workspace={w.id} id={`home-apps-${w.id}`} /> : <AppNames names={w.apps} />}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

@@ -6,6 +6,7 @@ use mosaik_core::geometry::Rect;
 use mosaik_core::journal::{HiddenWindow, HideMethod};
 use mosaik_core::layout::{SlotId, TabGroupId, WorkspaceId};
 use mosaik_core::settings::Settings;
+use mosaik_core::task::Task;
 use mosaik_core::window::{Elevation, WindowHandle};
 use mosaik_core::zone::{ZoneColor, ZoneId};
 use serde::{Deserialize, Serialize};
@@ -13,8 +14,9 @@ use thiserror::Error;
 
 /// Raised when commands or replies change; a client may be older than Mosaïk, never newer.
 /// 4: `arrange` takes a layout, and `preview_arrange` shows what it would do.
-/// 5: a workspace's apps (`apps`, `add_app`, `move_app`, `remove_app`); Arrange minimises the
-/// windows it has no zone for, rather than making them tabs.
+/// 5: a workspace's apps (`apps`, `add_app`, `move_app`, `remove_app`, and their names in
+/// `workspaces`); Arrange minimises the windows it has no zone for, rather than making them
+/// tabs, and its preview says the task the main monitor is laid out for.
 pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
@@ -249,6 +251,10 @@ pub struct ArrangePreview {
     pub windows: Vec<PreviewWindow>,
     /// Windows on the other monitors, which Arrange arranges there.
     pub elsewhere: u32,
+    /// What the main monitor's windows say the user is doing, which its layout is made for
+    /// (`None` for a layout picked, or no windows).
+    #[serde(default)]
+    pub task: Option<Task>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -406,6 +412,9 @@ pub struct WorkspaceSummary {
     pub windows: usize,
     pub zones: usize,
     pub hotkey: Option<String>,
+    /// Its apps' names, front to back ("Visual Studio Code").
+    #[serde(default)]
+    pub apps: Vec<String>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -872,6 +881,12 @@ mod wire {
                     windows: 4,
                     zones: 3,
                     hotkey: None,
+                    apps: vec![
+                        "Visual Studio Code".into(),
+                        "Google Chrome".into(),
+                        "Windows Terminal".into(),
+                        "Slack".into(),
+                    ],
                 }],
                 active: Some(WorkspaceId("ship".into())),
             },
@@ -929,13 +944,13 @@ mod wire {
                     PreviewWindow {
                         label: "Visual Studio Code".into(),
                         now: Rect::new(120, 80, 1100, 760),
-                        then: Some(Rect::new(2, 2, 958, 1030)),
+                        then: Some(Rect::new(0, 0, 960, 1032)),
                         minimized: false,
                     },
                     PreviewWindow {
                         label: "Google Chrome".into(),
                         now: Rect::new(700, 200, 1800, 980),
-                        then: Some(Rect::new(962, 2, 1918, 1030)),
+                        then: Some(Rect::new(960, 0, 1920, 1032)),
                         minimized: false,
                     },
                     PreviewWindow {
@@ -946,6 +961,7 @@ mod wire {
                     },
                 ],
                 elsewhere: 1,
+                task: Some(Task::Coding),
             })),
             Reply::Apps(Box::new(WorkspaceApps {
                 workspace: WorkspaceId("ship".into()),

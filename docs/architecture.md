@@ -58,9 +58,9 @@ the engine gathers windows and applies the result.
 - **Saving** (S in the switcher, then a name) turns the windows on screen into a workspace.
   Windows that tile, side by side without overlapping, become zones named after their app;
   windows stacked exactly on top of each other share a zone; maximised windows and windows
-  floating over others keep their own place. Windows in zones then fill them, as far apart as
-  their two rings are wide (4 px at 100%), so no desktop shows between them. Saving under an
-  existing name updates that workspace and keeps the zones its windows sit in.
+  floating over others keep their own place. Windows in zones then fill them, edge to edge, so no
+  desktop shows between them (ADR 0020). Saving under an existing name updates that workspace
+  and keeps the zones its windows sit in.
 - **Being in a zone** has one rule everywhere (`holds`): the window's centre is in the zone and
   the window and the zone's window area cover at least 70% of each other. A browser that will
   not shrink to a narrow zone still counts; a small window floating over a zone does not. A
@@ -76,19 +76,20 @@ the engine gathers windows and applies the result.
   several windows of one app apart), moves them all at once, starts missing apps, minimises the
   previous workspace's other windows that are on screen, brings its windows forward and gives
   the front one the keyboard. 400 ms later, windows an app moved back are put in place once.
-- **Frames**: every window in a zone of the open workspace wears a ring in the zone's colour and
-  a tag with its name, drawn right above the window in the stacking order, so windows that
-  cover it cover its frame too. Frames follow moves through window events, hooked per process.
+- **Frames**: every window in a zone of the open workspace wears a tag with its zone's name and
+  colour, and, when the user turns rings on, a ring in that colour (then windows sit two rings
+  apart; ADR 0020). Both are drawn right above the window in the stacking order, so windows
+  that cover it cover them too, and follow moves through window events, hooked per process.
 - **Tags** (ADR 0011): the tag goes in a free stretch of the window's own title bar, against its
   buttons, found by asking the window what is under a row of points, as Windows does wherever
   the pointer goes (`WM_NCHITTEST`), on a thread of its own (`titles`). Every window fills its
   zone and starts at its top: a tag with little room is cut short, then to the zone's initial
-  (`zone::tag_cut`), and a window with no room even for that wears its ring alone. Only the tab
+  (`zone::tag_cut`), and a window with no room even for that wears none. Only the tab
   that shows of a group whose title bar has no room for the group's strip sits below a band
   with the strip in it, once two readings a quarter of a second apart agree. A setting puts
-  every tag in a bar at the top of its zone instead, above every window. A band is solid and
-  inside the window's ring, so the two read as one window, and the window can be dragged by it
-  as by its title bar (Mosaïk moves it with the pointer).
+  every tag in a bar at the top of its zone instead, above every window. A band is solid and,
+  with rings on, inside the window's ring, so the two read as one window; the window can be
+  dragged by it as by its title bar (Mosaïk moves it with the pointer).
 - **Drag to snap**: while a window is dragged by its title bar, the open workspace's zones show
   under it; the zone under the pointer (or within 48 px) is tinted, and the window is pulled into
   it on release. Shift moves freely; a setting swaps that. A window that was not part of the
@@ -99,12 +100,15 @@ the engine gathers windows and applies the result.
   windows with it; the zones show as they will be while the resize lasts. An app that keeps a
   larger size than its new zone pushes the line back, once. An edge on the monitor's border has
   no line: the window goes back to its zone. Shift resizes freely.
-- **Arrange** (ADR 0014): one command puts every window on screen in the zone that suits it, by a
-  pure planner (`mosaik_core::arrange`): zones named after an app or a kind of app draw those
-  windows, the windows used most get the largest zones, windows stay where they are when they
-  fit, and windows left over are minimised (ADR 0017). A monitor without zones gets a preset for
-  its windows, or a grid for more than four; with no workspace open, a new one is made. Undo
-  puts everything back, for ten minutes.
+- **Arrange** (ADR 0014, 0019): one command lays out every monitor with windows for the task its
+  windows say (`mosaik_core::task`: coding, design, writing, browsing, chat and mail, games), by
+  a pure planner (`mosaik_core::arrange`). The window the task is done in gets the most room, a
+  terminal goes under the editor when coding, and the windows that help most sit beside it; the
+  others are minimised (ADR 0017). Its zones replace the open workspace's on that monitor; with
+  no workspace open, a new one is made. No window gets a zone smaller than its app lets it go
+  (`window::least_frame`, from `WM_GETMINMAXINFO`): the main zone grows, fewer windows sit beside
+  it, and a window that fits nowhere is minimised. Arranging twice moves nothing. Undo puts
+  everything back, for ten minutes.
 - **Windows move only on the user's actions** (ADR 0017): Arrange, a layout, opening or saving
   a workspace, a drop, the zone editor, a resize by hand, a tab clicked, an app added or moved.
   A title bar read again later (a window brought forward) changes no band and moves no window;
@@ -114,9 +118,10 @@ the engine gathers windows and applies the result.
   (`mosaik_core::editing`), saved, then applied at once in the open workspace.
 - **The home page** (ADR 0016): a picture of the main monitor, drawn from `preview_arrange`
   (the same preparation as Arrange, changing nothing). While the pointer or the keyboard is on
-  Arrange or one of ten layouts, the windows glide to where they would go and the zones appear;
-  a click does it. A layout replaces the main monitor's zones with its own, and Undo brings
-  them back.
+  Arrange or one of ten layouts, the windows glide to where they would go and the zones appear,
+  and the caption says the task Arrange read; a click does it. A layout replaces the main
+  monitor's zones with its own, for the windows that fit them, and Undo brings them back. Below,
+  each workspace lists its apps.
 - **The quick menu** (ADR 0015, 0017): a thin line on an edge of the main monitor slides open
   as soon as the pointer stops on it, onto Mosaïk's window and the open workspace, Arrange, the
   switcher, saving, the zone editor and snapping, without taking the keyboard. It hides while a game or a video fills the main monitor.

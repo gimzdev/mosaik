@@ -42,7 +42,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.4.0"
+MK_VERSION="1.5.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -529,8 +529,8 @@ const FEATURES = [
   {
     id: 'zones',
     title: 'Zones give every window a home',
-    body: 'Pick one of ten layouts, or carve the screen into your own named areas, like Code, Terminal and Review. Before you click, Mosaïk shows where each of your windows would go. Drag a window near a zone and it is pulled in; resize it and the zones beside it make room.',
-    points: ['Zones belong to the project, not the monitor', 'Every window wears its zone’s colour, so you can tell at a glance', 'Works across multiple displays'],
+    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, the windows that help sit beside it, and the rest wait in the taskbar. Or pick one of ten layouts, or carve the screen into your own named areas. Before you click, Mosaïk shows where each window would go.',
+    points: ['Zones belong to the project, not the monitor', 'Windows meet edge to edge, so no space is lost', 'Works across multiple displays'],
     Art: ZonesArt,
   },
   {
@@ -567,19 +567,14 @@ export default function Home() {
               <br />
               in its place.
             </h1>
-            <div className="lg:col-span-5 lg:pb-2">
-              <p className="max-w-[30rem] text-[18px] leading-[1.45] text-slate sm:text-[19px]">
-                Every project gets its own workspace: your apps and windows arranged and ready in one click.
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-3 lg:col-span-5 lg:justify-end lg:pb-3">
+              <DownloadButton className="btn btn-lapis" />
+              <p className="flex flex-col text-[15px] leading-snug text-slate">
+                <span>Free and open source.</span>
+                <Link href="/download" className="self-start font-semibold text-ink underline decoration-grout underline-offset-4 hover:decoration-ink">
+                  Requirements
+                </Link>
               </p>
-              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
-                <DownloadButton className="btn btn-lapis" />
-                <p className="text-[15px] text-slate">
-                  Free and open source.{' '}
-                  <Link href="/download" className="font-semibold text-ink underline decoration-grout underline-offset-4 hover:decoration-ink">
-                    Requirements
-                  </Link>
-                </p>
-              </div>
             </div>
           </div>
           <div className="mt-10 md:mt-12">
@@ -1503,8 +1498,8 @@ export const AppBody = memo(function AppBody({ win }: { win: Pick<Win, 'kind' | 
 });
 
 /**
- * A window. With Mosaïk it wears its zone frame, and its zone tag in its own title bar, next to its buttons
- * (`tagAt` places it elsewhere in that bar); plain, it is just a window; flat, it is maximised.
+ * A window. With Mosaïk it wears its zone tag in its own title bar, next to its buttons (`tagAt` places it
+ * elsewhere in that bar); plain, it is just a window; flat, it is maximised.
  */
 export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; tagAt?: CSSProperties; children: ReactNode }) {
   const z = ZONE[zone];
@@ -1517,10 +1512,10 @@ export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: st
         {tag}
       </span>
       <div
-        className="h-full w-full overflow-hidden transition-[box-shadow] duration-300"
+        className="h-full w-full overflow-hidden"
         style={{
           borderRadius: flat ? 0 : 10,
-          boxShadow: flat ? 'none' : plain ? '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)' : `0 0 0 2px ${z.bg}, 0 22px 44px -12px rgba(0,0,0,0.6)`,
+          boxShadow: flat ? 'none' : '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)',
         }}
       >
         {children}
@@ -2178,9 +2173,8 @@ const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
 const TASKBAR = 40; // the Windows taskbar, along the bottom
-// Zones fill the desktop above the taskbar; as in the app, windows are as far apart as their two rings are
-// wide (the rings touch), and half that from the desktop's edges.
-const [TOP, BOTTOM, SIDE, PAD] = [0, TASKBAR, 0, 4];
+// Zones fill the desktop above the taskbar; as in the app, windows meet edge to edge.
+const [TOP, BOTTOM, SIDE, PAD] = [0, TASKBAR, 0, 0];
 
 /** The shortcut that opens Mosaïk's switcher (the app's default). */
 export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];
@@ -2190,7 +2184,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
-  // Windows fill their zones (each wears its tag in its own title bar), as far apart as their two rings are wide.
+  // Windows fill their zones (each wears its tag in its own title bar), edge to edge.
   return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + PAD / 2), width: r1(cols * colW - PAD), height: r1(rows * rowH - PAD) };
 }
 

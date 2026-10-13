@@ -16,7 +16,7 @@ what it costs. Measurements behind a decision are summarised in the record and i
 | [0008](0008-store-distribution.md) | Distribution through the Microsoft Store, downloaded from mosaïk.com |
 | [0009](0009-tabs-one-rule.md) | One rule for what tabs show, applied on a hiding thread |
 | [0010](0010-drags-and-other-arrangers.md) | Move or resize from the pointer Windows shows; Windows' snapping and other arrangers named once, never fought |
-| [0011](0011-tags-in-title-bars.md) | Tags and tab strips in each window's own title bar, read from what the app answers; since 1.1 a window alone is never lowered: a tag with little room is cut to its zone's initial, or the window wears its ring alone; a strip always sits at the right end of its title bar (ADR 0017) |
+| [0011](0011-tags-in-title-bars.md) | Tags and tab strips in each window's own title bar, read from what the app answers; since 1.1 a window alone is never lowered: a tag with little room is cut to its zone's initial, else none; a strip always sits at the right end of its title bar (ADR 0017) |
 | [0012](0012-every-kind-of-app.md) | Borderless app windows managed, fixed-size windows never resized, full screen left alone |
 | [0013](0013-zones-follow-a-resize.md) | Resizing a window in a zone moves the lines between zones; apps that keep a larger size push back |
 | [0014](0014-arrange.md) | Arrange: a pure planner puts every window in the zone that suits it, with undo |
@@ -24,3 +24,5 @@ what it costs. Measurements behind a decision are summarised in the record and i
 | [0016](0016-home-page.md) | A home page that shows what Arrange, or a layout, would do before it does it |
 | [0017](0017-arrange-minimises-and-moves-only-when-asked.md) | Arrange minimises what it has no zone for; windows move only on the user's actions; strips always in title bars; a quicker quick menu |
 | [0018](0018-a-workspaces-apps.md) | A workspace's apps, listed and edited on the Workspaces page |
+| [0019](0019-arrange-lays-out-for-the-task.md) | Arrange lays every screen out for its task, the main window the most room; no window gets a zone it cannot fit; proper app names |
+| [0020](0020-windows-edge-to-edge.md) | Windows meet edge to edge, without coloured rings by default |

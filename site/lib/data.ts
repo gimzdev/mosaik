@@ -72,9 +72,8 @@ const DESK_W = 1280;
 export const DESK_H = 800;
 export const DESK_H_TALL = 960; // phones get a taller desktop
 const TASKBAR = 40; // the Windows taskbar, along the bottom
-// Zones fill the desktop above the taskbar; as in the app, windows are as far apart as their two rings are
-// wide (the rings touch), and half that from the desktop's edges.
-const [TOP, BOTTOM, SIDE, PAD] = [0, TASKBAR, 0, 4];
+// Zones fill the desktop above the taskbar; as in the app, windows meet edge to edge.
+const [TOP, BOTTOM, SIDE, PAD] = [0, TASKBAR, 0, 0];
 
 /** The shortcut that opens Mosaïk's switcher (the app's default). */
 export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];
@@ -84,7 +83,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
-  // Windows fill their zones (each wears its tag in its own title bar), as far apart as their two rings are wide.
+  // Windows fill their zones (each wears its tag in its own title bar), edge to edge.
   return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + PAD / 2), width: r1(cols * colW - PAD), height: r1(rows * rowH - PAD) };
 }
 

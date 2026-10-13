@@ -59,11 +59,11 @@
           "side": "right"
         },
         "frames": {
-          "show_frames": true,
+          "show_frames": false,
           "show_tags": true,
           "style": {
             "border": 2,
-            "gap": 4,
+            "gap": 0,
             "tag_band": 28
           },
           "tags_in_title_bar": true
@@ -88,7 +88,7 @@
         },
         "tab_hiding": null,
         "theme": "system",
-        "version": 4
+        "version": 5
       }
     },
     {
@@ -170,6 +170,12 @@
       "reply": "workspaces",
       "workspaces": [
         {
+          "apps": [
+            "Visual Studio Code",
+            "Google Chrome",
+            "Windows Terminal",
+            "Slack"
+          ],
           "hotkey": null,
           "id": "ship",
           "name": "Ship the release",
@@ -202,11 +208,11 @@
           "side": "right"
         },
         "frames": {
-          "show_frames": true,
+          "show_frames": false,
           "show_tags": true,
           "style": {
             "border": 2,
-            "gap": 4,
+            "gap": 0,
             "tag_band": 28
           },
           "tags_in_title_bar": true
@@ -231,7 +237,7 @@
         },
         "tab_hiding": null,
         "theme": "system",
-        "version": 4
+        "version": 5
       }
     },
     {
@@ -286,6 +292,7 @@
     {
       "elsewhere": 1,
       "reply": "preview",
+      "task": "coding",
       "windows": [
         {
           "label": "Visual Studio Code",
@@ -297,10 +304,10 @@
             "top": 80
           },
           "then": {
-            "bottom": 1030,
-            "left": 2,
-            "right": 958,
-            "top": 2
+            "bottom": 1032,
+            "left": 0,
+            "right": 960,
+            "top": 0
           }
         },
         {
@@ -313,10 +320,10 @@
             "top": 200
           },
           "then": {
-            "bottom": 1030,
-            "left": 962,
-            "right": 1918,
-            "top": 2
+            "bottom": 1032,
+            "left": 960,
+            "right": 1920,
+            "top": 0
           }
         },
         {

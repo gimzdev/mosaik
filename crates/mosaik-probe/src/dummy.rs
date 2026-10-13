@@ -30,6 +30,9 @@ thread_local! {
     /// `--min-width N`: the window will not be narrower than N pixels, as a browser keeps
     /// about 500.
     static MIN_WIDTH: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    /// `--min-height N`: the window will not be shorter than N pixels, as Battle.net keeps about
+    /// 720.
+    static MIN_HEIGHT: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
 }
 
 /// The app's own title bar in a `--borderless` window, and its buttons at the right of it.
@@ -38,11 +41,11 @@ const OWN_BUTTONS: i32 = 138;
 const RESIZE_EDGE: i32 = 6;
 
 /// `mosaik-probe dummy --title T --rect l,t,r,b [--topmost] [--self-move] [--no-title-room]
-/// [--borderless] [--fixed] [--full-screen] [--min-width N]`: shows the window and runs until it
-/// is closed or the
-/// process is killed. `--topmost` keeps it above the user's windows, so a probe that presses the
-/// mouse on its title bar never lands on something else. `--full-screen` covers the main monitor,
-/// taskbar included, borderless, as a game in full screen.
+/// [--borderless] [--fixed] [--full-screen] [--min-width N] [--min-height N]`: shows the window
+/// and runs until it is closed or the process is killed. `--topmost` keeps it above the user's
+/// windows, so a probe that presses the mouse on its title bar never lands on something else.
+/// `--full-screen` covers the main monitor, taskbar included, borderless, as a game in full
+/// screen.
 pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
     let has = |o: &str| args.iter().any(|a| a == o);
     SELF_MOVE.with(|m| m.set(has("--self-move")));
@@ -50,13 +53,15 @@ pub fn run(args: &[String]) -> Result<serde_json::Value, String> {
     let full_screen = has("--full-screen");
     BORDERLESS.with(|m| m.set(has("--borderless") || full_screen));
     FIXED.with(|m| m.set(has("--fixed") || full_screen));
-    let min_width = args
-        .iter()
-        .position(|a| a == "--min-width")
-        .and_then(|i| args.get(i + 1))
-        .and_then(|n| n.parse::<i32>().ok())
-        .unwrap_or(0);
-    MIN_WIDTH.with(|m| m.set(min_width));
+    let number = |option: &str| {
+        args.iter()
+            .position(|a| a == option)
+            .and_then(|i| args.get(i + 1))
+            .and_then(|n| n.parse::<i32>().ok())
+            .unwrap_or(0)
+    };
+    MIN_WIDTH.with(|m| m.set(number("--min-width")));
+    MIN_HEIGHT.with(|m| m.set(number("--min-height")));
     let title = args
         .iter()
         .position(|a| a == "--title")
@@ -128,7 +133,8 @@ unsafe extern "system" fn dummy_proc(
         return windows::Win32::Foundation::LRESULT(0);
     }
     let min_width = MIN_WIDTH.with(std::cell::Cell::get);
-    if msg == windows::Win32::UI::WindowsAndMessaging::WM_GETMINMAXINFO && min_width > 0 {
+    let min_height = MIN_HEIGHT.with(std::cell::Cell::get);
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_GETMINMAXINFO && (min_width > 0 || min_height > 0) {
         // SAFETY: Windows passes a valid MINMAXINFO with this message; the default handling
         // fills it first.
         unsafe {
@@ -136,6 +142,7 @@ unsafe extern "system" fn dummy_proc(
             let info = lparam.0 as *mut windows::Win32::UI::WindowsAndMessaging::MINMAXINFO;
             if let Some(info) = info.as_mut() {
                 info.ptMinTrackSize.x = info.ptMinTrackSize.x.max(min_width);
+                info.ptMinTrackSize.y = info.ptMinTrackSize.y.max(min_height);
             }
             return hit;
         }

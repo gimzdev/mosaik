@@ -7,19 +7,22 @@
 // `?nowindows=1` (nothing open on screen), `?broken=1` (the engine does not answer).
 
 import { PRESETS, type Preset, presetShape } from './editor/model';
-import type {
-  ArrangePreview,
-  Command,
-  HotkeyState,
-  MonitorState,
-  PreviewWindow,
-  Rect,
-  Reply,
-  Settings,
-  WorkspaceApp,
-  WorkspaceSummary,
-  ZoneColor,
-  ZoneEdit,
+import {
+  type ArrangePreview,
+  type Command,
+  type HotkeyState,
+  type MonitorState,
+  type PreviewWindow,
+  type RatioRect,
+  type Rect,
+  type Reply,
+  type Settings,
+  TASK_WORDS,
+  type Task,
+  type WorkspaceApp,
+  type WorkspaceSummary,
+  type ZoneColor,
+  type ZoneEdit,
 } from './protocol';
 
 const params = new URLSearchParams(window.location.search);
@@ -50,14 +53,14 @@ const monitors: MonitorState[] = [
 ];
 
 const settings: Settings = {
-  version: 4,
+  version: 5,
   switcher_hotkey: 'Win+Alt+Space',
   snap: { enabled: true, invert_shift: false, near: 48, resize_zones: true },
   frames: {
-    show_frames: true,
+    show_frames: false,
     show_tags: true,
     tags_in_title_bar: true,
-    style: { gap: 4, tag_band: 28, border: 2 },
+    style: { gap: 0, tag_band: 28, border: 2 },
   },
   tab_hiding: null,
   switching: { minimize_others: true, launch_missing: true },
@@ -75,7 +78,8 @@ function hotkey(): HotkeyState {
     : { shortcut: settings.switcher_hotkey, registered: true, problem: null };
 }
 
-interface Workspace extends WorkspaceSummary {
+/** A workspace as the stand-in keeps it: its apps' names come from its list of apps. */
+interface Workspace extends Omit<WorkspaceSummary, 'apps'> {
   zoneList: ZoneEdit[];
   appList: WorkspaceApp[];
 }
@@ -148,6 +152,8 @@ let revision = 1;
 /** The windows on the main screen, front to back, as `preview_arrange` reports them. */
 interface OnScreen {
   label: string;
+  /** What it is, as `arrange::Kind` says. */
+  kind: 'code' | 'browser' | 'terminal' | 'chat';
   /** What Arrange names its zone. */
   zone: string;
   now: Rect;
@@ -156,22 +162,79 @@ let onScreen: OnScreen[] =
   params.get('nowindows') === '1'
     ? []
     : [
-        { label: 'Visual Studio Code', zone: 'Code', now: { left: 180, top: 120, right: 1500, bottom: 980 } },
-        { label: 'Google Chrome', zone: 'Browser', now: { left: 900, top: 260, right: 2300, bottom: 1240 } },
-        { label: 'Windows Terminal', zone: 'Terminal', now: { left: 1400, top: 760, right: 2200, bottom: 1300 } },
-        { label: 'Slack', zone: 'Chat', now: { left: 300, top: 640, right: 1100, bottom: 1250 } },
+        {
+          label: 'Visual Studio Code',
+          kind: 'code',
+          zone: 'Code',
+          now: { left: 180, top: 120, right: 1500, bottom: 980 },
+        },
+        {
+          label: 'Google Chrome',
+          kind: 'browser',
+          zone: 'Browser',
+          now: { left: 900, top: 260, right: 2300, bottom: 1240 },
+        },
+        {
+          label: 'Windows Terminal',
+          kind: 'terminal',
+          zone: 'Terminal',
+          now: { left: 1400, top: 760, right: 2200, bottom: 1300 },
+        },
+        { label: 'Slack', kind: 'chat', zone: 'Chat', now: { left: 300, top: 640, right: 1100, bottom: 1250 } },
       ];
 /** Where the windows were before the last Arrange, for Undo. */
 let beforeArrange: OnScreen[] | null = null;
 
 const ZONE_COLORS: ZoneColor[] = ['lapis', 'verdigris', 'saffron', 'madder', 'slate'];
 
-/** The layout Arrange gives a screen for this many windows (`Preset::for_windows`). */
-function autoPreset(windows: number): Preset {
-  if (windows <= 1) return 'full';
-  if (windows === 2) return 'halves';
-  if (windows === 3) return 'half-stack';
-  return 'quarters';
+/** The layout Arrange gives a screen of windows of no particular task (`task::layout`): the
+ * window used last takes the most room, up to three sit beside it. */
+function autoShape(windows: number): RatioRect[] {
+  const share = [1, 0.6, 0.58, 0.55][Math.min(windows, 4) - 1] ?? 1;
+  const beside = Math.min(windows, 4) - 1;
+  const main = { left: 0, top: 0, right: share, bottom: 1 };
+  const rows = beside === 2 ? [0, 0.55, 1] : Array.from({ length: beside + 1 }, (_, k) => k / Math.max(1, beside));
+  return [
+    main,
+    ...Array.from({ length: beside }, (_, k) => ({
+      left: share,
+      top: rows[k] ?? 0,
+      right: 1,
+      bottom: rows[k + 1] ?? 1,
+    })),
+  ];
+}
+
+/** The layout Arrange gives the windows on screen (`task::layout`, for these kinds): with an
+ * editor it is coding: the editor takes the most room, the terminal goes under it, the others
+ * sit beside them; with none, the window used last takes the most room and up to three sit
+ * beside it. The zones, and the zone each window (front to back) takes. */
+function autoLayout(): { task: Task; shape: RatioRect[]; takes: (number | undefined)[] } {
+  const code = onScreen.findIndex((s) => s.kind === 'code');
+  if (code < 0) {
+    const shape = autoShape(onScreen.length);
+    return { task: 'general', shape, takes: onScreen.map((_, n) => (n < shape.length ? n : undefined)) };
+  }
+  const below = onScreen.findIndex((s) => s.kind === 'terminal');
+  const sides = onScreen
+    .map((_, n) => n)
+    .filter((n) => n !== code && n !== below)
+    .slice(0, 3);
+  const share = [1, 0.6, 0.58, 0.55][sides.length] ?? 0.55;
+  const split = below >= 0 ? 0.68 : 1;
+  const shape: RatioRect[] = [{ left: 0, top: 0, right: share, bottom: split }];
+  const takes: (number | undefined)[] = onScreen.map(() => undefined);
+  takes[code] = 0;
+  if (below >= 0) {
+    takes[below] = shape.length;
+    shape.push({ left: 0, top: split, right: share, bottom: 1 });
+  }
+  const rows = sides.length === 2 ? [0, 0.55, 1] : Array.from({ length: sides.length + 1 }, (_, k) => k / sides.length);
+  sides.forEach((n, k) => {
+    takes[n] = shape.length;
+    shape.push({ left: share, top: rows[k] ?? 0, right: 1, bottom: rows[k + 1] ?? 1 });
+  });
+  return { task: 'coding', shape, takes };
 }
 
 /** What Arrange would do with `preset` (or its own choice), as the engine reports it. */
@@ -180,29 +243,31 @@ function preview(preset: Preset | undefined): ArrangePreview {
   const w = work.right - work.left;
   const h = work.bottom - work.top;
   // Arrange makes no zones on a screen without windows; a picked layout always has its own.
-  const shape = preset ? presetShape(preset) : onScreen.length ? presetShape(autoPreset(onScreen.length)) : [];
+  const auto = preset || onScreen.length === 0 ? null : autoLayout();
+  const shape = preset ? presetShape(preset) : (auto?.shape ?? []);
   const rects = shape.map((a) => ({
     left: Math.round(work.left + a.left * w),
     top: Math.round(work.top + a.top * h),
     right: Math.round(work.left + a.right * w),
     bottom: Math.round(work.top + a.bottom * h),
   }));
-  // The windows used last take the largest zones; the rest are minimised.
+  // A picked layout: the windows used last take the largest zones; the rest are minimised.
   const order = rects
     .map((r, i) => ({ i, area: (r.right - r.left) * (r.bottom - r.top) }))
     .sort((a, b) => b.area - a.area || a.i - b.i)
     .map((x) => x.i);
-  const inset = (r: Rect): Rect => ({ left: r.left + 2, top: r.top + 2, right: r.right - 2, bottom: r.bottom - 2 });
+  const takes = (n: number) => (auto ? auto.takes[n] : order[n]);
   const windows: PreviewWindow[] = onScreen.map((s, n) => {
-    const zone = order[n];
-    return zone === undefined
+    const zone = takes(n);
+    const rect = zone === undefined ? undefined : rects[zone];
+    return rect === undefined
       ? { label: s.label, now: s.now, then: null, minimized: true }
-      : { label: s.label, now: s.now, then: inset(rects[zone] as Rect), minimized: false };
+      : { label: s.label, now: s.now, then: rect, minimized: false };
   });
   return {
     work_area: work,
     zones: rects.map((rect, i) => {
-      const n = order.indexOf(i);
+      const n = onScreen.findIndex((_, k) => takes(k) === i);
       return {
         name: onScreen[n]?.zone ?? (i === 0 ? 'Zone' : `Zone ${String(i + 1)}`),
         color: ZONE_COLORS[i % ZONE_COLORS.length] ?? 'slate',
@@ -211,6 +276,7 @@ function preview(preset: Preset | undefined): ArrangePreview {
     }),
     windows,
     elsewhere: 0,
+    task: auto?.task ?? null,
   };
 }
 
@@ -240,9 +306,12 @@ function arrange(preset: string | undefined): Reply {
     return w?.minimized ? [] : [{ ...s, now: w?.then ?? s.now }];
   });
   const gone = p.windows.length - onScreen.length;
+  const words = p.task ? TASK_WORDS[p.task] : null;
   const what = known
     ? `in the “${known.label}” layout`
-    : `in ${String(p.zones.length)} ${p.zones.length === 1 ? 'zone' : 'zones'}`;
+    : words
+      ? `for ${words}`
+      : `in ${String(p.zones.length)} ${p.zones.length === 1 ? 'zone' : 'zones'}`;
   const n = onScreen.length;
   return done(
     `Arranged ${String(n)} ${n === 1 ? 'window' : 'windows'} ${what}${
@@ -264,12 +333,13 @@ const missing = (which: string): Reply => ({
 function summary(): Reply {
   return {
     reply: 'workspaces',
-    workspaces: workspaces.map(({ id, name, windows, zones, hotkey: key }) => ({
+    workspaces: workspaces.map(({ id, name, zones, hotkey: key, appList }) => ({
       id,
       name,
-      windows,
+      windows: appList.length,
       zones,
       hotkey: key,
+      apps: appList.map((a) => a.label),
     })),
     active,
   };

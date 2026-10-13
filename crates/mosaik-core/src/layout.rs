@@ -102,10 +102,42 @@ pub enum Launch {
 }
 
 impl Slot {
-    /// What to call its app: its label, else a name made from its program or app id.
+    /// What to call its app: its label, else a name made from its window or its program.
     pub fn name(&self) -> String {
         if let Some(label) = self.label.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
             return label.to_owned();
+        }
+        // A packaged app's id starts with its publisher's and its own name: "Microsoft.
+        // WindowsCalculator_8wekyb3d8bbwe!App" is "Windows Calculator".
+        let packaged = || {
+            self.app
+                .aumid
+                .as_deref()
+                .and_then(|a| a.split(['_', '!']).next())
+                .and_then(|family| family.rsplit('.').next())
+                .filter(|n| !n.is_empty())
+                .map(spaced)
+        };
+        // Store apps run in a frame of the frame host, whose title is the app's name.
+        let frame_host = self
+            .app
+            .exe
+            .as_deref()
+            .is_some_and(|e| e.eq_ignore_ascii_case("applicationframehost.exe"))
+            || self
+                .app
+                .class
+                .as_deref()
+                .is_some_and(|c| c.eq_ignore_ascii_case("ApplicationFrameWindow"));
+        if frame_host {
+            return self
+                .app
+                .title
+                .as_ref()
+                .map(|t| t.text().trim().to_owned())
+                .filter(|t| !t.is_empty())
+                .or_else(packaged)
+                .unwrap_or_else(|| "App".to_owned());
         }
         if let Some(exe) = self.app.exe.as_deref() {
             if let Some(known) = crate::window::known_app_name(exe) {
@@ -117,20 +149,23 @@ impl Slot {
                 return first.to_uppercase().chain(chars).collect();
             }
         }
-        // A packaged app's id starts with its publisher's and its own name: "Microsoft.
-        // WindowsCalculator_8wekyb3d8bbwe!App" is "WindowsCalculator".
-        if let Some(name) = self
-            .app
-            .aumid
-            .as_deref()
-            .and_then(|a| a.split(['_', '!']).next())
-            .and_then(|family| family.rsplit('.').next())
-            .filter(|n| !n.is_empty())
-        {
-            return name.to_owned();
-        }
-        "App".to_owned()
+        packaged().unwrap_or_else(|| "App".to_owned())
     }
+}
+
+/// "WindowsCalculator" as "Windows Calculator": a space before each capital that follows a
+/// small letter.
+fn spaced(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    let mut previous: Option<char> = None;
+    for c in name.chars() {
+        if c.is_uppercase() && previous.is_some_and(char::is_lowercase) {
+            out.push(' ');
+        }
+        out.push(c);
+        previous = Some(c);
+    }
+    out
 }
 
 impl Layout {

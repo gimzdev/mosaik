@@ -7,8 +7,9 @@
 //!    moves the line between them, and their windows follow; an app that keeps a larger size
 //!    pushes the line back; an edge on the screen's border puts the window back in its zone;
 //!    with Shift held the window resizes freely.
-//! 3. Arrange: windows with no workspace open go into a new one (a window of a fixed size keeps
-//!    it, centred across its zone and at its top); Undo puts everything back; arranging again
+//! 3. Arrange: windows with no workspace open go into a new one, laid out for their task (the
+//!    window used last takes the most room; a window of a fixed size keeps its size, centred
+//!    across its zone and at its top); Undo puts everything back; arranging again
 //!    moves nothing, and the home page's picture shows nothing moving; a window more than the
 //!    zones is minimised, and Undo brings it back; a layout picked (thirds) shows where
 //!    each window would go without moving any, puts them there, and Undo puts back the zones;
@@ -27,9 +28,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use mosaik_core::arrange::Kind;
 use mosaik_core::geometry::{Point, Rect};
 use mosaik_core::presets::Preset;
 use mosaik_core::settings::Theme;
+use mosaik_core::task;
 use mosaik_core::zone::ZoneId;
 use mosaik_engine::{Config, Engine, Scope, UiEvent, UiSink};
 use mosaik_ipc::protocol::{
@@ -317,9 +320,9 @@ fn hit_code(side: Side) -> Option<i32> {
 }
 
 /// Where a press resizes `w` by its `side`: a point where Windows answers that side's hit-test
-/// code and `w` is the window under the pointer. Zones are only as far apart as their rings, so
-/// the neighbour across the line can be the window there (its invisible resize border reaches
-/// over): then its facing side is grabbed, which moves the same line. Half way along first, then
+/// code and `w` is the window under the pointer. Windows meet edge to edge, so the neighbour
+/// across the line can be the window there (its invisible resize border reaches over): then its
+/// facing side is grabbed, which moves the same line. Half way along first, then
 /// nearer the ends: half way along a side can be where two neighbours meet across the line, and
 /// there the one above answers with a corner (job 0099). Returns the point, the window grabbed
 /// and its side.
@@ -707,26 +710,55 @@ fn arrange(
     let before = frames(&w);
     let mut out = serde_json::Map::new();
 
-    // 3a. No workspace open: a new one, in the shape Arrange gives four windows on this monitor
-    // (quarters, but on an ultrawide or a monitor on its side).
+    // 3a. No workspace open: a new one, laid out for the task its windows say. The probe's
+    // windows are of no known kind: the one used last (a window that can be resized) takes the
+    // most room, the others sit beside it, as `mosaik_core::task::layout` says for them.
+    let order: Vec<HWND> = mosaik_win::window::top_level()
+        .into_iter()
+        .filter(|h| w.contains(h))
+        .collect();
+    let kinds: Vec<task::Window> = order
+        .iter()
+        .map(|&h| {
+            let frame = frame_rect(h).unwrap_or_default();
+            let resizable = h != fixed;
+            let least = if resizable {
+                mosaik_win::window::window_rect(h)
+                    .and_then(|r| mosaik_win::window::least_frame(h, r, frame, styles.dpi))
+                    .unwrap_or_default()
+            } else {
+                frame.size()
+            };
+            task::Window {
+                kind: Kind::Other,
+                resizable,
+                least,
+            }
+        })
+        .collect();
+    let expected = task::layout(&kinds, work.width(), work.height());
     let (reply, ms) = ask(engine, Command::Arrange { preset: None });
     let message = done(&reply)?;
     let st = settled(engine)?;
     let ws = st.active_workspace.clone().ok_or("Arrange opened no workspace")?;
     let zs = zones(engine, &ws.0, work)?;
-    let preset = Preset::for_windows(4, work.width(), work.height());
-    let mut wanted: Vec<[i32; 4]> = preset
-        .zones()
+    let mut wanted: Vec<[i32; 4]> = expected
+        .placed
         .iter()
-        .map(|a| {
-            let r = a.to_rect(work);
+        .map(|p| {
+            let r = p.area.to_rect(work);
             [r.left, r.top, r.right, r.bottom]
         })
         .collect();
     wanted.sort_unstable();
     let mut got = rects(&zs);
     got.sort_unstable();
-    let quarters = preset == Preset::Quarters && got == wanted;
+    let main = expected
+        .placed
+        .first()
+        .map(|p| (order[p.window], p.area.to_rect(work)));
+    let main_in_place = main.is_some_and(|(h, area)| zone_of(&st, &zs, h) == Some(area));
+    let shaped = got == wanted && main_in_place;
     let mut ids: Vec<String> = w
         .iter()
         .filter_map(|h| st.windows.iter().find(|x| x.handle == handle(*h)))
@@ -761,15 +793,16 @@ fn arrange(
         json!({
             "message": message,
             "ms": ms,
-            "preset": preset.id(),
-            "quarters": quarters,
+            "task": format!("{:?}", expected.task),
+            "laid_out_for_the_task": shaped,
+            "main_window_in_the_largest_zone": main_in_place,
             "zones": rects(&zs),
             "windows_in_zones": in_zones,
             "distinct_zones": ids.len(),
             "fit_px": fits,
             "fixed": fixed_place,
             "top_row_tops": top_row,
-            "ok": quarters && in_zones == 4 && ids.len() == 4 && all_fit(&fits)
+            "ok": shaped && in_zones == 4 && ids.len() == 4 && all_fit(&fits)
                 && fixed_place.as_ref().is_some_and(|f| f["ok"] == json!(true)) && one_line,
         }),
     );
@@ -821,8 +854,9 @@ fn arrange(
         }),
     );
 
-    // 3d. A fifth window for four zones: it is minimised (it stays in the taskbar), the others
-    // stay; Undo brings it back where it was.
+    // 3d. A fifth window, opened last: Arrange lays the screen out again for five. The window
+    // used last (the new one) takes the main zone, three sit beside it, and the one used longest
+    // ago is minimised (it stays in the taskbar); Undo brings every window back.
     let e = open(
         opened,
         "Probe E",
@@ -836,29 +870,50 @@ fn arrange(
     .map_err(|err| err.to_string())?;
     pump_until(400, || false);
     let e_before = frame_rect(e).ok_or("Probe E vanished")?;
+    let five: Vec<HWND> = w.iter().copied().chain(std::iter::once(e)).collect();
     let fifth = done(&ask(engine, Command::Arrange { preset: None }).0)?;
-    let _ = settled(engine)?;
-    let e_minimized = mosaik_win::window::geometry(e).is_some_and(|g| g.minimized);
-    let others_kept = most_moved(&frames(&w), &second);
+    let st = settled(engine)?;
+    let zs = st
+        .active_workspace
+        .clone()
+        .map(|ws| zones(engine, &ws.0, work))
+        .transpose()?
+        .unwrap_or_default();
+    let largest = zs.iter().map(|(_, z)| *z).max_by_key(|z| z.area());
+    let e_main = largest.is_some_and(|z| zone_of(&st, &zs, e) == Some(z));
+    let minimized: Vec<usize> = five
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| mosaik_win::window::geometry(**h).is_some_and(|g| g.minimized))
+        .map(|(i, _)| i)
+        .collect();
     let undo = done(&ask(engine, Command::UndoArrange).0)?;
     let st = settled(engine)?;
     let e_back = frame_rect(e).map(|f| edge_error(f, e_before));
+    let others_back = most_moved(&frames(&w), &second);
     let e_state = st.windows.iter().find(|x| x.handle == handle(e));
     let e_grouped = e_state.is_some_and(|x| x.tab_group.is_some());
-    let e_shown = e_state.is_some_and(|x| x.hidden.is_none())
-        && mosaik_win::window::geometry(e).is_some_and(|g| g.visible && !g.minimized && !g.cloaked);
+    let all_shown = five.iter().all(|h| {
+        st.windows
+            .iter()
+            .find(|x| x.handle == handle(*h))
+            .is_some_and(|x| x.hidden.is_none())
+            && mosaik_win::window::geometry(*h).is_some_and(|g| g.visible && !g.minimized && !g.cloaked)
+    });
     out.insert(
         "fifth_window".into(),
         json!({
             "message": fifth,
-            "minimized": e_minimized,
-            "others_moved_px": others_kept,
+            "new_window_main": e_main,
+            "minimized": minimized,
             "undo": undo,
             "back_px": e_back,
+            "others_back_px": others_back,
             "still_a_tab": e_grouped,
-            "shown": e_shown,
-            "ok": fifth.contains("; 1 window minimized.") && e_minimized && others_kept <= SLACK
-                && e_back.is_some_and(|b| b <= SLACK) && !e_grouped && e_shown,
+            "all_shown": all_shown,
+            "ok": fifth.contains("; 1 window minimized.") && e_main && minimized.len() == 1
+                && e_back.is_some_and(|b| b <= SLACK) && others_back <= SLACK && !e_grouped
+                && all_shown,
         }),
     );
     crate::apps::close(e);
@@ -866,6 +921,7 @@ fn arrange(
     out.insert("layout".into(), layout(engine, styles, work, &w)?);
     out.insert("to_front".into(), to_front(engine, &w)?);
     out.insert("apps".into(), apps(engine, styles, work, opened, &w)?);
+    out.insert("least".into(), least(engine, styles, work, opened, &w)?);
     *arranged = w;
     let ok = out.values().all(|v| v["ok"] == json!(true));
     out.insert("ok".into(), json!(ok));
@@ -896,6 +952,88 @@ fn to_front(engine: &Engine, w: &[HWND]) -> Result<Value, String> {
         "brought_forward": brought,
         "most_moved_px": moved,
         "ok": brought > 0 && moved <= SLACK,
+    }))
+}
+
+/// 3h. A window that will not get as small as a quarter of the screen (as Battle.net keeps about
+/// 1280 x 720): Mosaïk reads how small it goes from its app, and Quarters leaves it in the
+/// taskbar rather than let it spill over its neighbours, the others taking the quarters; Undo
+/// brings everything back.
+fn least(
+    engine: &Engine,
+    styles: Styles,
+    work: Rect,
+    opened: &mut Vec<Opened>,
+    w: &[HWND],
+) -> Result<Value, String> {
+    let (min_w, min_h) = (work.width() / 3, work.height() * 3 / 5);
+    let big = open(
+        opened,
+        "Probe Least",
+        Rect::from_origin_size(work.left + 120, work.top + 80, min_w + 40, min_h + 40),
+        &format!(" --topmost --min-width {min_w} --min-height {min_h}"),
+    )?;
+    pump_until(500, || false);
+    let before = frames(w);
+    let big_before = frame_rect(big).ok_or("Probe Least vanished")?;
+    // What the app says, read from another process, against what it was told.
+    let read = mosaik_win::window::window_rect(big).and_then(|r| {
+        mosaik_win::window::least_frame(big, r, big_before, styles.dpi).map(|l| {
+            (
+                l,
+                (r.width() - big_before.width(), r.height() - big_before.height()),
+            )
+        })
+    });
+    let read_off = read.map(|(l, (bw, bh))| {
+        (l.width - (min_w - bw))
+            .abs()
+            .max((l.height - (min_h - bh)).abs())
+    });
+    let shown = preview(engine, Some("quarters"))?;
+    let pictured = shown
+        .windows
+        .iter()
+        .find(|x| edge_error(x.now, big_before) <= 1)
+        .is_some_and(|x| x.minimized);
+    let message = done(
+        &ask(
+            engine,
+            Command::Arrange {
+                preset: Some("quarters".into()),
+            },
+        )
+        .0,
+    )?;
+    let st = settled(engine)?;
+    let big_minimized = mosaik_win::window::geometry(big).is_some_and(|g| g.minimized);
+    let zs = st
+        .active_workspace
+        .clone()
+        .map(|ws| zones(engine, &ws.0, work))
+        .transpose()?
+        .unwrap_or_default();
+    let in_quarters = w.iter().filter(|h| zone_of(&st, &zs, **h).is_some()).count();
+    let undo = done(&ask(engine, Command::UndoArrange).0)?;
+    let _ = settled(engine)?;
+    let back = most_moved(&frames(w), &before);
+    let big_back = frame_rect(big).map(|f| edge_error(f, big_before));
+    crate::apps::close(big);
+    pump_until(500, || false);
+    Ok(json!({
+        "told": [min_w, min_h],
+        "read": read.map(|(l, _)| [l.width, l.height]),
+        "read_off_px": read_off,
+        "picture_minimized": pictured,
+        "message": message,
+        "minimized": big_minimized,
+        "others_in_quarters": in_quarters,
+        "undo": undo,
+        "back_px": back,
+        "big_back_px": big_back,
+        "ok": read_off.is_some_and(|d| d <= SLACK) && pictured && big_minimized
+            && in_quarters == w.len() && message.contains("1 window minimized")
+            && back <= SLACK && big_back.is_some_and(|d| d <= SLACK),
     }))
 }
 

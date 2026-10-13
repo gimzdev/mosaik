@@ -41,17 +41,25 @@ function preview(layout: 'auto' | 'thirds', windows = 2): Reply & ArrangePreview
       const z = zones[i];
       return {
         ...w,
-        then: z ? { left: z.rect.left + 2, top: 2, right: z.rect.right - 2, bottom: 1030 } : null,
+        then: z ? z.rect : null,
         minimized: false,
       };
     }),
     elsewhere: 0,
+    task: layout === 'auto' ? 'coding' : null,
   };
 }
 
 const workspaces = (names: string[], active: string | null = null): Reply => ({
   reply: 'workspaces',
-  workspaces: names.map((name, i) => ({ id: `w${String(i)}`, name, windows: 2, zones: 2, hotkey: null })),
+  workspaces: names.map((name, i) => ({
+    id: `w${String(i)}`,
+    name,
+    windows: 2,
+    zones: 2,
+    hotkey: null,
+    apps: ['Visual Studio Code', 'Google Chrome'],
+  })),
   active,
 });
 
@@ -134,16 +142,24 @@ describe('the home page', () => {
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull();
   });
 
-  it('arranges with Mosaïk’s own choice', async () => {
-    answer((c) => (c.cmd === 'arrange' ? { reply: 'done', message: 'Arranged 2 windows in 2 zones.' } : null));
+  it('arranges with Mosaïk’s own choice, made for the task its windows say', async () => {
+    answer((c) => (c.cmd === 'arrange' ? { reply: 'done', message: 'Arranged 2 windows for coding.' } : null));
     page();
     await screen.findByText('Your main screen now: 2 windows');
     const arrange = screen.getByRole('button', { name: 'Arrange windows' });
     fireEvent.pointerEnter(arrange);
-    expect(await screen.findByText('With Arrange: every window in its own zone')).toBeTruthy();
+    expect(await screen.findByText('With Arrange, for coding: every window in its own zone')).toBeTruthy();
     await userEvent.click(arrange);
     expect(engine.request).toHaveBeenCalledWith({ cmd: 'arrange' });
-    expect(await screen.findByText('Arranged 2 windows in 2 zones.')).toBeTruthy();
+    expect(await screen.findByText('Arranged 2 windows for coding.')).toBeTruthy();
+  });
+
+  it('names no task when the windows say none', async () => {
+    answer((c) => (c.cmd === 'preview_arrange' && !c.preset ? { ...preview('auto'), task: 'general' } : null));
+    page();
+    await screen.findByText('Your main screen now: 2 windows');
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Arrange windows' }));
+    expect(await screen.findByText('With Arrange: every window in its own zone')).toBeTruthy();
   });
 
   it('says why the windows could not be arranged, and offers no undo', async () => {
@@ -235,5 +251,43 @@ describe('the home page', () => {
     fireEvent.pointerEnter(screen.getByRole('button', { name: 'Whole screen' }));
     expect(await screen.findByText('With Whole screen: 1 window minimized')).toBeTruthy();
     expect(picture().getAttribute('aria-label')).toBe('Visual Studio Code in Zone, Google Chrome minimized.');
+  });
+  it('shows each workspace’s apps, and the full list to change them', async () => {
+    answer(
+      (c) => {
+        if (c.cmd !== 'apps') return null;
+        return {
+          reply: 'apps',
+          workspace: c.workspace,
+          name: 'Ship',
+          apps: [
+            { id: 's1', label: 'Visual Studio Code', zone: 'z1', tab: false },
+            { id: 's2', label: 'Google Chrome', zone: 'z2', tab: false },
+          ],
+          zones: [
+            { id: 'z1', name: 'Code', color: 'lapis' },
+            { id: 'z2', name: 'Browser', color: 'verdigris' },
+          ],
+          windows: [],
+        };
+      },
+      workspaces(['Ship']),
+    );
+    page();
+    const row = (await screen.findByText('Ship')).closest('li');
+    if (!row) throw new Error('no row');
+    const names = within(row).getByRole('list', { name: 'Its apps' });
+    expect(
+      within(names)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['Visual Studio Code', 'Google Chrome']);
+    const toggle = within(row).getByRole('button', { name: 'Apps of “Ship”' });
+    await userEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(engine.request).toHaveBeenCalledWith({ cmd: 'apps', workspace: 'w0' });
+    expect(await screen.findByRole('combobox', { name: 'Zone of Google Chrome' })).toBeTruthy();
+    await userEvent.click(toggle);
+    expect(screen.queryByRole('combobox')).toBeNull();
   });
 });

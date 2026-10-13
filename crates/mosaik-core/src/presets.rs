@@ -120,24 +120,6 @@ impl Preset {
         }
     }
 
-    /// The preset for up to four windows on a monitor without zones (a tab group counts as
-    /// one), by the shape of its work area: columns on a landscape monitor, rows on one turned on
-    /// its side. More windows get a grid ([`zones_for_windows`]).
-    pub fn for_windows(windows: usize, width: i32, height: i32) -> Preset {
-        let portrait = height > width;
-        // 21:9 and wider: three columns side by side are still wide.
-        let ultrawide = i64::from(width) * 9 >= i64::from(height) * 21;
-        match (windows, portrait, ultrawide) {
-            (0 | 1, _, _) => Preset::Full,
-            (2, true, _) => Preset::Rows,
-            (_, true, _) => Preset::ThreeRows,
-            (2, false, _) => Preset::Halves,
-            (_, false, true) => Preset::Thirds,
-            (3, false, false) => Preset::HalfAndStack,
-            (_, false, false) => Preset::Quarters,
-        }
-    }
-
     /// How large each zone is compared with the largest one (1.0), in the order of
     /// [`Preset::zones`]: Arrange puts the windows that matter most in the largest zones.
     pub fn sizes(self) -> Vec<f64> {
@@ -159,122 +141,9 @@ impl Preset {
     }
 }
 
-/// The narrowest and the lowest a zone of an Arrange grid gets, in pixels: most apps are still
-/// usable at that size (a browser keeps about 500 px).
-const GRID_COLUMN: i32 = 600;
-const GRID_ROW: i32 = 420;
-
-/// The zones Arrange gives a monitor with `windows` windows and no zones of the open workspace,
-/// `width` by `height` pixels: up to four windows, the preset that suits them
-/// ([`Preset::for_windows`]); more, a grid of as many zones as the monitor holds well (columns of
-/// at least 600 px and rows of at least 420 px, at most four columns and three rows), the top
-/// rows holding fewer, larger zones for the windows that matter most. Windows beyond them are
-/// minimised.
-pub fn zones_for_windows(windows: usize, width: i32, height: i32) -> Vec<RatioRect> {
-    let columns = usize::try_from(width / GRID_COLUMN).unwrap_or(1).clamp(1, 4);
-    let rows = usize::try_from(height / GRID_ROW).unwrap_or(1).clamp(1, 3);
-    let room = columns * rows;
-    if windows <= 4 || room <= 4 {
-        return Preset::for_windows(windows.min(4), width, height).zones();
-    }
-    grid(windows.min(room), columns)
-}
-
-/// `cells` zones in rows of at most `columns`, as even as can be, the rows with fewer (wider)
-/// zones on top.
-fn grid(cells: usize, columns: usize) -> Vec<RatioRect> {
-    let rows = cells.div_ceil(columns.max(1)).max(1);
-    let (base, wider) = (cells / rows, cells % rows);
-    let mut out = Vec::with_capacity(cells);
-    // Counts of a few cells: exact as f64.
-    #[allow(clippy::cast_precision_loss)]
-    let frac = |i: usize, n: usize| if i >= n { 1.0 } else { i as f64 / n as f64 };
-    for row in 0..rows {
-        let n = if row < rows - wider { base } else { base + 1 };
-        for column in 0..n {
-            let r = RatioRect::new(
-                frac(column, n),
-                frac(row, rows),
-                frac(column + 1, n),
-                frac(row + 1, rows),
-            )
-            .unwrap_or(RatioRect::FULL);
-            out.push(r);
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The zones of `zones` cover the work area once, with no overlap and no gap.
-    fn tile(zones: &[RatioRect]) -> bool {
-        let area: f64 = zones.iter().map(|z| z.width() * z.height()).sum();
-        let overlap = zones.iter().enumerate().any(|(i, a)| {
-            zones[i + 1..].iter().any(|b| {
-                a.left() < b.right() - EPS
-                    && b.left() < a.right() - EPS
-                    && a.top() < b.bottom() - EPS
-                    && b.top() < a.bottom() - EPS
-            })
-        });
-        (area - 1.0).abs() < 1e-6 && !overlap
-    }
-
-    #[test]
-    fn up_to_four_windows_get_the_preset_that_suits_them() {
-        for n in 0..=4 {
-            assert_eq!(
-                zones_for_windows(n, 1920, 1032),
-                Preset::for_windows(n, 1920, 1032).zones(),
-                "{n} windows"
-            );
-        }
-    }
-
-    #[test]
-    fn more_windows_get_a_grid_with_larger_zones_on_top() {
-        // The owner's screen: five windows in two rows, two then three; six in three and three.
-        let five = zones_for_windows(5, 1920, 1032);
-        assert_eq!(five.len(), 5);
-        assert!(tile(&five), "{five:?}");
-        assert_eq!(five.iter().filter(|z| z.top() < EPS).count(), 2);
-        assert!(five[0].width() > five[4].width());
-        let six = zones_for_windows(6, 1920, 1032);
-        assert_eq!(six.len(), 6);
-        assert!(tile(&six));
-        assert!(
-            six.iter()
-                .all(|z| (z.width() - 1.0 / 3.0).abs() < EPS && (z.height() - 0.5).abs() < EPS)
-        );
-    }
-
-    #[test]
-    fn a_monitor_holds_no_more_zones_than_it_has_room_for() {
-        // 1920 by 1032: three columns of at least 600 px, two rows of at least 420 px.
-        assert_eq!(zones_for_windows(11, 1920, 1032).len(), 6);
-        // 2560 by 1392: four columns, three rows.
-        let nine = zones_for_windows(9, 2560, 1392);
-        assert_eq!(nine.len(), 9);
-        assert!(tile(&nine));
-        assert_eq!(zones_for_windows(20, 2560, 1392).len(), 12);
-        // A small laptop screen holds four; a monitor on its side, three rows.
-        assert_eq!(zones_for_windows(7, 1366, 728).len(), 4);
-        assert_eq!(zones_for_windows(7, 1080, 1872).len(), 3);
-        for (w, h) in [
-            (1920, 1032),
-            (2560, 1392),
-            (3440, 1392),
-            (1366, 728),
-            (1080, 1872),
-        ] {
-            for n in 1..15 {
-                assert!(tile(&zones_for_windows(n, w, h)), "{n} windows on {w}x{h}");
-            }
-        }
-    }
 
     const EPS: f64 = 1e-9;
 
@@ -338,22 +207,5 @@ mod tests {
             let preset = Preset::from_id(id).unwrap_or_else(|| panic!("{id}"));
             assert_eq!(preset.label(), label, "{id}");
         }
-    }
-
-    #[test]
-    fn arrange_picks_a_shape_for_the_windows_and_the_monitor() {
-        // 1920 x 1032: a usual landscape work area.
-        assert_eq!(Preset::for_windows(1, 1920, 1032), Preset::Full);
-        assert_eq!(Preset::for_windows(2, 1920, 1032), Preset::Halves);
-        assert_eq!(Preset::for_windows(3, 1920, 1032), Preset::HalfAndStack);
-        assert_eq!(Preset::for_windows(4, 1920, 1032), Preset::Quarters);
-        assert_eq!(Preset::for_windows(9, 1920, 1032), Preset::Quarters);
-        // An ultrawide holds three columns.
-        assert_eq!(Preset::for_windows(3, 3440, 1392), Preset::Thirds);
-        assert_eq!(Preset::for_windows(6, 3440, 1392), Preset::Thirds);
-        // A monitor on its side gets rows.
-        assert_eq!(Preset::for_windows(2, 1080, 1872), Preset::Rows);
-        assert_eq!(Preset::for_windows(5, 1080, 1872), Preset::ThreeRows);
-        assert_eq!(Preset::for_windows(0, 1080, 1872), Preset::Full);
     }
 }

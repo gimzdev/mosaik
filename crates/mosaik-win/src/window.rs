@@ -4,9 +4,9 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 
-use mosaik_core::geometry::Rect;
+use mosaik_core::geometry::{Rect, Size};
 use mosaik_core::window::{Cloak, Elevation, WindowFacts, WindowHandle, is_full_screen};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT, WAIT_OBJECT_0, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CAPTION_COLOR, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_TEXT_COLOR, DwmGetWindowAttribute,
     DwmSetWindowAttribute,
@@ -27,8 +27,9 @@ use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyS
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetClassNameW,
     GetLastActivePopup, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
-    InternalGetWindowText, IsIconic, IsWindow, IsWindowVisible, IsZoomed, WS_CAPTION, WS_CHILD,
-    WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
+    InternalGetWindowText, IsIconic, IsWindow, IsWindowVisible, IsZoomed, MINMAXINFO, SMTO_ABORTIFHUNG,
+    SendMessageTimeoutW, WM_GETMINMAXINFO, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::BOOL;
 
@@ -95,6 +96,51 @@ pub fn window_rect(hwnd: HWND) -> Option<Rect> {
     let mut r = RECT::default();
     // SAFETY: valid out pointer; fails for a destroyed window.
     unsafe { GetWindowRect(hwnd, &mut r) }.ok().map(|()| rect(r))
+}
+
+/// How long an app has to say how small its window goes.
+const LEAST_MS: u32 = 100;
+
+/// The smallest the window's visible frame goes, as its app tells Windows (`WM_GETMINMAXINFO`):
+/// Battle.net keeps about 1280 x 720, a browser about 500 px of width. Zero when the app sets
+/// no minimum. `window_rect` and `frame_rect` are where the window is now (the minimum is for
+/// the window rectangle, invisible borders included), and `monitor_dpi` the DPI of the monitor
+/// it is on: an app that is not per-monitor aware answers in its own scale. `None` when the app
+/// does not answer in time (busy, or not responding).
+pub fn least_frame(hwnd: HWND, window_rect: Rect, frame_rect: Rect, monitor_dpi: u32) -> Option<Size> {
+    let mut info = MINMAXINFO::default();
+    let mut answer = 0usize;
+    // SAFETY: WM_GETMINMAXINFO's lParam points to a MINMAXINFO; Windows carries it to the app's
+    // process and back, as it does for this message whenever it sends it, and ours lives until
+    // the call returns. An app not responding is not waited for.
+    let sent = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETMINMAXINFO,
+            WPARAM(0),
+            LPARAM((&raw mut info) as isize),
+            SMTO_ABORTIFHUNG,
+            LEAST_MS,
+            Some(&raw mut answer),
+        )
+    };
+    if sent.0 == 0 {
+        return None;
+    }
+    // SAFETY: a read-only query on any handle (96 for an app that is not DPI aware).
+    let own = unsafe { GetDpiForWindow(hwnd) }.max(96);
+    let scaled = |v: i32| {
+        let v = i64::from(v.max(0)) * i64::from(monitor_dpi.max(96)) / i64::from(own);
+        i32::try_from(v).unwrap_or(i32::MAX)
+    };
+    let borders = Size::new(
+        window_rect.width() - frame_rect.width(),
+        window_rect.height() - frame_rect.height(),
+    );
+    Some(Size::new(
+        (scaled(info.ptMinTrackSize.x) - borders.width).max(0),
+        (scaled(info.ptMinTrackSize.y) - borders.height).max(0),
+    ))
 }
 
 /// The visible frame (what the user sees), without the invisible resize borders.

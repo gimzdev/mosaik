@@ -18,14 +18,14 @@
 
 - A window whose title bar has little room for its zone's tag no longer sits lower than its
   neighbours: it stays at the top of its zone, and its tag is cut short, then to the zone's
-  initial in a small round chip; with no room even for that, it wears its coloured ring alone.
+  initial in a small round chip.
   A tab group's tabs sit at the right end of its title bar, in the same place on every
   window. Every window fills its zone; no band of empty space sits above any of them.
 - A window that cannot be resized keeps its size centred across its zone and at its top, on the
   same line as its neighbours, no longer in the middle.
-- Zones sit closer together: windows are as far apart as their coloured rings are wide, so no
-  desktop shows between them (it was 8 px, now 4 px at 100%). Settings from 1.0 move to it
-  once; a space you chose yourself stays.
+- Windows meet edge to edge, without coloured rings: no space is lost between them or at the
+  screen's edges. Settings, Coloured borders, brings the rings back, with a little space between
+  windows. Settings from 1.0 move to it once; a space you chose yourself stays.
 
 ### Zones that follow a resize
 
@@ -37,15 +37,17 @@
 
 ### Arrange
 
-- One click puts every window on screen in the zone that suits it: from the home page, the tray
-  menu, the quick menu or `mosaikctl arrange`. Zones named after an app or a kind of app
-  ("Browser", "Terminal") draw those windows; the windows you use most get the largest zones;
-  windows already in a zone stay there; windows more than the zones are minimised, and wait in
-  the taskbar.
-- A monitor without zones gets a layout for its windows: halves, a half beside two stacked
-  zones, quarters; columns on an ultrawide, rows on a monitor turned on its side; for more than
-  four windows, a grid with as many zones as the screen holds well. With no workspace open,
-  Arrange makes a new one.
+- One click lays out every screen for what you are doing: from the home page, the tray menu, the
+  quick menu or `mosaikctl arrange`. Arrange reads the task from your windows (coding, design,
+  writing, browsing, chat and mail, games). The window you work in gets the most room, a
+  terminal goes under your editor, and the windows that help sit beside it. The rest are
+  minimised and wait in the taskbar. On an ultrawide screen the main window is in the middle; on
+  one turned on its side, at the top. The home page says which task it read.
+- No window gets a zone smaller than it can go. The main zone grows to fit its window; a window
+  that fits nowhere (Battle.net keeps about 1280 x 720) waits in the taskbar instead of spilling
+  over its neighbours, with Arrange and with every layout.
+- Arrange replaces the open workspace's zones on the screens it lays out, and arranging again
+  moves nothing. With no workspace open, Arrange makes a new one.
 - Undo puts every window back where it was, for ten minutes.
 
 ### Windows move only when you ask
@@ -59,6 +61,9 @@
 - On the Workspaces page, Apps lists a workspace's apps and the zone each goes in: pick another
   zone, remove an app, or add a window that is open. In the open workspace, the window moves at
   once.
+- The home page lists each workspace's apps, with Apps to change them.
+- Apps have proper names: a Store app is called by its own name ("Calculator", not
+  "ApplicationFrameHost"), and Explorer is "File Explorer".
 
 ### The quick menu
 
@@ -77,7 +82,7 @@
 - `mosaikctl state` lists the quick menu, where it is and its rows. `mosaikctl arrange <layout>`
   uses a layout, and `mosaikctl preview [<layout>]` says what Arrange would do without doing it.
   `mosaikctl apps`, `add-app`, `move-app` and `remove-app` list and change a workspace's apps.
-  The protocol is version 5; settings are format 4, and settings from 1.0 move to it on their
+  The protocol is version 5; settings are format 5, and settings from 1.0 move to it on their
   own.
 - The app and the site say less: shorter pages, the essentials only.
 

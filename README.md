@@ -114,7 +114,7 @@ Each place becomes a zone with its own colour.</p>
 </table>
 
 <p>Or point at the thin line at the right edge of the screen and pick <b>Arrange windows</b>:<br>
-every window goes into the zone that suits it.</p>
+your screen is laid out for what you are doing, the window you work in the largest.</p>
 
 <p>Resize a window in a zone and the zones beside it follow.<br>
 While dragging or resizing a window, hold <kbd>Shift</kbd> to move it freely.<br>

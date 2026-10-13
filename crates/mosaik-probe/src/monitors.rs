@@ -149,7 +149,9 @@ pub(crate) fn scenario(
     // Its ring and tag on the other monitor, read from the screen.
     let tag = tag_of(engine, review.hwnd).ok().map(|(t, _)| t);
     let colours = match (frame_rect(review.hwnd), colour_of(review)) {
-        (Some(frame), Some(c)) => frame_colours(frame, c, topology.monitor_for_rect(frame).dpi, tag),
+        (Some(frame), Some(c)) => {
+            frame_colours(frame, c, topology.monitor_for_rect(frame).dpi, tag, styles.rings)
+        }
         _ => Value::Null,
     };
 

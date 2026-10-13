@@ -22,6 +22,7 @@ const list = (names: string[]): Reply => ({
     windows: 3,
     zones: 1,
     hotkey: i === 0 ? 'Win+Alt+J' : null,
+    apps: ['Visual Studio Code', 'Google Chrome', 'Windows Terminal'],
   })),
   active: 'w0',
 });

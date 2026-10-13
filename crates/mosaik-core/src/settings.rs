@@ -8,10 +8,10 @@ use crate::journal::HideMethod;
 use crate::snap::SnapSettings;
 use crate::zone::FrameStyle;
 
-/// 1: 1.0. 2 and 3: development builds of 1.1 only (tags in a bar above every window by default,
-/// then zones 4 px apart). 4: 1.1, tags back in title bars by default and zones 4 px apart
-/// (`crate::store` moves older files forward).
-pub const SETTINGS_VERSION: u32 = 4;
+/// 1: 1.0. 2 to 4: development builds of 1.1 only (tags in a bar above every window by default,
+/// then zones 4 px apart, then tags back in title bars). 5: 1.1, windows edge to edge and no
+/// coloured rings by default (`crate::store` moves older files forward).
+pub const SETTINGS_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -117,7 +117,8 @@ impl Settings {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FrameSettings {
-    /// Draw each zone's coloured ring around its windows.
+    /// Draw each zone's coloured ring around its windows. Off by default: windows meet edge to
+    /// edge. With rings, windows sit at least two rings apart, so no ring covers a neighbour.
     pub show_frames: bool,
     /// Show the zone's name on its windows.
     pub show_tags: bool,
@@ -132,7 +133,7 @@ pub struct FrameSettings {
 impl Default for FrameSettings {
     fn default() -> Self {
         Self {
-            show_frames: true,
+            show_frames: false,
             show_tags: true,
             tags_in_title_bar: true,
             style: FrameStyle::default(),
@@ -144,10 +145,10 @@ impl FrameSettings {
     /// The style windows are placed with: no band with tags in title bars or hidden.
     pub fn effective_style(self) -> FrameStyle {
         if self.tags_in_title_bar {
-            FrameStyle {
+            self.spaced(FrameStyle {
                 title_bars: true,
                 ..self.style.without_tags()
-            }
+            })
         } else {
             self.banded_style()
         }
@@ -157,14 +158,27 @@ impl FrameSettings {
     /// windows, and with tags in title bars, the tab that shows of a group whose title bar has no
     /// room for the group's strip (the way to its other tabs must stay in reach).
     pub fn banded_style(self) -> FrameStyle {
-        let style = FrameStyle {
+        let style = self.spaced(FrameStyle {
             title_bars: false,
             ..self.style
-        };
+        });
         if self.show_tags {
             style
         } else {
             style.without_tags()
+        }
+    }
+
+    /// The space between windows as set, and with rings shown at least two rings wide, so a
+    /// window's ring never covers the window next to it.
+    fn spaced(self, style: FrameStyle) -> FrameStyle {
+        if self.show_frames {
+            FrameStyle {
+                gap: style.gap.max(2 * style.border),
+                ..style
+            }
+        } else {
+            style
         }
     }
 }
@@ -278,6 +292,31 @@ mod tests {
             json.contains("\"tags_in_title_bar\":false") && !json.contains("title_bars"),
             "{json}"
         );
+    }
+
+    #[test]
+    fn windows_meet_edge_to_edge_without_rings_unless_rings_are_on() {
+        // The owner: "get rid of coloured borders, it looks childish and we lose space; just
+        // window to window". No rings and no space by default.
+        let s = Settings::default();
+        assert!(!s.frames.show_frames);
+        assert_eq!(s.frames.effective_style().gap, 0);
+        assert_eq!(s.frames.banded_style().gap, 0);
+        // Rings turned on: windows sit two rings apart, so a ring never covers a neighbour; a
+        // wider space the user set stays.
+        let ringed = FrameSettings {
+            show_frames: true,
+            ..FrameSettings::default()
+        };
+        assert_eq!(ringed.effective_style().gap, 2 * ringed.style.border);
+        assert_eq!(ringed.banded_style().gap, 2 * ringed.style.border);
+        let mut wide = ringed;
+        wide.style.gap = 10;
+        assert_eq!(wide.effective_style().gap, 10);
+        // A space set without rings is kept as it is.
+        let mut apart = FrameSettings::default();
+        apart.style.gap = 6;
+        assert_eq!(apart.effective_style().gap, 6);
     }
 
     #[test]

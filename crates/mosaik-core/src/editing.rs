@@ -801,9 +801,20 @@ mod tests {
         assert_eq!(slot(Some("obsidian.exe"), None).name(), "Obsidian");
         assert_eq!(
             slot(None, Some("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App")).name(),
-            "WindowsCalculator"
+            "Windows Calculator"
         );
         assert_eq!(slot(None, None).name(), "App");
+        // The owner's "Check" listed six "Applicationframehost": Store apps (Calculator,
+        // Settings) run in a frame of the frame host, whose title is the app's name.
+        let mut calculator = slot(Some("applicationframehost.exe"), None);
+        calculator.app.class = Some("ApplicationFrameWindow".into());
+        calculator.app.title = Some(crate::matching::TitleMatch::Like("Calculator".into()));
+        assert_eq!(calculator.name(), "Calculator");
+        calculator.app.title = None;
+        calculator.app.aumid = Some("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App".into());
+        assert_eq!(calculator.name(), "Windows Calculator");
+        // And "Windows Explorer", which people know as File Explorer.
+        assert_eq!(slot(Some("explorer.exe"), None).name(), "File Explorer");
         let mut labelled = slot(Some("code.exe"), None);
         labelled.label = Some("Visual Studio Code".into());
         assert_eq!(labelled.name(), "Visual Studio Code");

@@ -16,6 +16,7 @@ use std::time::Instant;
 
 use mosaik_core::hotkey::check;
 use mosaik_core::journal::Journal;
+use mosaik_core::layout::Slot;
 use mosaik_core::settings::{OnDisk, Settings};
 use mosaik_core::store::{Store, WorkspacesFile};
 use mosaik_core::switcher::Entry;
@@ -796,6 +797,7 @@ impl Engine {
                     windows: w.layout.slots.len(),
                     zones: w.layout.zones.len(),
                     hotkey: w.hotkey.map(|h| h.to_string()),
+                    apps: w.layout.slots.iter().map(Slot::name).collect(),
                 })
                 .collect(),
             active: self.active.as_ref().map(|a| a.id.clone()),

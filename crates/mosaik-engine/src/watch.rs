@@ -525,7 +525,7 @@ impl Engine {
             match self.tag_spot(h, g.frame, &zone.name, zone.dpi) {
                 TitleSpot::In(r) => (true, TagPlace::TitleBar(r), Some((r, BarPlace::TitleBar))),
                 // A window over its whole monitor is never moved below a band (`wants_band`): a
-                // tag above it would lie on its own title bar, so it wears its ring alone.
+                // tag above it would lie on its own title bar, so it wears none.
                 TitleSpot::Above
                     if self
                         .topology
@@ -535,7 +535,7 @@ impl Engine {
                     (false, TagPlace::Above, None)
                 }
                 // With tags in title bars, a window alone whose title bar has no room even for
-                // its zone's initial wears its ring alone, at the top of its zone like its
+                // its zone's initial wears no tag, at the top of its zone like its
                 // neighbours: it is never moved below a band for its tag (`wants_band`).
                 TitleSpot::Above if self.style().title_bars && !self.titles.banded.contains(&h) => {
                     (false, TagPlace::Above, None)

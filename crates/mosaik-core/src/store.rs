@@ -66,9 +66,9 @@ impl Saved for Settings {
         mut value: serde_json::Value,
         from: u32,
     ) -> Result<(serde_json::Value, Option<String>), String> {
-        // 1 is 1.0's format. 2 and 3 were only saved by development builds of 1.1: 2 put tags in
-        // a bar above every window, which left a band of empty space above each one, and 3 also
-        // put zones 4 px apart.
+        // 1 is 1.0's format. 2 to 4 were only saved by development builds of 1.1: 2 put tags in
+        // a bar above every window, which left a band of empty space above each one, 3 also put
+        // zones 4 px apart, and 4 put tags back in title bars.
         if !(1..SETTINGS_VERSION).contains(&from) {
             return Err(format!("no migration from version {from}"));
         }
@@ -79,32 +79,54 @@ impl Saved for Settings {
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
             .as_object_mut()
             .ok_or_else(|| "the frame settings are not an object".to_owned())?;
-        // Zones sit as far apart as their two rings are wide (4 px, was 8), so no desktop shows
-        // between windows; a space the user chose stays.
-        let mut closer = false;
-        if from <= 2
-            && let Some(style) = frames.get_mut("style").and_then(serde_json::Value::as_object_mut)
-            && style.get("gap").and_then(serde_json::Value::as_i64) == Some(8)
-        {
-            style.insert("gap".to_owned(), serde_json::Value::from(4));
-            closer = true;
-        }
-        // Tags are back in title bars by default; 1.0's files keep where the user put them.
-        let titles = from >= 2;
+        // Windows meet edge to edge: the space every older version kept between them by default
+        // (8 px in 1.0, then 4) goes; a space the user chose stays.
+        let old_gap = if from <= 2 { 8 } else { 4 };
+        let edge = match frames.get_mut("style").and_then(serde_json::Value::as_object_mut) {
+            Some(style) => {
+                let was_default = style
+                    .get("gap")
+                    .and_then(serde_json::Value::as_i64)
+                    .is_none_or(|gap| gap == old_gap);
+                if was_default {
+                    style.insert("gap".to_owned(), serde_json::Value::from(0));
+                }
+                was_default
+            }
+            // No style saved: the defaults, edge to edge now.
+            None => true,
+        };
+        // No coloured rings: every older version drew them unless the user turned them off.
+        let ringed = frames
+            .get("show_frames")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+        frames.insert("show_frames".to_owned(), serde_json::Value::Bool(false));
+        // Tags are back in title bars by default; 1.0's files, and 4's (title bars were already
+        // the default), keep where the user put them.
+        let titles = from == 2 || from == 3;
         if titles {
             frames.insert("tags_in_title_bar".to_owned(), serde_json::Value::Bool(true));
         }
-        let note = match (titles, closer) {
+        let look = match (edge, ringed) {
             (true, true) => Some(
-                "Zone tags are back in title bars and zones sit closer together: every window fills its zone, and no desktop shows between windows. To put tags in a bar above every window: Settings, Tags and tabs.",
+                "Windows now meet edge to edge, without coloured borders. To bring the borders back: Settings, Coloured borders.",
             ),
-            (true, false) => Some(
-                "Zone tags are back in title bars: every window fills its zone, with no band above it. To put tags in a bar above every window: Settings, Tags and tabs.",
+            (true, false) => Some("Windows now meet edge to edge."),
+            (false, true) => Some(
+                "Windows no longer wear coloured borders. To bring them back: Settings, Coloured borders.",
             ),
-            (false, true) => Some("Zones sit closer together: no desktop shows between windows now."),
             (false, false) => None,
         };
-        Ok((value, note.map(str::to_owned)))
+        let note = match (titles, look) {
+            (true, Some(look)) => Some(format!("Zone tags are back in title bars. {look}")),
+            (true, None) => Some(
+                "Zone tags are back in title bars: every window fills its zone, with no band above it. To put tags in a bar above every window: Settings, Tags and tabs."
+                    .to_owned(),
+            ),
+            (false, look) => look.map(str::to_owned),
+        };
+        Ok((value, note))
     }
 }
 
@@ -460,60 +482,74 @@ mod tests {
     }
 
     #[test]
-    fn settings_of_1_0_keep_where_tags_go_and_bring_zones_closer() {
-        // The owner: "space lost between zones". 1.0 put zones 8 px apart; now they are as far
-        // apart as their two rings are wide (4 px), so no desktop shows between windows. Where
-        // tags go is the user's (title bars, unless they chose the bar), and so is a space they
-        // chose; one note says what changed, and none when nothing did.
+    fn settings_of_1_0_keep_where_tags_go_and_put_windows_edge_to_edge() {
+        // The owner: "get rid of coloured borders, it looks childish and we lose space; just
+        // window to window". 1.0 put windows 8 px apart, each in a coloured ring: now they meet
+        // edge to edge, without rings. Where tags go is the user's (title bars, unless they chose
+        // the bar), and so is a space they chose; one note says what changed, and none when
+        // nothing they see did.
+        const EDGE: &str = "Windows now meet edge to edge, without coloured borders. To bring the borders back: Settings, Coloured borders.";
         let d = TempDir::new("settings1");
         let loaded = load_settings(
             &d,
             br#"{"version":1,"theme":"dark","frames":{"show_frames":true,"show_tags":true,"tags_in_title_bar":true,"style":{"gap":8,"tag_band":28,"border":2}}}"#,
         );
         assert!(loaded.value.frames.tags_in_title_bar);
-        assert_eq!(loaded.value.frames.style.gap, 4);
+        assert_eq!(loaded.value.frames.style.gap, 0);
+        assert!(!loaded.value.frames.show_frames);
         assert_eq!(
             loaded.value.theme,
             crate::settings::Theme::Dark,
             "the rest is kept"
         );
         assert_eq!(loaded.value.version, SETTINGS_VERSION);
-        assert_eq!(
-            loaded.notes,
-            ["Zones sit closer together: no desktop shows between windows now."]
-        );
+        assert_eq!(loaded.notes, [EDGE]);
         // Tags the user put in a bar above every window stay there.
         let loaded = load_settings(
             &d,
             br#"{"version":1,"frames":{"tags_in_title_bar":false,"style":{"gap":8,"tag_band":28,"border":2}}}"#,
         );
         assert!(!loaded.value.frames.tags_in_title_bar);
-        assert_eq!(loaded.value.frames.style.gap, 4);
-        // A space the user chose stays, and nothing they see changed: no note.
+        assert_eq!(loaded.value.frames.style.gap, 0);
+        // A space the user chose stays; the rings go.
         let loaded = load_settings(
             &d,
             br#"{"version":1,"frames":{"tags_in_title_bar":true,"style":{"gap":16,"tag_band":28,"border":2}}}"#,
         );
         assert_eq!(loaded.value.frames.style.gap, 16);
+        assert!(!loaded.value.frames.show_frames);
+        assert_eq!(
+            loaded.notes,
+            ["Windows no longer wear coloured borders. To bring them back: Settings, Coloured borders."]
+        );
+        // Rings the user had turned off and a space they chose: nothing they see changes.
+        let loaded = load_settings(
+            &d,
+            br#"{"version":1,"frames":{"show_frames":false,"style":{"gap":16,"tag_band":28,"border":2}}}"#,
+        );
+        assert_eq!(loaded.value.frames.style.gap, 16);
         assert!(loaded.notes.is_empty(), "{:?}", loaded.notes);
-        // A format 1 file with no frames at all gets the defaults.
+        // A format 1 file with no frames at all gets the defaults, and the note.
         let loaded = load_settings(&d, br#"{"version":1}"#);
         assert!(loaded.value.frames.tags_in_title_bar);
-        assert!(loaded.notes.is_empty(), "{:?}", loaded.notes);
+        assert_eq!(loaded.value.frames, crate::settings::FrameSettings::default());
+        assert_eq!(loaded.notes, [EDGE]);
     }
 
     #[test]
     fn settings_of_development_builds_of_1_1_put_tags_back_in_title_bars() {
-        // Formats 2 and 3 were only saved by development builds of 1.1, which put tags in a bar
-        // above every window: the owner found the bar blank, lost space. Title bars are the
-        // default again, so every window fills its zone; one note says so.
+        // Formats 2 to 4 were only saved by development builds of 1.1. 2 and 3 put tags in a
+        // bar above every window: the owner found the bar blank, lost space. Title bars are the
+        // default again, so every window fills its zone; windows meet edge to edge, without
+        // rings; one note says so.
         let d = TempDir::new("settings-dev");
         let loaded = load_settings(
             &d,
             br#"{"version":2,"frames":{"tags_in_title_bar":false,"style":{"gap":8,"tag_band":28,"border":2}}}"#,
         );
         assert!(loaded.value.frames.tags_in_title_bar);
-        assert_eq!(loaded.value.frames.style.gap, 4);
+        assert_eq!(loaded.value.frames.style.gap, 0);
+        assert!(!loaded.value.frames.show_frames);
         assert_eq!(
             loaded.notes.len(),
             1,
@@ -521,7 +557,7 @@ mod tests {
             loaded.notes
         );
         assert!(
-            loaded.notes[0].contains("title bars") && loaded.notes[0].contains("closer"),
+            loaded.notes[0].contains("title bars") && loaded.notes[0].contains("edge to edge"),
             "{:?}",
             loaded.notes
         );
@@ -530,20 +566,37 @@ mod tests {
             br#"{"version":3,"frames":{"tags_in_title_bar":false,"style":{"gap":4,"tag_band":28,"border":2}}}"#,
         );
         assert!(loaded.value.frames.tags_in_title_bar);
+        assert_eq!(loaded.value.frames.style.gap, 0);
         assert_eq!(loaded.notes.len(), 1);
         assert!(
-            loaded.notes[0].contains("title bars") && !loaded.notes[0].contains("closer"),
+            loaded.notes[0].contains("title bars") && loaded.notes[0].contains("edge to edge"),
             "{:?}",
             loaded.notes
         );
-        // In the current format, both are the user's choice, and nothing is said.
+        // Format 4 had tags in title bars by default already: where they go stays the user's.
+        let loaded = load_settings(
+            &d,
+            br#"{"version":4,"frames":{"show_frames":true,"tags_in_title_bar":false,"style":{"gap":4,"tag_band":28,"border":2}}}"#,
+        );
+        assert!(!loaded.value.frames.tags_in_title_bar);
+        assert_eq!(loaded.value.frames.style.gap, 0);
+        assert!(!loaded.value.frames.show_frames);
+        assert_eq!(
+            loaded.notes,
+            [
+                "Windows now meet edge to edge, without coloured borders. To bring the borders back: Settings, Coloured borders."
+            ]
+        );
+        // In the current format, all three are the user's choice, and nothing is said.
         let mut chosen = Settings::default();
         chosen.frames.tags_in_title_bar = false;
         chosen.frames.style.gap = 8;
+        chosen.frames.show_frames = true;
         Store::new(&d.0).save(&chosen).unwrap();
         let loaded = Store::new(&d.0).load::<Settings>().unwrap();
         assert!(!loaded.value.frames.tags_in_title_bar);
         assert_eq!(loaded.value.frames.style.gap, 8);
+        assert!(loaded.value.frames.show_frames);
         assert!(loaded.notes.is_empty());
         // A version no Mosaïk wrote is damaged, not guessed at.
         fs::write(d.0.join("settings.json"), br#"{"version":0}"#).unwrap();
@@ -594,7 +647,7 @@ mod tests {
         // A move with nothing to tell is written back too.
         let quiet = load_settings(
             &d,
-            br#"{"version":1,"frames":{"tags_in_title_bar":true,"style":{"gap":16,"tag_band":28,"border":2}}}"#,
+            br#"{"version":1,"frames":{"show_frames":false,"tags_in_title_bar":true,"style":{"gap":16,"tag_band":28,"border":2}}}"#,
         );
         assert!(quiet.notes.is_empty(), "{:?}", quiet.notes);
         let on_disk: serde_json::Value =

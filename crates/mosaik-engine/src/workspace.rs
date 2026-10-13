@@ -629,6 +629,7 @@ impl Engine {
         // being left come back (minimised, unless this one uses them).
         self.hiding.resume();
         self.activate(ws.id.clone(), assigned, placed);
+        self.name_open_apps();
         self.sync_tabs();
         for h in &plan.raise {
             let _ = arrange::raise(window::hwnd(*h));

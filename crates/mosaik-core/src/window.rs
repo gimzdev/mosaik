@@ -108,6 +108,7 @@ impl WindowFacts {
 /// Programs whose file describes something other than the app people know (Steam's windows
 /// belong to its web helper, "Steam Client WebHelper"), by file name in lower case.
 const APP_NAMES: &[(&str, &str)] = &[
+    ("explorer.exe", "File Explorer"),
     ("steamwebhelper.exe", "Steam"),
     ("steam.exe", "Steam"),
     ("windowsterminal.exe", "Windows Terminal"),

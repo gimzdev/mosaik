@@ -843,8 +843,8 @@ export const AppBody = memo(function AppBody({ win }: { win: Pick<Win, 'kind' | 
 });
 
 /**
- * A window. With Mosaïk it wears its zone frame, and its zone tag in its own title bar, next to its buttons
- * (`tagAt` places it elsewhere in that bar); plain, it is just a window; flat, it is maximised.
+ * A window. With Mosaïk it wears its zone tag in its own title bar, next to its buttons (`tagAt` places it
+ * elsewhere in that bar); plain, it is just a window; flat, it is maximised.
  */
 export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: string; zone: Win['zone']; plain?: boolean; flat?: boolean; tagAt?: CSSProperties; children: ReactNode }) {
   const z = ZONE[zone];
@@ -857,10 +857,10 @@ export function ZoneFrame({ tag, zone, plain, flat, tagAt, children }: { tag: st
         {tag}
       </span>
       <div
-        className="h-full w-full overflow-hidden transition-[box-shadow] duration-300"
+        className="h-full w-full overflow-hidden"
         style={{
           borderRadius: flat ? 0 : 10,
-          boxShadow: flat ? 'none' : plain ? '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)' : `0 0 0 2px ${z.bg}, 0 22px 44px -12px rgba(0,0,0,0.6)`,
+          boxShadow: flat ? 'none' : '0 0 0 1px rgba(255,255,255,0.14), 0 18px 40px -14px rgba(0,0,0,0.65)',
         }}
       >
         {children}
