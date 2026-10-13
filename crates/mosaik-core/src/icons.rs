@@ -2,9 +2,9 @@
 //! Mosaïk's window for (`app_icons`), the pixels Windows hands over made ready for a PNG, and
 //! the PNG as a `data:` URL for the page. Reading the picture is `mosaik_win::icons`.
 //!
-//! A key is `app:` and the app's id in the Start menu (`shell:AppsFolder`): a packaged app's
-//! Application User Model ID, or a desktop app's id ("Chrome"); or `exe:` and a program's full
-//! path. Windows draws either the way it does in the Start menu and on the taskbar.
+//! A key is `exe:` and a desktop program's full path, or `app:` and a packaged app's id in the
+//! Start menu (`shell:AppsFolder`, its Application User Model ID). Windows draws either the way it
+//! does in the Start menu and on the taskbar.
 
 use crate::layout::{Launch, Slot};
 use crate::matching::AppMatch;
@@ -18,16 +18,21 @@ pub enum Source<'a> {
     Program(&'a str),
 }
 
-/// The key for an app known by its id (a packaged app's, or a Start menu entry's), else by its
-/// program's full path; none when neither is known.
+/// The key for an app: a desktop app's program, whose file always holds its icon (the id its
+/// windows give, such as Chrome's "Chrome", may not be the one the Start menu knows it by); a
+/// packaged app's id, since its program does not draw the package's picture; none when neither is
+/// known.
 pub fn key(app_id: Option<&str>, path: Option<&str>) -> Option<String> {
     let usable = |s: &&str| !s.trim().is_empty();
-    if let Some(id) = app_id.filter(usable) {
-        return Some(format!("app:{id}"));
+    let path = path.filter(usable).filter(|p| is_full_path(p));
+    let packaged = path.is_some_and(|p| p.to_ascii_lowercase().contains(r"\windowsapps\"));
+    if let Some(p) = path.filter(|_| !packaged) {
+        return Some(format!("exe:{p}"));
     }
-    path.filter(usable)
-        .filter(|p| is_full_path(p))
-        .map(|p| format!("exe:{p}"))
+    app_id
+        .filter(usable)
+        .map(|id| format!("app:{id}"))
+        .or_else(|| path.map(|p| format!("exe:{p}")))
 }
 
 /// The key for an app found by `app` and started by `launch`: how it starts says best which app
@@ -133,7 +138,19 @@ mod tests {
     }
 
     #[test]
-    fn an_app_is_known_by_its_id_before_its_program() {
+    fn a_desktop_app_is_known_by_its_program_a_packaged_one_by_its_id() {
+        // Chrome's windows say "Chrome", which the Start menu may know by another id (job 0122:
+        // no picture for Chrome, VS Code or File Explorer); its program always has its icon.
+        assert_eq!(
+            key(
+                Some("Chrome"),
+                Some(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+            )
+            .as_deref(),
+            Some(r"exe:C:\Program Files\Google\Chrome\Application\chrome.exe")
+        );
+        // A packaged app's program does not draw the package's picture: it goes by its id.
+        assert_eq!(key(Some("Chrome"), None).as_deref(), Some("app:Chrome"));
         assert_eq!(
             key(
                 Some("Microsoft.WindowsTerminal_8wekyb3d8bbwe!App"),

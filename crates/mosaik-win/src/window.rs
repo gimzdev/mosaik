@@ -447,6 +447,13 @@ fn process_info(pid: u32, own_integrity: Option<u32>) -> Cached {
     }
 }
 
+/// A program of Mosaïk's, of this copy or another (the Store's while a build runs from a folder,
+/// say): its windows are never arranged (job 0122: the Store copy's watchdog said it had stopped,
+/// and Arrange gave its message a zone). `exe` is the file's name in lower case.
+fn is_mosaik(exe: Option<&str>) -> bool {
+    matches!(exe, Some("mosaik.exe" | "mosaik-watchdog.exe"))
+}
+
 /// The Application User Model ID of a packaged app's process; `None` for other programs.
 fn process_aumid(process: HANDLE) -> Option<String> {
     // An AUMID is at most APPLICATION_USER_MODEL_ID_MAX_LENGTH (130) characters.
@@ -531,6 +538,7 @@ impl Scanner {
         let window_rect = window_rect(hwnd)?;
         let frame_rect = frame_rect(hwnd).unwrap_or(window_rect);
         let full_screen = in_full_screen(hwnd, frame_rect, maximized, style);
+        let mosaik = is_mosaik(info.exe.as_deref());
         Some(WindowFacts {
             handle: handle(hwnd),
             pid,
@@ -557,7 +565,7 @@ impl Scanner {
             window_rect,
             frame_rect,
             dpi,
-            own_process: pid == self.own_pid || self.own_pids.contains(&pid),
+            own_process: pid == self.own_pid || self.own_pids.contains(&pid) || mosaik,
         })
     }
 
@@ -583,5 +591,20 @@ impl Scanner {
     pub fn scan(&mut self) -> Vec<WindowFacts> {
         self.processes.retain(|_, c| !c.exited());
         top_level().into_iter().filter_map(|h| self.facts(h)).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_mosaik;
+
+    #[test]
+    fn every_copy_of_mosaik_is_mosaik() {
+        assert!(is_mosaik(Some("mosaik.exe")));
+        assert!(is_mosaik(Some("mosaik-watchdog.exe")));
+        // The probe's test windows are apps like any other.
+        assert!(!is_mosaik(Some("mosaik-probe.exe")));
+        assert!(!is_mosaik(Some("chrome.exe")));
+        assert!(!is_mosaik(None));
     }
 }

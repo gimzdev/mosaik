@@ -191,14 +191,14 @@ export function Home({
               and to screen readers. */}
           <fieldset className="mt-3 min-w-0">
             <legend className="sr-only">Layout</legend>
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="flex flex-wrap items-center gap-0.5">
               {[{ id: 'smart' as const, label: 'Smart' }, ...LAYOUTS].map((option) => {
                 const on = choice === option.id;
                 return (
                   <label
                     key={option.id}
                     title={option.label}
-                    className={`relative inline-flex h-9 items-center gap-2 rounded-full px-2.5 text-small font-semibold transition-colors duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus)] has-[:disabled]:opacity-50 ${
+                    className={`relative inline-flex h-9 items-center gap-1.5 rounded-full px-2 text-small font-semibold transition-colors duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus)] has-[:disabled]:opacity-50 ${
                       on
                         ? 'bg-[var(--raised)] pr-3.5 text-[var(--text)] ring-1 ring-[var(--accent)] forced-colors:ring-[Highlight]'
                         : 'text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--text)]'

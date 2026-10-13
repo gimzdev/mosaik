@@ -181,8 +181,9 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     Ok(value)
 }
 
-/// `mosaik-probe menu-shot --shots DIR`: the quick menu open, pictured in the light and the dark
-/// theme, with a workspace open (two probe windows arranged), for the eye. Moves the mouse.
+/// `mosaik-probe menu-shot --shots DIR`: the side menu open, then a toast, pictured in the light
+/// and the dark theme, with a workspace open (two probe windows arranged), for the eye. Moves the
+/// mouse.
 pub fn menu_shot(args: &[String]) -> Result<Value, String> {
     let shots = args
         .iter()
@@ -265,6 +266,22 @@ pub fn menu_shot(args: &[String]) -> Result<Value, String> {
             }));
             input::move_to(away);
             let _ = wait_menu(&engine, 2500, |q| !is_open(q))?;
+            // A toast, as Mosaïk shows what it has to say while it works: by the corner of the
+            // screen the pointer is on. One shows at a time: the light one has faded first.
+            engine.toast(
+                "FancyZones is running",
+                "It moves windows too. Turn it off in PowerToys, or it and Mosaïk will keep moving the same windows.",
+            );
+            let toast = wait_toast(8000, true).ok_or("the toast did not show")?;
+            pump_until(500, || false);
+            let r = mosaik_win::window::window_rect(toast).ok_or("the toast vanished")?;
+            let file = format!("toast-{name}.bmp");
+            save_bmp(
+                &[Rect::new(r.left - 16, r.top - 16, r.right + 16, r.bottom + 16)],
+                &shots.join(&file),
+            )?;
+            pictures.push(json!({ "theme": name, "file": file, "toast": [r.width(), r.height()] }));
+            let _ = wait_toast(12_000, false);
         }
         Ok(json!({ "arranged": arranged, "pictures": pictures }))
     })();
@@ -273,6 +290,25 @@ pub fn menu_shot(args: &[String]) -> Result<Value, String> {
     close_all(&mut opened);
     let _ = std::fs::remove_dir_all(&dir);
     result
+}
+
+/// This process's toast window once it shows (`shown`), or once it is gone; `None` at the deadline.
+fn wait_toast(ms: u64, shown: bool) -> Option<HWND> {
+    let start = std::time::Instant::now();
+    loop {
+        let found = mosaik_win::window::top_level().into_iter().find(|&h| {
+            mosaik_win::window::pid(h) == mosaik_win::process::own_pid()
+                && mosaik_win::window::class_name(h) == "MosaikToast"
+                && mosaik_win::window::geometry(h).is_some_and(|g| g.visible && !g.cloaked)
+        });
+        if found.is_some() == shown {
+            return found.or(Some(HWND::default()));
+        }
+        if start.elapsed() > Duration::from_millis(ms) {
+            return None;
+        }
+        pump_until(100, || false);
+    }
 }
 
 /// An edge of a window.
