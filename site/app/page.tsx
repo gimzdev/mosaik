@@ -1,6 +1,5 @@
-import { DeskThumb, Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
+import { Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
 import { Check, DownloadButton, PlatformList } from '@/components/ui';
-import { WORKSPACES } from '@/lib/data';
 import { site } from '@/lib/site';
 
 const FEATURES = [
@@ -77,26 +76,6 @@ export default function Home() {
                   <Art />
                 </div>
               </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="people" className="scroll-mt-16 border-t border-grout py-20 md:py-28">
-        <div className="page-x">
-          <Intro title="One desktop, many kinds of work.">A workspace is whatever you need open together. These four are the ones we kept reaching for.</Intro>
-          <div className="mt-12 grid gap-x-8 gap-y-12 sm:grid-cols-2">
-            {WORKSPACES.map((w, i) => (
-              <div key={w.id}>
-                <div className="overflow-hidden rounded-[16px] ring-1 ring-black/10">
-                  <DeskThumb index={i} />
-                </div>
-                <div className="mt-4 flex items-baseline justify-between gap-4">
-                  <h3 className="font-display text-[1.35rem] font-bold tracking-[-0.02em]">{w.name}</h3>
-                  <p className="shrink-0 text-sm font-semibold text-lapis">{w.role}</p>
-                </div>
-                <p className="mt-1.5 max-w-md text-[15.5px] leading-relaxed text-slate">{w.about}</p>
-              </div>
             ))}
           </div>
         </div>

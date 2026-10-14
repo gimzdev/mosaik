@@ -75,8 +75,10 @@ interrupted with a dialog or a banner.
   project gets its own workspace: your apps and windows arranged and ready in one click", desktops
   of two to four windows (Mosaïk lays out three to a view at most; a site shows the idea), each
   window in a coloured frame with its zone's tag above it (both are settings of the app) and a
-  thin line of desktop between windows, and the four kinds of work under "Who it's for". The bar
-  that desktop once had along its top is left out: Mosaïk draws no such bar.
+  thin line of desktop between windows. The bar that desktop once had along its top is left out:
+  Mosaïk draws no such bar. The section "One desktop, many kinds of work." ("Who it's for", four
+  desktops in small) is gone for good (the owner, 2026-10-14: "it looks stacked and is
+  redundant with first section ... erase that"): the hero shows the same four workspaces.
 - **Version 1.0.1**: first 2.0.0, since the settings format changed in a way 1.0.0 cannot read
   and the window is new; then the owner, the same day: "rename everything to be v1 not v2 ...
   we're on v1.0 all the time". 1.0.1 is the lowest version the Store takes after its 1.0.0.

@@ -3,7 +3,7 @@ type Kind = 'editor' | 'terminal' | 'browser' | 'chat' | 'design' | 'notes' | 'p
 /** [column, row, columns, rows] on a 12 x 8 grid */
 type Slot = [number, number, number, number];
 export interface Win { id: string; kind: Kind; variant?: string; tag: string; zone: Zone; slot: Slot }
-export interface Workspace { id: string; label: string; name: string; role: string; summary: string; about: string; windows: Win[] }
+export interface Workspace { id: string; label: string; name: string; summary: string; windows: Win[] }
 export interface Rect { left: number; top: number; width: number; height: number }
 
 export const ZONE: Record<Zone, { bg: string; fg: string }> = {
@@ -21,9 +21,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'release',
     label: 'Release',
     name: 'Ship the release',
-    role: 'Developers',
     summary: 'Editor, terminal, pull request and team chat, switched as one.',
-    about: 'Editor, terminal, pull request and team chat, all in place the moment you pick up a task.',
     windows: [
       w('ed', 'editor', 'Code', 'lapis', [0, 0, 7, 5]),
       w('tm', 'terminal', 'Terminal', 'verdigris', [0, 5, 7, 3]),
@@ -35,9 +33,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'brand',
     label: 'Brand',
     name: 'Brand refresh',
-    role: 'Designers',
     summary: 'Canvas, references, the brief and the client thread, side by side.',
-    about: 'The canvas, your references, the brief and the client thread, side by side instead of buried.',
     windows: [
       w('cv', 'design', 'Canvas', 'lapis', [0, 0, 8, 8]),
       w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 3], 'refs'),
@@ -49,9 +45,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'thesis',
     label: 'Thesis',
     name: 'Thesis, chapter 3',
-    role: 'Researchers',
     summary: 'The paper you are reading, the draft you are writing and the data behind both.',
-    about: 'The paper you are reading, the draft you are writing and the data behind both, one switch from the next project.',
     windows: [
       w('pp', 'paper', 'Reading', 'madder', [0, 0, 4, 8]),
       w('dr', 'notes', 'Draft', 'verdigris', [4, 0, 4, 8], 'draft'),
@@ -63,9 +57,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'stream',
     label: 'Stream',
     name: 'Friday stream',
-    role: 'Streamers',
     summary: 'Broadcast software, live chat and your dashboards, ready before you go live.',
-    about: 'Broadcast software, live chat and dashboards, arranged before you go live and again for the next show.',
     windows: [
       w('ob', 'stream', 'Broadcast', 'lapis', [0, 0, 8, 5]),
       w('lc', 'chat', 'Chat', 'madder', [8, 0, 4, 8], 'live'),
@@ -88,7 +80,7 @@ export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
+function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
   return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + TAG), width: r1(cols * colW - PAD), height: r1(rows * rowH - TAG - PAD / 2) };

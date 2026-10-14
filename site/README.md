@@ -16,7 +16,7 @@ installed dependencies and the last build are kept.
 
 - `lib/data.ts`: the four demo workspaces and the desktop geometry (grid slots, the messy layout).
 - `components/apps.tsx`: the pretend apps drawn inside the demo (editor, terminal, browser, chat, design, notes, reader, charts, broadcast).
-- `components/desk.tsx`: the interactive desktop in the hero, the feature illustrations and the workspace thumbnails.
+- `components/desk.tsx`: the interactive desktop in the hero and the feature illustrations.
 - `components/header.tsx`: the header, the one part that runs in the browser besides the demo.
 - `components/ui.tsx`: footer, wordmark, icons, the download button and the platform list.
 - `app/`: the pages, plus the favicon (`icon.svg`, `favicon.ico`, `apple-icon.png`), `robots.txt` and `sitemap.xml`.

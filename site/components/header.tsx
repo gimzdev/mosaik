@@ -5,7 +5,6 @@ import { DownloadButton, Wordmark } from '@/components/ui';
 
 const NAV = [
   ['/#how', 'How it works'],
-  ['/#people', 'Who it’s for'],
   ['/#platforms', 'Platforms'],
 ];
 

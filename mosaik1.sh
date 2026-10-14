@@ -55,7 +55,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.10.3"
+MK_VERSION="1.11.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -228,7 +228,7 @@ installed dependencies and the last build are kept.
 
 - `lib/data.ts`: the four demo workspaces and the desktop geometry (grid slots, the messy layout).
 - `components/apps.tsx`: the pretend apps drawn inside the demo (editor, terminal, browser, chat, design, notes, reader, charts, broadcast).
-- `components/desk.tsx`: the interactive desktop in the hero, the feature illustrations and the workspace thumbnails.
+- `components/desk.tsx`: the interactive desktop in the hero and the feature illustrations.
 - `components/header.tsx`: the header, the one part that runs in the browser besides the demo.
 - `components/ui.tsx`: footer, wordmark, icons, the download button and the platform list.
 - `app/`: the pages, plus the favicon (`icon.svg`, `favicon.ico`, `apple-icon.png`), `robots.txt` and `sitemap.xml`.
@@ -551,9 +551,8 @@ export default function NotFound() {
 }
 __MK_EOF__
 put app/page.tsx <<'__MK_EOF__'
-import { DeskThumb, Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
+import { Stage, SwitcherArt, TabsArt, ZonesArt } from '@/components/desk';
 import { Check, DownloadButton, PlatformList } from '@/components/ui';
-import { WORKSPACES } from '@/lib/data';
 import { site } from '@/lib/site';
 
 const FEATURES = [
@@ -630,26 +629,6 @@ export default function Home() {
                   <Art />
                 </div>
               </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="people" className="scroll-mt-16 border-t border-grout py-20 md:py-28">
-        <div className="page-x">
-          <Intro title="One desktop, many kinds of work.">A workspace is whatever you need open together. These four are the ones we kept reaching for.</Intro>
-          <div className="mt-12 grid gap-x-8 gap-y-12 sm:grid-cols-2">
-            {WORKSPACES.map((w, i) => (
-              <div key={w.id}>
-                <div className="overflow-hidden rounded-[16px] ring-1 ring-black/10">
-                  <DeskThumb index={i} />
-                </div>
-                <div className="mt-4 flex items-baseline justify-between gap-4">
-                  <h3 className="font-display text-[1.35rem] font-bold tracking-[-0.02em]">{w.name}</h3>
-                  <p className="shrink-0 text-sm font-semibold text-lapis">{w.role}</p>
-                </div>
-                <p className="mt-1.5 max-w-md text-[15.5px] leading-relaxed text-slate">{w.about}</p>
-              </div>
             ))}
           </div>
         </div>
@@ -1577,11 +1556,11 @@ export const AppWindow = ({ win, plain, flat }: { win: Win; plain?: boolean; fla
 __MK_EOF__
 put components/desk.tsx <<'__MK_EOF__'
 'use client';
-/* The demo desktops: the interactive one in the hero, the feature illustrations and the workspace thumbnails. */
+/* The demo desktops: the interactive one in the hero and the feature illustrations. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppBody, AppWindow, EditorApp, ZoneFrame } from '@/components/apps';
 import { Icon } from '@/components/ui';
-import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Rect, type Win, type Zone } from '@/lib/data';
+import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, type Rect, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
 const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
@@ -1964,24 +1943,6 @@ export function SwitcherArt() {
     </div>
   );
 }
-
-/** A whole workspace as a still desktop, for thumbnails. */
-export function DeskThumb({ index }: { index: number }) {
-  return (
-    <Scaled className="bg-ink">
-      <Wallpaper />
-      <Taskbar />
-      {WORKSPACES[index].windows.map((w) => {
-        const b = slotBox(w.slot, DESK_H);
-        return (
-          <div key={w.id} className="absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height }}>
-            <AppWindow win={w} />
-          </div>
-        );
-      })}
-    </Scaled>
-  );
-}
 __MK_EOF__
 put components/header.tsx <<'__MK_EOF__'
 'use client';
@@ -1991,7 +1952,6 @@ import { DownloadButton, Wordmark } from '@/components/ui';
 
 const NAV = [
   ['/#how', 'How it works'],
-  ['/#people', 'Who it’s for'],
   ['/#platforms', 'Platforms'],
 ];
 
@@ -2178,7 +2138,7 @@ type Kind = 'editor' | 'terminal' | 'browser' | 'chat' | 'design' | 'notes' | 'p
 /** [column, row, columns, rows] on a 12 x 8 grid */
 type Slot = [number, number, number, number];
 export interface Win { id: string; kind: Kind; variant?: string; tag: string; zone: Zone; slot: Slot }
-export interface Workspace { id: string; label: string; name: string; role: string; summary: string; about: string; windows: Win[] }
+export interface Workspace { id: string; label: string; name: string; summary: string; windows: Win[] }
 export interface Rect { left: number; top: number; width: number; height: number }
 
 export const ZONE: Record<Zone, { bg: string; fg: string }> = {
@@ -2196,9 +2156,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'release',
     label: 'Release',
     name: 'Ship the release',
-    role: 'Developers',
     summary: 'Editor, terminal, pull request and team chat, switched as one.',
-    about: 'Editor, terminal, pull request and team chat, all in place the moment you pick up a task.',
     windows: [
       w('ed', 'editor', 'Code', 'lapis', [0, 0, 7, 5]),
       w('tm', 'terminal', 'Terminal', 'verdigris', [0, 5, 7, 3]),
@@ -2210,9 +2168,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'brand',
     label: 'Brand',
     name: 'Brand refresh',
-    role: 'Designers',
     summary: 'Canvas, references, the brief and the client thread, side by side.',
-    about: 'The canvas, your references, the brief and the client thread, side by side instead of buried.',
     windows: [
       w('cv', 'design', 'Canvas', 'lapis', [0, 0, 8, 8]),
       w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 3], 'refs'),
@@ -2224,9 +2180,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'thesis',
     label: 'Thesis',
     name: 'Thesis, chapter 3',
-    role: 'Researchers',
     summary: 'The paper you are reading, the draft you are writing and the data behind both.',
-    about: 'The paper you are reading, the draft you are writing and the data behind both, one switch from the next project.',
     windows: [
       w('pp', 'paper', 'Reading', 'madder', [0, 0, 4, 8]),
       w('dr', 'notes', 'Draft', 'verdigris', [4, 0, 4, 8], 'draft'),
@@ -2238,9 +2192,7 @@ export const WORKSPACES: Workspace[] = [
     id: 'stream',
     label: 'Stream',
     name: 'Friday stream',
-    role: 'Streamers',
     summary: 'Broadcast software, live chat and your dashboards, ready before you go live.',
-    about: 'Broadcast software, live chat and dashboards, arranged before you go live and again for the next show.',
     windows: [
       w('ob', 'stream', 'Broadcast', 'lapis', [0, 0, 8, 5]),
       w('lc', 'chat', 'Chat', 'madder', [8, 0, 4, 8], 'live'),
@@ -2263,7 +2215,7 @@ export const SWITCHER_KEYS = ['Win', 'Alt', 'Space'];
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-export function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
+function slotBox([c, r, cols, rows]: Slot, deskH: number): Rect {
   const colW = (DESK_W - SIDE * 2) / 12;
   const rowH = (deskH - TOP - BOTTOM) / 8;
   return { left: r1(SIDE + c * colW + PAD / 2), top: r1(TOP + r * rowH + TAG), width: r1(cols * colW - PAD), height: r1(rows * rowH - TAG - PAD / 2) };
