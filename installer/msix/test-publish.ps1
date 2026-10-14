@@ -4,9 +4,10 @@
   Checks publish.ps1 against a stand-in of Microsoft's services (store-standin.mjs, run with
   Node.js): the access token, the submission left waiting deleted, a new one made from the last
   published one, the package and "What's new" put in it with nothing else changed, the upload and
-  the commit, as Microsoft documents them. With keys it sends without asking; the first time
-  without keys it asks for them once, keeps them and sends; without them, nothing is sent.
-  Nothing is sent to Microsoft, and no key of the user's is read or kept.
+  the commit, as Microsoft documents them. With a key it sends without asking; the first time
+  without one it asks for the key alone (the tenant and client IDs are in identity.json), keeps it
+  and sends; without it, nothing is sent. Nothing is sent to Microsoft, and no key of the user's
+  is read or kept.
 #>
 [CmdletBinding()]
 param()
@@ -27,6 +28,7 @@ $saved = @{}
 $names = 'MOSAIK_STORE_API', 'MOSAIK_STORE_LOGIN', 'MOSAIK_STORE_TENANT', 'MOSAIK_STORE_CLIENT', 'MOSAIK_STORE_KEY', 'APPDATA'
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
 $quote = { param($s) '"' + $s + '"' }
+$api = (Get-Content -Raw -Encoding UTF8 (Join-Path $Here 'identity.json') | ConvertFrom-Json).storeApi
 $publish = Join-Path $Here 'publish.ps1'
 # Any file of the package's name: the stand-in looks for its name in the upload.
 $name = "Mosaik_$version.0_x64.msix"
@@ -36,15 +38,16 @@ $wanted = 'token_form', 'pending_deleted', 'created_after_delete', 'update_json'
 'new_package_added', 'whats_new', 'listing_kept', 'pricing_kept', 'blob_type', 'upload_is_a_zip', 'zip_has_the_package',
 'upload_after_update', 'commit_after_upload', 'status_read_until_taken'
 
-# Runs publish.ps1 with `$Answers` on its input against a stand-in of the Store started for it;
-# what the stand-in saw and what publish.ps1 said.
-function Send-ToStandin([string]$Case, [string]$Answers, [string[]]$More = @()) {
+# Runs publish.ps1 with `$Answers` on its input against a stand-in of the Store started for it,
+# which takes only the tenant and client given and the key "test-key"; what the stand-in saw and
+# what publish.ps1 said.
+function Send-ToStandin([string]$Case, [string]$Answers, [string]$Tenant, [string]$Client) {
   $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
   $listener.Start()
   $port = $listener.LocalEndpoint.Port
   $listener.Stop()
   $report = Join-Path $work "report-$port.json"
-  $standinArgs = @((& $quote (Join-Path $Here 'store-standin.mjs')), $port, (& $quote $report), $name, (& $quote (Join-Path $Here 'whats-new.txt')))
+  $standinArgs = @((& $quote (Join-Path $Here 'store-standin.mjs')), $port, (& $quote $report), $name, (& $quote (Join-Path $Here 'whats-new.txt')), $Tenant, $Client, 'test-key')
   $standin = Start-Process -FilePath $node.Source -ArgumentList $standinArgs -PassThru -NoNewWindow
   $watch = [Diagnostics.Stopwatch]::StartNew()
   while ($true) {
@@ -53,7 +56,7 @@ function Send-ToStandin([string]$Case, [string]$Answers, [string[]]$More = @()) 
   }
   $env:MOSAIK_STORE_API = "http://127.0.0.1:$port/api"
   $env:MOSAIK_STORE_LOGIN = "http://127.0.0.1:$port/login"
-  $out = $Answers | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package @More 2>&1 | ForEach-Object { "$_" }
+  $out = $Answers | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" }
   $code = $LASTEXITCODE
   if (-not $standin.WaitForExit(15000)) { Stop-Process -Id $standin.Id -Force }
   if (-not (Test-Path $report)) { throw ("{0}: the stand-in wrote no report. publish.ps1 said: {1}" -f $Case, ($out -join ' / ')) }
@@ -67,59 +70,59 @@ function Send-ToStandin([string]$Case, [string]$Answers, [string[]]$More = @()) 
   [pscustomobject]@{ Said = ($out -join ' '); Seen = @($seen.seen) }
 }
 
-# A data folder of its own for each case: the keys publish.ps1 keeps go there.
+# A data folder of its own for each case: the key publish.ps1 keeps goes there.
 function Use-Data([string]$Case) {
   $env:APPDATA = Join-Path $work $Case
   New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
-  Join-Path $env:APPDATA 'Mosaik\store-publishing.xml'
+  Join-Path $env:APPDATA 'Mosaik\store-key.xml'
 }
 
 try {
-  # 1. Keys in the environment (a build server), nobody to answer: sent, and nothing asked.
+  # 1. Everything in the environment (a build server), nobody to answer: sent, and nothing asked.
   $null = Use-Data 'environment'
   $env:MOSAIK_STORE_TENANT = 'test-tenant'
   $env:MOSAIK_STORE_CLIENT = 'test-client'
   $env:MOSAIK_STORE_KEY = 'test-key'
-  $sent = Send-ToStandin 'keys in the environment' ''
-  if ($sent.Said -match '\[y/N\]|Tenant ID') { throw ("keys in the environment: it asked something: {0}" -f $sent.Said) }
+  $sent = Send-ToStandin 'everything in the environment' '' 'test-tenant' 'test-client'
+  if ($sent.Said -match 'Key|Tenant ID|Client ID') { throw ("everything in the environment: it asked something: {0}" -f $sent.Said) }
   Write-Host ("publish.ps1 against a stand-in of the Store: {0} checks passing ({1}), nothing asked." -f $wanted.Count, ($sent.Seen -join ', ')) -ForegroundColor Green
   foreach ($n in 'MOSAIK_STORE_TENANT', 'MOSAIK_STORE_CLIENT', 'MOSAIK_STORE_KEY') { [Environment]::SetEnvironmentVariable($n, $null, 'Process') }
 
-  # 2. The first run without keys: asked once, kept for this user, and sent.
-  $keys = Use-Data 'first-run'
-  $sent = Send-ToStandin 'the first run, keys given' "test-tenant`ntest-client`ntest-key"
-  if (-not (Test-Path $keys)) { throw "the first run, keys given: they were not kept ($keys)" }
-  if ($sent.Said -notmatch 'Tenant ID') { throw ("the first run, keys given: they were not asked for: {0}" -f $sent.Said) }
-  # 3. The next run: the kept keys, nothing asked.
-  $sent = Send-ToStandin 'the next run' ''
-  if ($sent.Said -match '\[y/N\]|Tenant ID') { throw ("the next run: it asked something: {0}" -f $sent.Said) }
-  Write-Host 'publish.ps1 the first time without keys: asks for them once, keeps them, sends; the next time it sends without asking.' -ForegroundColor Green
+  # 2. The first run without a key: the key alone asked once, with identity.json's tenant and
+  #    client, kept for this user, and sent.
+  $keyFile = Use-Data 'first-run'
+  $sent = Send-ToStandin 'the first run, the key given' 'test-key' $api.tenantId $api.clientId
+  if (-not (Test-Path $keyFile)) { throw "the first run, the key given: it was not kept ($keyFile)" }
+  if ($sent.Said -notmatch 'Key' -or $sent.Said -match 'Tenant ID|Client ID') { throw ("the first run, the key given: not the key alone asked for: {0}" -f $sent.Said) }
+  if ((Get-Content -Raw $keyFile) -match 'test-key') { throw "the first run, the key given: kept as it was typed ($keyFile)" }
+  # 3. The next run: the kept key, nothing asked.
+  $sent = Send-ToStandin 'the next run' '' $api.tenantId $api.clientId
+  if ($sent.Said -match 'Key|Tenant ID|Client ID') { throw ("the next run: it asked something: {0}" -f $sent.Said) }
+  Write-Host ("publish.ps1 the first time without a key: asks for the key alone ({0}, client {1} from identity.json), keeps it encrypted, sends; the next time it sends without asking." -f $api.tenant, $api.clientId) -ForegroundColor Green
 
-  # 4. No keys given (nothing typed, or only some of them): nothing kept, nothing sent, a failure
-  #    that says what is needed, so mosaik1.sh --deploy --app puts nothing online either. Nothing
-  #    listens where the services would be: any request is an error.
+  # 4. No key given: nothing kept, nothing sent, a failure that says what is needed, so
+  #    mosaik1.sh --deploy --app puts nothing online either. Nothing listens where the services
+  #    would be: any request is an error.
   $env:MOSAIK_STORE_API = 'http://127.0.0.1:9/api'
   $env:MOSAIK_STORE_LOGIN = 'http://127.0.0.1:9/login'
-  foreach ($answers in '', "test-tenant`ntest-client`n") {
-    $keys = Use-Data "no-keys-$($answers.Length)"
-    $out = $answers | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" }
-    $code = $LASTEXITCODE
-    $said = $out -join ' '
-    if ($code -eq 0 -or $said -notmatch 'tenant ID, client ID and key are all needed' -or (Test-Path $keys) -or $said -match 'Starting a submission|did not give access|Partner Center opens|by hand') {
-      throw ("publish.ps1 without keys given ({0} characters typed): exit code {1}; it said: {2}" -f $answers.Length, $code, ($out -join ' / '))
-    }
+  $keyFile = Use-Data 'no-key'
+  $out = '' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" }
+  $code = $LASTEXITCODE
+  $said = $out -join ' '
+  if ($code -eq 0 -or $said -notmatch 'The key is needed' -or (Test-Path $keyFile) -or $said -match 'Starting a submission|did not give access') {
+    throw ("publish.ps1 without a key given: exit code {0}; it said: {1}" -f $code, ($out -join ' / '))
   }
-  Write-Host 'publish.ps1 without keys given: it says what is needed, keeps and sends nothing, and ends as a failure.' -ForegroundColor Green
+  Write-Host 'publish.ps1 without a key given: it says what is needed, keeps and sends nothing, and ends as a failure.' -ForegroundColor Green
 
-  # 5. -Yes without keys (a script): nobody to ask, so nothing is sent.
+  # 5. -Yes without a key (a script): nobody to ask, so nothing is sent.
   $null = Use-Data 'script'
   $out = '' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package -Yes 2>&1 | ForEach-Object { "$_" }
   $code = $LASTEXITCODE
   $said = $out -join ' '
-  if ($code -eq 0 -or $said -notmatch 'keys' -or $said -match 'Tenant ID') {
-    throw ("publish.ps1 -Yes without keys: exit code {0}; it said: {1}" -f $code, ($out -join ' / '))
+  if ($code -eq 0 -or $said -notmatch 'no key' -or $said -match 'Partner Center shows a new one') {
+    throw ("publish.ps1 -Yes without a key: exit code {0}; it said: {1}" -f $code, ($out -join ' / '))
   }
-  Write-Host 'publish.ps1 -Yes without keys: it says the keys are needed, and asks and sends nothing.' -ForegroundColor Green
+  Write-Host 'publish.ps1 -Yes without a key: it says the key is needed, and asks and sends nothing.' -ForegroundColor Green
 }
 finally {
   foreach ($n in $names) { [Environment]::SetEnvironmentVariable($n, $saved[$n], 'Process') }

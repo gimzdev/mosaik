@@ -515,7 +515,7 @@ const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '2.0.0-dev', protocol: 8 };
+      return { reply: 'hello', app_version: '1.0.1-dev', protocol: 8 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -674,7 +674,7 @@ function answer(command: Command): Reply {
     case 'state':
       return {
         reply: 'state',
-        app_version: '2.0.0-dev',
+        app_version: '1.0.1-dev',
         protocol: 8,
         safe_mode: false,
         watchdog: true,

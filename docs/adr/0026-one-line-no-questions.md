@@ -1,4 +1,4 @@
-# 0026. One line ships both, with nothing to answer once the Store's keys are kept
+# 0026. One line ships both, with nothing to answer once the Store's key is kept
 
 - Status: accepted
 - Date: 2026-10-13
@@ -11,17 +11,22 @@ time, and asks for the Store's keys only on a first run in a terminal. The owner
 the simplest shipping possible, i got app on machine i send app to store alright? dont add
 paperwork for me i do ./mosaik1.sh --deploy --app and the site & app are both online updated".
 The keys belong to a Microsoft Entra application of the Partner Center account, which needs a
-Microsoft Entra tenant: the owner made one on 2026-10-13 (`gimz.onmicrosoft.com`).
+Microsoft Entra tenant: the owner made one on 2026-10-13 (`gimz.onmicrosoft.com`), linked to the
+account the same day, with the application "Mosaik Store publishing" (Manager). Then the owner:
+"why should the script asks for keys cant you put them in it".
 
 ## Decision
 
 - **No question when the keys are there.** `publish.ps1` sends through the Store's API without
   asking: `--app` on the command line is the yes.
-- **The keys asked once, on the first run.** Without keys, it asks for the tenant ID, client ID
-  and key in the terminal, says where they are in Partner Center, keeps them for that Windows
-  user (DPAPI) and sends. `-SetKeys` asks again, for a new key.
-- **Without keys, nothing is sent.** Nothing typed (or `-Yes`, a script, which never asks) ends
-  as a failure that says what is needed, so the site is not deployed either.
+- **The IDs in the repository, the key asked once.** The application's tenant and client IDs
+  are in `installer/msix/identity.json`: they are not secrets. The key is: the repository is
+  public (and the one-file `mosaik.ps1` carries it), and the key alone publishes to the Store, so
+  it never goes in a file of it. Without a kept key, `publish.ps1` asks for the key alone, says
+  where Partner Center makes one, keeps it for that Windows user (DPAPI) and sends. `-NewKey`
+  asks again, for a new one.
+- **Without the key, nothing is sent.** Nothing typed (or `-Yes`, a script, which never asks)
+  ends as a failure that says what is needed, so the site is not deployed either.
 
 ## Consequences
 

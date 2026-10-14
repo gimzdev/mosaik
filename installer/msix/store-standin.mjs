@@ -2,13 +2,13 @@
 // Store submission API, as Microsoft documents them), for test-publish.ps1: it answers like them,
 // checks every request publish.ps1 makes, and writes what it saw to a report.
 //
-//   node store-standin.mjs <port> <report.json> <expected package name> <whats-new.txt>
+//   node store-standin.mjs <port> <report.json> <expected package name> <whats-new.txt> <tenant> <client> <key>
 //
 // It ends by itself once the submission's status has been read twice, or after a minute.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
-const [port, reportPath, packageName, whatsNewFile] = process.argv.slice(2);
+const [port, reportPath, packageName, whatsNewFile, tenant, client, key] = process.argv.slice(2);
 const whatsNew = readFileSync(whatsNewFile, 'utf8').replace(/^\uFEFF/, '').trim();
 const APP = '9PHR0L7S1QVD';
 const PENDING = '1152921505000000001';
@@ -100,12 +100,12 @@ const server = createServer((req, res) => {
     const authorized = req.headers.authorization === 'Bearer standin-token';
     const base = `/api/applications/${APP}`;
 
-    if (req.method === 'POST' && path === '/login/test-tenant/oauth2/token') {
+    if (req.method === 'POST' && path === `/login/${tenant}/oauth2/token`) {
       const form = new URLSearchParams(body.toString('utf8'));
       checks.token_form =
         form.get('grant_type') === 'client_credentials' &&
-        form.get('client_id') === 'test-client' &&
-        form.get('client_secret') === 'test-key' &&
+        form.get('client_id') === client &&
+        form.get('client_secret') === key &&
         form.get('resource') === 'https://manage.devcenter.microsoft.com';
       return json(200, { token_type: 'Bearer', expires_in: '3599', access_token: 'standin-token' });
     }

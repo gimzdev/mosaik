@@ -18,8 +18,8 @@ re-run before each release.
 | 6. Product UI | done: every page reviewed, tested in a browser and toured on Windows (names, Tab key, light and dark, smallest size); a Windows contrast theme and Narrator by ear are in the release checks | [Step 6](#step-6-product-ui) |
 | 7. Hardening | done here: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers, soak, two screens at two scales; left for the owner by hand: sleep and resume, a screen unplugged; not possible here: RDP (Windows 11 Home has no Remote Desktop host), Windows 10 | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
-| 1.1 | built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.1](#11) |
-| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0141): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 2.0.0.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's keys are kept (asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant for the keys made on 2026-10-13 | [2.0](#20) |
+| 1.0.1, first builds | (called 1.1 then) built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.0.1: first builds](#101-first-builds) |
+| 1.0.1 | (called 2.0 until 2026-10-13) built, tested and packaged on Windows (jobs 0122 to 0141): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 1.0.1.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's key is kept (the key alone asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant made, linked to the developer account, and its application "Mosaik Store publishing" made with a key on 2026-10-13 | [1.0.1: the window rebuilt](#101-the-window-rebuilt) |
 
 ## Step 1: verify assumptions
 
@@ -202,7 +202,7 @@ mosaikctl-fc4207af53db9f1f.exe. Making them again.", and every test then passed 
 
 - Two monitors with different scale factors, with virtual displays (Virtual Display Driver
   25.7.26 from winget, owner's go-ahead): done in job 0116, the main screen at 100% and a
-  virtual 2560x1440 one at 125% (`workspace --monitors`, 1.1 below). A screen unplugged and
+  virtual 2560x1440 one at 125% (`workspace --monitors`, "1.0.1: first builds" below). A screen unplugged and
   plugged back (switching the virtual displays off and on changes Windows' display settings):
   left for the owner, by hand.
 - Windows 10 22H2: needs a second machine or a VM (this PC has 28 GB free, too little for a VM);
@@ -676,9 +676,10 @@ switch time (mean)           32.5 ms      33.1 ms
   `npm audit`: 0 vulnerabilities; a fresh build from a copy with Windows line endings works.
   Deploy only once the Store listing is live (the Download buttons install from it).
 
-## 1.1
+## 1.0.1: first builds
 
-What the owner asked for on 2026-10-12, and the evidence. Jobs run on the owner's PC (1920x1080
+Called 1.1 then (the owner keeps the version at 1.0, see the owner's decisions). What the owner
+asked for on 2026-10-12, and the evidence. Jobs run on the owner's PC (1920x1080
 at 100%, two virtual monitors attached), with `mosaik-probe smart` (the engine in the probe's
 process, its own windows, a scratch folder).
 
@@ -718,7 +719,7 @@ process, its own windows, a scratch folder).
   the owner's own path, passed in 69 s ("Every test passed."), and it found in the real Code
   Integrity log the two files of this build Windows refused that day. `pack`: the one-file
   `mosaik.ps1`, 236 files, checked file by file against the repository; it and `mosaik1.sh`
-  are beside the repository. Mosaïk 1.1 started on the new build (16:45; the owner had quit the
+  are beside the repository. Mosaïk started on the new build (16:45; the owner had quit the
   one before at 16:40, a clean exit in its log, no error reported to Windows), with the switcher
   shortcut registered, the watchdog running and the note about tags back in title bars shown.
 - **A note said at every start** (found in job 0094): settings moved forward on load were not
@@ -789,7 +790,7 @@ process, its own windows, a scratch folder).
   Arrange in 10 ms, zones Steam, Terminal, Settings, Browser for Steam, Windows Terminal,
   Settings and Google Chrome, Claude and File Explorer as tabs; Thirds in 10 ms, zones Browser,
   Files, Chat. `pack`: 240 files, checked against the repository; `mosaik.ps1` (1.09 MB) and
-  `mosaik1.sh` (site 1.3.0) beside it. Mosaïk 1.1 left running in the tray.
+  `mosaik1.sh` (site 1.3.0) beside it. Mosaïk left running in the tray.
 - **Arrange minimises, windows move only when asked, a workspace's apps** (ADR 0017 and 0018; the
   owner: "arrange window (auto) is really fucked up", "it should never resize when opening a
   window", "the position of tabs", "see and set list of current apps in a workspace"). Job 0104
@@ -1006,8 +1007,9 @@ process, its own windows, a scratch folder).
     close button does. The probe now closes the window the engine would manage; run again (job
     0119): Character Map's window in 465 ms, 1 window, closed, none left open.
 
-## 2.0
+## 1.0.1: the window rebuilt
 
+Called 2.0 until 2026-10-13 (the owner keeps the version at 1.0, see the owner's decisions).
 What the owner asked for on 2026-10-13, after opening 1.0 from the Store ("break everything and
 redo everything", "the dark theme default was much better", "production ready"), and the
 evidence (ADR 0024). Jobs 0122 to 0133 ran on the owner's PC: the main screen 1920 x 1080 at 100%,
@@ -1082,20 +1084,23 @@ edge, where the pointer stops).
   moved (Arrange is never clicked).
 - **Sending to the Store** (ADRs 0025 and 0026): `./mosaik1.sh --deploy --app` runs
   `mosaik.ps1 publish`, which sends the package through the Store's API with nothing to answer,
-  then deploys the site; the first run asks for the Store's keys once and keeps them. The keys
-  need a Microsoft Entra tenant, which the developer account did not have: Microsoft blocked the
-  first one the owner made ("Access to tenant is denied", AADSTS5000228, after its card check
-  failed); the second, `gimz.onmicrosoft.com`, was made on 2026-10-13 (its sign-in address
-  answers). `installer/msix/test-publish.ps1`, part of `mosaik.ps1 test`, runs `publish.ps1`
-  against a stand-in of Microsoft's token and submission services that checks every request (the
-  token, the waiting submission deleted, a new one from the last published, the old package
-  removed and the new one added, "What's new" in the listing and nothing else changed, the ZIP
-  uploaded as a block blob, the commit, the status read until the Store has it): 16 checks
-  passing with keys in the environment and nobody to answer, with keys given on the first run
-  (kept, encrypted) and on the next run asking nothing; without keys given, nothing kept or sent;
-  `-Yes` without keys refused. On the owner's PC (Windows PowerShell 5.1, job 0137) the
-  publish.ps1 before the change failed it (it asked "Send it now?" and sent nothing) and the one
-  after passed.
+  then deploys the site; the first run asks for the Store's key alone and keeps it. The key
+  belongs to the Entra application "Mosaik Store publishing", which needs a Microsoft Entra
+  tenant the developer account did not have: Microsoft blocked the first one the owner made
+  ("Access to tenant is denied", AADSTS5000228, after its card check failed); the second,
+  `gimz.onmicrosoft.com`, was made on 2026-10-13 and linked to the account that evening (Tenants:
+  "Tenant association complete"). The application was made there with the Manager (Windows)
+  role, then its first key (Partner Center shows it once; the owner keeps it). Its tenant and
+  client IDs are in `identity.json`. `installer/msix/test-publish.ps1`, part of `mosaik.ps1
+  test`, runs `publish.ps1` against a stand-in of Microsoft's token and submission services that
+  checks every request (the token for the tenant, client and key given, the waiting submission
+  deleted, a new one from the last published, the old package removed and the new one added,
+  "What's new" in the listing and nothing else changed, the ZIP uploaded as a block blob, the
+  commit, the status read until the Store has it): 16 checks passing with everything in the
+  environment and nobody to answer; on the first run the key alone asked, with `identity.json`'s
+  tenant and client, and kept encrypted; the next run asking nothing; without a key given,
+  nothing kept or sent; `-Yes` without a key refused. The `publish.ps1` before failed it (it
+  asked for the tenant ID first) and the one now passes, on PowerShell 7.4 here.
 - **The build around a running Mosaïk.** The build step's own test
   (`installer/test-mosaik-ps1.ps1`): job 0132's `mosaik.ps1 build` stopped at once on Windows
   PowerShell 5.1 ("The property 'Count' cannot be found on this object"); job 0133 ran the test
@@ -1134,15 +1139,16 @@ edge, where the pointer stops).
   ("it is another copy of Mosaïk (mosaik.exe), not this one", with how to quit it), and windows of
   Mosaïk's own programs are never arranged (the 1.0 watchdog's message had a zone in job 0122's
   preview; job 0123, none).
-- **The Store's 1.0 opened while 2.0 runs** (job 0126): from the Start menu, it handed over and
-  left: Mosaïk 2's window showed 1.0 s later, and no 1.0 process was left 3 s later. 1.0 does
+- **The Store's 1.0 opened while this build runs** (job 0126): from the Start menu, it handed
+  over and left: this build's window showed 1.0 s later, and no 1.0 process was left 3 s later. 1.0 does
   not start with Windows on this PC (its startup task is off, state 0).
 - **Built and packed** (job 0133): release build in 121 s, `Mosaik_2.0.0.0_x64.msix` 2.90 MB;
   `pack`, 270 files, checked file by file against the repository; `mosaik.ps1` and `mosaik1.sh`
   beside the repository, dated that day (each later copy is checked the same way when it is
-  made; job 0139: the package 2.9 MB, `pack` 271 files). Opened by hand, Mosaïk's window shows in 0.3 s; with `--background`, none (job 0133).
-  Mosaïk 2 left in the tray on the owner's own data (job 0135: version 2.0.0, protocol 8, its
-  watchdog, Win+Alt+Space registered).
+  made; job 0139: the package 2.9 MB, `pack` 271 files). Opened by hand, Mosaïk's window shows in
+  0.3 s; with `--background`, none (job 0133). This build left in the tray on the owner's own
+  data (job 0135: version 2.0.0, as it was called then, protocol 8, its watchdog, Win+Alt+Space
+  registered).
 - **The site** (`mosaik1.sh` 1.10.0, with `--app`): its first home page back (the title, "Every
   project gets its own workspace: your apps and windows arranged and ready in one click.", "Free
   and open source.", desktops of two to four windows); the site folder is what the script writes
@@ -1178,20 +1184,20 @@ edge, where the pointer stops).
   app once per run.
 - 2026-10-12: every kind of app, Steam, launchers and games included (ADR 0012); one row of
   title bar wherever possible, and where a band is needed above a window, a solid one (ADR 0011).
-- 2026-10-12 (1.1): every window starts at the top of its zone ("normalize all apps"); zones that
-  follow a resize; Arrange, "very smart", with undo; a quick menu on a line at the screen's right
-  edge; at least one vertical preset; no space lost between zones (4 px) and no blank band above
-  windows (tags in title bars, a window alone never lowered).
-- 2026-10-12 (1.1): Arrange lays every screen out for the task its windows say, the main window
-  the most room, in place of the open workspace's zones (ADR 0019); no coloured borders and no
-  space between windows (ADR 0020).
-- 2026-10-13 (1.1): zones make room for a window too big for them, as little as it needs,
-  rather than minimising it or letting it overlap; the window keeps its place in the layout and
-  is not made the main one (ADR 0021). Sets of the apps installed that go together, offered on
-  the home page, secondary but in view; the windows open the first time sorted into workspaces
-  by task; "clean, concise, non-invasive" (ADR 0022). On the site, the header's Download button
-  alone; the hero is the title and the desktop.
-- 2026-10-13 (2.0): "break everything and redo everything", "production ready": the window
+- 2026-10-12 (1.0.1, first builds): every window starts at the top of its zone ("normalize all
+  apps"); zones that follow a resize; Arrange, "very smart", with undo; a quick menu on a line at
+  the screen's right edge; at least one vertical preset; no space lost between zones (4 px) and no
+  blank band above windows (tags in title bars, a window alone never lowered).
+- 2026-10-12 (1.0.1, first builds): Arrange lays every screen out for the task its windows say, the
+  main window the most room, in place of the open workspace's zones (ADR 0019); no coloured borders
+  and no space between windows (ADR 0020).
+- 2026-10-13 (1.0.1, first builds): zones make room for a window too big for them, as little as it
+  needs, rather than minimising it or letting it overlap; the window keeps its place in the layout
+  and is not made the main one (ADR 0021). Sets of the apps installed that go together, offered on
+  the home page, secondary but in view; the windows open the first time sorted into workspaces by
+  task; "clean, concise, non-invasive" (ADR 0022). On the site, the header's Download button alone;
+  the hero is the title and the desktop.
+- 2026-10-13 (1.0.1): "break everything and redo everything", "production ready": the window
   rebuilt, dark by default (ADR 0024). The site's home page as it first was ("Every window, in
   its place.", "Every project gets its own workspace: your apps and windows arranged and ready in
   one click.", "Free and open source."). In the app, one to three zones (four rarely); on the
@@ -1201,3 +1207,11 @@ edge, where the pointer stops).
   `./mosaik1.sh --deploy --app`, with nothing to answer ("the simplest shipping possible ... dont
   add paperwork for me", ADR 0026); the owner made the Microsoft Entra tenant the Store's keys
   need (`gimz.onmicrosoft.com`; Microsoft blocked the first).
+- 2026-10-13: the version stays 1.0 ("rename everything to be v1 not v2 unless i tell you we're
+  on v1.0 all the time"): this release is 1.0.1, the lowest version the Store takes after its
+  1.0.0, and each next one takes the next third number. The builds were called 1.1 (jobs 0094
+  to 0118), then 2.0.0 (jobs 0122 to 0141): what they printed is quoted here as it was.
+- 2026-10-13: the Store's key is asked by the script, never written in it ("why should the
+  script asks for keys cant you put them in it"): the repository is public and the key alone
+  publishes to the Store. The Entra application's tenant and client IDs are in `identity.json`,
+  so the first run asks for the key alone (ADR 0026).

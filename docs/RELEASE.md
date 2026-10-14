@@ -1,16 +1,18 @@
 # Releasing Mosaïk
 
 Everything up to the package is automated, and sending it is one line; publishing stays the
-owner's (the Store submission, the GitHub push, the site deploy). Version 2.0.0 is set in
+owner's (the Store submission, the GitHub push, the site deploy). Version 1.0.1 is set in
 `Cargo.toml` and `apps/desktop/package.json`; `CHANGELOG.md` says what is in it, and
-`installer/msix/whats-new.txt` is what the Store shows as "What's new in this version".
+`installer/msix/whats-new.txt` is what the Store shows as "What's new in this version". The
+version stays 1.0 (the owner): each release takes the next third number (1.0.2, 1.0.3...), as the
+Store takes only a higher version than the one it has.
 
 ## 1. Build, test and package (on Windows)
 
 ```powershell
 .\mosaik.ps1 build      # interface + release binaries (about 3 minutes the first time)
 .\mosaik.ps1 test       # every test, clippy and the interface checks
-.\mosaik.ps1 package    # target\msix\Mosaik_2.0.0.0_x64.msix
+.\mosaik.ps1 package    # target\msix\Mosaik_1.0.1.0_x64.msix
 ```
 
 A Mosaïk running from the same folder quits for the build (every window it hid comes back) and
@@ -51,22 +53,27 @@ online. If the app is not sent, the site is not deployed either. The Store check
 version, usually within a day or two, and then updates everyone. `./mosaik1.sh --app` sends the app
 alone; `.\mosaik.ps1 publish` does the same from PowerShell.
 
-### The Store's keys (the first time only)
+### The Store's key (the first time only)
 
-The first run asks for three keys and keeps them for your Windows user, encrypted
-(`%APPDATA%\Mosaik\store-publishing.xml`); after that there is nothing to answer. They belong to
-a Microsoft Entra application of the Partner Center account:
+The first run asks for one thing, the key of the Partner Center account's Microsoft Entra
+application "Mosaik Store publishing", and keeps it for your Windows user, encrypted
+(`%APPDATA%\Mosaik\store-key.xml`); after that there is nothing to answer. The application's
+tenant and client IDs are in `installer/msix/identity.json`: they are not secrets. The key never
+goes in a file of the repository, which is public: whoever has it can publish to the Store.
 
-1. Partner Center, **Account settings**, **Tenants**: **Create Microsoft Entra ID**, or
-   **Associate Microsoft Entra ID** for a tenant you have (this account's: `gimz.onmicrosoft.com`).
-   Microsoft's sign-up asks for a payment card whose country is the tenant's (nothing is charged).
-2. **Account settings**, **User management**: sign in with Microsoft Entra ID, then **Microsoft
-   Entra applications**, **Create Microsoft Entra application**, with the **Manager** role.
-3. Select it: its **Tenant ID** and **Client ID**, then **Add new key** for the **Key** (shown
-   once).
+How it was set up, on 2026-10-13:
 
-Keys expire: Partner Center shows when and makes a new one the same way; give it with
-`.\installer\msix\publish.ps1 -SetKeys`.
+1. Partner Center, signed in with the developer account (the Microsoft account that owns
+   Mosaïk), **Account settings**, **Tenants**, **Associate Microsoft Entra ID**, signed in there
+   as `dev@gimz.onmicrosoft.com`: the tenant `gimz.onmicrosoft.com` is linked to the account.
+2. Partner Center, signed in as `dev@gimz.onmicrosoft.com` (Manager): **Account settings**,
+   **User management**, **Microsoft Entra applications**, **Create Microsoft Entra
+   application**: "Mosaik Store publishing", reply URL `https://gimzdev.com/mosaik-store`
+   (Partner Center refuses one on onmicrosoft.com), the **Manager (Windows)** role.
+3. The application, **Add new key**: the key, shown once.
+
+Keys expire: Partner Center shows when. Make a new one the same way (step 3) and give it with
+`.\installer\msix\publish.ps1 -NewKey`.
 
 ### The submission, for reference
 
@@ -110,6 +117,6 @@ The rest of the submission, for reference (already set by submission 1):
 - GitHub: from the folder above the repositories, `./deploy.sh push mosaik` force-pushes this
   repository to `master` as it is (its README included); the full `./deploy.sh` does every
   repository, and leaves Mosaïk's README as it is written here. Then, if wanted, a release
-  tagged with the version (`v2.0.0`) with that version's section of `CHANGELOG.md` (no files to
+  tagged with the version (`v1.0.1`) with that version's section of `CHANGELOG.md` (no files to
   attach: Mosaïk installs from the Store).
 - `winget install 9PHR0L7S1QVD` works through winget's Store source once the listing is live.

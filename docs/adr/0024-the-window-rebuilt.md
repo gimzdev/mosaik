@@ -1,4 +1,4 @@
-# 0024. Mosaïk 2: one window rebuilt, dark by default, apps by their icons, no alerts
+# 0024. The window rebuilt, dark by default, apps by their icons, no alerts
 
 - Status: accepted
 - Date: 2026-10-13
@@ -45,7 +45,7 @@ interrupted with a dialog or a banner.
     and its presets are the same ten layouts ("Start from a layout").
   - **Settings**: General (the switcher's shortcut, starting with Windows, the theme), Side menu,
     Windows (snapping, zone tags, coloured borders), Advanced, closed until asked, then About.
-- **Dark by default**: settings format 6. 1.x followed Windows' theme by default, so a file of
+- **Dark by default**: settings format 6. 1.0.0 followed Windows' theme by default, so a file of
   format 5 or older with that theme becomes dark; a theme picked (light, or dark) stays. From 6,
   "Like Windows" is a choice, and is kept.
 - **No tour**: the first time, Mosaïk sorts the windows open into workspaces and, installed from
@@ -77,11 +77,13 @@ interrupted with a dialog or a banner.
   window in a coloured frame with its zone's tag above it (both are settings of the app) and a
   thin line of desktop between windows, and the four kinds of work under "Who it's for". The bar
   that desktop once had along its top is left out: Mosaïk draws no such bar.
-- **Version 2.0.0**: the settings format changed in a way 1.x cannot read, and the window is new.
+- **Version 1.0.1**: first 2.0.0, since the settings format changed in a way 1.0.0 cannot read
+  and the window is new; then the owner, the same day: "rename everything to be v1 not v2 ...
+  we're on v1.0 all the time". 1.0.1 is the lowest version the Store takes after its 1.0.0.
 
 ## Consequences
 
-- 1.x cannot read format 6: a PC that goes back to 1.0 shows 1.0's own message once. Mosaïk 2
+- 1.0.0 cannot read format 6: a PC that goes back to it shows 1.0.0's own message once. 1.0.1
   reads every older format.
 - Icons cost one read per app per run, off the engine's thread; the cache is in memory only.
 - The tests of the window were rewritten with it (component tests with `@testing-library/jest-dom`

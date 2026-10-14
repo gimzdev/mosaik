@@ -2,8 +2,7 @@
 <#
 .SYNOPSIS
   Sends Mosaik's Store package to the Microsoft Store: a new submission with the package and
-  "What's new in this version", for certification. Nothing to answer once this PC has the
-  Store's keys.
+  "What's new in this version", for certification. Nothing to answer once this PC has the key.
 
 .DESCRIPTION
   The Microsoft Store submission API (manage.devcenter.microsoft.com) does it the way Partner
@@ -11,22 +10,23 @@
   old one and "What's new" from whats-new.txt (beside this script); nothing else of the listing
   changes. The Store then checks it, usually within a day or two, and updates everyone.
 
-  The keys are those of a Microsoft Entra application of the Partner Center account
-  (docs/RELEASE.md): asked the first time and kept for this Windows user only (encrypted with
-  DPAPI, in %APPDATA%\Mosaik\store-publishing.xml), never in the repository.
-  MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY, when set, are used instead (a
-  build server). Without them nothing is sent.
+  It signs in as the Partner Center account's Microsoft Entra application, "Mosaik Store
+  publishing" (docs/RELEASE.md): its tenant and client IDs are in identity.json (they are not
+  secrets); its key is asked the first time and kept for this Windows user only (encrypted with
+  DPAPI, in %APPDATA%\Mosaik\store-key.xml), never in the repository. MOSAIK_STORE_TENANT,
+  MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY, when set, are used instead (a build server). Without
+  the key nothing is sent.
 
 .PARAMETER Package
   The package to send; by default target\msix\Mosaik_<version>.0_x64.msix, as package.ps1 makes
   it for the version in Cargo.toml.
 
 .PARAMETER Yes
-  Nobody to answer (a script): never asks; without keys, nothing is sent.
+  Nobody to answer (a script): never asks; without the key, nothing is sent.
 
-.PARAMETER SetKeys
-  Asks for the Entra application's tenant ID, client ID and key again (a new key), keeps them for
-  this Windows user, and sends.
+.PARAMETER NewKey
+  Asks for the key again (a new one from Partner Center, when the kept one has expired), keeps it
+  for this Windows user, and sends.
 
 .NOTES
   MOSAIK_STORE_API and MOSAIK_STORE_LOGIN point it at a stand-in of Microsoft's services, for
@@ -39,7 +39,7 @@
 param(
   [string]$Package,
   [switch]$Yes,
-  [switch]$SetKeys
+  [switch]$NewKey
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,12 +52,12 @@ $StoreId = $Identity.storeId
 # The services, as Microsoft documents them; a test points these at a stand-in.
 $Api = if ($env:MOSAIK_STORE_API) { $env:MOSAIK_STORE_API.TrimEnd('/') } else { 'https://manage.devcenter.microsoft.com/v1.0/my' }
 $Login = if ($env:MOSAIK_STORE_LOGIN) { $env:MOSAIK_STORE_LOGIN.TrimEnd('/') } else { 'https://login.microsoftonline.com' }
-$Keys = Join-Path $env:APPDATA 'Mosaik\store-publishing.xml'
+$KeyFile = Join-Path $env:APPDATA 'Mosaik\store-key.xml'
 
 function Say([string]$Text, [string]$Colour = 'Gray') { Write-Host $Text -ForegroundColor $Colour }
 function Fail([string]$Text) { throw $Text }
 
-# The workspace version in Cargo.toml ("2.0.0"), as package.ps1 reads it.
+# The workspace version in Cargo.toml ("1.0.1"), as package.ps1 reads it.
 function Get-Version {
   $cargo = Get-Content -Raw -Encoding UTF8 (Join-Path $Root 'Cargo.toml')
   $match = [regex]::Match($cargo, '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"')
@@ -82,35 +82,32 @@ function Read-Answer([string]$Question, [switch]$Secret) {
   (Read-Host $Question).Trim()
 }
 
-# The Entra application's tenant ID, client ID and key for the Store's API: from the environment,
-# the file kept for this user, or asked once (again with -SetKeys) and kept.
+# The Entra application's tenant ID, client ID and key for the Store's API: the IDs from the
+# environment or identity.json, the key from the environment, the file kept for this user, or
+# asked once (again with -NewKey) and kept.
 function Get-Access {
-  if ($env:MOSAIK_STORE_TENANT -and $env:MOSAIK_STORE_CLIENT -and $env:MOSAIK_STORE_KEY) {
-    return [pscustomobject]@{
-      Tenant = $env:MOSAIK_STORE_TENANT
-      Client = $env:MOSAIK_STORE_CLIENT
-      Key    = ConvertTo-SecureString $env:MOSAIK_STORE_KEY -AsPlainText -Force
-    }
+  $api = $Identity.storeApi
+  $tenant = if ($env:MOSAIK_STORE_TENANT) { $env:MOSAIK_STORE_TENANT } else { $api.tenantId }
+  $client = if ($env:MOSAIK_STORE_CLIENT) { $env:MOSAIK_STORE_CLIENT } else { $api.clientId }
+  $access = { param($Key) [pscustomobject]@{ Tenant = $tenant; Client = $client; Key = $Key } }
+  if ($env:MOSAIK_STORE_KEY) { return & $access (ConvertTo-SecureString $env:MOSAIK_STORE_KEY -AsPlainText -Force) }
+  if (-not $NewKey -and (Test-Path -LiteralPath $KeyFile)) {
+    # Encrypted for the Windows user who gave it: another account cannot read it.
+    try { return & $access (Import-Clixml -LiteralPath $KeyFile) }
+    catch { Fail ("The Store's key kept in {0} cannot be read by this Windows user ({1}). Give it again: .\installer\msix\publish.ps1 -NewKey" -f $KeyFile, $_.Exception.Message) }
   }
-  if (-not $SetKeys -and (Test-Path $Keys)) {
-    # Encrypted for the Windows user who gave them: another account cannot read them.
-    try { return Import-Clixml $Keys }
-    catch { Fail ("The Store's keys kept in {0} cannot be read by this Windows user ({1}). Give them again: .\installer\msix\publish.ps1 -SetKeys" -f $Keys, $_.Exception.Message) }
-  }
-  if ($Yes) { Fail "This PC has no keys for the Store's API, and -Yes means nobody is here to give them: run it once in a terminal to give them (docs/RELEASE.md), or set MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY." }
+  if ($Yes) { Fail "This PC has no key for the Store's API, and -Yes means nobody is here to give it: run it once in a terminal to give it (docs/RELEASE.md), or set MOSAIK_STORE_KEY." }
   Say ''
-  Say 'The Store''s keys, asked this once and kept for this Windows user only, encrypted. They are in' Cyan
-  Say 'Partner Center: Account settings, User management, Microsoft Entra applications (docs/RELEASE.md).' Cyan
-  $tenant = Read-Answer 'Tenant ID'
-  $client = if ($tenant) { Read-Answer 'Client ID' } else { '' }
-  $key = if ($client) { Read-Answer 'Key' -Secret } else { New-Object Security.SecureString }
-  if ($key.Length -eq 0) { Fail 'The tenant ID, client ID and key are all needed: nothing was kept or sent.' }
-  $access = [pscustomobject]@{ Tenant = $tenant; Client = $client; Key = $key }
-  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Keys) | Out-Null
+  Say 'The key of "Mosaik Store publishing", asked this once and kept for this Windows user only,' Cyan
+  Say 'encrypted. Partner Center shows a new one in Account settings, User management, Microsoft' Cyan
+  Say 'Entra applications, Mosaik Store publishing, Add new key (docs/RELEASE.md).' Cyan
+  $key = Read-Answer 'Key' -Secret
+  if ($key.Length -eq 0) { Fail 'The key is needed: nothing was kept or sent.' }
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $KeyFile) | Out-Null
   # A SecureString goes into the file encrypted for this Windows user (DPAPI).
-  $access | Export-Clixml -Path $Keys
-  Say "Kept in $Keys; from now on it sends without asking." DarkGray
-  $access
+  Export-Clixml -LiteralPath $KeyFile -InputObject $key
+  Say "Kept in $KeyFile; from now on it sends without asking." DarkGray
+  & $access $key
 }
 
 # An access token for the Store's API (an hour long).
@@ -127,7 +124,7 @@ function Get-Token($Access) {
       $reply = Invoke-RestMethod -Method Post -Uri "$Login/$($Access.Tenant)/oauth2/token" -Body $body -ContentType 'application/x-www-form-urlencoded'
     }
     catch {
-      Fail ("Microsoft did not give access with this tenant ID, client ID and key ({0}). Check them in Partner Center (Account settings, User management, Microsoft Entra applications), then give them again: .\installer\msix\publish.ps1 -SetKeys." -f $_.Exception.Message)
+      Fail ("Microsoft did not give access with this key ({0}). Partner Center shows the key's dates, and makes a new one, in Account settings, User management, Microsoft Entra applications, Mosaik Store publishing; give it with: .\installer\msix\publish.ps1 -NewKey" -f $_.Exception.Message)
     }
     $reply.access_token
   }

@@ -7,5 +7,12 @@
   "packageFamilyName": "Gimzdev.Mosak_yjd3d5zpwkx98",
   "storeId": "9PHR0L7S1QVD",
   "storePage": "https://apps.microsoft.com/detail/9PHR0L7S1QVD",
-  "submitBy": "2027-01-11"
+  "submitBy": "2027-01-11",
+  "storeApi": {
+    "about": "The Partner Center account's Microsoft Entra application that sends packages through the Store's API (publish.ps1, docs/RELEASE.md), made on 2026-10-13. Its tenant and client IDs are not secrets; its key is never written here.",
+    "name": "Mosaik Store publishing",
+    "tenant": "gimz.onmicrosoft.com",
+    "tenantId": "390212b4-7d6f-424f-bf7e-a818d879b778",
+    "clientId": "ab164317-ab8c-4f40-9455-80c4a97ee27e"
+  }
 }

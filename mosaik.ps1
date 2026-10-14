@@ -531,7 +531,7 @@ function Invoke-Package {
 }
 
 # Tests, builds and packages Mosaik, then sends the package to the Microsoft Store:
-# installer\msix\publish.ps1, which asks once for the Store's keys (docs/RELEASE.md).
+# installer\msix\publish.ps1, which asks once for the Store's key (docs/RELEASE.md).
 function Invoke-Publish {
   $source = Get-Source
   Invoke-Test

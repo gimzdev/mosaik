@@ -37,9 +37,9 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    it is beside this file, else the one-file mosaik.ps1 beside it. It tests,
 #    builds and packages the app and sends it to the Microsoft Store, which
 #    checks it (usually within a day or two) before everyone gets it. The
-#    first time, it asks for the Store's keys (the app's docs/RELEASE.md says
-#    where they are) and keeps them, encrypted; after that there is nothing
-#    to answer.
+#    first time, it asks for the Store's key (the app's docs/RELEASE.md says
+#    where Partner Center makes one) and keeps it, encrypted; after that
+#    there is nothing to answer.
 # ════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
 # The copy made for Windows line endings (line 2) goes when the script ends.
@@ -55,7 +55,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.10.0"
+MK_VERSION="1.10.1"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then

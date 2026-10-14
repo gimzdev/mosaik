@@ -1,13 +1,13 @@
 # Changelog
 
-## 2.0.0
+## 1.0.1
 
-Mosaïk 2 is a new window on the same engine, with everything the 1.1 builds added since 1.0
+A new window on the same engine, with everything the development builds added since 1.0.0
 (below).
 
 ### A new window
 
-- Dark by default. A theme left as 1.x set it (following Windows) becomes dark once; a theme you
+- Dark by default. A theme left as 1.0.0 set it (following Windows) becomes dark once; a theme you
   picked stays. Light and "Like Windows" are a click away in Settings.
 - Home shows your screen as it will be: each window in its zone, with its app's icon, its name
   and its zone's tag, a thin line of desktop apart. Smart is chosen first, Arrange's own layout
@@ -41,11 +41,11 @@ Mosaïk 2 is a new window on the same engine, with everything the 1.1 builds add
 ### Making a release
 
 - `.\mosaik.ps1 publish` runs the tests, builds and packages Mosaïk, then sends the package to the
-  Microsoft Store with "What's new", with nothing to answer (the Store's keys are asked the first
+  Microsoft Store with "What's new", with nothing to answer (the Store's key is asked the first
   time and kept); the site script's `--app` does it too, so `./mosaik1.sh --deploy --app` ships
   the site and the app in one line.
 
-## 1.1.0 (development builds, not released on their own)
+## Development builds after 1.0.0 (not released on their own, all in 1.0.1)
 
 ### A home page that shows before it moves
 

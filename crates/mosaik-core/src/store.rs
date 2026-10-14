@@ -99,7 +99,7 @@ impl Saved for Settings {
         let settings = value
             .as_object_mut()
             .ok_or_else(|| "settings are not an object".to_owned())?;
-        // Dark is the default from 6. 1.x followed Windows by default, so a theme left as it
+        // Dark is the default from 6. 1.0.0 followed Windows by default, so a theme left as it
         // came takes the new default; a theme picked (light, or dark) stays.
         let theme = settings.get("theme").and_then(serde_json::Value::as_str);
         if theme.is_none_or(|t| t == "system") {
@@ -661,8 +661,8 @@ mod tests {
     }
 
     #[test]
-    fn settings_from_before_2_are_dark_unless_light_was_chosen() {
-        // The owner: "the dark theme default was much better". 1.x followed Windows by default,
+    fn settings_from_before_format_6_are_dark_unless_light_was_chosen() {
+        // The owner: "the dark theme default was much better". 1.0.0 followed Windows by default,
         // so a theme left as it came becomes dark, set up or not; a theme picked in Settings
         // (light, or dark) stays. Nothing is said: Settings shows the theme.
         let d = TempDir::new("settings-dark");
@@ -673,7 +673,7 @@ mod tests {
         assert_eq!(set_up.value.theme, crate::settings::Theme::Dark);
         let light = load_settings(&d, br#"{"version":5,"theme":"light","onboarding_done":true}"#);
         assert_eq!(light.value.theme, crate::settings::Theme::Light);
-        // Saved by 2.0: "Like Windows" is the user's choice now, and stays.
+        // Saved in format 6: "Like Windows" is the user's choice now, and stays.
         let follows = load_settings(&d, br#"{"version":6,"theme":"system","onboarding_done":true}"#);
         assert_eq!(follows.value.theme, crate::settings::Theme::System);
         // From 1.0's format too, with its own move.
