@@ -93,9 +93,10 @@ $watchdogExe = Join-Path $release 'mosaik-watchdog.exe'
 $rescue = "start $watchdogExe --rescue --quiet --journal `"$journal`" (waited)"
 $ctl = Join-Path $release 'mosaikctl.exe'
 # A program that runs and answers "quit" on stderr, as mosaikctl does when Mosaik does not answer:
-# whoami.exe (or ls, where this runs on PowerShell 7 outside Windows) says it knows no "quit", in
-# the language of this Windows.
-$talker = if ([IO.Path]::DirectorySeparatorChar -eq '\') { Join-Path $env:SystemRoot 'System32\whoami.exe' } else { '/bin/ls' }
+# Windows' own tar.exe (ls where this runs on PowerShell 7 outside Windows), which takes "quit" for
+# options it refuses and says so the way C programs do. (whoami.exe answered nothing that reached
+# the pipe, job 0140.)
+$talker = if ([IO.Path]::DirectorySeparatorChar -eq '\') { Join-Path $env:SystemRoot 'System32\tar.exe' } else { '/bin/ls' }
 
 $built = 'cargo build --release -p mosaik-desktop -p mosaik-watchdog -p mosaik-ipc'
 $restart = "start $(Join-Path $release 'mosaik.exe') --background"
