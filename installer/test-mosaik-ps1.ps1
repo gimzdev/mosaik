@@ -18,12 +18,15 @@
 #>
 [CmdletBinding()]
 param(
-  # The mosaik.ps1 to check: the repository's, or a one-file copy.
-  [string]$Script = (Join-Path $PSScriptRoot '..\mosaik.ps1')
+  # The mosaik.ps1 to check: a one-file copy, or by default the repository's.
+  [string]$Script
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
+# Here, not as the parameter's default: there, Windows PowerShell 5.1 started with -File has no
+# $PSScriptRoot yet (job 0139: the test stopped at once, in Join-Path).
+if (-not $Script) { $Script = Join-Path $PSScriptRoot '..\mosaik.ps1' }
 
 $tokens = $null
 $errors = $null
@@ -90,7 +93,8 @@ $watchdogExe = Join-Path $release 'mosaik-watchdog.exe'
 $rescue = "start $watchdogExe --rescue --quiet --journal `"$journal`" (waited)"
 $ctl = Join-Path $release 'mosaikctl.exe'
 # A program that runs and answers "quit" on stderr, as mosaikctl does when Mosaik does not answer:
-# whoami.exe (or ls, where this runs on PowerShell 7 outside Windows) says it knows no 'quit'.
+# whoami.exe (or ls, where this runs on PowerShell 7 outside Windows) says it knows no "quit", in
+# the language of this Windows.
 $talker = if ([IO.Path]::DirectorySeparatorChar -eq '\') { Join-Path $env:SystemRoot 'System32\whoami.exe' } else { '/bin/ls' }
 
 $built = 'cargo build --release -p mosaik-desktop -p mosaik-watchdog -p mosaik-ipc'
@@ -126,13 +130,19 @@ try {
   Check 'one running, its mosaikctl answering on stderr' {
     Copy-Item -LiteralPath $talker -Destination $ctl
     try {
+      # Its answer, as Request-Quit will get it.
+      $says = & {
+        $ErrorActionPreference = 'Continue'
+        @(& $ctl quit 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) | Select-Object -First 1
+      }
       $mine = New-Mosaik (Join-Path $release 'mosaik.exe')
       $script:Running = @($mine)
       Invoke-Build
     }
     finally { Remove-Item -LiteralPath $ctl -ErrorAction SilentlyContinue }
     $order = @($script:Done)
-    if (-not ($order | Where-Object { $_ -like "say *'quit'*" })) { return "its answer not shown ($($order -join ' / '))" }
+    if (-not $says) { return "$talker, standing in for mosaikctl, answered nothing" }
+    if (-not ($order | Where-Object { $_.StartsWith('say ') -and $_.Contains($says) })) { return "its answer ($says) not shown ($($order -join ' / '))" }
     if ($order | Where-Object { $_ -like 'say *did not run mosaikctl*' }) { return "its answer taken for Windows refusing to run it ($($order -join ' / '))" }
     if ($mine.WaitedFor -ne 10000) { return "not waited for as one asked to quit ($($mine.WaitedFor) ms)" }
     if (-not $script:Done.Contains($restart)) { return 'not started again' }

@@ -68,10 +68,11 @@ export function Wordmark({ className, fill = 'currentColor', tiles = TILES, deco
   );
 }
 
-export const Check = ({ children, s = 16, top = 3 }: { children: React.ReactNode; s?: number; top?: number }) => (
+/** A list item with a tick. */
+export const Check = ({ children }: { children: React.ReactNode }) => (
   <li className="flex items-start gap-3">
-    <span className="text-lapis" style={{ marginTop: top }}>
-      <Icon n="check" s={s} w={2} />
+    <span className="mt-[3px] text-lapis">
+      <Icon n="check" s={16} w={2} />
     </span>
     {children}
   </li>

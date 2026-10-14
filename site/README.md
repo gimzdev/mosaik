@@ -3,8 +3,8 @@
 Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4 and TypeScript. No animation library: the demo moves with CSS transitions.
 
 This folder is written by `mosaik1.sh` at the root of the repository, which is the source of truth. Never edit these files
-by hand: change the script and run it again. The folder is written afresh each time; `public/`, the Vercel link and the
-installed dependencies are kept.
+by hand: change the script and run it again. The folder is written afresh each time; `public/`, the Vercel link, the
+installed dependencies and the last build are kept.
 
 ```bash
 ./mosaik1.sh --dir site             # install or update, then start the dev server

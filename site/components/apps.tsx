@@ -14,7 +14,7 @@ const Controls = ({ className = '' }: { className?: string }) => (
   </div>
 );
 
-function TitleBar({ title, dark, glyph = '#7C93FF' }: { title: string; dark?: boolean; glyph?: string }) {
+function TitleBar({ title, dark, glyph }: { title: string; dark?: boolean; glyph: string }) {
   return (
     <div className={`flex h-[34px] shrink-0 select-none items-center justify-between text-[12px] ${dark ? 'bg-[#101216] text-[#8E97AA]' : 'bg-[#E9ECF1] text-[#4A5262]'}`}>
       <div className="flex min-w-0 items-center gap-2 pl-3">
@@ -26,7 +26,7 @@ function TitleBar({ title, dark, glyph = '#7C93FF' }: { title: string; dark?: bo
   );
 }
 
-const Avatar = ({ name, color, size = 28 }: { name: string; color: string; size?: number }) => (
+const Avatar = ({ name, color, size }: { name: string; color: string; size: number }) => (
   <span className="grid shrink-0 place-items-center rounded-full font-semibold text-white" style={{ width: size, height: size, background: color, fontSize: size * 0.4 }}>
     {name[0]}
   </span>
@@ -757,8 +757,8 @@ function Meter({ label, level, icon }: { label: string; level: number; icon: str
     <div className="flex items-center gap-2.5 text-[11.5px] text-[#AEB5C4]">
       <span className="flex w-[70px] items-center gap-1.5"><Icon n={icon} s={13} /> {label}</span>
       <div className="flex flex-1 gap-[2px]">
-        {Array.from({ length: 22 }, (_, i) => (
-          <span key={i} className="h-[9px] flex-1 rounded-[1.5px]" style={{ background: i / 22 >= level ? '#2A2F3B' : i > 18.04 ? '#C93450' : i > 13.64 ? '#F4B13A' : '#5FD3B6' }} />
+        {Array.from({ length: 22 }, (_, i) => i / 22).map((f, i) => (
+          <span key={i} className="h-[9px] flex-1 rounded-[1.5px]" style={{ background: f >= level ? '#2A2F3B' : f > 0.82 ? '#C93450' : f > 0.62 ? '#F4B13A' : '#5FD3B6' }} />
         ))}
       </div>
     </div>

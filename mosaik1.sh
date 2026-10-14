@@ -23,8 +23,8 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #  Updating
 #    This file is the source of truth. Change the settings below and run it
 #    again: the site's files are written afresh (any it no longer makes are
-#    gone), while public/, your Vercel link and the installed dependencies
-#    are kept, so only what changed is installed or built again.
+#    gone), while public/, your Vercel link, the installed dependencies and
+#    the last build are kept, so only what changed is installed or built.
 #
 #  Deploying
 #    The first --deploy asks you to sign in to Vercel (or export
@@ -146,7 +146,7 @@ case "$APP_DIR" in ""|/|"$HOME") die "Refusing to install into '$APP_DIR'." ;; e
 
 # An existing site is replaced: its files are written afresh, and any it no longer makes are gone.
 # Kept: public/ and the Vercel link, and (unless --fresh) the installed dependencies and the last
-# build, so a rerun only installs or builds what changed.
+# build and type-check, so a rerun only installs, builds or checks what changed.
 INSTALL="fresh"
 if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR")" ]; then
   # Only a folder this script wrote is emptied: never one of yours, nor the app's source code.
@@ -156,7 +156,7 @@ if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR")" ]; then
     [ -e "$entry" ] || [ -L "$entry" ] || continue
     case "${entry##*/}" in
       public|.vercel|"$MARKER") continue ;;
-      node_modules|.next|package-lock.json) [ "$FRESH" = 1 ] || continue ;;
+      node_modules|package-lock.json|.next|next-env.d.ts|*.tsbuildinfo) [ "$FRESH" = 1 ] || continue ;;
     esac
     rm -rf "$entry" || die "Could not remove $entry (a program has files open in it: close it and run again)."
   done
@@ -215,8 +215,8 @@ put README.md <<'__MK_EOF__'
 Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4 and TypeScript. No animation library: the demo moves with CSS transitions.
 
 This folder is written by `mosaik1.sh` at the root of the repository, which is the source of truth. Never edit these files
-by hand: change the script and run it again. The folder is written afresh each time; `public/`, the Vercel link and the
-installed dependencies are kept.
+by hand: change the script and run it again. The folder is written afresh each time; `public/`, the Vercel link, the
+installed dependencies and the last build are kept.
 
 ```bash
 ./mosaik1.sh --dir site             # install or update, then start the dev server
@@ -717,7 +717,7 @@ const Controls = ({ className = '' }: { className?: string }) => (
   </div>
 );
 
-function TitleBar({ title, dark, glyph = '#7C93FF' }: { title: string; dark?: boolean; glyph?: string }) {
+function TitleBar({ title, dark, glyph }: { title: string; dark?: boolean; glyph: string }) {
   return (
     <div className={`flex h-[34px] shrink-0 select-none items-center justify-between text-[12px] ${dark ? 'bg-[#101216] text-[#8E97AA]' : 'bg-[#E9ECF1] text-[#4A5262]'}`}>
       <div className="flex min-w-0 items-center gap-2 pl-3">
@@ -729,7 +729,7 @@ function TitleBar({ title, dark, glyph = '#7C93FF' }: { title: string; dark?: bo
   );
 }
 
-const Avatar = ({ name, color, size = 28 }: { name: string; color: string; size?: number }) => (
+const Avatar = ({ name, color, size }: { name: string; color: string; size: number }) => (
   <span className="grid shrink-0 place-items-center rounded-full font-semibold text-white" style={{ width: size, height: size, background: color, fontSize: size * 0.4 }}>
     {name[0]}
   </span>
@@ -1460,8 +1460,8 @@ function Meter({ label, level, icon }: { label: string; level: number; icon: str
     <div className="flex items-center gap-2.5 text-[11.5px] text-[#AEB5C4]">
       <span className="flex w-[70px] items-center gap-1.5"><Icon n={icon} s={13} /> {label}</span>
       <div className="flex flex-1 gap-[2px]">
-        {Array.from({ length: 22 }, (_, i) => (
-          <span key={i} className="h-[9px] flex-1 rounded-[1.5px]" style={{ background: i / 22 >= level ? '#2A2F3B' : i > 18.04 ? '#C93450' : i > 13.64 ? '#F4B13A' : '#5FD3B6' }} />
+        {Array.from({ length: 22 }, (_, i) => i / 22).map((f, i) => (
+          <span key={i} className="h-[9px] flex-1 rounded-[1.5px]" style={{ background: f >= level ? '#2A2F3B' : f > 0.82 ? '#C93450' : f > 0.62 ? '#F4B13A' : '#5FD3B6' }} />
         ))}
       </div>
     </div>
@@ -1601,8 +1601,8 @@ const TrayIcon = () => (
 );
 
 /** A workspace's layout in small: its zones, in their colours, where they are. */
-const LayoutGlyph = ({ windows, size = 16 }: { windows: Win[]; size?: number }) => (
-  <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" className="shrink-0">
+const LayoutGlyph = ({ windows }: { windows: Win[] }) => (
+  <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true" className="shrink-0">
     {windows.map(({ id, slot: [c, r, cw, rh], zone }) => (
       <rect key={id} x={1 + (c / 12) * 14 + 0.5} y={1 + (r / 8) * 14 + 0.5} width={(cw / 12) * 14 - 1} height={(rh / 8) * 14 - 1} rx="1.2" fill={ZONE[zone].bg} />
     ))}
@@ -2098,10 +2098,11 @@ export function Wordmark({ className, fill = 'currentColor', tiles = TILES, deco
   );
 }
 
-export const Check = ({ children, s = 16, top = 3 }: { children: React.ReactNode; s?: number; top?: number }) => (
+/** A list item with a tick. */
+export const Check = ({ children }: { children: React.ReactNode }) => (
   <li className="flex items-start gap-3">
-    <span className="text-lapis" style={{ marginTop: top }}>
-      <Icon n="check" s={s} w={2} />
+    <span className="mt-[3px] text-lapis">
+      <Icon n="check" s={16} w={2} />
     </span>
     {children}
   </li>

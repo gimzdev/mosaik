@@ -23,8 +23,8 @@ const TrayIcon = () => (
 );
 
 /** A workspace's layout in small: its zones, in their colours, where they are. */
-const LayoutGlyph = ({ windows, size = 16 }: { windows: Win[]; size?: number }) => (
-  <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" className="shrink-0">
+const LayoutGlyph = ({ windows }: { windows: Win[] }) => (
+  <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true" className="shrink-0">
     {windows.map(({ id, slot: [c, r, cw, rh], zone }) => (
       <rect key={id} x={1 + (c / 12) * 14 + 0.5} y={1 + (r / 8) * 14 + 0.5} width={(cw / 12) * 14 - 1} height={(rh / 8) * 14 - 1} rx="1.2" fill={ZONE[zone].bg} />
     ))}
