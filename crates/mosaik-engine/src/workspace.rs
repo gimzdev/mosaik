@@ -856,7 +856,10 @@ impl Engine {
             .filter(|f| self.manageable(f) || (Some(f.handle) == shown && self.addable(f)))
             .filter_map(|f| assigned.get(&f.handle).map(|s| (s.clone(), f)))
             .collect();
-        let moves = self.to_moves(&plan_refit(&ws, &on_screen, topology, self.style()), topology);
+        let moves = self.to_moves(
+            &plan_refit(&ws, &on_screen, topology, self.style(), shown),
+            topology,
+        );
         let targets: HashMap<WindowHandle, Rect> = moves
             .iter()
             .filter_map(|(w, to)| match to {
@@ -925,7 +928,7 @@ impl Engine {
         let Some(active) = &mut self.active else { return };
         let launched = active.launching.remove(pos);
         active.windows.insert(launched.slot.clone(), h);
-        let moves = plan_refit(&ws, &[(launched.slot, &facts)], &topology, style);
+        let moves = plan_refit(&ws, &[(launched.slot, &facts)], &topology, style, None);
         let placed: Vec<(WindowHandle, Rect)> =
             mover::move_all(&self.to_moves(&moves, &topology), Duration::from_millis(1500))
                 .into_iter()

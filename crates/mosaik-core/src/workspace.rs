@@ -730,18 +730,20 @@ pub fn regroup(ws: &mut Workspace, groups: &[GroupSeen<'_>]) -> Vec<(SlotId, Win
 }
 
 /// Where the windows already filling a workspace's slots go on the monitors connected now:
-/// after a display change, or when a window the workspace started appears. Minimised windows are
-/// left where they are.
+/// after a display change, when a window the workspace started appears, or when one is added.
+/// Minimised windows are left where they are, but for `shown`: a window just added to the
+/// workspace, which goes to its place and shows again.
 pub fn plan_refit(
     ws: &Workspace,
     windows: &[(SlotId, &WindowFacts)],
     topology: &Topology,
     style: FrameStyle,
+    shown: Option<WindowHandle>,
 ) -> Vec<Move> {
     let resolver = Resolver::new(&ws.layout, topology, style);
     windows
         .iter()
-        .filter(|(_, w)| !w.minimized)
+        .filter(|(_, w)| !w.minimized || Some(w.handle) == shown)
         .filter_map(|(slot, w)| {
             let s = ws.layout.slot(slot)?;
             let target = resolver.target(&s.place)?;
@@ -1466,7 +1468,7 @@ mod tests {
             (w.layout.slots[2].id.clone(), &minimized),
         ];
         for t in fixtures::all() {
-            let moves = plan_refit(&w, &windows, &t, style());
+            let moves = plan_refit(&w, &windows, &t, style(), None);
             assert_eq!(moves.len(), 2, "the minimised window stays put");
             for m in moves {
                 let Target::Frame(f) = m.target else {
@@ -1474,6 +1476,35 @@ mod tests {
                 };
                 assert!(t.is_reachable(f, 32), "{f:?} on {}", t.fingerprint());
             }
+        }
+    }
+
+    #[test]
+    fn refit_shows_a_minimised_window_just_added() {
+        // The owner: "i should be able to add claude", minimised as opening a workspace leaves
+        // the windows it does not use (job 0146: added to a zone, it stayed minimised). The
+        // window added goes to its slot's place; another minimised one stays put.
+        let one = fixtures::single_1080p_100();
+        let ws = snapped();
+        let seen: Vec<Seen> = ws.iter().map(|w| seen(w, "App")).collect();
+        let w = capture(WorkspaceId("w".into()), "W".into(), &seen, &one, style(), None);
+        let added = WindowFacts {
+            minimized: true,
+            ..ws[1].clone()
+        };
+        let other = WindowFacts {
+            minimized: true,
+            ..ws[2].clone()
+        };
+        let windows = [
+            (w.layout.slots[0].id.clone(), &ws[0]),
+            (w.layout.slots[1].id.clone(), &added),
+            (w.layout.slots[2].id.clone(), &other),
+        ];
+        for t in fixtures::all() {
+            let moves = plan_refit(&w, &windows, &t, style(), Some(added.handle));
+            let moved: Vec<WindowHandle> = moves.iter().map(|m| m.window).collect();
+            assert_eq!(moved, vec![ws[0].handle, added.handle], "on {}", t.fingerprint());
         }
     }
 
