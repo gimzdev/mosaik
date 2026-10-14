@@ -490,15 +490,39 @@ function Invoke-Build([switch]$Installed) {
   Copy-Item (Under $source 'THIRD-PARTY-NOTICES.txt') (Under $source 'target' 'release')
   $exe = Under $source 'target' 'release' 'mosaik.exe'
   Say ("Done: {0}" -f $exe) Green
-  if ($restart) {
-    # Windows can refuse a new build for a while (Smart App Control): it is built all the same.
-    try {
-      Start-Process $exe -ArgumentList '--background'
-      Say 'Mosaik is running again, in the tray.' Green
-    }
+  if ($restart) { Start-Again $source }
+}
+
+# Starts the new build again in the tray, as Mosaik was before the build. Windows can refuse a
+# new program for a minute or two while Smart App Control looks it up: it is tried again every
+# 20 s, for 3 minutes. "Running again" is said only once it runs from this folder, a few seconds
+# on (the owner was shown the Store's 1.0.0 after building 1.0.2, with "running again" said).
+function Start-Again([string]$Source) {
+  $exe = Under $Source 'target' 'release' 'mosaik.exe'
+  $tries = 10
+  for ($try = 1; $try -le $tries; $try++) {
+    try { Start-Process $exe -ArgumentList '--background' }
     catch {
-      Say ("Mosaik is built, but Windows did not start it again ({0}). Start it with .\mosaik.ps1 run once Windows allows it." -f $_.Exception.Message) Yellow
+      if ($try -eq $tries) {
+        Say ("Mosaik is built, but Windows did not start it again ({0}). Start it with .\mosaik.ps1 run once Windows allows it." -f $_.Exception.Message) Yellow
+        return
+      }
+      Say 'Windows has not let the new build start yet (Smart App Control looks a new program up first): trying again in 20 s.' DarkGray
+      Start-Sleep -Seconds 20
+      continue
     }
+    # A copy that gives way to another leaves within a second; one that replaces an older copy
+    # takes a few.
+    Start-Sleep -Seconds 3
+    for ($look = 1; $look -le 5; $look++) {
+      if (@(Get-RunningBuild $Source).Count -gt 0) {
+        Say 'Mosaik is running again, in the tray.' Green
+        return
+      }
+      Start-Sleep -Seconds 1
+    }
+    Say 'Mosaik was started again but is not running: start it with .\mosaik.ps1 run, or from its tray icon if another Mosaik is there.' Yellow
+    return
   }
 }
 

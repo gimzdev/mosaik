@@ -33,8 +33,8 @@ $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $Script).Path, [ref]$tokens, [ref]$errors)
 if (@($errors).Count -gt 0) { throw ("{0} does not parse: {1}" -f $Script, $errors[0].Message) }
 $functions = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $false))
-# The build step and what it calls; the last two are not in every version of the script.
-$optional = 'Stop-RunningBuild', 'Request-Quit', 'Stop-Mosaik', 'Get-WatchdogJournal'
+# The build step and what it calls; the optional ones are not in every version of the script.
+$optional = 'Stop-RunningBuild', 'Request-Quit', 'Stop-Mosaik', 'Get-WatchdogJournal', 'Start-Again'
 foreach ($name in @('Under', 'Fail', 'Get-RunningBuild', 'Invoke-Build', 'Invoke-Publish') + $optional) {
   $found = @($functions | Where-Object { $_.Name -eq $name })
   if ($found.Count -eq 0) {
@@ -59,18 +59,29 @@ function Use-Cargo { }
 function Invoke-Tool([string]$In, [string]$Program, [string[]]$Arguments) { $script:Done.Add("$Program $($Arguments -join ' ')") }
 function Invoke-Cargo([string]$In, [string[]]$Arguments) { $script:Done.Add("cargo $($Arguments -join ' ')") }
 $script:StartRefused = $false
+# How many starts Windows refuses before it lets one through, as Smart App Control does with a new
+# build for a minute or two; and whether the Mosaik started leaves at once (another took its place).
+$script:StartRefusals = 0
+$script:StartLeaves = $false
 function Start-Process {
   param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru)
   # As Windows refuses a program it does not trust yet (Smart App Control and a new build).
   if ($script:StartRefused) { throw 'This program is blocked by group policy.' }
+  if ($script:StartRefusals -gt 0) {
+    $script:StartRefusals -= 1
+    throw 'This program is blocked by group policy.'
+  }
   $script:Done.Add(("start {0} {1}{2}" -f $FilePath, ($ArgumentList -join ' '), $(if ($Wait) { ' (waited)' } else { '' })).Trim())
+  # A Mosaik started runs from then on, unless it leaves at once.
+  if (-not $Wait -and -not $script:StartLeaves -and (Split-Path -Leaf $FilePath) -eq 'mosaik.exe') { $script:Running += New-Mosaik $FilePath }
   if ($PassThru) { [pscustomobject]@{ ExitCode = 1 } }
 }
-# As Windows lists them: the processes of a name, none, one or several.
+function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) $script:Done.Add("sleep $Seconds s $Milliseconds ms") }
+# As Windows lists them: the processes of a name still running, none, one or several.
 function Get-Process {
   [CmdletBinding()]
   param([string[]]$Name)
-  $script:Running | Where-Object { $Name -contains $_.Name }
+  $script:Running | Where-Object { $Name -contains $_.Name -and -not $_.Ended }
 }
 # The command line Windows keeps for each of them (none for a process it cannot read).
 function Get-CimInstance {
@@ -83,8 +94,8 @@ function Get-CimInstance {
 $script:NextId = 4000
 function New-Mosaik([string]$Path, [bool]$Quits = $true, [string]$Name = 'mosaik', [bool]$Dies = $true, [string]$CommandLine = '') {
   $script:NextId += 1
-  $p = [pscustomobject]@{ Id = $script:NextId; Name = $Name; Path = $Path; Quits = $Quits; Dies = $Dies; CommandLine = $CommandLine; WaitedFor = 0; Stopped = $false }
-  $p | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($ms) $this.WaitedFor = $ms; $this.Quits -or ($this.Stopped -and $this.Dies) }
+  $p = [pscustomobject]@{ Id = $script:NextId; Name = $Name; Path = $Path; Quits = $Quits; Dies = $Dies; CommandLine = $CommandLine; WaitedFor = 0; Stopped = $false; Ended = $false }
+  $p | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($ms) $this.WaitedFor = $ms; $this.Ended = $this.Quits -or ($this.Stopped -and $this.Dies); $this.Ended }
   $p | Add-Member -MemberType ScriptMethod -Name Kill -Value { $this.Stopped = $true; $script:Done.Add("stop $($this.Name)") }
   $p
 }
@@ -170,6 +181,26 @@ try {
     try { Invoke-Build } finally { $script:StartRefused = $false }
     if (-not $script:Done.Contains($built)) { return 'not built' }
     if (-not ($script:Done | Where-Object { $_ -like 'say *built*not start it again*' })) { return "nothing said ($($script:Done -join ' / '))" }
+  }
+  Check 'one running, refused by Windows twice, then started' {
+    $script:Running = @(New-Mosaik (Join-Path $release 'mosaik.exe'))
+    $script:StartRefusals = 2
+    try { Invoke-Build } finally { $script:StartRefusals = 0 }
+    $order = @($script:Done)
+    if (-not $script:Done.Contains($restart)) { return "not started again ($($order -join ' / '))" }
+    if (@($order | Where-Object { $_ -like 'say *trying again*' }).Count -ne 2) { return "not tried again twice, saying so ($($order -join ' / '))" }
+    if (-not ($order | Where-Object { $_ -like 'say *running again*' })) { return "nothing said ($($order -join ' / '))" }
+  }
+  Check 'one running, started again but gone at once' {
+    # Another Mosaik took its place meanwhile (the Store's copy, opened from the Start menu while
+    # the build ran), or it stopped: it is not running, and that is said (the owner was shown the
+    # Store's 1.0.0 after building 1.0.2, with "running again" said).
+    $script:Running = @(New-Mosaik (Join-Path $release 'mosaik.exe'))
+    $script:StartLeaves = $true
+    try { Invoke-Build } finally { $script:StartLeaves = $false }
+    $order = @($script:Done)
+    if ($order | Where-Object { $_ -like 'say *running again*' }) { return "it said it was running ($($order -join ' / '))" }
+    if (-not ($order | Where-Object { $_ -like 'say *not running*' })) { return "nothing said ($($order -join ' / '))" }
   }
   Check 'one running, its mosaikctl refused by Windows' {
     # A file Windows will not run, as Smart App Control refuses one. Mosaik and its watchdog only
@@ -259,4 +290,4 @@ finally {
 }
 if ($publishFailures.Count -gt 0) { throw ("mosaik.ps1 publish: {0}" -f ($publishFailures -join '; ')) }
 Write-Host 'mosaik.ps1 publish: sent (0), waiting for the Store with nothing sent (3, not a failure), a failure (1): 3 cases passing.' -ForegroundColor Green
-Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one whose mosaikctl answers on stderr (shown, still asked), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one whose mosaikctl Windows refuses (its watchdog stopped first, then it, its windows brought back quietly, said), the same with its journal not readable, its watchdog (waited for), one that does not quit (said): 10 cases passing.' -ForegroundColor Green
+Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one whose mosaikctl answers on stderr (shown, still asked), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one Windows refuses twice (tried again, saying so, then running), one started again but gone at once (said, not called running), one whose mosaikctl Windows refuses (its watchdog stopped first, then it, its windows brought back quietly, said), the same with its journal not readable, its watchdog (waited for), one that does not quit (said): 12 cases passing.' -ForegroundColor Green
