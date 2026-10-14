@@ -9,7 +9,7 @@
   The Microsoft Store submission API (manage.devcenter.microsoft.com) does it the way Partner
   Center takes a submission: a copy of the last published one, with this package in place of the
   old one and "What's new" from whats-new.txt (beside this script); nothing else of the listing
-  changes. The Store then checks it, usually within a day, and updates everyone.
+  changes. The Store then checks it, usually within a day or two, and updates everyone.
 
   The keys are those of a Microsoft Entra application of the Partner Center account
   (docs/RELEASE.md): asked the first time and kept for this Windows user only (encrypted with
@@ -57,11 +57,12 @@ $Keys = Join-Path $env:APPDATA 'Mosaik\store-publishing.xml'
 function Say([string]$Text, [string]$Colour = 'Gray') { Write-Host $Text -ForegroundColor $Colour }
 function Fail([string]$Text) { throw $Text }
 
-# The version in Cargo.toml ("2.0.0").
+# The workspace version in Cargo.toml ("2.0.0"), as package.ps1 reads it.
 function Get-Version {
-  $line = Select-String -Path (Join-Path $Root 'Cargo.toml') -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
-  if (-not $line) { Fail 'No version in Cargo.toml.' }
-  $line.Matches[0].Groups[1].Value
+  $cargo = Get-Content -Raw -Encoding UTF8 (Join-Path $Root 'Cargo.toml')
+  $match = [regex]::Match($cargo, '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"')
+  if (-not $match.Success) { Fail 'The version was not found in Cargo.toml ([workspace.package] version).' }
+  $match.Groups[1].Value
 }
 
 # A line from the person here, or from a script on its input (nothing at its end); a secret is
@@ -91,7 +92,11 @@ function Get-Access {
       Key    = ConvertTo-SecureString $env:MOSAIK_STORE_KEY -AsPlainText -Force
     }
   }
-  if (-not $SetKeys -and (Test-Path $Keys)) { return Import-Clixml $Keys }
+  if (-not $SetKeys -and (Test-Path $Keys)) {
+    # Encrypted for the Windows user who gave them: another account cannot read them.
+    try { return Import-Clixml $Keys }
+    catch { Fail ("The Store's keys kept in {0} cannot be read by this Windows user ({1}). Give them again: .\installer\msix\publish.ps1 -SetKeys" -f $Keys, $_.Exception.Message) }
+  }
   if ($Yes) { Fail "This PC has no keys for the Store's API, and -Yes means nobody is here to give them: run it once in a terminal to give them (docs/RELEASE.md), or set MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY." }
   Say ''
   Say 'The Store''s keys, asked this once and kept for this Windows user only, encrypted. They are in' Cyan
@@ -162,7 +167,7 @@ try {
 
   $version = Get-Version
   if (-not $Package) { $Package = Join-Path $Root "target\msix\Mosaik_$version.0_x64.msix" }
-  if (-not (Test-Path $Package)) { Fail "There is no package to send ($Package). Make it first: .\mosaik.ps1 package" }
+  if (-not (Test-Path -LiteralPath $Package)) { Fail "There is no package to send ($Package). Make it first: .\mosaik.ps1 package" }
   $notesFile = Join-Path $Here 'whats-new.txt'
   $notes = if (Test-Path $notesFile) { (Get-Content -Raw -Encoding UTF8 $notesFile).Trim() } else { '' }
   if (-not $notes) { Fail "Write what is new in $version in $notesFile first: the Store shows it as `"What's new in this version`"." }
@@ -196,13 +201,13 @@ try {
 
   Say '  Uploading the package' DarkGray
   $zip = Join-Path ([IO.Path]::GetTempPath()) "mosaik-store-$version-$PID.zip"
-  Remove-Item $zip -ErrorAction SilentlyContinue
-  Compress-Archive -Path $Package -DestinationPath $zip
+  Remove-Item -LiteralPath $zip -ErrorAction SilentlyContinue
+  Compress-Archive -LiteralPath $Package -DestinationPath $zip
   try {
     $null = Invoke-WebRequest -Method Put -Uri $upload -InFile $zip -Headers @{ 'x-ms-blob-type' = 'BlockBlob' } -ContentType 'application/zip' -UseBasicParsing
   }
   catch { Fail ("The package could not be uploaded: {0}" -f $_.Exception.Message) }
-  finally { Remove-Item $zip -ErrorAction SilentlyContinue }
+  finally { Remove-Item -LiteralPath $zip -ErrorAction SilentlyContinue }
 
   Say '  Sending it for certification' DarkGray
   $null = Invoke-Store POST "/submissions/$id/commit"

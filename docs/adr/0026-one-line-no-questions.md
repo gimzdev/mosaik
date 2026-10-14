@@ -27,7 +27,7 @@ Microsoft Entra tenant: the owner made one on 2026-10-13 (`gimz.onmicrosoft.com`
 
 - After the first run, `./mosaik1.sh --deploy --app` is the whole release: tests, build,
   package, the Store's submission, the site. Microsoft's review of each version (usually within a
-  day) is the only wait, and it asks nothing of the owner.
+  day or two) is the only wait, and it asks nothing of the owner.
 - `installer/msix/test-publish.ps1` checks it against its stand-in: keys in the environment, keys
   given on the first run and kept, the next run with nothing asked, no keys given, and `-Yes`
   without keys.

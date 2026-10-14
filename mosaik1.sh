@@ -18,13 +18,13 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    ./mosaik1.sh --dir ~/m   install somewhere else (default ./mosaik_site)
 #    ./mosaik1.sh --deploy --app   also send the app to the Microsoft Store
 #    ./mosaik1.sh --app       only send the app (Windows: it is tested, built
-#                             and packaged first, then you are asked)
+#                             and packaged first)
 #
 #  Updating
 #    This file is the source of truth. Change the settings below and run it
-#    again: only files that changed are rewritten, files it no longer makes
-#    are removed, and what you added yourself (public/, extra pages, your
-#    Vercel link) is left alone.
+#    again: the site's files are written afresh (any it no longer makes are
+#    gone), while public/, your Vercel link and the installed dependencies
+#    are kept, so only what changed is installed or built again.
 #
 #  Deploying
 #    The first --deploy asks you to sign in to Vercel (or export
@@ -36,13 +36,15 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    Runs the app's own mosaik.ps1 publish: the repository's (./mosaik/) when
 #    it is beside this file, else the one-file mosaik.ps1 beside it. It tests,
 #    builds and packages the app and sends it to the Microsoft Store, which
-#    checks it (usually within a day) before everyone gets it. The first time,
-#    it asks for the Store's keys (the app's docs/RELEASE.md says where they
-#    are) and keeps them, encrypted; after that there is nothing to answer.
+#    checks it (usually within a day or two) before everyone gets it. The
+#    first time, it asks for the Store's keys (the app's docs/RELEASE.md says
+#    where they are) and keeps them, encrypted; after that there is nothing
+#    to answer.
 # ════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
 # The copy made for Windows line endings (line 2) goes when the script ends.
-[ "${MK_COPY:-}" != "$0" ] || trap 'rm -f "$0"' EXIT
+cleanup() { [ "${MK_COPY:-}" != "$0" ] || rm -f "$0"; }
+trap cleanup EXIT
 
 # ── Your settings ────────────────────────────────────────────────────────
 SITE_NAME="Mosaïk"
@@ -53,7 +55,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.9.2"
+MK_VERSION="1.10.0"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -94,7 +96,7 @@ while [ $# -gt 0 ]; do
 done
 case "$PORT" in ''|*[!0-9]*) die "Port must be a number, got \"$PORT\"" ;; esac
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "Port must be between 1 and 65535"
-case "$SITE_URL" in http://*|https://*) SITE_URL="${SITE_URL%/}" ;; *) die "SITE_URL must start with https:// (got \"$SITE_URL\")" ;; esac
+case "$SITE_URL" in https://*) SITE_URL="${SITE_URL%/}" ;; *) die "SITE_URL must start with https:// (got \"$SITE_URL\")" ;; esac
 case "$PATREON_URL" in https://*) ;; *) die "PATREON_URL must start with https:// (got \"$PATREON_URL\")" ;; esac
 case "$STORE_ID" in ????????????) ;; *) die "STORE_ID is the 12-character Store ID from Partner Center (got \"$STORE_ID\")" ;; esac
 case "$STORE_ID" in *[!0-9A-Z]*) die "STORE_ID has only capital letters and digits (got \"$STORE_ID\")" ;; esac
@@ -103,8 +105,8 @@ case "$VERCEL_PROJECT" in ''|*[!a-z0-9._-]*) die "VERCEL_PROJECT may only use lo
 printf '\n%s%s  %s site%s  %s%s %s%s\n\n' "$CB" "$CA" "$SITE_NAME" "$C0" "$CD" "$SCRIPT_NAME" "$MK_VERSION" "$C0"
 
 # ── The app (--app) ──────────────────────────────────────────────────────
-# Tested, built and packaged by the app's own mosaik.ps1, then sent to the Microsoft Store after
-# asking (its "publish"). Before the site: when the app is not sent, nothing else is done.
+# Tested, built and packaged by the app's own mosaik.ps1, then sent to the Microsoft Store (its
+# "publish"). Before the site: when the app is not sent, nothing else is done.
 if [ "$APP" = 1 ]; then
   command -v powershell.exe >/dev/null 2>&1 ||
     die "--app builds Mosaïk and sends it to the Microsoft Store: run it on Windows (Git Bash), where Mosaïk builds."
@@ -115,15 +117,10 @@ if [ "$APP" = 1 ]; then
   else die "--app needs the app beside this file: its repository (mosaik/) or the one-file mosaik.ps1."; fi
   step "Sending Mosaïk to the Microsoft Store with $APP_PS1"
   note "Its tests, build and package first (a few minutes), then the Store."
-  APP_PS1_WIN="$(cygpath -w "$APP_PS1" 2>/dev/null || printf '%s' "$APP_PS1")"
+  PUBLISH=(powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$APP_PS1" 2>/dev/null || printf '%s' "$APP_PS1")" publish)
   # mintty (Git Bash's own window) is no Windows console: winpty gives PowerShell one, so it can ask.
-  if [ "${TERM_PROGRAM:-}" = "mintty" ] && command -v winpty >/dev/null 2>&1; then
-    winpty powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$APP_PS1_WIN" publish ||
-      die "Mosaïk was not sent to the Store; the lines above say why. Nothing else was done."
-  else
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$APP_PS1_WIN" publish ||
-      die "Mosaïk was not sent to the Store; the lines above say why. Nothing else was done."
-  fi
+  if [ "${TERM_PROGRAM:-}" = "mintty" ] && command -v winpty >/dev/null 2>&1; then PUBLISH=(winpty "${PUBLISH[@]}"); fi
+  "${PUBLISH[@]}" || die "Mosaïk was not sent to the Store; the lines above say why. Nothing else was done."
   ok "The app's part is done"
   [ "$SITE" = 1 ] || exit 0
 fi
@@ -138,7 +135,6 @@ ok "Node.js $NODE_VERSION, npm $(npm -v)"
 
 # ── Where to install ─────────────────────────────────────────────────────
 MARKER=".mosaik-site"
-MANIFEST=".mosaik-files"
 if [ -z "$APP_DIR" ]; then
   if [ -f "$MARKER" ]; then APP_DIR="."
   else APP_DIR="./mosaik_site"; fi
@@ -148,20 +144,22 @@ APP_DIR="$(cd "$(dirname "$APP_DIR")" && pwd -P)/$(basename "$APP_DIR")"
 case "$APP_DIR" in */.) APP_DIR="${APP_DIR%/.}" ;; esac
 case "$APP_DIR" in ""|/|"$HOME") die "Refusing to install into '$APP_DIR'." ;; esac
 
-# An existing install is removed and the site written fresh; public/ and the Vercel link are kept.
+# An existing site is replaced: its files are written afresh, and any it no longer makes are gone.
+# Kept: public/ and the Vercel link, and (unless --fresh) the installed dependencies and the last
+# build, so a rerun only installs or builds what changed.
 INSTALL="fresh"
-if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then
-  # The one thing never removed: the app's own source code (it is not a site, and not on GitHub).
-  if [ -f "$APP_DIR/Cargo.toml" ] || [ -d "$APP_DIR/crates" ]; then
-    die "$APP_DIR is the Mosaïk app's source code, not a site. Nothing was removed. Use --dir to pick the site's folder."
-  fi
-  [ "$APP_DIR" != "$(pwd -P)" ] || cd ..
-  KEEP="$(mktemp -d "${TMPDIR:-/tmp}/mosaik-keep.XXXXXX")"
-  for kept in public .vercel; do [ ! -e "$APP_DIR/$kept" ] || cp -R "$APP_DIR/$kept" "$KEEP/"; done
-  rm -rf "$APP_DIR" || die "Could not remove $APP_DIR (a program has files open in it: close it and run again)."
-  mkdir -p "$APP_DIR"
-  for kept in public .vercel; do [ ! -e "$KEEP/$kept" ] || cp -R "$KEEP/$kept" "$APP_DIR/"; done
-  rm -rf "$KEEP"
+if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR")" ]; then
+  # Only a folder this script wrote is emptied: never one of yours, nor the app's source code.
+  [ -f "$APP_DIR/$MARKER" ] ||
+    die "$APP_DIR has files this script did not write: nothing was removed. Use --dir with a new or empty folder."
+  for entry in "$APP_DIR"/* "$APP_DIR"/.[!.]* "$APP_DIR"/..?*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    case "${entry##*/}" in
+      public|.vercel|"$MARKER") continue ;;
+      node_modules|.next|package-lock.json) [ "$FRESH" = 1 ] || continue ;;
+    esac
+    rm -rf "$entry" || die "Could not remove $entry (a program has files open in it: close it and run again)."
+  done
   INSTALL="replaced the old one"
 fi
 mkdir -p "$APP_DIR"
@@ -170,24 +168,17 @@ step "Writing the site into $APP_DIR ($INSTALL)"
 
 rmdir public 2>/dev/null || true
 
-FILES=0; CHANGED=0
-NEW_LIST="$(mktemp "${TMPDIR:-/tmp}/mosaik-files.XXXXXX")"
-cleanup() { rm -f "$NEW_LIST"; [ "${MK_COPY:-}" != "$0" ] || rm -f "$0"; }
-trap cleanup EXIT
-# put FILE < content: writes FILE only when its content changed, and records it.
+FILES=0
+# put FILE < content: writes FILE.
 put() {
   case "$1" in */*) mkdir -p "${1%/*}" ;; esac
-  cat > "$1.mk-new"
-  if [ -f "$1" ] && cmp -s "$1.mk-new" "$1"; then rm -f "$1.mk-new"; else mv -f "$1.mk-new" "$1"; CHANGED=$((CHANGED + 1)); fi
+  cat > "$1"
   FILES=$((FILES + 1))
-  printf '%s\n' "$1" >> "$NEW_LIST"
 }
-# put_b64 FILE < base64: the same for binary files (icons).
+# put_b64 FILE < base64: the same for binary files (the favicon), decoded where it is written.
 put_b64() {
-  case "$1" in */*) mkdir -p "${1%/*}" ;; esac
-  node -e 'process.stdout.write(Buffer.from(require("fs").readFileSync(0, "utf8"), "base64"))' > "$1.mk-bin"
-  put "$1" < "$1.mk-bin"
-  rm -f "$1.mk-bin"
+  put "$1"
+  node -e 'const fs = require("fs"); fs.writeFileSync(process.argv[1], Buffer.from(fs.readFileSync(process.argv[1], "utf8"), "base64"))' "$1"
 }
 
 # ── Project files ────────────────────────────────────────────────────────
@@ -206,12 +197,10 @@ rm -f lib.site.mk-gen
 put .gitignore <<'__MK_EOF__'
 node_modules
 .next
-out
 .vercel
 .env*.local
 *.tsbuildinfo
 next-env.d.ts
-npm-debug.log*
 .DS_Store
 __MK_EOF__
 put .vercelignore <<'__MK_EOF__'
@@ -226,7 +215,8 @@ put README.md <<'__MK_EOF__'
 Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4 and TypeScript. No animation library: the demo moves with CSS transitions.
 
 This folder is written by `mosaik1.sh` at the root of the repository, which is the source of truth. Never edit these files
-by hand: change the script and run it again; the site updates in place and only changed files are touched.
+by hand: change the script and run it again. The folder is written afresh each time; `public/`, the Vercel link and the
+installed dependencies are kept.
 
 ```bash
 ./mosaik1.sh --dir site             # install or update, then start the dev server
@@ -240,7 +230,7 @@ by hand: change the script and run it again; the site updates in place and only 
 - `components/apps.tsx`: the pretend apps drawn inside the demo (editor, terminal, browser, chat, design, notes, reader, charts, broadcast).
 - `components/desk.tsx`: the interactive desktop in the hero, the feature illustrations and the workspace thumbnails.
 - `components/header.tsx`: the header, the one part that runs in the browser besides the demo.
-- `components/ui.tsx`: footer, wordmark, icons, key caps, the download button and the platform list.
+- `components/ui.tsx`: footer, wordmark, icons, the download button and the platform list.
 - `app/`: the pages, plus the favicon (`icon.svg`, `favicon.ico`, `apple-icon.png`), `robots.txt` and `sitemap.xml`.
 
 ## Releasing
@@ -1591,7 +1581,7 @@ put components/desk.tsx <<'__MK_EOF__'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppBody, AppWindow, EditorApp, ZoneFrame } from '@/components/apps';
 import { Icon } from '@/components/ui';
-import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
+import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Rect, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
 const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
@@ -1600,12 +1590,13 @@ const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?
   </div>
 );
 
-const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: number }) => (
-  <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" className="shrink-0">
-    <rect x="1" y="1" width="8" height="8" rx="1.6" fill={colors[0]} />
-    <rect x="10.5" y="1" width="4.5" height="4.5" rx="1.2" fill={colors[1]} />
-    <rect x="10.5" y="7" width="4.5" height="8" rx="1.2" fill={colors[2]} />
-    <rect x="1" y="10.5" width="8" height="4.5" rx="1.2" fill={colors[3]} />
+/** Mosaïk's icon in the tray: the four tiles. */
+const TrayIcon = () => (
+  <svg viewBox="0 0 16 16" width={14} height={14} aria-hidden="true" className="shrink-0">
+    <rect x="1" y="1" width="8" height="8" rx="1.6" fill={TILES[0]} />
+    <rect x="10.5" y="1" width="4.5" height="4.5" rx="1.2" fill={TILES[1]} />
+    <rect x="10.5" y="7" width="4.5" height="8" rx="1.2" fill={TILES[2]} />
+    <rect x="1" y="10.5" width="8" height="4.5" rx="1.2" fill={TILES[3]} />
   </svg>
 );
 
@@ -1638,7 +1629,7 @@ function Taskbar() {
         ))}
       </span>
       <span className="absolute inset-y-0 right-4 flex items-center gap-3 text-[12px] text-white/60">
-        <TileGlyph colors={TILES} size={14} />
+        <TrayIcon />
         10:42
       </span>
     </div>
@@ -1669,7 +1660,7 @@ function geometry(index: number) {
   return { a, b, main, full: toFull(a), fullT: toFull(b), home: inv(toFull(a)), homeT: inv(toFull(b)) };
 }
 
-function vars(r: { left: number; top: number; width: number; height: number }, rt: typeof r, look: Look, z: number): CSSProperties {
+function vars(r: Rect, rt: Rect, look: Look, z: number): CSSProperties {
   return {
     '--l': px(r.left), '--w': px(r.width), '--t': px(r.top), '--h': px(r.height), '--tt': px(rt.top), '--ht': px(rt.height),
     '--x': px(look.m.x), '--y': px(look.m.y), '--yt': px(look.mt.y), '--sx': look.m.sx ?? 1, '--sy': look.m.sy ?? 1, '--syt': look.mt.sy ?? 1,
@@ -1918,7 +1909,6 @@ const Key = ({ children, dim }: { children: ReactNode; dim?: boolean }) => (
   <span className={`rounded-[6px] border border-white/15 px-1.5 py-0.5 text-[11.5px] ${dim ? 'text-[#8E97AA]' : ''}`}>{children}</span>
 );
 
-/** Saved layouts: Mosaïk's switcher as the app draws it (Win+Alt+Space opens it; 1 to 9 pick). */
 /** What the switcher calls each kind of app, under a workspace's name. */
 const APP_WORDS: Record<Win['kind'], string> = {
   editor: 'Code editor',
@@ -1932,6 +1922,7 @@ const APP_WORDS: Record<Win['kind'], string> = {
   stream: 'Broadcast',
 };
 
+/** Saved layouts: Mosaïk's switcher as the app draws it (Win+Alt+Space opens it; 1 to 9 pick). */
 export function SwitcherArt() {
   return (
     <div className="switcher-bg relative overflow-hidden rounded-[20px] bg-ink px-5 py-10 ring-1 ring-black/10 sm:px-10 sm:py-14">
@@ -2116,17 +2107,6 @@ export const Check = ({ children, s = 16, top = 3 }: { children: React.ReactNode
   </li>
 );
 
-/** Keys pressed together, as key caps: "Win Alt Space". */
-export const Keys = ({ k }: { k: string }) => (
-  <span className="inline-flex gap-1 whitespace-nowrap align-[0.08em]">
-    {k.split(' ').map((key) => (
-      <kbd key={key} className="rounded-[6px] border border-b-2 border-ink/20 bg-paper px-1.5 font-mono text-[0.78em] font-medium leading-[1.55] text-ink">
-        {key}
-      </kbd>
-    ))}
-  </span>
-);
-
 /** One click: Microsoft's small installer, which installs Mosaïk from the Store and starts it. */
 export const DownloadButton = ({ className, label = 'Download for Windows' }: { className: string; label?: string }) => (
   <a href={site.download} className={`${className} gap-2.5`}>
@@ -2193,9 +2173,9 @@ export function PlatformList() {
 __MK_EOF__
 put lib/data.ts <<'__MK_EOF__'
 export type Zone = 'lapis' | 'verdigris' | 'saffron' | 'madder';
-export type Kind = 'editor' | 'terminal' | 'browser' | 'chat' | 'design' | 'notes' | 'paper' | 'chart' | 'stream';
+type Kind = 'editor' | 'terminal' | 'browser' | 'chat' | 'design' | 'notes' | 'paper' | 'chart' | 'stream';
 /** [column, row, columns, rows] on a 12 x 8 grid */
-export type Slot = [number, number, number, number];
+type Slot = [number, number, number, number];
 export interface Win { id: string; kind: Kind; variant?: string; tag: string; zone: Zone; slot: Slot }
 export interface Workspace { id: string; label: string; name: string; role: string; summary: string; about: string; windows: Win[] }
 export interface Rect { left: number; top: number; width: number; height: number }
@@ -2302,7 +2282,7 @@ function mulberry32(seed: number) {
   };
 }
 
-export interface DeskLayout {
+interface DeskLayout {
   /** each window's frame, including the strip above it for the zone tag */
   rects: Rect[];
   /** how far each window moves for the messy desktop */
@@ -2453,19 +2433,8 @@ put vercel.json <<'__MK_EOF__'
 }
 __MK_EOF__
 
-# Remove whatever an earlier run generated that this version no longer makes.
-REMOVED=0
-if [ -f "$MANIFEST" ]; then
-  STALE="$(grep -Fxv -f "$NEW_LIST" "$MANIFEST" || true)"
-  while IFS= read -r f; do
-    [ -n "$f" ] && [ -f "$f" ] || continue
-    rm -f -- "$f"; REMOVED=$((REMOVED + 1))
-    case "$f" in */*) rmdir -p "${f%/*}" 2>/dev/null || true ;; esac
-  done <<< "$STALE"
-fi
-cp "$NEW_LIST" "$MANIFEST" && chmod 644 "$MANIFEST" # a copy: mktemp's file is private to its owner
 printf '%s\n' "$MK_VERSION" > "$MARKER"
-ok "$FILES files: $CHANGED written, $((FILES - CHANGED)) unchanged$([ "$REMOVED" = 0 ] || echo ", $REMOVED old ones removed")"
+ok "$FILES files written"
 
 export NEXT_TELEMETRY_DISABLED=1
 unset NODE_ENV
@@ -2473,8 +2442,7 @@ NEXT="node_modules/.bin/next"
 
 # ── Dependencies (only when package.json changed) ───────────────────────
 PKG_SUM="$(cksum < package.json | cut -d' ' -f1)"
-if [ "$FRESH" = 1 ] || [ ! -x "$NEXT" ] || [ "$(cat node_modules/.mk-pkg 2>/dev/null || true)" != "$PKG_SUM" ]; then
-  [ "$FRESH" = 0 ] || rm -rf node_modules .next package-lock.json
+if [ ! -x "$NEXT" ] || [ "$(cat node_modules/.mk-pkg 2>/dev/null || true)" != "$PKG_SUM" ]; then
   step "Installing dependencies (about 30 seconds the first time)"
   npm install --no-audit --no-fund --loglevel=error
   printf '%s\n' "$PKG_SUM" > node_modules/.mk-pkg
@@ -2522,7 +2490,7 @@ fi
 if [ "$MODE" = prod ]; then
   SRC_SUM="$( { for d in app components lib public; do [ ! -d "$d" ] || find "$d" -type f -print0; done
                 printf '%s\0' package.json next.config.ts postcss.config.mjs tsconfig.json; } | LC_ALL=C sort -z | xargs -0 cksum | cksum | cut -d' ' -f1)"
-  if [ "$FRESH" = 0 ] && [ -f .next/BUILD_ID ] && [ "$(cat .next/.mk-build 2>/dev/null || true)" = "$SRC_SUM" ]; then
+  if [ -f .next/BUILD_ID ] && [ "$(cat .next/.mk-build 2>/dev/null || true)" = "$SRC_SUM" ]; then
     ok "Production build is current"
   else
     step "Building for production"

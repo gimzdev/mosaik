@@ -3,7 +3,8 @@
 Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4 and TypeScript. No animation library: the demo moves with CSS transitions.
 
 This folder is written by `mosaik1.sh` at the root of the repository, which is the source of truth. Never edit these files
-by hand: change the script and run it again; the site updates in place and only changed files are touched.
+by hand: change the script and run it again. The folder is written afresh each time; `public/`, the Vercel link and the
+installed dependencies are kept.
 
 ```bash
 ./mosaik1.sh --dir site             # install or update, then start the dev server
@@ -17,7 +18,7 @@ by hand: change the script and run it again; the site updates in place and only 
 - `components/apps.tsx`: the pretend apps drawn inside the demo (editor, terminal, browser, chat, design, notes, reader, charts, broadcast).
 - `components/desk.tsx`: the interactive desktop in the hero, the feature illustrations and the workspace thumbnails.
 - `components/header.tsx`: the header, the one part that runs in the browser besides the demo.
-- `components/ui.tsx`: footer, wordmark, icons, key caps, the download button and the platform list.
+- `components/ui.tsx`: footer, wordmark, icons, the download button and the platform list.
 - `app/`: the pages, plus the favicon (`icon.svg`, `favicon.ico`, `apple-icon.png`), `robots.txt` and `sitemap.xml`.
 
 ## Releasing

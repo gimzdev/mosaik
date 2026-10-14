@@ -1,7 +1,7 @@
 export type Zone = 'lapis' | 'verdigris' | 'saffron' | 'madder';
-export type Kind = 'editor' | 'terminal' | 'browser' | 'chat' | 'design' | 'notes' | 'paper' | 'chart' | 'stream';
+type Kind = 'editor' | 'terminal' | 'browser' | 'chat' | 'design' | 'notes' | 'paper' | 'chart' | 'stream';
 /** [column, row, columns, rows] on a 12 x 8 grid */
-export type Slot = [number, number, number, number];
+type Slot = [number, number, number, number];
 export interface Win { id: string; kind: Kind; variant?: string; tag: string; zone: Zone; slot: Slot }
 export interface Workspace { id: string; label: string; name: string; role: string; summary: string; about: string; windows: Win[] }
 export interface Rect { left: number; top: number; width: number; height: number }
@@ -108,7 +108,7 @@ function mulberry32(seed: number) {
   };
 }
 
-export interface DeskLayout {
+interface DeskLayout {
   /** each window's frame, including the strip above it for the zone tag */
   rects: Rect[];
   /** how far each window moves for the messy desktop */

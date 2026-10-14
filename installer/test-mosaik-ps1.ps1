@@ -4,7 +4,8 @@
   Checks mosaik.ps1's build step around a Mosaik running from the folder it builds: with none
   running the build goes ahead (job 0132: it stopped at once, "The property 'Count' cannot be
   found on this object"); one running from that folder is asked to quit, waited for, and started
-  again in the tray after the build; one from anywhere else is left alone; when its mosaikctl
+  again in the tray after the build; what its mosaikctl answers on stderr is shown and not taken
+  for Windows refusing to run it; one from anywhere else is left alone; when its mosaikctl
   cannot run (job 0133: Smart App Control refused a new build's mosaikctl.exe), it is stopped
   instead, its watchdog first, and the windows it hid are brought back by the watchdog's quiet
   rescue, from the journal its watchdog was watching (job 0134: stopped alone, Mosaik left its
@@ -88,6 +89,9 @@ $journal = 'C:\Users\someone\AppData\Roaming\Mosaik\hidden-windows.json'
 $watchdogExe = Join-Path $release 'mosaik-watchdog.exe'
 $rescue = "start $watchdogExe --rescue --quiet --journal `"$journal`" (waited)"
 $ctl = Join-Path $release 'mosaikctl.exe'
+# A program that runs and answers "quit" on stderr, as mosaikctl does when Mosaik does not answer:
+# whoami.exe (or ls, where this runs on PowerShell 7 outside Windows) says it knows no 'quit'.
+$talker = if ([IO.Path]::DirectorySeparatorChar -eq '\') { Join-Path $env:SystemRoot 'System32\whoami.exe' } else { '/bin/ls' }
 
 $built = 'cargo build --release -p mosaik-desktop -p mosaik-watchdog -p mosaik-ipc'
 $restart = "start $(Join-Path $release 'mosaik.exe') --background"
@@ -118,6 +122,20 @@ try {
     if ($at -lt 0) { return "not built ($($order -join ' / '))" }
     if ([array]::IndexOf($order, $restart) -le $at) { return "not started again after the build ($($order -join ' / '))" }
     if (-not ($order | Where-Object { $_ -like 'say *quits for the build*' })) { return 'nothing said about it quitting' }
+  }
+  Check 'one running, its mosaikctl answering on stderr' {
+    Copy-Item -LiteralPath $talker -Destination $ctl
+    try {
+      $mine = New-Mosaik (Join-Path $release 'mosaik.exe')
+      $script:Running = @($mine)
+      Invoke-Build
+    }
+    finally { Remove-Item -LiteralPath $ctl -ErrorAction SilentlyContinue }
+    $order = @($script:Done)
+    if (-not ($order | Where-Object { $_ -like "say *'quit'*" })) { return "its answer not shown ($($order -join ' / '))" }
+    if ($order | Where-Object { $_ -like 'say *did not run mosaikctl*' }) { return "its answer taken for Windows refusing to run it ($($order -join ' / '))" }
+    if ($mine.WaitedFor -ne 10000) { return "not waited for as one asked to quit ($($mine.WaitedFor) ms)" }
+    if (-not $script:Done.Contains($restart)) { return 'not started again' }
   }
   Check 'one running from elsewhere' {
     $other = New-Mosaik 'C:\Program Files\WindowsApps\Gimzdev.Mosak_1.0.0.0_x64__yjd3d5zpwkx98\mosaik.exe'
@@ -195,4 +213,4 @@ finally {
 }
 
 if ($failures.Count -gt 0) { throw ("mosaik.ps1 build: {0}" -f ($failures -join '; ')) }
-Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one whose mosaikctl Windows refuses (its watchdog stopped first, then it, its windows brought back quietly, said), the same with its journal not readable, its watchdog (waited for), one that does not quit (said): 9 cases passing.' -ForegroundColor Green
+Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one whose mosaikctl answers on stderr (shown, still asked), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one whose mosaikctl Windows refuses (its watchdog stopped first, then it, its windows brought back quietly, said), the same with its journal not readable, its watchdog (waited for), one that does not quit (said): 10 cases passing.' -ForegroundColor Green

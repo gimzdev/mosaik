@@ -77,17 +77,6 @@ export const Check = ({ children, s = 16, top = 3 }: { children: React.ReactNode
   </li>
 );
 
-/** Keys pressed together, as key caps: "Win Alt Space". */
-export const Keys = ({ k }: { k: string }) => (
-  <span className="inline-flex gap-1 whitespace-nowrap align-[0.08em]">
-    {k.split(' ').map((key) => (
-      <kbd key={key} className="rounded-[6px] border border-b-2 border-ink/20 bg-paper px-1.5 font-mono text-[0.78em] font-medium leading-[1.55] text-ink">
-        {key}
-      </kbd>
-    ))}
-  </span>
-);
-
 /** One click: Microsoft's small installer, which installs Mosaïk from the Store and starts it. */
 export const DownloadButton = ({ className, label = 'Download for Windows' }: { className: string; label?: string }) => (
   <a href={site.download} className={`${className} gap-2.5`}>

@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Makes Mosaik's Store package (MSIX) from the release build, ready to upload in Partner Center.
+  Makes Mosaik's Store package (MSIX) from the release build; publish.ps1 sends it to the Store.
 
 .DESCRIPTION
   Needs the release build (mosaik.ps1 build, or cargo build --release -p mosaik-desktop
@@ -13,8 +13,8 @@
 
 .PARAMETER Register
   Also registers the package's folder on this PC, to try the packaged app (its startup task, the
-  mosaikctl command, its own data folder) before uploading. Needs Developer Mode, which you turn on
-  in Settings, System, For developers.
+  mosaikctl command, its own data folder) before sending it. Needs Developer Mode, which you turn
+  on in Settings, System, For developers.
 
 .EXAMPLE
   .\installer\msix\package.ps1
@@ -126,7 +126,6 @@ Invoke-SdkTool $makeAppx 'makeappx' @('pack', '/o', '/h', 'SHA256', '/d', $Layou
 $size = (Get-Item $msix).Length / 1MB
 Write-Host ''
 Write-Host ('Package: {0} ({1:N1} MB), version {2}' -f $msix, $size, $version) -ForegroundColor Green
-Write-Host 'Upload it in Partner Center: Apps and games, Mosaik, the submission''s Packages page.'
 
 if ($Register) {
   try {

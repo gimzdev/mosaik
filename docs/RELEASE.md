@@ -48,7 +48,7 @@ It tests, builds and packages the app and sends it to the Microsoft Store (ADR 0
 submission copied from the last one, this package in place of the old one and "What's new"
 from `installer/msix/whats-new.txt`; nothing else of the listing changes. Then it puts the site
 online. If the app is not sent, the site is not deployed either. The Store checks the new
-version, usually within a day, and then updates everyone. `./mosaik1.sh --app` sends the app
+version, usually within a day or two, and then updates everyone. `./mosaik1.sh --app` sends the app
 alone; `.\mosaik.ps1 publish` does the same from PowerShell.
 
 ### The Store's keys (the first time only)

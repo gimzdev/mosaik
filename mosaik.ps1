@@ -12,7 +12,7 @@
     .\mosaik.ps1 build             build the interface, then mosaik.exe, its watchdog and mosaikctl
     .\mosaik.ps1 test              run the tests and checks
     .\mosaik.ps1 run               start the Mosaik just built
-    .\mosaik.ps1 package           make the Store package (MSIX) to upload in Partner Center
+    .\mosaik.ps1 package           make the Store package (MSIX)
     .\mosaik.ps1 publish           test, build and package it, then send it to the Microsoft Store
     .\mosaik.ps1 pack [folder]     make a new mosaik.ps1 with the source of a folder inside
     .\mosaik.ps1 verify [folder]   check that the source inside matches a folder
@@ -117,11 +117,23 @@ function Get-SourceFiles([string]$Source) {
     $files = & git -C $Source -c core.quotepath=off ls-files
     if ($LASTEXITCODE -ne 0) { $files = $null }
   }
-  if (-not $files) {
-    $prefix = (Resolve-Path $Source).Path.TrimEnd('\', '/').Length + 1
-    $files = Get-ChildItem -Recurse -File -Force $Source | ForEach-Object { $_.FullName.Substring($prefix).Replace('\', '/') }
-  }
+  if (-not $files) { $files = Get-TreeFiles $Source }
   @($files | Where-Object { $_ -and $_ -notmatch $Excluded } | Sort-Object -CaseSensitive)
+}
+
+# Every file under a folder, relative, with forward slashes; the excluded folders are not walked
+# at all (a built copy holds hundreds of thousands of files in target and node_modules).
+function Get-TreeFiles([string]$Source) {
+  $root = (Resolve-Path $Source).Path.TrimEnd('\', '/')
+  $folders = New-Object 'System.Collections.Generic.Stack[string]'
+  $folders.Push($root)
+  while ($folders.Count -gt 0) {
+    foreach ($item in Get-ChildItem -LiteralPath $folders.Pop() -Force) {
+      $relative = $item.FullName.Substring($root.Length + 1).Replace('\', '/')
+      if (-not $item.PSIsContainer) { $relative }
+      elseif ("$relative/" -notmatch $Excluded) { $folders.Push($item.FullName) }
+    }
+  }
 }
 
 # A zip of the source, the same bytes for the same files (fixed dates, sorted names).
@@ -318,6 +330,7 @@ function Invoke-Tool([string]$In, [string]$Program, [string[]]$Arguments) {
   if ($code -ne 0) { Fail ("{0} {1} failed (exit code {2}); the lines above say why." -f $Program, ($Arguments -join ' '), $code) }
 }
 
+# Rust and Node.js, which every build and test needs: found, or a failure that says what to run.
 function Use-Cargo {
   $cargoHome = Join-Path $env:USERPROFILE '.cargo\bin'
   if ((Test-Path $cargoHome) -and ($env:Path -notlike "*$cargoHome*")) { $env:Path = "$cargoHome;$env:Path" }
@@ -379,20 +392,24 @@ function Get-RunningBuild([string]$Source, [string]$Name = 'mosaik') {
   }
 }
 
-# Asks Mosaik to quit (every window it hid comes back) with the build's own mosaikctl; false
-# when Windows does not run it (Smart App Control refuses a new build's files for a while: job
-# 0133 had mosaikctl.exe refused while mosaik.exe ran).
+# Asks Mosaik to quit (every window it hid comes back) with the build's own mosaikctl, and shows
+# its answer; false when Windows does not run it (Smart App Control refuses a new build's files
+# for a while: job 0133 had mosaikctl.exe refused while mosaik.exe ran).
 function Request-Quit([string]$Ctl) {
   if (-not (Test-Path $Ctl)) { return $false }
-  # Its own messages go to the console as they are: a line on stderr is no failure here.
+  # Its answer on stderr (Mosaik not answering, say) is shown, not taken for Windows refusing to
+  # run it: Windows PowerShell 5.1 would stop at that line when the output is redirected.
+  $stop = $ErrorActionPreference
   try {
-    & $Ctl quit | Out-Null
+    $ErrorActionPreference = 'Continue'
+    & $Ctl quit 2>&1 | ForEach-Object { Say "  $_" DarkGray }
     $true
   }
   catch {
     Say ("Windows did not run mosaikctl ({0})." -f $_.Exception.Message) Yellow
     $false
   }
+  finally { $ErrorActionPreference = $stop }
 }
 
 # The journal a watchdog watches: its "--journal" on its command line, else the one in Mosaik's
@@ -414,10 +431,10 @@ function Stop-Mosaik([string]$Source, $Process) {
   $dogs = @(Get-RunningBuild $Source 'mosaik-watchdog')
   $journals = @($dogs | ForEach-Object { Get-WatchdogJournal $_ } | Select-Object -Unique)
   foreach ($d in $dogs) {
-    try { $d.Kill() } catch { }
+    try { $d.Kill() } catch { Write-Verbose "The watchdog had already ended: $($_.Exception.Message)" }
     $null = $d.WaitForExit(5000)
   }
-  try { $Process.Kill() } catch { }
+  try { $Process.Kill() } catch { Write-Verbose "Mosaik had already ended: $($_.Exception.Message)" }
   if (-not $Process.WaitForExit(10000)) { Fail 'Mosaik from this folder did not quit. Quit it from its tray icon, then build again.' }
   $watchdog = Under $Source 'target' 'release' 'mosaik-watchdog.exe'
   foreach ($j in $journals) {
@@ -453,7 +470,8 @@ function Stop-RunningBuild([string]$Source) {
   $running.Count -gt 0
 }
 
-function Invoke-Build {
+# -Installed: the interface's packages are installed already (publish runs the tests first).
+function Invoke-Build([switch]$Installed) {
   $source = Get-Source
   Use-Cargo
   $ui = Under $source 'apps' 'desktop'
@@ -461,7 +479,7 @@ function Invoke-Build {
   # build is made.
   $restart = Stop-RunningBuild $source
   Step 'Building the interface'
-  Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund')
+  if (-not $Installed) { Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund') }
   Invoke-Tool $ui 'npm' @('run', 'build')
   Step 'Building Mosaik, its watchdog and mosaikctl (release)'
   Invoke-Cargo $source @('build', '--release', '-p', 'mosaik-desktop', '-p', 'mosaik-watchdog', '-p', 'mosaik-ipc')
@@ -486,7 +504,7 @@ function Invoke-Test {
   Use-Cargo
   $ui = Under $source 'apps' 'desktop'
   Step 'Engine tests'
-  Invoke-Cargo $source @('test', '--no-fail-fast', '--all-features', '-p', 'mosaik-core', '-p', 'mosaik-ipc', '-p', 'mosaik-win', '-p', 'mosaik-overlay', '-p', 'mosaik-engine')
+  Invoke-Cargo $source @('test', '--no-fail-fast', '--all-features', '-p', 'mosaik-core', '-p', 'mosaik-ipc', '-p', 'mosaik-win', '-p', 'mosaik-overlay', '-p', 'mosaik-engine', '-p', 'mosaik-probe')
   Step 'Lints (clippy)'
   Invoke-Cargo $source @('clippy', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings')
   Step 'Interface checks and tests'
@@ -504,7 +522,7 @@ function Invoke-Run {
   $exe = Under $source 'target' 'release' 'mosaik.exe'
   if (-not (Test-Path $exe)) { Fail 'Mosaik is not built yet. Run: .\mosaik.ps1 build' }
   Start-Process $exe
-  Say 'Mosaik is starting: its icon is in the tray, and the welcome opens on a first run.' Green
+  Say 'Mosaik is starting: its window opens, and its icon stays in the tray.' Green
 }
 
 function Invoke-Package {
@@ -512,13 +530,12 @@ function Invoke-Package {
   & (Under $source 'installer' 'msix' 'package.ps1')
 }
 
-# Tests, builds and packages Mosaik, then sends the package to the Microsoft Store (after asking):
-# installer\msix\publish.ps1, which needs, once, the Entra application of the Partner Center
-# account (docs/RELEASE.md).
+# Tests, builds and packages Mosaik, then sends the package to the Microsoft Store:
+# installer\msix\publish.ps1, which asks once for the Store's keys (docs/RELEASE.md).
 function Invoke-Publish {
   $source = Get-Source
   Invoke-Test
-  Invoke-Build
+  Invoke-Build -Installed
   Invoke-Package
   Step 'Sending it to the Microsoft Store'
   & (Under $source 'installer' 'msix' 'publish.ps1')

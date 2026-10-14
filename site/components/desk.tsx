@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AppBody, AppWindow, EditorApp, ZoneFrame } from '@/components/apps';
 import { Icon } from '@/components/ui';
-import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Win, type Zone } from '@/lib/data';
+import { DESK_H, DESK_H_TALL, SWITCHER_KEYS, TILES, WORKSPACES, ZONE, deskLayout, slotBox, type Rect, type Win, type Zone } from '@/lib/data';
 
 /** A 1280 px wide canvas scaled to its container in pure CSS, so it is right from the first paint. */
 const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?: string; children: ReactNode }) => (
@@ -12,12 +12,13 @@ const Scaled = ({ tall, className = '', children }: { tall?: boolean; className?
   </div>
 );
 
-const TileGlyph = ({ colors, size = 18 }: { colors: string[]; size?: number }) => (
-  <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true" className="shrink-0">
-    <rect x="1" y="1" width="8" height="8" rx="1.6" fill={colors[0]} />
-    <rect x="10.5" y="1" width="4.5" height="4.5" rx="1.2" fill={colors[1]} />
-    <rect x="10.5" y="7" width="4.5" height="8" rx="1.2" fill={colors[2]} />
-    <rect x="1" y="10.5" width="8" height="4.5" rx="1.2" fill={colors[3]} />
+/** Mosaïk's icon in the tray: the four tiles. */
+const TrayIcon = () => (
+  <svg viewBox="0 0 16 16" width={14} height={14} aria-hidden="true" className="shrink-0">
+    <rect x="1" y="1" width="8" height="8" rx="1.6" fill={TILES[0]} />
+    <rect x="10.5" y="1" width="4.5" height="4.5" rx="1.2" fill={TILES[1]} />
+    <rect x="10.5" y="7" width="4.5" height="8" rx="1.2" fill={TILES[2]} />
+    <rect x="1" y="10.5" width="8" height="4.5" rx="1.2" fill={TILES[3]} />
   </svg>
 );
 
@@ -50,7 +51,7 @@ function Taskbar() {
         ))}
       </span>
       <span className="absolute inset-y-0 right-4 flex items-center gap-3 text-[12px] text-white/60">
-        <TileGlyph colors={TILES} size={14} />
+        <TrayIcon />
         10:42
       </span>
     </div>
@@ -81,7 +82,7 @@ function geometry(index: number) {
   return { a, b, main, full: toFull(a), fullT: toFull(b), home: inv(toFull(a)), homeT: inv(toFull(b)) };
 }
 
-function vars(r: { left: number; top: number; width: number; height: number }, rt: typeof r, look: Look, z: number): CSSProperties {
+function vars(r: Rect, rt: Rect, look: Look, z: number): CSSProperties {
   return {
     '--l': px(r.left), '--w': px(r.width), '--t': px(r.top), '--h': px(r.height), '--tt': px(rt.top), '--ht': px(rt.height),
     '--x': px(look.m.x), '--y': px(look.m.y), '--yt': px(look.mt.y), '--sx': look.m.sx ?? 1, '--sy': look.m.sy ?? 1, '--syt': look.mt.sy ?? 1,
@@ -330,7 +331,6 @@ const Key = ({ children, dim }: { children: ReactNode; dim?: boolean }) => (
   <span className={`rounded-[6px] border border-white/15 px-1.5 py-0.5 text-[11.5px] ${dim ? 'text-[#8E97AA]' : ''}`}>{children}</span>
 );
 
-/** Saved layouts: Mosaïk's switcher as the app draws it (Win+Alt+Space opens it; 1 to 9 pick). */
 /** What the switcher calls each kind of app, under a workspace's name. */
 const APP_WORDS: Record<Win['kind'], string> = {
   editor: 'Code editor',
@@ -344,6 +344,7 @@ const APP_WORDS: Record<Win['kind'], string> = {
   stream: 'Broadcast',
 };
 
+/** Saved layouts: Mosaïk's switcher as the app draws it (Win+Alt+Space opens it; 1 to 9 pick). */
 export function SwitcherArt() {
   return (
     <div className="switcher-bg relative overflow-hidden rounded-[20px] bg-ink px-5 py-10 ring-1 ring-black/10 sm:px-10 sm:py-14">

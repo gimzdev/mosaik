@@ -176,6 +176,7 @@ or deploys it.<br>
 <tr><td><code>crates/mosaik-engine</code></td><td>the engine thread: events, workspaces, the switcher, shortcuts</td></tr>
 <tr><td><code>crates/mosaik-watchdog</code></td><td>brings hidden windows back if Mosaïk stops</td></tr>
 <tr><td><code>crates/mosaik-ipc</code></td><td>the named-pipe protocol and <code>mosaikctl</code></td></tr>
+<tr><td><code>crates/mosaik-probe</code></td><td>the probes behind the measurements in <a href="docs/STATUS.md">status</a>, run on a real desktop</td></tr>
 <tr><td><code>apps/desktop</code></td><td>the Tauri shell and Mosaïk's window (React, TypeScript)</td></tr>
 <tr><td><code>installer/</code></td><td>the Store package and the third-party notices</td></tr>
 <tr><td><code>docs/</code></td><td><a href="docs/architecture.md">architecture</a>, <a href="docs/STATUS.md">status and measurements</a>, <a href="docs/adr">decisions</a></td></tr>
