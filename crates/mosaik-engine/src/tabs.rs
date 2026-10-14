@@ -887,14 +887,19 @@ impl Engine {
         if let Some(w) = self.active.as_ref().and_then(|a| a.windows.get(slot)).copied()
             && !self.hiding.hidden.contains_key(&w)
         {
-            let hwnd = window::hwnd(w);
-            let _ = arrange::raise(hwnd);
-            arrange::focus(hwnd);
-            // The raise lands when the window's app gets round to it, often after the strip was
-            // put above the window: put it back once the window is up (the owner: "the tabs go
-            // behind the new window").
-            self.restack_soon();
+            self.bring_forward(w);
         }
+    }
+
+    /// Brings `w` to the front with the keyboard, its strip and frame above it. The raise lands
+    /// when the window's app gets round to it, often after the strip was put above the window:
+    /// they go back above it once it is up (the owner: "the tabs go behind the new window" when a
+    /// tab was clicked; a window dropped on a tag "overlaps the tabs and we only see the window").
+    pub(crate) fn bring_forward(&mut self, w: WindowHandle) {
+        let hwnd = window::hwnd(w);
+        let _ = arrange::raise(hwnd);
+        arrange::focus(hwnd);
+        self.restack_soon();
     }
 
     /// Puts strips and frames back above their windows in a moment, twice: soon after a window
@@ -1039,9 +1044,7 @@ impl Engine {
             }
         }
         self.sync_tabs();
-        let hwnd = window::hwnd(dropped);
-        let _ = arrange::raise(hwnd);
-        arrange::focus(hwnd);
+        self.bring_forward(dropped);
         self.refresh_frames();
     }
 
@@ -1103,9 +1106,7 @@ impl Engine {
             }
         }
         self.sync_tabs();
-        let hwnd = window::hwnd(window);
-        let _ = arrange::raise(hwnd);
-        arrange::focus(hwnd);
+        self.bring_forward(window);
         self.refresh_frames();
     }
 

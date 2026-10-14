@@ -93,15 +93,14 @@ impl Engine {
             .filter(|a| a.id == id)
             .map(|a| a.windows.clone())
             .unwrap_or_default();
-        // Windows on screen that are not this workspace's already, front to back.
+        // Open windows that are not this workspace's already, minimised ones included, front to
+        // back.
         let taken: HashSet<WindowHandle> = filled.values().copied().collect();
         let on_screen: Vec<_> = self
             .scan_marked()
             .into_iter()
             .filter(|f| {
-                self.manageable(f)
-                    && !self.hiding.hidden.contains_key(&f.handle)
-                    && !taken.contains(&f.handle)
+                self.addable(f) && !self.hiding.hidden.contains_key(&f.handle) && !taken.contains(&f.handle)
             })
             .collect();
         let windows = on_screen
@@ -168,21 +167,23 @@ impl Engine {
     }
 
     /// In the open workspace, the windows of `zone` go to their places in it (one just added or
-    /// moved there, that is), and tab groups show what they should.
-    fn place_in(&mut self, zone: &ZoneId) {
+    /// moved there, that is), and tab groups show what they should. `added`, minimised, is shown
+    /// again in its place.
+    fn place_in(&mut self, zone: &ZoneId, added: Option<WindowHandle>) {
         let Some(topology) = self.refresh_topology() else {
             return;
         };
         let only: HashSet<ZoneId> = HashSet::from([zone.clone()]);
-        let placed = self.refit(&topology, Some(&only));
+        let placed = self.refit_with(&topology, Some(&only), added);
         self.sync_tabs();
         // A window its app keeps larger than the zone: the zones make room for it.
         self.make_room(&topology, &placed);
         self.refresh_frames();
     }
 
-    /// Adds the app of `window` (on screen) to a workspace: in `zone`, else its first empty
-    /// zone, else where the window is.
+    /// Adds the app of `window` (open, or minimised) to a workspace: in `zone`, else its first
+    /// empty zone, else where the window is. In the open workspace, a minimised window is shown
+    /// again in its place.
     pub(crate) fn add_app_to(&mut self, which: &str, window: WindowHandle, zone: Option<ZoneId>) -> Reply {
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
@@ -193,10 +194,10 @@ impl Engine {
         let Some(facts) = self
             .scanner
             .facts(window::hwnd(window))
-            .filter(|f| self.manageable(f))
+            .filter(|f| self.addable(f))
         else {
             return refused(
-                "This window is not on screen any more.",
+                "This window is not open any more.",
                 Some("Pick it again from the list."),
             );
         };
@@ -223,7 +224,7 @@ impl Engine {
                 a.windows.insert(slot, window);
             }
             match &zone {
-                Some(z) => self.place_in(z),
+                Some(z) => self.place_in(z, Some(window)),
                 None => self.refresh_frames(),
             }
         }
@@ -250,7 +251,7 @@ impl Engine {
                     // It may have been a tab shown for now: it is no longer one.
                     a.shown.retain(|_, s| s != slot);
                 }
-                self.place_in(zone);
+                self.place_in(zone, None);
             }
         }
         self.apps_reply(&id)

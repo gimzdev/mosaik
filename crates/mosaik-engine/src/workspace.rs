@@ -197,6 +197,16 @@ impl Engine {
         self.allowed(f) && classify(f, &self.settings.rules) == Verdict::Manage
     }
 
+    /// A window that can be added to a workspace: one Mosaïk manages, or one minimised, which
+    /// it shows again when it goes to its place. The owner: "i should be able to add claude".
+    pub(crate) fn addable(&self, f: &WindowFacts) -> bool {
+        self.allowed(f)
+            && matches!(
+                classify(f, &self.settings.rules),
+                Verdict::Manage | Verdict::Pending(Pending::Minimized)
+            )
+    }
+
     /// A window that can fill a slot when a workspace opens: a managed one, a minimised one it
     /// restores, or one in full screen, which it leaves as it is (`plan_switch`).
     fn movable(&self, f: &WindowFacts) -> bool {
@@ -656,6 +666,8 @@ impl Engine {
         if let Some(f) = plan.focus {
             arrange::focus(window::hwnd(f));
         }
+        // Strips and frames back above their windows once the apps have raised them.
+        self.restack_soon();
 
         // Start what is missing, unless it is open on another desktop.
         let mut launching = Vec::new();
@@ -807,6 +819,17 @@ impl Engine {
         topology: &Topology,
         only: Option<&std::collections::HashSet<ZoneId>>,
     ) -> Vec<(WindowHandle, Rect, Rect)> {
+        self.refit_with(topology, only, None)
+    }
+
+    /// [`Engine::refit`], with `shown` placed even when it is minimised: a window just added to
+    /// the workspace, which its move shows again. Others the user minimised stay so.
+    pub(crate) fn refit_with(
+        &mut self,
+        topology: &Topology,
+        only: Option<&std::collections::HashSet<ZoneId>>,
+        shown: Option<WindowHandle>,
+    ) -> Vec<(WindowHandle, Rect, Rect)> {
         let Some(active) = &self.active else {
             return Vec::new();
         };
@@ -830,7 +853,7 @@ impl Engine {
         let all = self.scan_marked();
         let on_screen: Vec<(SlotId, &WindowFacts)> = all
             .iter()
-            .filter(|f| self.manageable(f))
+            .filter(|f| self.manageable(f) || (Some(f.handle) == shown && self.addable(f)))
             .filter_map(|f| assigned.get(&f.handle).map(|s| (s.clone(), f)))
             .collect();
         let moves = self.to_moves(&plan_refit(&ws, &on_screen, topology, self.style()), topology);
