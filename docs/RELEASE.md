@@ -1,7 +1,7 @@
 # Releasing Mosaïk
 
 Everything up to the package is automated, and sending it is one line; publishing stays the
-owner's (the Store submission, the GitHub push, the site deploy). Version 1.0.1 is set in
+owner's (the Store submission, the GitHub push, the site deploy). Version 1.0.2 is set in
 `Cargo.toml` and `apps/desktop/package.json`; `CHANGELOG.md` says what is in it, and
 `installer/msix/whats-new.txt` is what the Store shows as "What's new in this version". The
 version stays 1.0 (the owner): each release takes the next third number (1.0.2, 1.0.3...), as the
@@ -12,7 +12,7 @@ Store takes only a higher version than the one it has.
 ```powershell
 .\mosaik.ps1 build      # interface + release binaries (about 3 minutes the first time)
 .\mosaik.ps1 test       # every test, clippy and the interface checks
-.\mosaik.ps1 package    # target\msix\Mosaik_1.0.1.0_x64.msix
+.\mosaik.ps1 package    # target\msix\Mosaik_1.0.2.0_x64.msix
 ```
 
 A Mosaïk running from the same folder quits for the build (every window it hid comes back) and
@@ -124,6 +124,6 @@ The rest of the submission, for reference (already set by submission 1):
 - GitHub: from the folder above the repositories, `./deploy.sh push mosaik` force-pushes this
   repository to `master` as it is (its README included); the full `./deploy.sh` does every
   repository, and leaves Mosaïk's README as it is written here. Then, if wanted, a release
-  tagged with the version (`v1.0.1`) with that version's section of `CHANGELOG.md` (no files to
+  tagged with the version (`v1.0.2`) with that version's section of `CHANGELOG.md` (no files to
   attach: Mosaïk installs from the Store).
 - `winget install 9PHR0L7S1QVD` works through winget's Store source once the listing is live.

@@ -35,7 +35,7 @@ if (@($errors).Count -gt 0) { throw ("{0} does not parse: {1}" -f $Script, $erro
 $functions = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $false))
 # The build step and what it calls; the last two are not in every version of the script.
 $optional = 'Stop-RunningBuild', 'Request-Quit', 'Stop-Mosaik', 'Get-WatchdogJournal'
-foreach ($name in @('Under', 'Fail', 'Get-RunningBuild', 'Invoke-Build') + $optional) {
+foreach ($name in @('Under', 'Fail', 'Get-RunningBuild', 'Invoke-Build', 'Invoke-Publish') + $optional) {
   $found = @($functions | Where-Object { $_.Name -eq $name })
   if ($found.Count -eq 0) {
     if ($name -in $optional) { continue }
@@ -224,4 +224,39 @@ finally {
 }
 
 if ($failures.Count -gt 0) { throw ("mosaik.ps1 build: {0}" -f ($failures -join '; ')) }
+
+# mosaik.ps1 publish: the key first, then tests, build and package, then the Store. publish.ps1
+# is stood in for by a script ending as told: 0 sent, 3 waiting for the Store (the version sent
+# before is still being checked: no failure, so mosaik1.sh --deploy --app still puts the site
+# online), anything else a failure.
+$work = Join-Path ([IO.Path]::GetTempPath()) "mosaik-publish-step-$PID"
+$scripts = [IO.Path]::Combine($work, 'installer', 'msix')
+New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+Set-Content -Path (Join-Path $scripts 'publish.ps1') -Value @(
+  'param([switch]$KeyOnly)'
+  'if ($KeyOnly) { exit 0 }'
+  'exit [int]$env:MOSAIK_TEST_PUBLISH_ENDS'
+)
+function Invoke-Test { $script:Done.Add('test') }
+function Invoke-Build { param([switch]$Installed) $script:Done.Add('build') }
+function Invoke-Package { $script:Done.Add('package') }
+$publishFailures = @()
+try {
+  foreach ($case in @(@{ Ends = 0; Waiting = $false; Fails = $false }, @{ Ends = 3; Waiting = $true; Fails = $false }, @{ Ends = 1; Waiting = $false; Fails = $true })) {
+    $script:Done.Clear()
+    $script:Waiting = $false
+    $env:MOSAIK_TEST_PUBLISH_ENDS = $case.Ends
+    $failed = $false
+    try { Invoke-Publish } catch { $failed = $true }
+    if ($failed -ne $case.Fails -or $script:Waiting -ne $case.Waiting -or ($script:Done -join ',') -ne 'test,build,package') {
+      $publishFailures += "publish.ps1 ending with {0}: failed {1}, waiting {2}, did {3}" -f $case.Ends, $failed, $script:Waiting, ($script:Done -join ',')
+    }
+  }
+}
+finally {
+  Remove-Item Env:\MOSAIK_TEST_PUBLISH_ENDS -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force -LiteralPath $work -ErrorAction SilentlyContinue
+}
+if ($publishFailures.Count -gt 0) { throw ("mosaik.ps1 publish: {0}" -f ($publishFailures -join '; ')) }
+Write-Host 'mosaik.ps1 publish: sent (0), waiting for the Store with nothing sent (3, not a failure), a failure (1): 3 cases passing.' -ForegroundColor Green
 Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one whose mosaikctl answers on stderr (shown, still asked), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one whose mosaikctl Windows refuses (its watchdog stopped first, then it, its windows brought back quietly, said), the same with its journal not readable, its watchdog (waited for), one that does not quit (said): 10 cases passing.' -ForegroundColor Green

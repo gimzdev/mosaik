@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.2
+
+- A workspace's page offers every open window to add, minimised ones too. Opening a workspace
+  minimises the windows it does not use, so its page said "Open a window to add it here." with
+  ten apps open. A minimised window added to a zone shows again there.
+- A window dropped onto another's tag or tab strip ends under the strip, as a tab you click does:
+  when its app came forward a moment late, it covered the strip. The same when a tab is pulled out
+  and when a workspace opens.
+- Sending to the Store while it still checks the version sent before waits instead of failing:
+  nothing is sent, the line says so, and `./mosaik1.sh --deploy --app` still puts the site up.
+
 ## 1.0.1
 
 A new window on the same engine, with everything the development builds added since 1.0.0

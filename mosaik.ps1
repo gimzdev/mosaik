@@ -36,6 +36,9 @@ Set-StrictMode -Version 3.0
 $SourceVersion = ''
 $SourceSha256 = ''
 
+# Set by publish when the Store still checks the version sent before: nothing sent, exit code 3.
+$Waiting = $false
+
 # Paths the source inside never includes: what building makes, the site (mosaik1.sh makes it),
 # the README's pictures of the site, and this PC's own settings (.env.local: the Store's key).
 $Excluded = '^(\.git|\.agent|target|site|node_modules|dist|test-results|playwright-report)(/|$)|/(node_modules|dist|target|test-results|gen)/|^mosaik1\.sh$|^docs/screenshots/|(^|/)\.env[^/]*\.local$'
@@ -532,7 +535,8 @@ function Invoke-Package {
 
 # Tests, builds and packages Mosaik, then sends the package to the Microsoft Store with
 # installer\msix\publish.ps1. The Store's key comes first (asked once, then kept: docs/RELEASE.md),
-# so the minutes of tests and build that follow need nobody.
+# so the minutes of tests and build that follow need nobody. While the Store still checks the
+# version sent before, nothing is sent and $script:Waiting says so: no failure (publish ends with 3).
 function Invoke-Publish {
   $source = Get-Source
   $publish = Under $source 'installer' 'msix' 'publish.ps1'
@@ -544,6 +548,7 @@ function Invoke-Publish {
   Invoke-Package
   Step 'Sending it to the Microsoft Store'
   & $publish
+  if ($LASTEXITCODE -eq 3) { $script:Waiting = $true; return }
   if ($LASTEXITCODE -ne 0) { Fail 'The package was not sent to the Store; the lines above say why.' }
 }
 
@@ -596,7 +601,7 @@ try {
     'test' { Invoke-Test }
     'run' { Invoke-Run }
     'package' { Invoke-Package }
-    'publish' { Invoke-Publish }
+    'publish' { Invoke-Publish; if ($script:Waiting) { exit 3 } }
     'pack' { Invoke-Pack }
     'verify' { Invoke-Verify }
   }

@@ -2,7 +2,8 @@
 <#
 .SYNOPSIS
   Checks publish.ps1 against a stand-in of Microsoft's services (store-standin.mjs, run with
-  Node.js): the access token, the submission left waiting deleted, a new one made from the last
+  Node.js): the access token, the submission left waiting deleted (one still with the Store is
+  left alone: nothing is sent, and the end says so apart from a failure), a new one made from the last
   published one, the package and "What's new" put in it with nothing else changed, the upload and
   the commit, as Microsoft documents them. With a key (in the environment, or in .env.local beside
   Cargo.toml, as in a web project) it sends without asking; the first time
@@ -45,20 +46,20 @@ $publish = Join-Path $treeScripts 'publish.ps1'
 $name = "Mosaik_$version.0_x64.msix"
 $package = Join-Path $work $name
 [IO.File]::WriteAllBytes($package, [byte[]](1..64))
-$wanted = 'token_form', 'pending_deleted', 'created_after_delete', 'update_json', 'packages_are_an_array', 'old_package_removed',
+$wanted = 'token_form', 'pending_status_read', 'pending_deleted', 'created_after_delete', 'update_json', 'packages_are_an_array', 'old_package_removed',
 'new_package_added', 'whats_new', 'listing_kept', 'pricing_kept', 'blob_type', 'upload_is_a_zip', 'zip_has_the_package',
 'upload_after_update', 'commit_after_upload', 'status_read_until_taken'
 
 # Runs publish.ps1 with `$Answers` on its input against a stand-in of the Store started for it,
-# which takes only the tenant and client given and the key "test-key"; what the stand-in saw and
-# what publish.ps1 said.
-function Send-ToStandin([string]$Case, [string]$Answers, [string]$Tenant, [string]$Client) {
+# which takes only the tenant and client given and the key "test-key", the submission made before
+# standing at `$Status`; publish.ps1's exit code and lines, and what the stand-in saw and checked.
+function Invoke-Standin([string]$Case, [string]$Answers, [string]$Tenant, [string]$Client, [string]$Status = 'PendingCommit') {
   $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
   $listener.Start()
   $port = $listener.LocalEndpoint.Port
   $listener.Stop()
   $report = Join-Path $work "report-$port.json"
-  $standinArgs = @((& $quote (Join-Path $Here 'store-standin.mjs')), $port, (& $quote $report), $name, (& $quote (Join-Path $Here 'whats-new.txt')), $Tenant, $Client, 'test-key')
+  $standinArgs = @((& $quote (Join-Path $Here 'store-standin.mjs')), $port, (& $quote $report), $name, (& $quote (Join-Path $Here 'whats-new.txt')), $Tenant, $Client, 'test-key', $Status)
   $standin = Start-Process -FilePath $node.Source -ArgumentList $standinArgs -PassThru -NoNewWindow
   $watch = [Diagnostics.Stopwatch]::StartNew()
   while ($true) {
@@ -67,18 +68,23 @@ function Send-ToStandin([string]$Case, [string]$Answers, [string]$Tenant, [strin
   }
   $env:MOSAIK_STORE_API = "http://127.0.0.1:$port/api"
   $env:MOSAIK_STORE_LOGIN = "http://127.0.0.1:$port/login"
-  $out = $Answers | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" }
+  $out = @($Answers | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" })
   $code = $LASTEXITCODE
   if (-not $standin.WaitForExit(15000)) { Stop-Process -Id $standin.Id -Force }
   if (-not (Test-Path $report)) { throw ("{0}: the stand-in wrote no report. publish.ps1 said: {1}" -f $Case, ($out -join ' / ')) }
   $seen = Get-Content -Raw -Encoding UTF8 $report | ConvertFrom-Json
-  $checks = @($seen.checks.PSObject.Properties)
-  $failed = @($wanted | Where-Object { -not ($checks | Where-Object Name -EQ $_ | Where-Object { $_.Value -eq $true }) })
-  $odd = @($checks | Where-Object { $_.Name -in 'unexpected', 'unauthorized' } | ForEach-Object { "$($_.Name): $($_.Value)" })
-  if ($code -ne 0 -or $failed.Count -gt 0 -or $odd.Count -gt 0) {
-    throw ("{0}: exit code {1}; checks not passing: {2}; {3}; it said: {4}" -f $Case, $code, ($failed -join ', '), ($odd -join ', '), ($out -join ' / '))
+  [pscustomobject]@{ Code = $code; Said = ($out -join ' '); Lines = $out; Seen = @($seen.seen); Checks = @($seen.checks.PSObject.Properties) }
+}
+
+# Sends to the stand-in, which must see everything Microsoft documents and nothing else.
+function Send-ToStandin([string]$Case, [string]$Answers, [string]$Tenant, [string]$Client) {
+  $run = Invoke-Standin $Case $Answers $Tenant $Client
+  $failed = @($wanted | Where-Object { -not ($run.Checks | Where-Object Name -EQ $_ | Where-Object { $_.Value -eq $true }) })
+  $odd = @($run.Checks | Where-Object { $_.Name -in 'unexpected', 'unauthorized' } | ForEach-Object { "$($_.Name): $($_.Value)" })
+  if ($run.Code -ne 0 -or $failed.Count -gt 0 -or $odd.Count -gt 0) {
+    throw ("{0}: exit code {1}; checks not passing: {2}; {3}; it said: {4}" -f $Case, $run.Code, ($failed -join ', '), ($odd -join ', '), ($run.Lines -join ' / '))
   }
-  [pscustomobject]@{ Said = ($out -join ' '); Lines = @($out); Seen = @($seen.seen) }
+  $run
 }
 
 # Whether publish.ps1 asked for the key: a script answering on its input is asked with "Key" alone
@@ -157,6 +163,20 @@ try {
   finally { Remove-Item -LiteralPath $envLocal -Force }
   if ((Test-Asked $sent.Lines) -or (Test-Path $keyFile)) { throw ("the key in .env.local: it asked, or kept the key: {0}" -f $sent.Said) }
   Write-Host 'publish.ps1 with the key in .env.local: sends, asks nothing, keeps nothing.' -ForegroundColor Green
+
+  # 1c. The version sent before still with the Store (being checked): it is left alone, nothing is
+  #     sent, and publish.ps1 says so and ends with 3, not as a failure, so mosaik1.sh --deploy
+  #     --app still puts the site online; the same line sends the app once that version is out.
+  $null = Use-Data 'still-with-the-store'
+  $env:MOSAIK_STORE_KEY = 'test-key'
+  try { $run = Invoke-Standin 'the version before still with the Store' '' $api.tenantId $api.clientId 'Certification' }
+  finally { [Environment]::SetEnvironmentVariable('MOSAIK_STORE_KEY', $null, 'Process') }
+  $touched = @($run.Checks | Where-Object { $_.Name -in 'deleted_while_with_the_store', 'created_while_one_is_with_the_store', 'unexpected', 'unauthorized' } | ForEach-Object { "$($_.Name): $($_.Value)" })
+  $looked = @($run.Checks | Where-Object { $_.Name -eq 'pending_status_read' -and $_.Value -eq $true }).Count -eq 1
+  if ($run.Code -ne 3 -or -not $looked -or $touched.Count -gt 0 -or $run.Said -notmatch 'still checking' -or $run.Said -match 'refused|Sent:') {
+    throw ("the version before still with the Store: exit code {0}; looked at it: {1}; {2}; it said: {3}" -f $run.Code, $looked, ($touched -join ', '), ($run.Lines -join ' / '))
+  }
+  Write-Host 'publish.ps1 while the version before is still with the Store: leaves it alone, sends nothing, says so, and ends with 3 (not a failure).' -ForegroundColor Green
 
   # 2. The first run without a key: the key alone asked once, with identity.json's tenant and
   #    client, kept for this user, and sent.

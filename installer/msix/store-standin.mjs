@@ -2,13 +2,20 @@
 // Store submission API, as Microsoft documents them), for test-publish.ps1: it answers like them,
 // checks every request publish.ps1 makes, and writes what it saw to a report.
 //
-//   node store-standin.mjs <port> <report.json> <expected package name> <whats-new.txt> <tenant> <client> <key>
+//   node store-standin.mjs <port> <report.json> <expected package name> <whats-new.txt> <tenant> <client> <key> [<status>]
 //
-// It ends by itself once the submission's status has been read twice, or after a minute.
+// <status> is where the submission made before stands (PendingCommit when left out: made, never
+// sent). Sent and still with the Store (Certification...), it cannot be deleted, as with Microsoft.
+// It ends by itself once the new submission's status has been read twice, soon after a submission
+// still with the Store was looked at, or after a minute.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
-const [port, reportPath, packageName, whatsNewFile, tenant, client, key] = process.argv.slice(2);
+const [port, reportPath, packageName, whatsNewFile, tenant, client, key, pendingStatus = 'PendingCommit'] =
+  process.argv.slice(2);
+// Sent, and not out yet: Microsoft refuses to delete such a submission.
+const IN_FLIGHT = ['CommitStarted', 'PreProcessing', 'Certification', 'Release', 'PendingPublication', 'Publishing'];
+const inFlight = IN_FLIGHT.includes(pendingStatus);
 const whatsNew = readFileSync(whatsNewFile, 'utf8').replace(/^\uFEFF/, '').trim();
 const APP = '9PHR0L7S1QVD';
 const PENDING = '1152921505000000001';
@@ -122,12 +129,27 @@ const server = createServer((req, res) => {
         pendingApplicationSubmission: { id: PENDING, resourceLocation: `applications/${APP}/submissions/${PENDING}` },
       });
     }
+    if (req.method === 'GET' && path === `${base}/submissions/${PENDING}/status`) {
+      checks.pending_status_read = true;
+      json(200, { status: pendingStatus, statusDetails: { errors: [], warnings: [], certificationReports: [] } });
+      // What follows, if anything, comes at once.
+      if (inFlight) setTimeout(finish, 1500);
+      return undefined;
+    }
     if (req.method === 'DELETE' && path === `${base}/submissions/${PENDING}`) {
-      checks.pending_deleted = true;
+      if (inFlight) {
+        checks.deleted_while_with_the_store = true;
+        return json(409, { code: 'InvalidState', message: 'The submission cannot be deleted in its current state.' });
+      }
+      checks.pending_deleted = checks.pending_status_read === true;
       res.writeHead(204);
       return res.end();
     }
     if (req.method === 'POST' && path === `${base}/submissions`) {
+      if (inFlight) {
+        checks.created_while_one_is_with_the_store = true;
+        return json(409, { code: 'InvalidState', message: 'An in-progress submission exists.' });
+      }
       checks.created_after_delete = checks.pending_deleted === true;
       return json(201, published());
     }

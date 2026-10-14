@@ -36,10 +36,13 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    Runs the app's own mosaik.ps1 publish: the repository's (./mosaik/) when
 #    it is beside this file, else the one-file mosaik.ps1 beside it. It tests,
 #    builds and packages the app and sends it to the Microsoft Store, which
-#    checks it (usually within a day or two) before everyone gets it. The
-#    Store's key goes in mosaik/.env.local, on a line MOSAIK_STORE_KEY=...
-#    (git ignores that file; the app's docs/RELEASE.md says where Partner
-#    Center makes one); then there is nothing to answer.
+#    checks it (usually within a day or two) before everyone gets it; while
+#    it still checks the version sent before, the app waits (run the same
+#    line again later) and the site still goes up. The Store's key comes
+#    from MOSAIK_STORE_KEY (an export line at the top of your own copy of
+#    this file does it), or from mosaik/.env.local, on a line
+#    MOSAIK_STORE_KEY=... (git ignores that file; the app's docs/RELEASE.md
+#    says where Partner Center makes one); then there is nothing to answer.
 # ════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
 # The copy made for Windows line endings (line 2) goes when the script ends.
@@ -55,7 +58,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.11.0"
+MK_VERSION="1.11.1"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -106,7 +109,8 @@ printf '\n%s%s  %s site%s  %s%s %s%s\n\n' "$CB" "$CA" "$SITE_NAME" "$C0" "$CD" "
 
 # ── The app (--app) ──────────────────────────────────────────────────────
 # Tested, built and packaged by the app's own mosaik.ps1, then sent to the Microsoft Store (its
-# "publish"). Before the site: when the app is not sent, nothing else is done.
+# "publish"). Before the site: when the app fails, nothing else is done; when it waits for the
+# Store (still checking the version sent before: publish ends with 3), the site still goes up.
 if [ "$APP" = 1 ]; then
   command -v powershell.exe >/dev/null 2>&1 ||
     die "--app builds Mosaïk and sends it to the Microsoft Store: run it on Windows (Git Bash), where Mosaïk builds."
@@ -116,13 +120,18 @@ if [ "$APP" = 1 ]; then
   elif [ -f "$HERE/mosaik.ps1" ]; then APP_PS1="$HERE/mosaik.ps1"
   else die "--app needs the app beside this file: its repository (mosaik/) or the one-file mosaik.ps1."; fi
   step "Sending Mosaïk to the Microsoft Store with $APP_PS1"
-  note "Its tests, build and package (a few minutes), then the Store, with the key in mosaik/.env.local."
+  note "Its tests, build and package (a few minutes), then the Store."
   PUBLISH=(powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$APP_PS1" 2>/dev/null || printf '%s' "$APP_PS1")" publish)
   # mintty (Git Bash's own window) is no Windows console: winpty gives PowerShell one, so it can ask.
   if [ "${TERM_PROGRAM:-}" = "mintty" ] && command -v winpty >/dev/null 2>&1; then PUBLISH=(winpty "${PUBLISH[@]}"); fi
-  "${PUBLISH[@]}" || die "Mosaïk was not sent to the Store; the lines above say why. Nothing else was done."
-  ok "The app's part is done"
-  [ "$SITE" = 1 ] || exit 0
+  sent=0
+  "${PUBLISH[@]}" || sent=$?
+  case "$sent" in
+    0) ok "The app's part is done" ;;
+    3) warn "Mosaïk waits for the Store, still checking the version sent before: run the same line again in a day or two to send it." ;;
+    *) die "Mosaïk was not sent to the Store; the lines above say why. Nothing else was done (the site alone: ./$SCRIPT_NAME --deploy)." ;;
+  esac
+  [ "$SITE" = 1 ] || exit "$sent"
 fi
 
 # ── Requirements ─────────────────────────────────────────────────────────

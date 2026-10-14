@@ -1173,6 +1173,36 @@ edge, where the pointer stops).
   `--app` checked with stand-ins for `powershell.exe` and `winpty`: the same command in Git
   Bash's own window and elsewhere, and a failed send stops everything with nothing deployed.
 
+## 1.0.2
+
+What the owner asked on 2026-10-14 at 00:22, with a screenshot: a workspace's page said "Open a
+window to add it here." with about ten apps open ("i should be able to add claude for example");
+"when drag drop a window as new tab of a zone it overlaps the tabs and we only see the window";
+the site's section "One desktop, many kinds of work." gone, whole (ADR 0024).
+
+- **Minimised windows offered**: opening a workspace minimises the windows it does not use, and
+  its page offered only windows on screen. It now offers every open window not already the
+  workspace's, minimised ones too; one added to a zone shows again in its place. Test first:
+  smart's 3g minimises a window and expects it offered, then shown in its zone (job 0146).
+- **The strip above a dropped window**: the dropped window was raised after its strip went above
+  it, and an app that comes forward late covered the strip. A dropped window, one pulled out of
+  its group and the windows a workspace opens with now have their strips and frames put back
+  above them twice in the next half second, as a clicked tab already had. Test first: the
+  probe's dummy window can come forward 250 ms late, and `workspace --drag` drops it on a tag and
+  checks the strip ends above it (job 0146).
+- **The Store while it checks the version sent before**: `publish.ps1` looks at the submission
+  waiting in Partner Center before replacing it; one still being checked is left alone, nothing
+  is sent, it says so and ends with 3, which `mosaik.ps1 publish` passes on, and `mosaik1.sh
+  --deploy --app` warns and still puts the site up. Test first: the stand-in keeps a submission
+  in certification and refuses to delete it, as Microsoft does; the publish test failed on the
+  `publish.ps1` before (it never looked at the waiting submission) and passes now (17 checks, and
+  the new case); the `mosaik.ps1` test's 3 publish cases failed on `mosaik.ps1` before (3 taken
+  for a failure) and pass; `mosaik1.sh --app` with a stand-in publish ending with 0, 3 and 1:
+  done; waiting, the site made after it; failed, nothing after it.
+- **The site** (`mosaik1.sh` 1.11.1): no section "One desktop, many kinds of work.", no "Who
+  it's for" in the header, the small desktops it drew gone; type-checked and `shellcheck` clean.
+- Version 1.0.2: the changelog, and "What's new" with 1.0.1's for anyone still on 1.0.0.
+
 ## Owner decisions
 
 - 2026-10-11: the Patreon link is https://www.patreon.com/gimzdev (About and the tray menu only).
@@ -1228,4 +1258,11 @@ edge, where the pointer stops).
   keys cant you put them in it"): the repository is public and the key alone publishes to the
   Store. The Entra application's tenant and client IDs are in `identity.json`. After the prompt
   failed in Git Bash, the key goes in `.env.local` at the top of the repository, as in a web
-  project ("lets just be normal please"), which the owner writes himself (ADR 0026).
+  project ("lets just be normal please"), which the owner writes himself (ADR 0026). The owner
+  put it instead in his own copy of `mosaik1.sh`, the one beside the repository that no commit
+  has, as a line `export MOSAIK_STORE_KEY=...` ("put this shit in the bash file"): `publish.ps1`
+  takes it from the environment first. A job that brings that copy up to date keeps the line
+  where it is and never prints it.
+- 2026-10-14: the site has no section "One desktop, many kinds of work." ("Who it's for", the
+  four workspaces as desktops in small): "it looks stacked and is redundant with first section";
+  asked before, so it does not come back (ADR 0024).

@@ -8,7 +8,9 @@
   The Microsoft Store submission API (manage.devcenter.microsoft.com) does it the way Partner
   Center takes a submission: a copy of the last published one, with this package in place of the
   old one and "What's new" from whats-new.txt (beside this script); nothing else of the listing
-  changes. The Store then checks it, usually within a day or two, and updates everyone.
+  changes. The Store then checks it, usually within a day or two, and updates everyone. While it
+  still checks the version sent before, it takes no other: nothing is sent, and the exit code is 3
+  (0 once sent, 1 on a failure), so a script can tell waiting from failing.
 
   It signs in as the Partner Center account's Microsoft Entra application, "Mosaik Store
   publishing" (docs/RELEASE.md): its tenant and client IDs are in identity.json (they are not
@@ -64,7 +66,7 @@ $KeyFile = Join-Path $env:APPDATA 'Mosaik\store-key.xml'
 function Say([string]$Text, [string]$Colour = 'Gray') { Write-Host $Text -ForegroundColor $Colour }
 function Fail([string]$Text) { throw $Text }
 
-# The workspace version in Cargo.toml ("1.0.1"), as package.ps1 reads it.
+# The workspace version in Cargo.toml ("1.0.2"), as package.ps1 reads it.
 function Get-Version {
   $cargo = Get-Content -Raw -Encoding UTF8 (Join-Path $Root 'Cargo.toml')
   $match = [regex]::Match($cargo, '(?ms)^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"')
@@ -227,7 +229,13 @@ try {
   $app = Invoke-Store GET ''
   $pending = if ($app.PSObject.Properties['pendingApplicationSubmission']) { $app.pendingApplicationSubmission } else { $null }
   if ($pending -and $pending.id) {
-    Say ("  A submission not sent yet was waiting ({0}); it is replaced by this one." -f $pending.id) Yellow
+    $before = (Invoke-Store GET "/submissions/$($pending.id)/status").status
+    # Sent and not out yet: the Store keeps it until it is, and takes no other meanwhile.
+    if ($before -in 'CommitStarted', 'PreProcessing', 'Certification', 'Release', 'PendingPublication', 'Publishing') {
+      Say ("The Store is still checking the version sent before ({0}): Mosaik {1} waits for it. Run the same line again once it is out, usually within a day or two. Nothing was sent." -f $before, $version) Yellow
+      exit 3
+    }
+    Say ("  A submission waiting in Partner Center ({0}, {1}) is replaced by this one." -f $pending.id, $before) Yellow
     $null = Invoke-Store DELETE "/submissions/$($pending.id)"
   }
   $submission = Invoke-Store POST '/submissions'
