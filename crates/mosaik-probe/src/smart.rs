@@ -46,8 +46,8 @@ use mosaik_win::window::{frame_rect, handle};
 use serde_json::{Value, json};
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GetAncestor, HTBOTTOM, HTLEFT, HTRIGHT, HTTOP, HWND_NOTOPMOST, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SetWindowPos, WindowFromPoint,
+    GA_ROOT, GetAncestor, HTBOTTOM, HTLEFT, HTRIGHT, HTTOP, HWND_NOTOPMOST, IsIconic, SW_MINIMIZE,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, ShowWindow, WindowFromPoint,
 };
 
 use crate::capture::save_bmp;
@@ -1229,7 +1229,8 @@ fn apps_of(engine: &Engine, command: Command) -> Result<WorkspaceApps, String> {
 /// 3g. The open workspace's apps, edited as on the home page: its three windows are listed
 /// with their zones and a new window is offered; added to a zone, the window goes into it at
 /// once; moved to another zone, it follows; taken out, it stays where it is. The workspace's
-/// own windows do not move meanwhile.
+/// own windows do not move meanwhile. A minimised window is offered too, and added to a zone,
+/// it is shown again there (the owner: "i should be able to add claude").
 fn apps(
     engine: &Engine,
     styles: Styles,
@@ -1331,6 +1332,61 @@ fn apps(
     let others_moved = most_moved(&before, &frames(w));
     crate::apps::close(g);
     pump_until(500, || false);
+
+    let h = open(
+        opened,
+        "Probe H",
+        Rect::from_origin_size(work.left + 120, work.top + 160, 520, 380),
+        " --topmost",
+    )?;
+    pump_until(500, || false);
+    // SAFETY: ShowWindow on the probe's own window.
+    let _ = unsafe { ShowWindow(h, SW_MINIMIZE) };
+    pump_until(600, || false);
+    let h_handle = handle(h);
+    let again = apps_of(
+        engine,
+        Command::Apps {
+            workspace: workspace(),
+        },
+    )?;
+    let min_offered = again.windows.iter().any(|x| x.window == h_handle);
+    let min_added = if min_offered {
+        Some(apps_of(
+            engine,
+            Command::AddApp {
+                workspace: workspace(),
+                window: h_handle,
+                zone: Some(zone_a.clone()),
+            },
+        )?)
+    } else {
+        None
+    };
+    let st = settled(engine)?;
+    // SAFETY: read-only query on the probe's own window.
+    let min_shown = min_added.is_some() && !unsafe { IsIconic(h) }.as_bool();
+    let min_fit = fit(&st, &zs, styles, &[h]);
+    let min_app = min_added
+        .as_ref()
+        .and_then(|added| {
+            added
+                .apps
+                .iter()
+                .find(|a| !again.apps.iter().any(|b| b.id == a.id))
+        })
+        .map(|a| a.id.clone());
+    if let Some(app) = min_app {
+        let _ = apps_of(
+            engine,
+            Command::RemoveApp {
+                workspace: workspace(),
+                app,
+            },
+        )?;
+    }
+    crate::apps::close(h);
+    pump_until(500, || false);
     Ok(json!({
         "apps": listed.apps.len(),
         "apps_in_zones": zoned,
@@ -1344,9 +1400,13 @@ fn apps(
         "removed": gone,
         "stayed_px": stayed,
         "others_moved_px": others_moved,
+        "minimized_offered": min_offered,
+        "minimized_added_shown": min_shown,
+        "minimized_fit_px": min_fit,
         "ok": listed.apps.len() == 3 && zoned == 3 && offered && !own_offered
             && in_a && all_fit(&fit_a) && in_b && all_fit(&fit_b)
-            && gone && stayed.is_some_and(|d| d <= SLACK) && others_moved <= SLACK,
+            && gone && stayed.is_some_and(|d| d <= SLACK) && others_moved <= SLACK
+            && min_offered && min_shown && all_fit(&min_fit),
     }))
 }
 

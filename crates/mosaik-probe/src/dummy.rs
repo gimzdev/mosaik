@@ -33,6 +33,37 @@ thread_local! {
     /// `--min-height N`: the window will not be shorter than N pixels, as Battle.net keeps about
     /// 720.
     static MIN_HEIGHT: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    /// Set by [`late_raise`]: the window takes its place in the stacking order this many
+    /// milliseconds after it is asked to (0: at once), as an app busy laying itself out after a
+    /// resize gets round to such a request late.
+    static LATE_RAISE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// The place in the stacking order asked for meanwhile (the window to go after).
+    static RAISE_AFTER: std::cell::Cell<Option<isize>> = const { std::cell::Cell::new(None) };
+    /// While the window takes that place itself.
+    static RAISING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The probe's message to a dummy window: from now on, take a new place in the stacking order
+/// wParam milliseconds after it is asked for (0: at once).
+const WM_LATE_RAISE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
+
+/// The timer that puts a late window where it was asked to go.
+const RAISE_TIMER: usize = 2;
+
+/// Makes the dummy window `hwnd` (of another process) slow to come forward, from now on: it
+/// takes its place in the stacking order `ms` milliseconds after it is asked to (0: at once
+/// again). Whether the message went.
+pub fn late_raise(hwnd: windows::Win32::Foundation::HWND, ms: u32) -> bool {
+    // SAFETY: posts a message to a window; any handle is accepted.
+    unsafe {
+        windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+            Some(hwnd),
+            WM_LATE_RAISE,
+            windows::Win32::Foundation::WPARAM(ms as usize),
+            windows::Win32::Foundation::LPARAM(0),
+        )
+    }
+    .is_ok()
 }
 
 /// `--hide-pointer`: over the window, the pointer has no shape, as a game built on SDL or GLFW
@@ -157,6 +188,49 @@ unsafe extern "system" fn dummy_proc(
         // SAFETY: gives the pointer no shape over our own window's client area.
         unsafe { windows::Win32::UI::WindowsAndMessaging::SetCursor(None) };
         return windows::Win32::Foundation::LRESULT(1);
+    }
+    if msg == WM_LATE_RAISE {
+        LATE_RAISE.with(|l| l.set(u32::try_from(wparam.0).unwrap_or(0)));
+        return windows::Win32::Foundation::LRESULT(0);
+    }
+    let late = LATE_RAISE.with(std::cell::Cell::get);
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_WINDOWPOSCHANGING
+        && late > 0
+        && !RAISING.with(std::cell::Cell::get)
+    {
+        let pos = lparam.0 as *mut windows::Win32::UI::WindowsAndMessaging::WINDOWPOS;
+        // SAFETY: Windows passes a valid WINDOWPOS with this message, ours to change before the
+        // default handling.
+        if let Some(pos) = unsafe { pos.as_mut() }
+            && !pos.flags.contains(SWP_NOZORDER)
+        {
+            // Not now: the place asked for is taken when the timer goes off.
+            RAISE_AFTER.with(|r| r.set(Some(pos.hwndInsertAfter.0 as isize)));
+            pos.flags |= SWP_NOZORDER;
+            // SAFETY: a timer on our own window, stopped when it goes off.
+            unsafe { windows::Win32::UI::WindowsAndMessaging::SetTimer(Some(hwnd), RAISE_TIMER, late, None) };
+        }
+    }
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_TIMER && wparam.0 == RAISE_TIMER {
+        // SAFETY: stops our own window's timer.
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), RAISE_TIMER) };
+        if let Some(after) = RAISE_AFTER.with(std::cell::Cell::take) {
+            RAISING.with(|r| r.set(true));
+            // SAFETY: our own window, to the place in the stacking order it was asked to take.
+            let _ = unsafe {
+                SetWindowPos(
+                    hwnd,
+                    Some(windows::Win32::Foundation::HWND(after as *mut core::ffi::c_void)),
+                    0,
+                    0,
+                    0,
+                    0,
+                    windows::Win32::UI::WindowsAndMessaging::SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                )
+            };
+            RAISING.with(|r| r.set(false));
+        }
+        return windows::Win32::Foundation::LRESULT(0);
     }
     if msg == windows::Win32::UI::WindowsAndMessaging::WM_TIMER && wparam.0 == UNCLOAK_TIMER {
         // SAFETY: stops the timer set on our own window when it was shown cloaked.

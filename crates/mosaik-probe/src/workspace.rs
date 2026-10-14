@@ -1136,6 +1136,7 @@ fn windows_snapping(engine: &Engine, probes: &[Probe], styles: Styles) -> Result
             .iter()
             .find(|s| s.tabs.iter().any(|t| t.window == handle(review.hwnd)))
             .cloned();
+        let above = strip.as_ref().and_then(|_| strip_above(review.hwnd));
         let frame = frame_rect(review.hwnd);
         let maximized = mosaik_win::window::geometry(review.hwnd).is_some_and(|g| g.maximized);
         let appeared: Vec<String> = shell_windows()
@@ -1147,6 +1148,7 @@ fn windows_snapping(engine: &Engine, probes: &[Probe], styles: Styles) -> Result
             "drop": name,
             "pointer": [to.x, to.y],
             "became_a_tab": strip.is_some(),
+            "strip_above": above,
             "zone_error_px": (!onto_strip).then(|| frame.map(|f| edge_error(f, styles.area(zone, false)))).flatten(),
             "maximized": maximized,
             "arranged_by_windows": mosaik_win::window::is_arranged(review.hwnd),
@@ -1186,6 +1188,10 @@ fn windows_snapping(engine: &Engine, probes: &[Probe], styles: Styles) -> Result
     Ok(json!({ "windows_snapping_on": mosaik_win::os::snapping_on(), "drops": results }))
 }
 
+/// How late the terminal's app comes forward when it is dropped on a tag: about what an app busy
+/// laying itself out after a resize takes, longer than Mosaïk's first look at the stacking order.
+const LATE_RAISE_MS: u32 = 250;
+
 /// Mosaïk's tab strip is above `window` in the stacking order: `None` when no strip shows.
 fn strip_above(window: HWND) -> Option<bool> {
     let order = mosaik_win::window::top_level();
@@ -1211,7 +1217,11 @@ fn tabs_and_snap(
     #[allow(clippy::cast_possible_truncation)]
     let px = |v: f64| (v * s).round() as i32;
 
-    // 1. Drop the terminal on the code window's tag.
+    // 1. Drop the terminal on the code window's tag. Its app comes forward late, as an app busy
+    // laying itself out after a resize gets round to it: the strip must still end above it (the
+    // owner: "when drag drop a window as new tab of a zone it overlaps the tabs and we only see
+    // the window").
+    let late = dummy::late_raise(terminal.hwnd, LATE_RAISE_MS);
     let t = frame_rect(terminal.hwnd).ok_or("the terminal window vanished")?;
     let (tag, _) = tag_of(engine, code.hwnd)?;
     drag(
@@ -1220,6 +1230,10 @@ fn tabs_and_snap(
         terminal.hwnd,
     )?;
     let after_join = settled(engine)?;
+    // Past the late raise, and the moment Mosaïk takes to put its strip back above the window.
+    pump_until(LATE_RAISE_MS + 800, || false);
+    let joined_above = strip_above(terminal.hwnd);
+    dummy::late_raise(terminal.hwnd, 0);
     shot(shots, "2-joined", &[terminal.hwnd], styles.dpi);
     let strip = after_join.tab_strips.first().cloned();
     // Where the strip sits, from the right end and the top of the visible tab's frame: the same
@@ -1237,6 +1251,8 @@ fn tabs_and_snap(
         "terminal_error_px": frame_rect(terminal.hwnd).map(|f| edge_error(f, styles.area(code.tiled, false))),
         "code_hidden": hidden(&after_join, code.hwnd),
         "terminal_hidden": hidden(&after_join, terminal.hwnd),
+        "late_raise_ms": late.then_some(LATE_RAISE_MS),
+        "strip_above": joined_above,
     });
 
     // 2. Click the code tab, then the terminal's and the code's again: each time the strip
@@ -1328,6 +1344,7 @@ fn tabs_and_snap(
         terminal.hwnd,
     )?;
     let st = settled(engine)?;
+    pump_until(600, || false);
     let at_tag_start = json!({
         "pointer": [corner.x, corner.y],
         "strips": st.tab_strips.len(),
@@ -1335,6 +1352,7 @@ fn tabs_and_snap(
         "terminal_hidden": hidden(&st, terminal.hwnd),
         "code_hidden": hidden(&st, code.hwnd),
         "terminal_frame": frame_rect(terminal.hwnd).map(|f| [f.left, f.top, f.right, f.bottom]),
+        "strip_above": strip_above(terminal.hwnd),
     });
     input::move_to(original);
     Ok(json!({
