@@ -19,7 +19,7 @@ re-run before each release.
 | 7. Hardening | done here: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers, soak, two screens at two scales; left for the owner by hand: sleep and resume, a screen unplugged; not possible here: RDP (Windows 11 Home has no Remote Desktop host), Windows 10 | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.0.1, first builds | (called 1.1 then) built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.0.1: first builds](#101-first-builds) |
-| 1.0.1 | (called 2.0 until 2026-10-13) built, tested and packaged on Windows (jobs 0122 to 0141): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 1.0.1.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's key is kept (the key alone asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant made, linked to the developer account, and its application "Mosaik Store publishing" made with a key on 2026-10-13 | [1.0.1: the window rebuilt](#101-the-window-rebuilt) |
+| 1.0.1 | (called 2.0 until 2026-10-13) built, tested and packaged on Windows (jobs 0122 to 0143): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 1.0.1.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's key is kept (the key alone asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant made, linked to the developer account, and its application "Mosaik Store publishing" made with a key on 2026-10-13 | [1.0.1: the window rebuilt](#101-the-window-rebuilt) |
 
 ## Step 1: verify assumptions
 
@@ -1100,7 +1100,8 @@ edge, where the pointer stops).
   environment and nobody to answer; on the first run the key alone asked, with `identity.json`'s
   tenant and client, and kept encrypted; the next run asking nothing; without a key given,
   nothing kept or sent; `-Yes` without a key refused. The `publish.ps1` before failed it (it
-  asked for the tenant ID first) and the one now passes, on PowerShell 7.4 here.
+  asked for the tenant ID first) and the one now passes, here and on the owner's PC (Windows
+  PowerShell 5.1, job 0143).
 - **The build around a running Mosaïk.** The build step's own test
   (`installer/test-mosaik-ps1.ps1`): job 0132's `mosaik.ps1 build` stopped at once on Windows
   PowerShell 5.1 ("The property 'Count' cannot be found on this object"); job 0133 ran the test
@@ -1148,7 +1149,10 @@ edge, where the pointer stops).
   made; job 0139: the package 2.9 MB, `pack` 271 files). Opened by hand, Mosaïk's window shows in
   0.3 s; with `--background`, none (job 0133). This build left in the tray on the owner's own
   data (job 0135: version 2.0.0, as it was called then, protocol 8, its watchdog, Win+Alt+Space
-  registered).
+  registered). As 1.0.1 (job 0143): `mosaik.ps1 test` passing whole in 81 s; the build with
+  Mosaïk running in 143 s, started again in the tray (`mosaikctl 1.0.1`, `mosaik.exe` file version
+  1.0.1); `Mosaik_1.0.1.0_x64.msix` 2.9 MB, an update of the Store's 1.0.0.0 installed on the PC;
+  `pack`, 271 files, checked against the repository.
 - **The site** (`mosaik1.sh` 1.10.0, with `--app`): its first home page back (the title, "Every
   project gets its own workspace: your apps and windows arranged and ready in one click.", "Free
   and open source.", desktops of two to four windows); the site folder is what the script writes
