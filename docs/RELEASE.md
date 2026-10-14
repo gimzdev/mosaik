@@ -44,49 +44,44 @@ From the folder with `mosaik1.sh` and the repository (`mosaik/`) beside it, in G
 ./mosaik1.sh --deploy --app
 ```
 
-`--app` runs the app's `.\mosaik.ps1 publish` first: the tests, the build and the package (a few
-minutes), then the Store (ADR 0026):
+It tests, builds and packages the app and sends it to the Microsoft Store (ADR 0027): a new
+submission copied from the last one, this package in place of the old one and "What's new"
+from `installer/msix/whats-new.txt`; nothing else of the listing changes. Then it puts the site
+online. If the app is not sent, the site is not deployed either. The Store checks the new
+version, usually within a day, and then updates everyone. `./mosaik1.sh --app` sends the app
+alone; `.\mosaik.ps1 publish` does the same from PowerShell.
 
-1. Partner Center opens on Mosaïk in your browser (signed in as you), File Explorer shows
-   `target\msix\Mosaik_<version>.0_x64.msix`, and "What's new" (from
-   `installer/msix/whats-new.txt`) is on the clipboard.
-2. In Partner Center: **Start update**; **Packages**: drag the package in and remove the older
-   one, **Save**; **Store listings**, English: paste into "What's new in this version", **Save**;
-   then submit it.
-3. Back in the terminal, answer **y** to "Submitted?".
+### The Store's keys (the first time only)
 
-If the app is not sent (a test fails, or you answer no), the site is not deployed either. Then
-`--deploy` puts the site online. The Store checks the new version, usually within a day or two,
-and then updates everyone. `./mosaik1.sh --app` sends the app alone; `.\mosaik.ps1 publish` does
-the same from PowerShell.
+The first run asks for three keys and keeps them for your Windows user, encrypted
+(`%APPDATA%\Mosaik\store-publishing.xml`); after that there is nothing to answer. They belong to
+a Microsoft Entra application of the Partner Center account:
 
-### Sending through the Store's API (optional)
-
-With keys for the Store's submission API, `--app` sends the package itself, after you say yes:
-a new submission copied from the last one, this package in place of the old one and "What's
-new" (ADR 0025); nothing else of the listing changes. The API acts for the Partner Center
-account through a Microsoft Entra application, which needs the account to have a Microsoft
-Entra tenant:
-
-1. Partner Center, **Account settings**, **Tenants**: **Create Microsoft Entra ID** (Microsoft's
-   sign-up asks for a payment card whose country is the one chosen for the tenant; nothing is
-   charged), or **Associate Microsoft Entra ID** for one you have.
+1. Partner Center, **Account settings**, **Tenants**: **Create Microsoft Entra ID**, or
+   **Associate Microsoft Entra ID** for a tenant you have. Microsoft's sign-up asks for a payment
+   card whose country is the tenant's (nothing is charged).
 2. **Account settings**, **User management**: sign in with Microsoft Entra ID, then **Microsoft
    Entra applications**, **Create Microsoft Entra application**, with the **Manager** role.
-3. Select it: note its **Tenant ID** and **Client ID**, then **Add new key** and copy the **Key**
-   (it is shown once).
-4. `.\installer\msix\publish.ps1 -SetKeys` asks for the three and keeps them for your Windows user
-   only, encrypted (`%APPDATA%\Mosaik\store-publishing.xml`; delete it to go back to sending by
-   hand). Keys expire: Partner Center shows when, and makes a new one the same way.
+3. Select it: its **Tenant ID** and **Client ID**, then **Add new key** for the **Key** (shown
+   once).
+
+Keys expire: Partner Center shows when and makes a new one the same way; give it with
+`.\installer\msix\publish.ps1 -SetKeys`.
+
+### Without the keys
+
+Press Enter at the first question instead, and it is sent by hand that time (ADR 0026): Partner
+Center opens on Mosaïk, File Explorer shows the package and "What's new" is on the clipboard;
+**Start update**, drag the package in and remove the older one, paste "What's new" in the
+English listing, submit, then answer **y** to "Submitted?".
 
 On 2026-10-13 the owner's first tenant was blocked by Microsoft while being made ("Access to
-tenant is denied", AADSTS5000228, after its card check failed), so this account sends by hand.
+tenant is denied", AADSTS5000228, after its card check failed); the owner is making another.
 
 ### The submission, for reference
 
-Apps and games, Mosaïk (Store ID `9PHR0L7S1QVD`), Start update: what `--app` opens. 1.0.0 was
-published on 2026-10-12; Partner Center copies the last submission, so only the package and
-"What's new" change.
+Apps and games, Mosaïk (Store ID `9PHR0L7S1QVD`). 1.0.0 was published on 2026-10-12; each new
+submission is a copy of the last one, so only the package and "What's new" change.
 
 The rest of the submission, for reference (already set by submission 1):
 

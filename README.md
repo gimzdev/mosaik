@@ -161,7 +161,7 @@ or deploys it.<br>
 .\mosaik.ps1 test       # every test and check
 .\mosaik.ps1 run        # start the Mosaïk just built
 .\mosaik.ps1 package    # the Store package (MSIX)
-.\mosaik.ps1 publish    # tests, builds and packages it, then the Microsoft Store (Partner Center opens)
+.\mosaik.ps1 publish    # tests, builds and packages it, then sends it to the Microsoft Store
 .\mosaik.ps1 pack       # a one-file copy with this source inside (target\mosaik.ps1)
 ```
 

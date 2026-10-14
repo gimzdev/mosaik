@@ -1,6 +1,6 @@
 # 0026. The new version sent by hand in Partner Center, unless the Store's API has keys
 
-- Status: accepted
+- Status: accepted; amended by ADR 0027 (the keys asked on the first run, no question after)
 - Date: 2026-10-13
 - Amends: ADR 0025
 

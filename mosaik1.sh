@@ -35,10 +35,10 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #  The app (--app)
 #    Runs the app's own mosaik.ps1 publish: the repository's (./mosaik/) when
 #    it is beside this file, else the one-file mosaik.ps1 beside it. It tests,
-#    builds and packages the app, then Partner Center opens on Mosaïk with the
-#    package and its "What's new" ready to drop in and submit (or, once the
-#    Store's API keys are set, it is sent for you: the app's docs/RELEASE.md).
-#    The Store then checks the new version, usually within a day or two.
+#    builds and packages the app and sends it to the Microsoft Store, which
+#    checks it (usually within a day) before everyone gets it. The first time,
+#    it asks for the Store's keys (the app's docs/RELEASE.md says where they
+#    are) and keeps them, encrypted; after that there is nothing to answer.
 # ════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
 # The copy made for Windows line endings (line 2) goes when the script ends.
@@ -53,7 +53,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.9.1"
+MK_VERSION="1.9.2"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -114,7 +114,7 @@ if [ "$APP" = 1 ]; then
   elif [ -f "$HERE/mosaik.ps1" ]; then APP_PS1="$HERE/mosaik.ps1"
   else die "--app needs the app beside this file: its repository (mosaik/) or the one-file mosaik.ps1."; fi
   step "Sending Mosaïk to the Microsoft Store with $APP_PS1"
-  note "Its tests, build and package first (a few minutes); then you submit it in Partner Center, which opens."
+  note "Its tests, build and package first (a few minutes), then the Store."
   APP_PS1_WIN="$(cygpath -w "$APP_PS1" 2>/dev/null || printf '%s' "$APP_PS1")"
   # mintty (Git Bash's own window) is no Windows console: winpty gives PowerShell one, so it can ask.
   if [ "${TERM_PROGRAM:-}" = "mintty" ] && command -v winpty >/dev/null 2>&1; then
