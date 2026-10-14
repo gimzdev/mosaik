@@ -395,9 +395,47 @@ function Request-Quit([string]$Ctl) {
   }
 }
 
+# The journal a watchdog watches: its "--journal" on its command line, else the one in Mosaik's
+# own folder (%APPDATA%\Mosaik), where the watchdog keeps it unless a test gave Mosaik another.
+function Get-WatchdogJournal($Process) {
+  $line = try { (Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($Process.Id)" -ErrorAction Stop).CommandLine } catch { $null }
+  if ($line -and $line -match '--journal\s+(?:"([^"]+)"|(\S+))') {
+    if ($Matches[1]) { return $Matches[1] }
+    return $Matches[2]
+  }
+  Join-Path $env:APPDATA 'Mosaik\hidden-windows.json'
+}
+
+# Stops a Mosaik that cannot be asked to quit, or does not, and brings back what it hid without
+# the watchdog's "Mosaik has stopped" message, which would hold the build until it is closed (job
+# 0134): its watchdog is stopped first, then Mosaik, then the watchdog's quiet rescue restores
+# every window in the journal (ADR 0006).
+function Stop-Mosaik([string]$Source, $Process) {
+  $dogs = @(Get-RunningBuild $Source 'mosaik-watchdog')
+  $journals = @($dogs | ForEach-Object { Get-WatchdogJournal $_ } | Select-Object -Unique)
+  foreach ($d in $dogs) {
+    try { $d.Kill() } catch { }
+    $null = $d.WaitForExit(5000)
+  }
+  try { $Process.Kill() } catch { }
+  if (-not $Process.WaitForExit(10000)) { Fail 'Mosaik from this folder did not quit. Quit it from its tray icon, then build again.' }
+  $watchdog = Under $Source 'target' 'release' 'mosaik-watchdog.exe'
+  foreach ($j in $journals) {
+    try {
+      $rescue = Start-Process -FilePath $watchdog -ArgumentList @('--rescue', '--quiet', '--journal', "`"$j`"") -Wait -PassThru
+      # 3: some windows could not be brought back (apps running as administrator).
+      if ($rescue.ExitCode -eq 3) { Say 'Some windows it hid could not be brought back (apps running as administrator): run "mosaikctl rescue" as administrator.' Yellow }
+    }
+    catch {
+      # Mosaik brings them back itself when it starts again, after the build.
+      Say ("Windows did not run the watchdog's rescue ({0}): the windows Mosaik hid come back when it starts again." -f $_.Exception.Message) Yellow
+    }
+  }
+}
+
 # Makes way for the build: a Mosaik running from this folder is asked to quit and waited for; one
-# that cannot be asked, or does not quit, is stopped, and its watchdog brings back every window it
-# hid; then its watchdog is waited for. True when Mosaik was running, to start it again after.
+# that cannot be asked, or does not quit, is stopped and its windows brought back (Stop-Mosaik);
+# then its watchdog is waited for. True when Mosaik was running, to start it again after.
 function Stop-RunningBuild([string]$Source) {
   $running = @(Get-RunningBuild $Source)
   if ($running.Count -gt 0) {
@@ -405,9 +443,8 @@ function Stop-RunningBuild([string]$Source) {
     $asked = Request-Quit (Under $Source 'target' 'release' 'mosaikctl.exe')
     foreach ($p in $running) {
       if ($p.WaitForExit($(if ($asked) { 10000 } else { 1000 }))) { continue }
-      Say 'It did not quit: it is stopped, and its watchdog brings back every window it hid.' Yellow
-      try { $p.Kill() } catch { }
-      if (-not $p.WaitForExit(10000)) { Fail 'Mosaik from this folder did not quit. Quit it from its tray icon, then build again.' }
+      Say 'It did not quit: it is stopped instead, and every window it hid is brought back.' Yellow
+      Stop-Mosaik $Source $p
     }
   }
   foreach ($w in @(Get-RunningBuild $Source 'mosaik-watchdog')) {

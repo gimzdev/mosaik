@@ -37,8 +37,10 @@ app built with Cargo is not one. The Store submission API it uses underneath tak
   quits a Mosaïk running from the same folder (Windows keeps its files from being built over) and
   starts it again after. Smart App Control refuses a new build's files for a while (job 0133:
   `mosaikctl.exe` refused while `mosaik.exe` ran): when it refuses `mosaikctl.exe`, Mosaïk is
-  stopped instead and its watchdog brings back its windows (ADR 0006); when it refuses the new
-  `mosaik.exe`, the build says so and the publish goes on.
+  stopped instead, its watchdog first (job 0134: stopped alone, Mosaïk left its watchdog showing
+  "Mosaïk has stopped" and the build waiting), and the watchdog's quiet rescue brings back its
+  windows from the journal (ADR 0006); when it refuses the new `mosaik.exe`, the build says so and
+  the publish goes on.
 - **`mosaik1.sh --app`** runs that `publish` with the app beside the site script: the
   repository (`mosaik/`) when it is there, else the one-file `mosaik.ps1`. It goes first: when the
   app is not sent, the site is not deployed either. Alone, `--app` sends only the app. In Git

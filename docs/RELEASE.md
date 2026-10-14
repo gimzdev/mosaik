@@ -15,9 +15,9 @@ owner's (the Store submission, the GitHub push, the site deploy). Version 2.0.0 
 
 A Mosaïk running from the same folder quits for the build (every window it hid comes back) and
 starts again after. Smart App Control can refuse a new build's files for a while: when it refuses
-`mosaikctl.exe`, which asks Mosaïk to quit, Mosaïk is stopped instead and its watchdog brings back
-its windows; when it refuses the new `mosaik.exe`, the build says so and `.\mosaik.ps1 run`
-starts it later.
+`mosaikctl.exe`, which asks Mosaïk to quit, Mosaïk is stopped instead (its watchdog first) and
+the watchdog's quiet rescue brings back its windows; when it refuses the new `mosaik.exe`, the
+build says so and `.\mosaik.ps1 run` starts it later.
 
 ## 2. Check by hand on real machines
 

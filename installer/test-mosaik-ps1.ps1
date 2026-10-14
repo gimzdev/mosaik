@@ -6,9 +6,11 @@
   found on this object"); one running from that folder is asked to quit, waited for, and started
   again in the tray after the build; one from anywhere else is left alone; when its mosaikctl
   cannot run (job 0133: Smart App Control refused a new build's mosaikctl.exe), it is stopped
-  instead, and its watchdog brings back its windows; its watchdog is waited for; one that does not
-  quit stops the build with what to do; when Windows does not start the new build, the build is
-  still done and says so.
+  instead, its watchdog first, and the windows it hid are brought back by the watchdog's quiet
+  rescue, from the journal its watchdog was watching (job 0134: stopped alone, Mosaik left its
+  watchdog showing "Mosaik has stopped" and the build waiting); its watchdog is waited for when it
+  quits; one that does not quit stops the build with what to do; when Windows does not start the
+  new build, the build is still done and says so.
 
   Invoke-Build and its helpers are read from mosaik.ps1 itself; what it starts (npm, cargo, the
   processes) is stood in for, so nothing is built, quit or started, and it takes a second.
@@ -28,10 +30,11 @@ $ast = [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $Script)
 if (@($errors).Count -gt 0) { throw ("{0} does not parse: {1}" -f $Script, $errors[0].Message) }
 $functions = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $false))
 # The build step and what it calls; the last two are not in every version of the script.
-foreach ($name in 'Under', 'Fail', 'Get-RunningBuild', 'Invoke-Build', 'Stop-RunningBuild', 'Request-Quit') {
+$optional = 'Stop-RunningBuild', 'Request-Quit', 'Stop-Mosaik', 'Get-WatchdogJournal'
+foreach ($name in @('Under', 'Fail', 'Get-RunningBuild', 'Invoke-Build') + $optional) {
   $found = @($functions | Where-Object { $_.Name -eq $name })
   if ($found.Count -eq 0) {
-    if ($name -in 'Stop-RunningBuild', 'Request-Quit') { continue }
+    if ($name -in $optional) { continue }
     throw "$Script has no function $name."
   }
   . ([scriptblock]::Create($found[0].Extent.Text))
@@ -52,10 +55,12 @@ function Use-Cargo { }
 function Invoke-Tool([string]$In, [string]$Program, [string[]]$Arguments) { $script:Done.Add("$Program $($Arguments -join ' ')") }
 function Invoke-Cargo([string]$In, [string[]]$Arguments) { $script:Done.Add("cargo $($Arguments -join ' ')") }
 $script:StartRefused = $false
-function Start-Process([string]$FilePath, [string[]]$ArgumentList) {
+function Start-Process {
+  param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru)
   # As Windows refuses a program it does not trust yet (Smart App Control and a new build).
   if ($script:StartRefused) { throw 'This program is blocked by group policy.' }
-  $script:Done.Add("start $FilePath $($ArgumentList -join ' ')")
+  $script:Done.Add(("start {0} {1}{2}" -f $FilePath, ($ArgumentList -join ' '), $(if ($Wait) { ' (waited)' } else { '' })).Trim())
+  if ($PassThru) { [pscustomobject]@{ ExitCode = 1 } }
 }
 # As Windows lists them: the processes of a name, none, one or several.
 function Get-Process {
@@ -63,13 +68,25 @@ function Get-Process {
   param([string[]]$Name)
   $script:Running | Where-Object { $Name -contains $_.Name }
 }
+# The command line Windows keeps for each of them (none for a process it cannot read).
+function Get-CimInstance {
+  [CmdletBinding()]
+  param([string]$ClassName, [string]$Filter)
+  $id = if ($Filter -match '(\d+)') { [int]$Matches[1] } else { -1 }
+  $script:Running | Where-Object { $_.Id -eq $id -and $_.CommandLine } | ForEach-Object { [pscustomobject]@{ CommandLine = $_.CommandLine } }
+}
 # A Mosaik (or its watchdog) that ends when it quits as asked, or when it is stopped.
-function New-Mosaik([string]$Path, [bool]$Quits = $true, [string]$Name = 'mosaik', [bool]$Dies = $true) {
-  $p = [pscustomobject]@{ Name = $Name; Path = $Path; Quits = $Quits; Dies = $Dies; WaitedFor = 0; Stopped = $false }
+$script:NextId = 4000
+function New-Mosaik([string]$Path, [bool]$Quits = $true, [string]$Name = 'mosaik', [bool]$Dies = $true, [string]$CommandLine = '') {
+  $script:NextId += 1
+  $p = [pscustomobject]@{ Id = $script:NextId; Name = $Name; Path = $Path; Quits = $Quits; Dies = $Dies; CommandLine = $CommandLine; WaitedFor = 0; Stopped = $false }
   $p | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($ms) $this.WaitedFor = $ms; $this.Quits -or ($this.Stopped -and $this.Dies) }
-  $p | Add-Member -MemberType ScriptMethod -Name Kill -Value { $this.Stopped = $true }
+  $p | Add-Member -MemberType ScriptMethod -Name Kill -Value { $this.Stopped = $true; $script:Done.Add("stop $($this.Name)") }
   $p
 }
+$journal = 'C:\Users\someone\AppData\Roaming\Mosaik\hidden-windows.json'
+$watchdogExe = Join-Path $release 'mosaik-watchdog.exe'
+$rescue = "start $watchdogExe --rescue --quiet --journal `"$journal`" (waited)"
 $ctl = Join-Path $release 'mosaikctl.exe'
 
 $built = 'cargo build --release -p mosaik-desktop -p mosaik-watchdog -p mosaik-ipc'
@@ -126,18 +143,35 @@ try {
     if (-not ($script:Done | Where-Object { $_ -like 'say *built*not start it again*' })) { return "nothing said ($($script:Done -join ' / '))" }
   }
   Check 'one running, its mosaikctl refused by Windows' {
-    # A file Windows will not run, as Smart App Control refuses one.
+    # A file Windows will not run, as Smart App Control refuses one. Mosaik and its watchdog only
+    # end when stopped; the watchdog would show its message, so it goes first.
     Set-Content -Path $ctl -Value ''
     try {
       $mine = New-Mosaik (Join-Path $release 'mosaik.exe') $false
-      $script:Running = @($mine)
+      $dog = New-Mosaik $watchdogExe $false 'mosaik-watchdog' $true "`"$watchdogExe`" --watch $($mine.Id) --journal `"$journal`""
+      $script:Running = @($mine, $dog)
       Invoke-Build
     }
     finally { Remove-Item -LiteralPath $ctl -ErrorAction SilentlyContinue }
+    $order = @($script:Done)
     if (-not $mine.Stopped) { return 'not stopped' }
-    if (-not $script:Done.Contains($built)) { return 'not built' }
+    $dogAt = [array]::IndexOf($order, 'stop mosaik-watchdog')
+    $mineAt = [array]::IndexOf($order, 'stop mosaik')
+    $rescueAt = [array]::IndexOf($order, $rescue)
+    $builtAt = [array]::IndexOf($order, $built)
+    if ($dogAt -lt 0 -or $dogAt -gt $mineAt) { return "its watchdog not stopped first ($($order -join ' / '))" }
+    if ($rescueAt -lt $mineAt -or $rescueAt -gt $builtAt) { return "the windows not brought back before the build ($($order -join ' / '))" }
     if (-not $script:Done.Contains($restart)) { return 'not started again' }
-    if (-not ($script:Done | Where-Object { $_ -like 'say *stopped*watchdog brings back*' })) { return "nothing said ($($script:Done -join ' / '))" }
+    if (-not ($order | Where-Object { $_ -like 'say *stopped*brought back*' })) { return "nothing said ($($order -join ' / '))" }
+  }
+  Check 'its watchdog, its journal not readable' {
+    # Windows gives no command line: the journal is the one in Mosaik's own folder.
+    $mine = New-Mosaik (Join-Path $release 'mosaik.exe') $false
+    $dog = New-Mosaik $watchdogExe $false 'mosaik-watchdog'
+    $script:Running = @($mine, $dog)
+    Invoke-Build
+    $own = "start $watchdogExe --rescue --quiet --journal `"$(Join-Path $env:APPDATA 'Mosaik\hidden-windows.json')`" (waited)"
+    if (-not $script:Done.Contains($own)) { return "no rescue from Mosaik's own journal ($($script:Done -join ' / '))" }
   }
   Check 'its watchdog waited for' {
     $mine = New-Mosaik (Join-Path $release 'mosaik.exe')
@@ -161,4 +195,4 @@ finally {
 }
 
 if ($failures.Count -gt 0) { throw ("mosaik.ps1 build: {0}" -f ($failures -join '; ')) }
-Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one whose mosaikctl Windows refuses (stopped, said), its watchdog (waited for), one that does not quit (said): 8 cases passing.' -ForegroundColor Green
+Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one whose mosaikctl Windows refuses (its watchdog stopped first, then it, its windows brought back quietly, said), the same with its journal not readable, its watchdog (waited for), one that does not quit (said): 9 cases passing.' -ForegroundColor Green
