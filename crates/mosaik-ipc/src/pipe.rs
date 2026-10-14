@@ -873,6 +873,15 @@ impl Client {
         })
     }
 
+    /// The process serving the other end (checked as Mosaïk when connecting).
+    pub fn server_pid(&self) -> Option<u32> {
+        let mut pid = 0u32;
+        // SAFETY: our own pipe handle and a valid out pointer.
+        unsafe { GetNamedPipeServerProcessId(self.pipe.handle.0, &mut pid) }
+            .ok()
+            .map(|()| pid)
+    }
+
     /// Sends one request and waits up to `timeout` for its reply.
     pub fn request(&mut self, command: Command, timeout: Duration) -> Result<Response> {
         let id = self.next_id;

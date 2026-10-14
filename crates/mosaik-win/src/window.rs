@@ -30,9 +30,9 @@ use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyS
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GA_ROOTOWNER, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetClassNameW,
     GetLastActivePopup, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
-    InternalGetWindowText, IsIconic, IsWindow, IsWindowVisible, IsZoomed, MINMAXINFO, SMTO_ABORTIFHUNG,
-    SendMessageTimeoutW, WM_GETMINMAXINFO, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
+    InternalGetWindowText, IsIconic, IsWindow, IsWindowVisible, IsZoomed, MINMAXINFO, PostMessageW,
+    SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_CLOSE, WM_GETMINMAXINFO, WS_CAPTION, WS_CHILD, WS_EX_APPWINDOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_POPUP, WS_THICKFRAME,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -93,6 +93,17 @@ pub fn top_level() -> Vec<HWND> {
     // this call.
     let _ = unsafe { EnumWindows(Some(push_window), LPARAM(&raw mut out as isize)) };
     out
+}
+
+/// Asks every top-level window of process `pid` to close, as an installer or `taskkill` (without
+/// `/F`) does: a program that handles it, as Mosaïk does, ends properly. How many were asked.
+pub fn ask_to_close(pid: u32) -> usize {
+    let windows: Vec<HWND> = top_level().into_iter().filter(|h| self::pid(*h) == pid).collect();
+    windows
+        .iter()
+        // SAFETY: posts a message to a window; one that is gone meanwhile only fails the post.
+        .filter(|h| unsafe { PostMessageW(Some(**h), WM_CLOSE, WPARAM(0), LPARAM(0)) }.is_ok())
+        .count()
 }
 
 pub fn window_rect(hwnd: HWND) -> Option<Rect> {

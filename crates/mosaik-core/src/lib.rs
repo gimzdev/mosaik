@@ -27,6 +27,7 @@ pub mod tabs;
 pub mod task;
 pub mod titlebar;
 pub mod topology;
+pub mod version;
 pub mod window;
 pub mod workspace;
 pub mod zone;

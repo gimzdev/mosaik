@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use mosaik_core::store::Store;
 use mosaik_engine::{Config, Engine, UiEvent, UiSink};
 use mosaik_ipc::pipe::{Client, PipeError, Program, Server, Stopper, pipe_name};
-use mosaik_ipc::protocol::{Command, Reply, WorkspaceSummary};
+use mosaik_ipc::protocol::{Command, ErrorCode, Reply, WorkspaceSummary};
 use serde::Serialize;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -123,16 +123,24 @@ pub fn run(args: Vec<String>) -> i32 {
     };
     let lock = match claim_instance() {
         Ok(Instance::First(lock)) => lock,
-        Ok(Instance::AlreadyRunning) => {
-            return if args.iter().any(|a| a == "--rescue") {
-                ask_running(Command::Rescue)
-            } else if background {
-                // Windows started a second copy as the user signed in: the first one is enough.
-                0
-            } else {
-                ask_running(Command::ShowSettings)
-            };
+        Ok(Instance::AlreadyRunning) if args.iter().any(|a| a == "--rescue") => {
+            return ask_running(Command::Rescue);
         }
+        // An older Mosaïk in its place (the Store's copy before an update reached it, or a build
+        // from before) gives way to this one: the newest runs. The owner, shown 1.0.0's window
+        // after building 1.0.2: "wtf is this".
+        Ok(Instance::AlreadyRunning) => match replace_older() {
+            Replaced::Done(lock) => lock,
+            Replaced::NotOlder if background => {
+                // Windows started a second copy as the user signed in: the first one is enough.
+                return 0;
+            }
+            Replaced::NotOlder => return ask_running(Command::ShowSettings),
+            Replaced::Failed(text) => {
+                message("Mosaïk", &text, MB_ICONERROR);
+                return 1;
+            }
+        },
         Err(e) => {
             message(
                 "Mosaïk cannot start",
@@ -302,6 +310,75 @@ fn setup(
 
 fn data_dir() -> Option<PathBuf> {
     mosaik_core::store::data_folder(&|name: &str| std::env::var_os(name))
+}
+
+/// What became of an older Mosaïk running in this one's place.
+enum Replaced {
+    /// It quit: this one runs instead.
+    Done(InstanceLock),
+    /// The one running is not older (or does not say): it stays.
+    NotOlder,
+    /// It did not quit: why, for the user.
+    Failed(String),
+}
+
+/// When the Mosaïk running is older than this one, asks it to quit as an installer would (every
+/// window it hid comes back) and takes its place.
+fn replace_older() -> Replaced {
+    let Some((pid, version)) = running_older() else {
+        return Replaced::NotOlder;
+    };
+    tracing::info!(pid, running = %version, "an older Mosaïk is running: it is asked to quit");
+    let asked = mosaik_win::window::ask_to_close(pid);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(250));
+        match claim_instance() {
+            Ok(Instance::First(lock)) => {
+                tracing::info!(pid, running = %version, "the older Mosaïk quit");
+                return Replaced::Done(lock);
+            }
+            Ok(Instance::AlreadyRunning) => {}
+            Err(e) => {
+                return Replaced::Failed(format!(
+                    "Mosaïk could not check whether it is already running: {e}"
+                ));
+            }
+        }
+    }
+    tracing::warn!(pid, running = %version, asked, "the older Mosaïk did not quit");
+    let which = if version.is_empty() {
+        "An older Mosaïk".to_owned()
+    } else {
+        format!("An older Mosaïk ({version})")
+    };
+    Replaced::Failed(format!(
+        "{which} is running and did not quit.\n\nQuit it from its tray icon, then start Mosaïk again."
+    ))
+}
+
+/// The process and version of the Mosaïk running, when it is older than this one: it says its
+/// version, or refuses this one's newer protocol, as older copies do (its version then unknown,
+/// empty).
+fn running_older() -> Option<(u32, String)> {
+    let name = pipe_name().ok()?;
+    let mut client =
+        Client::connect(&name, &Program::Name("mosaik.exe".into()), Duration::from_secs(2)).ok()?;
+    let pid = client.server_pid()?;
+    let hello = Command::Hello {
+        client: format!("mosaik {}", env!("CARGO_PKG_VERSION")),
+    };
+    match client.request(hello, Duration::from_secs(5)).ok()?.reply {
+        Reply::Hello { app_version, .. } => {
+            mosaik_core::version::is_older(&app_version, env!("CARGO_PKG_VERSION"))
+                .then_some((pid, app_version))
+        }
+        Reply::Error {
+            code: ErrorCode::UnsupportedVersion,
+            ..
+        } => Some((pid, String::new())),
+        _ => None,
+    }
 }
 
 /// Mosaïk is already running: pass the request on, then leave. The running one may still be
