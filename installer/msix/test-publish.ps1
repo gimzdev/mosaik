@@ -4,7 +4,8 @@
   Checks publish.ps1 against a stand-in of Microsoft's services (store-standin.mjs, run with
   Node.js): the access token, the submission left waiting deleted, a new one made from the last
   published one, the package and "What's new" put in it with nothing else changed, the upload and
-  the commit, as Microsoft documents them. With a key it sends without asking; the first time
+  the commit, as Microsoft documents them. With a key (in the environment, or in .env.local beside
+  Cargo.toml, as in a web project) it sends without asking; the first time
   without one it asks for the key alone (the tenant and client IDs are in identity.json), keeps it
   and sends; without it, nothing is sent; -KeyOnly (mosaik.ps1 publish runs it first) asks for the
   key and sends nothing. At the hidden prompt, a key pasted is taken without the spaces and line
@@ -32,7 +33,14 @@ $names = 'MOSAIK_STORE_API', 'MOSAIK_STORE_LOGIN', 'MOSAIK_STORE_TENANT', 'MOSAI
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
 $quote = { param($s) '"' + $s + '"' }
 $api = (Get-Content -Raw -Encoding UTF8 (Join-Path $Here 'identity.json') | ConvertFrom-Json).storeApi
-$publish = Join-Path $Here 'publish.ps1'
+# publish.ps1 runs from a copy, with Cargo.toml and no .env.local beside it: the repository's own
+# .env.local, the owner's key, is never read nor touched.
+$tree = Join-Path $work 'tree'
+$treeScripts = Join-Path $tree 'installer\msix'
+New-Item -ItemType Directory -Force -Path $treeScripts | Out-Null
+foreach ($f in 'publish.ps1', 'identity.json', 'whats-new.txt') { Copy-Item (Join-Path $Here $f) $treeScripts }
+Copy-Item (Join-Path $Root 'Cargo.toml') $tree
+$publish = Join-Path $treeScripts 'publish.ps1'
 # Any file of the package's name: the stand-in looks for its name in the upload.
 $name = "Mosaik_$version.0_x64.msix"
 $package = Join-Path $work $name
@@ -139,6 +147,16 @@ try {
   if ((Test-Asked $sent.Lines) -or $sent.Said -match 'Tenant ID|Client ID') { throw ("everything in the environment: it asked something: {0}" -f $sent.Said) }
   Write-Host ("publish.ps1 against a stand-in of the Store: {0} checks passing ({1}), nothing asked." -f $wanted.Count, ($sent.Seen -join ', ')) -ForegroundColor Green
   foreach ($n in 'MOSAIK_STORE_TENANT', 'MOSAIK_STORE_CLIENT', 'MOSAIK_STORE_KEY') { [Environment]::SetEnvironmentVariable($n, $null, 'Process') }
+
+  # 1b. The key in .env.local beside Cargo.toml, with a comment and quotes around it as people
+  #     write them: sent, nothing asked, nothing kept. The file goes after.
+  $envLocal = Join-Path $tree '.env.local'
+  Set-Content -Path $envLocal -Value @('# The Store''s key (Partner Center, Mosaik Store publishing)', 'MOSAIK_STORE_KEY="test-key"') -Encoding UTF8
+  $keyFile = Use-Data 'env-local'
+  try { $sent = Send-ToStandin 'the key in .env.local' '' $api.tenantId $api.clientId }
+  finally { Remove-Item -LiteralPath $envLocal -Force }
+  if ((Test-Asked $sent.Lines) -or (Test-Path $keyFile)) { throw ("the key in .env.local: it asked, or kept the key: {0}" -f $sent.Said) }
+  Write-Host 'publish.ps1 with the key in .env.local: sends, asks nothing, keeps nothing.' -ForegroundColor Green
 
   # 2. The first run without a key: the key alone asked once, with identity.json's tenant and
   #    client, kept for this user, and sent.

@@ -53,17 +53,20 @@ online. If the app is not sent, the site is not deployed either. The Store check
 version, usually within a day or two, and then updates everyone. `./mosaik1.sh --app` sends the app
 alone; `.\mosaik.ps1 publish` does the same from PowerShell.
 
-### The Store's key (the first time only)
+### The Store's key, in `.env.local`
 
-The first run asks for one thing before anything else, the key of the Partner Center account's
-Microsoft Entra application "Mosaik Store publishing", and keeps it for your Windows user,
-encrypted (`%APPDATA%\Mosaik\store-key.xml`); after that there is nothing to answer. At the
-prompt, copy the key and press Enter: a paste does not get through Git Bash's window, so when
-nothing comes through, the key copied is taken. A script can give it on its input instead
-(`cat /dev/clipboard | powershell.exe -File mosaik/installer/msix/publish.ps1 -KeyOnly`). The
-application's tenant and client IDs are in `installer/msix/identity.json`: they are not secrets.
-The key never goes in a file of the repository, which is public: whoever has it can publish to
-the Store.
+The key of the Partner Center account's Microsoft Entra application "Mosaik Store publishing"
+goes in `.env.local` at the top of the repository (`mosaik/.env.local`), as in a web project:
+
+```
+MOSAIK_STORE_KEY=the key
+```
+
+Git ignores that file, so it is never committed, pushed or packed into the one-file `mosaik.ps1`:
+the repository is public, and whoever has the key can publish to the Store. The application's
+tenant and client IDs are in `installer/msix/identity.json`: they are not secrets. Without
+`.env.local` (or `MOSAIK_STORE_KEY` set), the first run asks for the key before anything else
+and keeps it for your Windows user, encrypted (`%APPDATA%\Mosaik\store-key.xml`).
 
 How it was set up, on 2026-10-13:
 

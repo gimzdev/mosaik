@@ -37,9 +37,9 @@ if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/
 #    it is beside this file, else the one-file mosaik.ps1 beside it. It tests,
 #    builds and packages the app and sends it to the Microsoft Store, which
 #    checks it (usually within a day or two) before everyone gets it. The
-#    first time, it asks for the Store's key (the app's docs/RELEASE.md says
-#    where Partner Center makes one) and keeps it, encrypted; after that
-#    there is nothing to answer.
+#    Store's key goes in mosaik/.env.local, on a line MOSAIK_STORE_KEY=...
+#    (git ignores that file; the app's docs/RELEASE.md says where Partner
+#    Center makes one); then there is nothing to answer.
 # ════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
 # The copy made for Windows line endings (line 2) goes when the script ends.
@@ -55,7 +55,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.10.2"
+MK_VERSION="1.10.3"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -116,7 +116,7 @@ if [ "$APP" = 1 ]; then
   elif [ -f "$HERE/mosaik.ps1" ]; then APP_PS1="$HERE/mosaik.ps1"
   else die "--app needs the app beside this file: its repository (mosaik/) or the one-file mosaik.ps1."; fi
   step "Sending Mosaïk to the Microsoft Store with $APP_PS1"
-  note "The Store's key first if this PC has none, then its tests, build and package (a few minutes), and the Store."
+  note "Its tests, build and package (a few minutes), then the Store, with the key in mosaik/.env.local."
   PUBLISH=(powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$APP_PS1" 2>/dev/null || printf '%s' "$APP_PS1")" publish)
   # mintty (Git Bash's own window) is no Windows console: winpty gives PowerShell one, so it can ask.
   if [ "${TERM_PROGRAM:-}" = "mintty" ] && command -v winpty >/dev/null 2>&1; then PUBLISH=(winpty "${PUBLISH[@]}"); fi

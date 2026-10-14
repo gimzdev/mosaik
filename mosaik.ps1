@@ -37,8 +37,8 @@ $SourceVersion = ''
 $SourceSha256 = ''
 
 # Paths the source inside never includes: what building makes, the site (mosaik1.sh makes it),
-# and the README's pictures of the site.
-$Excluded = '^(\.git|\.agent|target|site|node_modules|dist|test-results|playwright-report)(/|$)|/(node_modules|dist|target|test-results|gen)/|^mosaik1\.sh$|^docs/screenshots/'
+# the README's pictures of the site, and this PC's own settings (.env.local: the Store's key).
+$Excluded = '^(\.git|\.agent|target|site|node_modules|dist|test-results|playwright-report)(/|$)|/(node_modules|dist|target|test-results|gen)/|^mosaik1\.sh$|^docs/screenshots/|(^|/)\.env[^/]*\.local$'
 $PayloadStart = '<#--- source: a zip, in base64 ---'
 $PayloadEnd = '---#>'
 

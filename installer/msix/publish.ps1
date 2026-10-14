@@ -12,10 +12,12 @@
 
   It signs in as the Partner Center account's Microsoft Entra application, "Mosaik Store
   publishing" (docs/RELEASE.md): its tenant and client IDs are in identity.json (they are not
-  secrets); its key is asked the first time and kept for this Windows user only (encrypted with
-  DPAPI, in %APPDATA%\Mosaik\store-key.xml), never in the repository. MOSAIK_STORE_TENANT,
-  MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY, when set, are used instead (a build server). Without
-  the key nothing is sent.
+  secrets). Its key is read, in this order, from MOSAIK_STORE_KEY, from .env.local beside
+  Cargo.toml (a line MOSAIK_STORE_KEY=..., in a file git ignores, as in a web project), or from
+  what was given once at the prompt and kept for this Windows user only (encrypted with DPAPI, in
+  %APPDATA%\Mosaik\store-key.xml). It is never in a file of the repository. MOSAIK_STORE_TENANT
+  and MOSAIK_STORE_CLIENT, when set, are used instead of identity.json's. Without the key nothing
+  is sent.
 
 .PARAMETER Package
   The package to send; by default target\msix\Mosaik_<version>.0_x64.msix, as package.ps1 makes
@@ -107,25 +109,46 @@ function Read-Key([bool]$Console = -not [Console]::IsInputRedirected) {
   $null
 }
 
+# The settings of this PC that never go in the repository: .env.local beside Cargo.toml, which git
+# ignores, with KEY=value lines as in a web project (comments, blank lines and quotes allowed).
+function Read-LocalEnv {
+  $values = @{}
+  $file = Join-Path $Root '.env.local'
+  if (Test-Path -LiteralPath $file) {
+    foreach ($line in Get-Content -LiteralPath $file -Encoding UTF8) {
+      if ($line -match '^\s*(?:export\s+)?([A-Za-z_]\w*)\s*=\s*(.*?)\s*$') {
+        $name = $Matches[1]
+        $value = $Matches[2]
+        if ($value -match '^(["''])(.*)\1$') { $value = $Matches[2] }
+        $values[$name] = $value
+      }
+    }
+  }
+  $values
+}
+
 # The Entra application's tenant ID, client ID and key for the Store's API: the IDs from the
-# environment or identity.json, the key from the environment, the file kept for this user, or
-# asked once (again with -NewKey) and kept.
+# environment or identity.json; the key from the environment, .env.local, the file kept for this
+# user, or asked once (again with -NewKey) and kept.
 function Get-Access {
   $api = $Identity.storeApi
   $tenant = if ($env:MOSAIK_STORE_TENANT) { $env:MOSAIK_STORE_TENANT } else { $api.tenantId }
   $client = if ($env:MOSAIK_STORE_CLIENT) { $env:MOSAIK_STORE_CLIENT } else { $api.clientId }
   $access = { param($Key) [pscustomobject]@{ Tenant = $tenant; Client = $client; Key = $Key } }
   if ($env:MOSAIK_STORE_KEY) { return & $access (ConvertTo-SecureString $env:MOSAIK_STORE_KEY -AsPlainText -Force) }
+  $local = (Read-LocalEnv)['MOSAIK_STORE_KEY']
+  if (-not $NewKey -and $local) { return & $access (ConvertTo-SecureString $local -AsPlainText -Force) }
   if (-not $NewKey -and (Test-Path -LiteralPath $KeyFile)) {
     # Encrypted for the Windows user who gave it: another account cannot read it.
     try { return & $access (Import-Clixml -LiteralPath $KeyFile) }
     catch { Fail ("The Store's key kept in {0} cannot be read by this Windows user ({1}). Give it again: .\installer\msix\publish.ps1 -NewKey" -f $KeyFile, $_.Exception.Message) }
   }
-  if ($Yes) { Fail "This PC has no key for the Store's API, and -Yes means nobody is here to give it: run it once in a terminal to give it (docs/RELEASE.md), or set MOSAIK_STORE_KEY." }
+  $envFile = Join-Path $Root '.env.local'
+  if ($Yes) { Fail ("This PC has no key for the Store's API, and -Yes means nobody is here to give it: put it in {0} as MOSAIK_STORE_KEY=... (docs/RELEASE.md), or set MOSAIK_STORE_KEY." -f $envFile) }
   Say ''
-  Say 'The key of "Mosaik Store publishing", asked this once and kept for this Windows user only,' Cyan
-  Say 'encrypted. Partner Center shows a new one in Account settings, User management, Microsoft' Cyan
-  Say 'Entra applications, Mosaik Store publishing, Add new key (docs/RELEASE.md).' Cyan
+  Say ("The Store's key: put it in {0}, on a line MOSAIK_STORE_KEY=... (git ignores that file)," -f $envFile) Cyan
+  Say 'or give it here once, kept encrypted for this Windows user. Partner Center makes one in' Cyan
+  Say 'Account settings, User management, Microsoft Entra applications, Mosaik Store publishing.' Cyan
   $key = Read-Key
   if ($null -eq $key) { Fail 'The key is needed: nothing was kept or sent.' }
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $KeyFile) | Out-Null

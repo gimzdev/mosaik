@@ -1084,8 +1084,11 @@ edge, where the pointer stops).
   moved (Arrange is never clicked).
 - **Sending to the Store** (ADRs 0025 and 0026): `./mosaik1.sh --deploy --app` runs
   `mosaik.ps1 publish`, which sends the package through the Store's API with nothing to answer,
-  then deploys the site; the first run asks for the Store's key alone and keeps it. The key
-  belongs to the Entra application "Mosaik Store publishing", which needs a Microsoft Entra
+  then deploys the site. The Store's key is in `.env.local` at the top of the repository (git
+  ignores it, `pack` leaves it out); without it, it is asked once before anything else and kept.
+  The owner's first run (2026-10-13) reached the prompt after the tests and the build, and no
+  paste got through Git Bash's window (Shift+Insert, then a right-click): nothing was sent. The
+  key belongs to the Entra application "Mosaik Store publishing", which needs a Microsoft Entra
   tenant the developer account did not have: Microsoft blocked the first one the owner made
   ("Access to tenant is denied", AADSTS5000228, after its card check failed); the second,
   `gimz.onmicrosoft.com`, was made on 2026-10-13 and linked to the account that evening (Tenants:
@@ -1097,9 +1100,15 @@ edge, where the pointer stops).
   deleted, a new one from the last published, the old package removed and the new one added,
   "What's new" in the listing and nothing else changed, the ZIP uploaded as a block blob, the
   commit, the status read until the Store has it): 16 checks passing with everything in the
-  environment and nobody to answer; on the first run the key alone asked, with `identity.json`'s
-  tenant and client, and kept encrypted; the next run asking nothing; without a key given,
-  nothing kept or sent; `-Yes` without a key refused. The `publish.ps1` before failed it (it
+  environment and nobody to answer; with the key in `.env.local` (a comment and quotes around
+  it), nothing asked or kept; on the first run the key alone asked, with `identity.json`'s tenant
+  and client, and kept encrypted; the next run asking nothing; without a key given, nothing kept
+  or sent; `-KeyOnly` (run first by `mosaik.ps1 publish`) asking and keeping, sending nothing;
+  `-Yes` without a key refused. The hidden prompt's own 4 cases: a key pasted with spaces and a
+  line break around it, the key copied taken when nothing came through, other text copied not
+  taken, nothing at all. publish.ps1 runs from a copy of the scripts, so the repository's own
+  `.env.local` is never read: with one there, the test before failed ("checks not passing:
+  token_form") and passes now. The `publish.ps1` before failed it (it
   asked for the tenant ID first) and the one now passes, here and on the owner's PC (Windows
   PowerShell 5.1, job 0143).
 - **The build around a running Mosaïk.** The build step's own test
@@ -1215,7 +1224,8 @@ edge, where the pointer stops).
   on v1.0 all the time"): this release is 1.0.1, the lowest version the Store takes after its
   1.0.0, and each next one takes the next third number. The builds were called 1.1 (jobs 0094
   to 0118), then 2.0.0 (jobs 0122 to 0141): what they printed is quoted here as it was.
-- 2026-10-13: the Store's key is asked by the script, never written in it ("why should the
-  script asks for keys cant you put them in it"): the repository is public and the key alone
-  publishes to the Store. The Entra application's tenant and client IDs are in `identity.json`,
-  so the first run asks for the key alone (ADR 0026).
+- 2026-10-13: the Store's key is never written in the scripts ("why should the script asks for
+  keys cant you put them in it"): the repository is public and the key alone publishes to the
+  Store. The Entra application's tenant and client IDs are in `identity.json`. After the prompt
+  failed in Git Bash, the key goes in `.env.local` at the top of the repository, as in a web
+  project ("lets just be normal please"), which the owner writes himself (ADR 0026).

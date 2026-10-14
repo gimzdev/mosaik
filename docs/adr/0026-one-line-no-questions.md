@@ -19,10 +19,12 @@ account the same day, with the application "Mosaik Store publishing" (Manager). 
 
 - **No question when the keys are there.** `publish.ps1` sends through the Store's API without
   asking: `--app` on the command line is the yes.
-- **The IDs in the repository, the key asked once.** The application's tenant and client IDs
-  are in `installer/msix/identity.json`: they are not secrets. The key is: the repository is
+- **The IDs in the repository, the key in `.env.local`.** The application's tenant and client
+  IDs are in `installer/msix/identity.json`: they are not secrets. The key is: the repository is
   public (and the one-file `mosaik.ps1` carries it), and the key alone publishes to the Store, so
-  it never goes in a file of it. Without a kept key, `publish.ps1` asks for the key alone, says
+  it never goes in a file of it. It goes in `.env.local` at the top of the repository, as in a
+  web project (the owner, after the prompt failed him: "lets just be normal please"): git ignores
+  that file, and `pack` leaves it out. Without a kept key, `publish.ps1` asks for the key alone, says
   where Partner Center makes one, keeps it for that Windows user (DPAPI) and sends. `-NewKey`
   asks again, for a new one. `mosaik.ps1 publish` asks first (`publish.ps1 -KeyOnly`), so the
   tests and the build that follow need nobody; and since Git Bash's window does not pass a paste
