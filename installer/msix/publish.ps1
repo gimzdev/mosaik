@@ -28,6 +28,10 @@
   Asks for the key again (a new one from Partner Center, when the kept one has expired), keeps it
   for this Windows user, and sends.
 
+.PARAMETER KeyOnly
+  Only makes sure this PC has the key: asks for it when none is kept, keeps it, and stops without
+  sending. mosaik.ps1 publish runs this first, so its tests and build need nobody.
+
 .NOTES
   MOSAIK_STORE_API and MOSAIK_STORE_LOGIN point it at a stand-in of Microsoft's services, for
   test-publish.ps1.
@@ -39,7 +43,8 @@
 param(
   [string]$Package,
   [switch]$Yes,
-  [switch]$NewKey
+  [switch]$NewKey,
+  [switch]$KeyOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,21 +70,41 @@ function Get-Version {
   $match.Groups[1].Value
 }
 
-# A line from the person here, or from a script on its input (nothing at its end); a secret is
-# not shown as it is typed.
-function Read-Answer([string]$Question, [switch]$Secret) {
-  if ([Console]::IsInputRedirected) {
-    Say $Question
-    $line = [Console]::In.ReadLine()
-    if ($null -eq $line) { $line = '' }
-    if ($Secret) {
-      if ($line -eq '') { return New-Object Security.SecureString }
-      return ConvertTo-SecureString $line -AsPlainText -Force
+# A secure string as plain text, for as long as it is needed.
+function ConvertFrom-Secure([Security.SecureString]$Secure) {
+  if ($null -eq $Secure -or $Secure.Length -eq 0) { return '' }
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
+  try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+  finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
+# The key, without the spaces and line breaks around it; $null when none was given. Asked at a
+# hidden prompt, or read from a script on its input (`cat /dev/clipboard | ...` in Git Bash). When
+# nothing comes through the prompt (Git Bash's window does not pass a paste on to it), the key
+# copied to the clipboard is taken; it is asked three times at most.
+function Read-Key([bool]$Console = -not [Console]::IsInputRedirected) {
+  for ($try = 1; $try -le 3; $try++) {
+    if ($Console) {
+      $key = (ConvertFrom-Secure (Read-Host 'Key (paste it, or copy it and press Enter)' -AsSecureString)).Trim()
+      if (-not $key) {
+        $copied = try { "$(Get-Clipboard -Raw)".Trim() } catch { '' }
+        # A key is one word: anything else on the clipboard is not it.
+        if ($copied -match '^\S{16,256}$') {
+          $key = $copied
+          Say '  Taken from the clipboard.' DarkGray
+        }
+      }
     }
-    return $line.Trim()
+    else {
+      if ($try -eq 1) { Say 'Key' }
+      $line = [Console]::In.ReadLine()
+      if ($null -eq $line) { break }
+      $key = $line.Trim()
+    }
+    if ($key) { return ConvertTo-SecureString $key -AsPlainText -Force }
+    if ($Console -and $try -lt 3) { Say '  Nothing came through: copy the key, then press Enter.' Yellow }
   }
-  if ($Secret) { return Read-Host $Question -AsSecureString }
-  (Read-Host $Question).Trim()
+  $null
 }
 
 # The Entra application's tenant ID, client ID and key for the Store's API: the IDs from the
@@ -101,8 +126,8 @@ function Get-Access {
   Say 'The key of "Mosaik Store publishing", asked this once and kept for this Windows user only,' Cyan
   Say 'encrypted. Partner Center shows a new one in Account settings, User management, Microsoft' Cyan
   Say 'Entra applications, Mosaik Store publishing, Add new key (docs/RELEASE.md).' Cyan
-  $key = Read-Answer 'Key' -Secret
-  if ($key.Length -eq 0) { Fail 'The key is needed: nothing was kept or sent.' }
+  $key = Read-Key
+  if ($null -eq $key) { Fail 'The key is needed: nothing was kept or sent.' }
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $KeyFile) | Out-Null
   # A SecureString goes into the file encrypted for this Windows user (DPAPI).
   Export-Clixml -LiteralPath $KeyFile -InputObject $key
@@ -112,25 +137,19 @@ function Get-Access {
 
 # An access token for the Store's API (an hour long).
 function Get-Token($Access) {
-  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Access.Key)
+  $body = @{
+    grant_type    = 'client_credentials'
+    client_id     = $Access.Client
+    client_secret = ConvertFrom-Secure $Access.Key
+    resource      = 'https://manage.devcenter.microsoft.com'
+  }
   try {
-    $body = @{
-      grant_type    = 'client_credentials'
-      client_id     = $Access.Client
-      client_secret = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-      resource      = 'https://manage.devcenter.microsoft.com'
-    }
-    try {
-      $reply = Invoke-RestMethod -Method Post -Uri "$Login/$($Access.Tenant)/oauth2/token" -Body $body -ContentType 'application/x-www-form-urlencoded'
-    }
-    catch {
-      Fail ("Microsoft did not give access with this key ({0}). Partner Center shows the key's dates, and makes a new one, in Account settings, User management, Microsoft Entra applications, Mosaik Store publishing; give it with: .\installer\msix\publish.ps1 -NewKey" -f $_.Exception.Message)
-    }
-    $reply.access_token
+    $reply = Invoke-RestMethod -Method Post -Uri "$Login/$($Access.Tenant)/oauth2/token" -Body $body -ContentType 'application/x-www-form-urlencoded'
   }
-  finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+  catch {
+    Fail ("Microsoft did not give access with this key ({0}). Partner Center shows the key's dates, and makes a new one, in Account settings, User management, Microsoft Entra applications, Mosaik Store publishing; give it with: .\installer\msix\publish.ps1 -NewKey" -f $_.Exception.Message)
   }
+  $reply.access_token
 }
 
 # A call to the Store's API for this app; the body, when there is one, as JSON.
@@ -161,6 +180,12 @@ try {
   # Windows PowerShell 5.1 writes some arrays as {"value": [...], "Count": n} because of the type
   # data it adds to arrays; without it, they are plain JSON arrays (this session only).
   Remove-TypeData -TypeName System.Array -ErrorAction SilentlyContinue
+
+  if ($KeyOnly) {
+    $null = Get-Access
+    Say "The Store's key is ready: sending asks nothing." Green
+    exit 0
+  }
 
   $version = Get-Version
   if (-not $Package) { $Package = Join-Path $Root "target\msix\Mosaik_$version.0_x64.msix" }

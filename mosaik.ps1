@@ -530,15 +530,20 @@ function Invoke-Package {
   & (Under $source 'installer' 'msix' 'package.ps1')
 }
 
-# Tests, builds and packages Mosaik, then sends the package to the Microsoft Store:
-# installer\msix\publish.ps1, which asks once for the Store's key (docs/RELEASE.md).
+# Tests, builds and packages Mosaik, then sends the package to the Microsoft Store with
+# installer\msix\publish.ps1. The Store's key comes first (asked once, then kept: docs/RELEASE.md),
+# so the minutes of tests and build that follow need nobody.
 function Invoke-Publish {
   $source = Get-Source
+  $publish = Under $source 'installer' 'msix' 'publish.ps1'
+  Step "The Store's key"
+  & $publish -KeyOnly
+  if ($LASTEXITCODE -ne 0) { Fail "Nothing was built or sent: the Store's key is needed first (the lines above say where it is)." }
   Invoke-Test
   Invoke-Build -Installed
   Invoke-Package
   Step 'Sending it to the Microsoft Store'
-  & (Under $source 'installer' 'msix' 'publish.ps1')
+  & $publish
   if ($LASTEXITCODE -ne 0) { Fail 'The package was not sent to the Store; the lines above say why.' }
 }
 

@@ -55,7 +55,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.10.1"
+MK_VERSION="1.10.2"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -116,7 +116,7 @@ if [ "$APP" = 1 ]; then
   elif [ -f "$HERE/mosaik.ps1" ]; then APP_PS1="$HERE/mosaik.ps1"
   else die "--app needs the app beside this file: its repository (mosaik/) or the one-file mosaik.ps1."; fi
   step "Sending Mosaïk to the Microsoft Store with $APP_PS1"
-  note "Its tests, build and package first (a few minutes), then the Store."
+  note "The Store's key first if this PC has none, then its tests, build and package (a few minutes), and the Store."
   PUBLISH=(powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$APP_PS1" 2>/dev/null || printf '%s' "$APP_PS1")" publish)
   # mintty (Git Bash's own window) is no Windows console: winpty gives PowerShell one, so it can ask.
   if [ "${TERM_PROGRAM:-}" = "mintty" ] && command -v winpty >/dev/null 2>&1; then PUBLISH=(winpty "${PUBLISH[@]}"); fi

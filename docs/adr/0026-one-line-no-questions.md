@@ -24,7 +24,10 @@ account the same day, with the application "Mosaik Store publishing" (Manager). 
   public (and the one-file `mosaik.ps1` carries it), and the key alone publishes to the Store, so
   it never goes in a file of it. Without a kept key, `publish.ps1` asks for the key alone, says
   where Partner Center makes one, keeps it for that Windows user (DPAPI) and sends. `-NewKey`
-  asks again, for a new one.
+  asks again, for a new one. `mosaik.ps1 publish` asks first (`publish.ps1 -KeyOnly`), so the
+  tests and the build that follow need nobody; and since Git Bash's window does not pass a paste
+  on to the hidden prompt (the owner's first run, 2026-10-13: "i did both shift insert ... then
+  did click paste"), the key copied to the clipboard is taken when nothing comes through.
 - **Without the key, nothing is sent.** Nothing typed (or `-Yes`, a script, which never asks)
   ends as a failure that says what is needed, so the site is not deployed either.
 

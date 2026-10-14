@@ -6,8 +6,11 @@
   published one, the package and "What's new" put in it with nothing else changed, the upload and
   the commit, as Microsoft documents them. With a key it sends without asking; the first time
   without one it asks for the key alone (the tenant and client IDs are in identity.json), keeps it
-  and sends; without it, nothing is sent. Nothing is sent to Microsoft, and no key of the user's
-  is read or kept.
+  and sends; without it, nothing is sent; -KeyOnly (mosaik.ps1 publish runs it first) asks for the
+  key and sends nothing. At the hidden prompt, a key pasted is taken without the spaces and line
+  breaks around it, and when nothing comes through (a paste in Git Bash's window), the key copied
+  to the clipboard, asked up to three times. Nothing is sent to Microsoft, and no key of the user's is
+  read or kept.
 #>
 [CmdletBinding()]
 param()
@@ -67,8 +70,12 @@ function Send-ToStandin([string]$Case, [string]$Answers, [string]$Tenant, [strin
   if ($code -ne 0 -or $failed.Count -gt 0 -or $odd.Count -gt 0) {
     throw ("{0}: exit code {1}; checks not passing: {2}; {3}; it said: {4}" -f $Case, $code, ($failed -join ', '), ($odd -join ', '), ($out -join ' / '))
   }
-  [pscustomobject]@{ Said = ($out -join ' '); Seen = @($seen.seen) }
+  [pscustomobject]@{ Said = ($out -join ' '); Lines = @($out); Seen = @($seen.seen) }
 }
+
+# Whether publish.ps1 asked for the key: a script answering on its input is asked with "Key" alone
+# on a line.
+function Test-Asked([string[]]$Lines) { @($Lines | ForEach-Object { $_.Trim() }) -contains 'Key' }
 
 # A data folder of its own for each case: the key publish.ps1 keeps goes there.
 function Use-Data([string]$Case) {
@@ -78,13 +85,58 @@ function Use-Data([string]$Case) {
 }
 
 try {
+  # 0. The hidden prompt, as a person meets it (read from publish.ps1, Read-Host and the clipboard
+  #    stood in for): what is pasted, without the spaces and line breaks around it; when nothing
+  #    comes through, the key copied to the clipboard; anything else there is not taken, and the
+  #    key is asked again, three times at most.
+  $tokens = $null
+  $errors = $null
+  $ast = [Management.Automation.Language.Parser]::ParseFile($publish, [ref]$tokens, [ref]$errors)
+  $functions = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $false))
+  foreach ($fn in 'ConvertFrom-Secure', 'Read-Key') {
+    $found = @($functions | Where-Object { $_.Name -eq $fn })
+    if ($found.Count -eq 0) { throw "publish.ps1 has no function $fn." }
+    . ([scriptblock]::Create($found[0].Extent.Text))
+  }
+  $script:Typed = New-Object System.Collections.Queue
+  $script:Clipboard = ''
+  $script:Said = New-Object 'System.Collections.Generic.List[string]'
+  function Say([string]$Text) { $script:Said.Add($Text) }
+  function Read-Host {
+    param([string]$Prompt, [switch]$AsSecureString)
+    $text = if ($script:Typed.Count -gt 0) { [string]$script:Typed.Dequeue() } else { '' }
+    $secure = New-Object Security.SecureString
+    foreach ($c in $text.ToCharArray()) { $secure.AppendChar($c) }
+    $secure
+  }
+  function Get-Clipboard { param([switch]$Raw) $script:Clipboard }
+  $prompts = @(
+    @{ Case = 'pasted, with spaces and a line break'; Typed = @("  aB3~kEy.pasted-1234567`r`n"); Clipboard = 'other-key-on-the-clipboard'; Key = 'aB3~kEy.pasted-1234567' },
+    @{ Case = 'nothing through, the key copied'; Typed = @(''); Clipboard = "`r`n  cOp1ed~key_from.clipboard99  `r`n"; Key = 'cOp1ed~key_from.clipboard99' },
+    @{ Case = 'nothing through, other text copied, then pasted'; Typed = @('', 'thE2nd~try.pasted-key0001'); Clipboard = 'a sentence, not a key'; Key = 'thE2nd~try.pasted-key0001' },
+    @{ Case = 'nothing at all'; Typed = @('', '', ''); Clipboard = ''; Key = $null }
+  )
+  foreach ($p in $prompts) {
+    $script:Typed.Clear()
+    foreach ($t in $p.Typed) { $script:Typed.Enqueue($t) }
+    $script:Clipboard = $p.Clipboard
+    $script:Said.Clear()
+    $got = ConvertFrom-Secure (Read-Key -Console $true)
+    $want = if ($null -eq $p.Key) { '' } else { $p.Key }
+    if ($got -ne $want) { throw ("the hidden prompt, {0}: got {1} characters, not the key ({2})" -f $p.Case, $got.Length, ($script:Said -join ' / ')) }
+    if ($script:Typed.Count -ne 0) { throw ("the hidden prompt, {0}: asked {1} time(s) too few" -f $p.Case, $script:Typed.Count) }
+  }
+  if (-not ($script:Said | Where-Object { $_ -match 'copy the key, then press Enter' })) { throw ("the hidden prompt: nothing said about what to do ({0})" -f ($script:Said -join ' / ')) }
+  Remove-Item Function:\Read-Host, Function:\Get-Clipboard, Function:\Say
+  Write-Host ("publish.ps1's hidden prompt: {0} cases passing (a key pasted with spaces and a line break around it, the key copied when nothing came through, other text copied, nothing at all)." -f $prompts.Count) -ForegroundColor Green
+
   # 1. Everything in the environment (a build server), nobody to answer: sent, and nothing asked.
   $null = Use-Data 'environment'
   $env:MOSAIK_STORE_TENANT = 'test-tenant'
   $env:MOSAIK_STORE_CLIENT = 'test-client'
   $env:MOSAIK_STORE_KEY = 'test-key'
   $sent = Send-ToStandin 'everything in the environment' '' 'test-tenant' 'test-client'
-  if ($sent.Said -match 'Key|Tenant ID|Client ID') { throw ("everything in the environment: it asked something: {0}" -f $sent.Said) }
+  if ((Test-Asked $sent.Lines) -or $sent.Said -match 'Tenant ID|Client ID') { throw ("everything in the environment: it asked something: {0}" -f $sent.Said) }
   Write-Host ("publish.ps1 against a stand-in of the Store: {0} checks passing ({1}), nothing asked." -f $wanted.Count, ($sent.Seen -join ', ')) -ForegroundColor Green
   foreach ($n in 'MOSAIK_STORE_TENANT', 'MOSAIK_STORE_CLIENT', 'MOSAIK_STORE_KEY') { [Environment]::SetEnvironmentVariable($n, $null, 'Process') }
 
@@ -93,11 +145,11 @@ try {
   $keyFile = Use-Data 'first-run'
   $sent = Send-ToStandin 'the first run, the key given' 'test-key' $api.tenantId $api.clientId
   if (-not (Test-Path $keyFile)) { throw "the first run, the key given: it was not kept ($keyFile)" }
-  if ($sent.Said -notmatch 'Key' -or $sent.Said -match 'Tenant ID|Client ID') { throw ("the first run, the key given: not the key alone asked for: {0}" -f $sent.Said) }
+  if (-not (Test-Asked $sent.Lines) -or $sent.Said -match 'Tenant ID|Client ID') { throw ("the first run, the key given: not the key alone asked for: {0}" -f $sent.Said) }
   if ((Get-Content -Raw $keyFile) -match 'test-key') { throw "the first run, the key given: kept as it was typed ($keyFile)" }
   # 3. The next run: the kept key, nothing asked.
   $sent = Send-ToStandin 'the next run' '' $api.tenantId $api.clientId
-  if ($sent.Said -match 'Key|Tenant ID|Client ID') { throw ("the next run: it asked something: {0}" -f $sent.Said) }
+  if ((Test-Asked $sent.Lines) -or $sent.Said -match 'Tenant ID|Client ID') { throw ("the next run: it asked something: {0}" -f $sent.Said) }
   Write-Host ("publish.ps1 the first time without a key: asks for the key alone ({0}, client {1} from identity.json), keeps it encrypted, sends; the next time it sends without asking." -f $api.tenant, $api.clientId) -ForegroundColor Green
 
   # 4. No key given: nothing kept, nothing sent, a failure that says what is needed, so
@@ -113,6 +165,23 @@ try {
     throw ("publish.ps1 without a key given: exit code {0}; it said: {1}" -f $code, ($out -join ' / '))
   }
   Write-Host 'publish.ps1 without a key given: it says what is needed, keeps and sends nothing, and ends as a failure.' -ForegroundColor Green
+
+  # 6. -KeyOnly, as mosaik.ps1 publish runs it first, so its tests and build need nobody: the
+  #    first time the key alone asked, kept, and nothing sent; the next time nothing asked; without
+  #    a key, a failure. Nothing listens where the services would be: a request would be an error.
+  $keyFile = Use-Data 'key-only'
+  foreach ($round in @(@{ Name = 'the first time'; Answers = 'test-key'; Asked = $true; Code = 0 }, @{ Name = 'the next time'; Answers = ''; Asked = $false; Code = 0 })) {
+    $out = @($round.Answers | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -KeyOnly 2>&1 | ForEach-Object { "$_" })
+    $code = $LASTEXITCODE
+    $said = $out -join ' '
+    if ($code -ne $round.Code -or (Test-Asked $out) -ne $round.Asked -or -not (Test-Path $keyFile) -or $said -notmatch 'key is ready' -or $said -match 'Starting a submission|did not give access|refused') {
+      throw ("publish.ps1 -KeyOnly, {0}: exit code {1}; it said: {2}" -f $round.Name, $code, ($out -join ' / '))
+    }
+  }
+  $null = Use-Data 'key-only-none'
+  $out = @('' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -KeyOnly 2>&1 | ForEach-Object { "$_" })
+  if ($LASTEXITCODE -eq 0 -or ($out -join ' ') -notmatch 'The key is needed') { throw ("publish.ps1 -KeyOnly without a key: exit code {0}; it said: {1}" -f $LASTEXITCODE, ($out -join ' / ')) }
+  Write-Host 'publish.ps1 -KeyOnly: asks for the key alone and keeps it, sending nothing; then asks nothing; without a key, ends as a failure.' -ForegroundColor Green
 
   # 5. -Yes without a key (a script): nobody to ask, so nothing is sent.
   $null = Use-Data 'script'
