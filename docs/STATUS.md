@@ -19,7 +19,7 @@ re-run before each release.
 | 7. Hardening | done here: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers, soak, two screens at two scales; left for the owner by hand: sleep and resume, a screen unplugged; not possible here: RDP (Windows 11 Home has no Remote Desktop host), Windows 10 | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.1 | built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.1](#11) |
-| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0138): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 2.0.0.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's keys are kept (asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant for the keys made on 2026-10-13 | [2.0](#20) |
+| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0141): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 2.0.0.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's keys are kept (asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant for the keys made on 2026-10-13 | [2.0](#20) |
 
 ## Step 1: verify assumptions
 
@@ -1112,7 +1112,21 @@ edge, where the pointer stops).
   0135). `mosaikctl.exe` made again was allowed (job 0134). Job 0135: the build with Mosaïk
   running asked it to quit, built in 141 s and started it again in the tray (a new process:
   version 2.0.0, protocol 8, its watchdog, Win+Alt+Space registered), the same 14 windows on
-  screen before and after.
+  screen before and after. What `mosaikctl quit` answers is now shown, and a line of it on stderr
+  (Mosaïk not answering, say) is no longer taken for Windows refusing to run it: Windows
+  PowerShell 5.1 stops at such a line when the output is redirected. The test stands in for
+  mosaikctl with Windows' own `tar.exe`, which refuses "quit" on stderr (`whoami.exe`'s answer
+  reached the pipe as one empty line and `where.exe`'s as none, jobs 0140 and 0141): 10 cases,
+  the script before (bbe6601) failing the new one ("its answer (Usage:) not shown") and the one
+  now passing all 10, on the owner's PC (job 0141). The test also runs when Windows PowerShell
+  5.1 starts it with -File and no -Script: its default path is set in its body (job 0139: started
+  so, it stopped at once in Join-Path; job 0141: passing). Job 0139, with the owner's Mosaïk
+  running: the build showed its answer ("Mosaïk is closing; every window it hid is coming
+  back."), built in 130 s and started it again in the tray (a new process, `mosaikctl` 2.0.0),
+  30 windows on screen before and after. `mosaik.ps1 test` now runs mosaik-probe's tests too
+  (2), and passes whole on the owner's PC (job 0141, 53 s: 299 Rust tests, clippy, the
+  interface's 92, the publish test's 16 checks, the build step's 10 cases, "Every test
+  passed.").
 - **Previews on the owner's own screen** (`mosaikctl preview`, asked only, job 0126): Smart in
   12 ms (Chrome 1114 x 1032 as the browser, Windows Terminal 806 x 568, Claude 806 x 464; File
   Explorer and two others minimised), Thirds and Quarters in 10 ms.
@@ -1126,13 +1140,19 @@ edge, where the pointer stops).
 - **Built and packed** (job 0133): release build in 121 s, `Mosaik_2.0.0.0_x64.msix` 2.90 MB;
   `pack`, 270 files, checked file by file against the repository; `mosaik.ps1` and `mosaik1.sh`
   beside the repository, dated that day (each later copy is checked the same way when it is
-  made). Opened by hand, Mosaïk's window shows in 0.3 s; with `--background`, none (job 0133).
+  made; job 0139: the package 2.9 MB, `pack` 271 files). Opened by hand, Mosaïk's window shows in 0.3 s; with `--background`, none (job 0133).
   Mosaïk 2 left in the tray on the owner's own data (job 0135: version 2.0.0, protocol 8, its
   watchdog, Win+Alt+Space registered).
-- **The site** (`mosaik1.sh` 1.9.2, with `--app`): its first home page back (the title, "Every
+- **The site** (`mosaik1.sh` 1.10.0, with `--app`): its first home page back (the title, "Every
   project gets its own workspace: your apps and windows arranged and ready in one click.", "Free
   and open source.", desktops of two to four windows); the site folder is what the script writes
-  (its 23 files compared one by one, 2026-10-13, again for 1.9.2); `shellcheck` clean.
+  (2026-10-13, again for 1.10.0); `shellcheck` clean; built and type-checked clean. A rerun writes
+  its 25 files afresh and removes any it no longer makes, keeping `public/`, the Vercel link, the
+  dependencies and the last build and type-check: 0.4 s, against 15 s for a first install here,
+  and the type-check 2.4 s instead of 4.1 s. It empties only a folder it wrote (one with its
+  `.mosaik-site`): a folder of notes, and one with a `Cargo.toml`, refused with nothing removed.
+  `--app` checked with stand-ins for `powershell.exe` and `winpty`: the same command in Git
+  Bash's own window and elsewhere, and a failed send stops everything with nothing deployed.
 
 ## Owner decisions
 
