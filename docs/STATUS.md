@@ -1094,8 +1094,9 @@ edge, where the pointer stops).
   removed and the new one added, "What's new" in the listing and nothing else changed, the ZIP
   uploaded as a block blob, the commit, the status read until the Store has it), and a no or no
   answer sending nothing; without keys, by hand with what it would open written instead,
-  submitted ending well and not submitted ending as a failure, and `-Yes` refused (these written
-  test first, passing under PowerShell 7 here). The build step's own test
+  submitted ending well and not submitted ending as a failure, and `-Yes` refused (written test
+  first: on the owner's PC the publish.ps1 before them failed them, job 0134, and the one now
+  passes them all, jobs 0134 and 0135). The build step's own test
   (`installer/test-mosaik-ps1.ps1`): job 0132's `mosaik.ps1 build` stopped at once on Windows
   PowerShell 5.1 ("The property 'Count' cannot be found on this object"); job 0133 ran the test
   against the script as job 0132 had it (every case failing), as the next commit had it (the
@@ -1103,8 +1104,15 @@ edge, where the pointer stops).
   Then `mosaik.ps1 build` with the owner's Mosaïk running from the folder: it quit, the build
   took 146 s, Mosaïk started again in the tray (a new process, the old one gone); with none
   running, 121 s. Smart App Control then refused the new `mosaikctl.exe` while `mosaik.exe` ran
-  (job 0133): the build now stops a Mosaïk it cannot ask, and its watchdog brings back its
-  windows (two more cases, test first, 8 passing under PowerShell 7 here).
+  (job 0133), so the build could not ask Mosaïk to quit. Job 0134, with the owner's Mosaïk
+  running and `mosaikctl.exe` still refused: the build stopped it, but its watchdog then showed
+  "Mosaïk has stopped" and the build failed waiting for it. Now the watchdog is stopped first and
+  its quiet rescue brings back the windows from the journal it watched (9 cases: the script
+  before failed the new ones and the one now passes all 9, on the owner's PC, jobs 0134 and
+  0135). `mosaikctl.exe` made again was allowed (job 0134). Job 0135: the build with Mosaïk
+  running asked it to quit, built in 141 s and started it again in the tray (a new process:
+  version 2.0.0, protocol 8, its watchdog, Win+Alt+Space registered), the same 14 windows on
+  screen before and after.
 - **Previews on the owner's own screen** (`mosaikctl preview`, asked only, job 0126): Smart in
   12 ms (Chrome 1114 x 1032 as the browser, Windows Terminal 806 x 568, Claude 806 x 464; File
   Explorer and two others minimised), Thirds and Quarters in 10 ms.
@@ -1117,10 +1125,10 @@ edge, where the pointer stops).
   not start with Windows on this PC (its startup task is off, state 0).
 - **Built and packed** (job 0133): release build in 121 s, `Mosaik_2.0.0.0_x64.msix` 2.90 MB;
   `pack`, 270 files, checked file by file against the repository; `mosaik.ps1` and `mosaik1.sh`
-  beside the repository, dated that day. Mosaïk 2 left in the tray on the owner's own data:
-  opened by hand its window shows in 0.3 s, with `--background` none (job 0133; job 0128 read
-  version 2.0.0, its watchdog and Win+Alt+Space registered through `mosaikctl`, which Smart App
-  Control refused in job 0133).
+  beside the repository, dated that day (each later copy is checked the same way when it is
+  made). Opened by hand, Mosaïk's window shows in 0.3 s; with `--background`, none (job 0133).
+  Mosaïk 2 left in the tray on the owner's own data (job 0135: version 2.0.0, protocol 8, its
+  watchdog, Win+Alt+Space registered).
 - **The site** (`mosaik1.sh` 1.9.1, with `--app`): its first home page back (the title, "Every
   project gets its own workspace: your apps and windows arranged and ready in one click.", "Free
   and open source.", desktops of two to four windows); the site folder is what the script writes
@@ -1168,4 +1176,7 @@ edge, where the pointer stops).
   its place.", "Every project gets its own workspace: your apps and windows arranged and ready in
   one click.", "Free and open source."). In the app, one to three zones (four rarely); on the
   site, desktops of two to four windows. Apps shown by their own icons or not at all, and never
-  a picture in the middle of a zone.
+  a picture in the middle of a zone. Windows dragged onto each other on Home's picture ("we
+  should be able to drag drop apps to permute them"). The site and the app shipped in one line,
+  `./mosaik1.sh --deploy --app`; with Microsoft's tenant blocked, the Store by hand ("lets do the
+  best way", ADR 0026).
