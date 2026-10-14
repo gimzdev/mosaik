@@ -5,9 +5,8 @@
   Node.js): the access token, the submission left waiting deleted, a new one made from the last
   published one, the package and "What's new" put in it with nothing else changed, the upload and
   the commit, as Microsoft documents them. With keys it sends without asking; the first time
-  without keys it asks for them once, keeps them and sends; skipped, it is the send by hand in
-  Partner Center, with what it would open written instead (MOSAIK_STORE_OPEN=print). Nothing is
-  sent to Microsoft, nothing is opened, and no key of the user's is read or kept.
+  without keys it asks for them once, keeps them and sends; without them, nothing is sent.
+  Nothing is sent to Microsoft, and no key of the user's is read or kept.
 #>
 [CmdletBinding()]
 param()
@@ -25,7 +24,7 @@ $version = $line.Matches[0].Groups[1].Value
 $work = Join-Path ([IO.Path]::GetTempPath()) "mosaik-publish-test-$PID"
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 $saved = @{}
-$names = 'MOSAIK_STORE_API', 'MOSAIK_STORE_LOGIN', 'MOSAIK_STORE_TENANT', 'MOSAIK_STORE_CLIENT', 'MOSAIK_STORE_KEY', 'MOSAIK_STORE_OPEN', 'APPDATA'
+$names = 'MOSAIK_STORE_API', 'MOSAIK_STORE_LOGIN', 'MOSAIK_STORE_TENANT', 'MOSAIK_STORE_CLIENT', 'MOSAIK_STORE_KEY', 'APPDATA'
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
 $quote = { param($s) '"' + $s + '"' }
 $publish = Join-Path $Here 'publish.ps1'
@@ -96,36 +95,31 @@ try {
   if ($sent.Said -match '\[y/N\]|Tenant ID') { throw ("the next run: it asked something: {0}" -f $sent.Said) }
   Write-Host 'publish.ps1 the first time without keys: asks for them once, keeps them, sends; the next time it sends without asking.' -ForegroundColor Green
 
-  # 4. No keys, the question skipped: by hand in Partner Center this time. Its page, the package
-  #    shown and "What's new" copied are written instead of done. Submitted: it ends well. Not
-  #    submitted, or nobody to answer: nothing sent, a failure.
+  # 4. No keys given (nothing typed, or only some of them): nothing kept, nothing sent, a failure
+  #    that says what is needed, so mosaik1.sh --deploy --app puts nothing online either. Nothing
+  #    listens where the services would be: any request is an error.
   $env:MOSAIK_STORE_API = 'http://127.0.0.1:9/api'
   $env:MOSAIK_STORE_LOGIN = 'http://127.0.0.1:9/login'
-  $env:MOSAIK_STORE_OPEN = 'print'
-  $page = 'https://partner.microsoft.com/dashboard/products/9PHR0L7S1QVD/overview'
-  foreach ($answer in 'y', 'n', '') {
-    $keys = Use-Data "by-hand-$answer"
-    $out = "`n$answer" | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" }
+  foreach ($answers in '', "test-tenant`ntest-client`n") {
+    $keys = Use-Data "no-keys-$($answers.Length)"
+    $out = $answers | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" }
     $code = $LASTEXITCODE
     $said = $out -join ' '
-    $shown = $said.Contains("Would open: $page") -and $said.Contains("Would show: $package") -and $said.Contains("Would copy: What's new") -and $said -match 'by hand'
-    $ended = if ($answer -eq 'y') { $code -eq 0 -and $said -match 'Sent' } else { $code -ne 0 -and $said -match 'Nothing was sent' }
-    if (-not $shown -or -not $ended -or (Test-Path $keys) -or $said -match 'Starting a submission|did not give access') {
-      throw ("publish.ps1 by hand, answered '{0}': exit code {1}; it said: {2}" -f $answer, $code, ($out -join ' / '))
+    if ($code -eq 0 -or $said -notmatch 'tenant ID, client ID and key are all needed' -or (Test-Path $keys) -or $said -match 'Starting a submission|did not give access|Partner Center opens|by hand') {
+      throw ("publish.ps1 without keys given ({0} characters typed): exit code {1}; it said: {2}" -f $answers.Length, $code, ($out -join ' / '))
     }
   }
-  Write-Host 'publish.ps1 without keys, the question skipped: by hand in Partner Center (its page, the package, What''s new copied); submitted ends well, not submitted or no answer sends nothing and fails.' -ForegroundColor Green
+  Write-Host 'publish.ps1 without keys given: it says what is needed, keeps and sends nothing, and ends as a failure.' -ForegroundColor Green
 
-  # 5. -Yes without keys (a script): nobody to ask or to send it by hand, so nothing is opened or
-  #    sent.
+  # 5. -Yes without keys (a script): nobody to ask, so nothing is sent.
   $null = Use-Data 'script'
   $out = '' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package -Yes 2>&1 | ForEach-Object { "$_" }
   $code = $LASTEXITCODE
   $said = $out -join ' '
-  if ($code -eq 0 -or $said -notmatch 'keys' -or $said -match 'Would open|Tenant ID') {
+  if ($code -eq 0 -or $said -notmatch 'keys' -or $said -match 'Tenant ID') {
     throw ("publish.ps1 -Yes without keys: exit code {0}; it said: {1}" -f $code, ($out -join ' / '))
   }
-  Write-Host 'publish.ps1 -Yes without keys: it says the keys are needed, and asks, opens and sends nothing.' -ForegroundColor Green
+  Write-Host 'publish.ps1 -Yes without keys: it says the keys are needed, and asks and sends nothing.' -ForegroundColor Green
 }
 finally {
   foreach ($n in $names) { [Environment]::SetEnvironmentVariable($n, $saved[$n], 'Process') }

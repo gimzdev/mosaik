@@ -44,7 +44,7 @@ From the folder with `mosaik1.sh` and the repository (`mosaik/`) beside it, in G
 ./mosaik1.sh --deploy --app
 ```
 
-It tests, builds and packages the app and sends it to the Microsoft Store (ADR 0027): a new
+It tests, builds and packages the app and sends it to the Microsoft Store (ADR 0026): a new
 submission copied from the last one, this package in place of the old one and "What's new"
 from `installer/msix/whats-new.txt`; nothing else of the listing changes. Then it puts the site
 online. If the app is not sent, the site is not deployed either. The Store checks the new
@@ -58,8 +58,8 @@ The first run asks for three keys and keeps them for your Windows user, encrypte
 a Microsoft Entra application of the Partner Center account:
 
 1. Partner Center, **Account settings**, **Tenants**: **Create Microsoft Entra ID**, or
-   **Associate Microsoft Entra ID** for a tenant you have. Microsoft's sign-up asks for a payment
-   card whose country is the tenant's (nothing is charged).
+   **Associate Microsoft Entra ID** for a tenant you have (this account's: `gimz.onmicrosoft.com`).
+   Microsoft's sign-up asks for a payment card whose country is the tenant's (nothing is charged).
 2. **Account settings**, **User management**: sign in with Microsoft Entra ID, then **Microsoft
    Entra applications**, **Create Microsoft Entra application**, with the **Manager** role.
 3. Select it: its **Tenant ID** and **Client ID**, then **Add new key** for the **Key** (shown
@@ -67,16 +67,6 @@ a Microsoft Entra application of the Partner Center account:
 
 Keys expire: Partner Center shows when and makes a new one the same way; give it with
 `.\installer\msix\publish.ps1 -SetKeys`.
-
-### Without the keys
-
-Press Enter at the first question instead, and it is sent by hand that time (ADR 0026): Partner
-Center opens on Mosaïk, File Explorer shows the package and "What's new" is on the clipboard;
-**Start update**, drag the package in and remove the older one, paste "What's new" in the
-English listing, submit, then answer **y** to "Submitted?".
-
-On 2026-10-13 the owner's first tenant was blocked by Microsoft while being made ("Access to
-tenant is denied", AADSTS5000228, after its card check failed); the owner is making another.
 
 ### The submission, for reference
 

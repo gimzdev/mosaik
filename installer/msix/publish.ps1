@@ -15,11 +15,7 @@
   (docs/RELEASE.md): asked the first time and kept for this Windows user only (encrypted with
   DPAPI, in %APPDATA%\Mosaik\store-publishing.xml), never in the repository.
   MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY, when set, are used instead (a
-  build server).
-
-  Without keys, the question skipped: by hand this time. Partner Center opens on Mosaik, File
-  Explorer shows the package and "What's new" is put on the clipboard; you start the update, drop
-  the package in, paste "What's new" and submit, then say so here.
+  build server). Without them nothing is sent.
 
 .PARAMETER Package
   The package to send; by default target\msix\Mosaik_<version>.0_x64.msix, as package.ps1 makes
@@ -33,8 +29,7 @@
   this Windows user, and sends.
 
 .NOTES
-  MOSAIK_STORE_API and MOSAIK_STORE_LOGIN point it at a stand-in of Microsoft's services, and
-  MOSAIK_STORE_OPEN=print writes what a send by hand would open instead of opening it: both for
+  MOSAIK_STORE_API and MOSAIK_STORE_LOGIN point it at a stand-in of Microsoft's services, for
   test-publish.ps1.
 
 .EXAMPLE
@@ -87,8 +82,7 @@ function Read-Answer([string]$Question, [switch]$Secret) {
 }
 
 # The Entra application's tenant ID, client ID and key for the Store's API: from the environment,
-# the file kept for this user, or asked once (again with -SetKeys) and kept. None (the question
-# skipped, or -Yes): the package is not sent through the API.
+# the file kept for this user, or asked once (again with -SetKeys) and kept.
 function Get-Access {
   if ($env:MOSAIK_STORE_TENANT -and $env:MOSAIK_STORE_CLIENT -and $env:MOSAIK_STORE_KEY) {
     return [pscustomobject]@{
@@ -98,18 +92,14 @@ function Get-Access {
     }
   }
   if (-not $SetKeys -and (Test-Path $Keys)) { return Import-Clixml $Keys }
-  if ($Yes) { return $null }
+  if ($Yes) { Fail "This PC has no keys for the Store's API, and -Yes means nobody is here to give them: run it once in a terminal to give them (docs/RELEASE.md), or set MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY." }
   Say ''
   Say 'The Store''s keys, asked this once and kept for this Windows user only, encrypted. They are in' Cyan
   Say 'Partner Center: Account settings, User management, Microsoft Entra applications (docs/RELEASE.md).' Cyan
-  $tenant = Read-Answer $(if ($SetKeys) { 'Tenant ID' } else { 'Tenant ID (or press Enter to send it by hand this time)' })
-  if (-not $tenant) {
-    if ($SetKeys) { Fail 'The tenant ID, client ID and key are all needed.' }
-    return $null
-  }
-  $client = Read-Answer 'Client ID'
-  $key = Read-Answer 'Key' -Secret
-  if (-not $client -or $key.Length -eq 0) { Fail 'The tenant ID, client ID and key are all needed: nothing was kept or sent.' }
+  $tenant = Read-Answer 'Tenant ID'
+  $client = if ($tenant) { Read-Answer 'Client ID' } else { '' }
+  $key = if ($client) { Read-Answer 'Key' -Secret } else { New-Object Security.SecureString }
+  if ($key.Length -eq 0) { Fail 'The tenant ID, client ID and key are all needed: nothing was kept or sent.' }
   $access = [pscustomobject]@{ Tenant = $tenant; Client = $client; Key = $key }
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Keys) | Out-Null
   # A SecureString goes into the file encrypted for this Windows user (DPAPI).
@@ -157,38 +147,6 @@ function Invoke-Store([string]$Method, [string]$Path, $Body = $null) {
   }
 }
 
-# A yes from the person here, or from a script on its input (nothing is a no).
-function Get-Yes([string]$Question) {
-  $answer = if ([Console]::IsInputRedirected) { Say $Question; [Console]::In.ReadLine() } else { Read-Host $Question }
-  "$answer".Trim() -match '^(y|yes|o|oui)$'
-}
-
-# By hand in Partner Center: its page for Mosaik opens, File Explorer shows the package, "What's
-# new" goes on the clipboard, and the steps are said; then the person says whether it was
-# submitted. Not submitted ends as a failure, so mosaik1.sh --deploy --app puts nothing online.
-function Send-ByHand([string]$Version, [string]$Path, [string]$Notes) {
-  $page = "https://partner.microsoft.com/dashboard/products/$StoreId/overview"
-  Say ''
-  Say ("Mosaik {0} to the Microsoft Store (app {1}), by hand in Partner Center this time (no keys for the Store's API)." -f $Version, $StoreId) Cyan
-  if ($env:MOSAIK_STORE_OPEN -eq 'print') {
-    Say "Would open: $page"
-    Say "Would show: $Path"
-    Say "Would copy: What's new"
-  }
-  else {
-    Start-Process $page
-    Start-Process explorer.exe -ArgumentList "/select,`"$Path`""
-    Set-Clipboard -Value $Notes
-  }
-  Say "What's new (on the clipboard): $Notes" DarkGray
-  Say '  1. In Partner Center (it opened on Mosaik, signed in as you): Start update.'
-  Say ("  2. Packages: drag in {0} from the folder that opened; remove the older package; Save." -f (Split-Path -Leaf $Path))
-  Say '  3. Store listings, English: paste into "What''s new in this version" (it is on the clipboard); Save.'
-  Say '  4. Submit it.'
-  if (-not (Get-Yes 'Submitted? [y/N]')) { Say 'Nothing was sent.' Yellow; exit 1 }
-  Say ("Sent: Mosaik {0} is with the Store. It is usually checked within a day or two; then everyone gets it." -f $Version) Green
-}
-
 # Sets a property of an object read from JSON, adding it when the object has none.
 function Set-Field($Object, [string]$Name, $Value) {
   if ($Object.PSObject.Properties[$Name]) { $Object.$Name = $Value }
@@ -210,12 +168,6 @@ try {
   if (-not $notes) { Fail "Write what is new in $version in $notesFile first: the Store shows it as `"What's new in this version`"." }
 
   $access = Get-Access
-  if (-not $access) {
-    if ($Yes) { Fail "This PC has no keys for the Store's API, and -Yes means nobody is here to give them: run it once in a terminal to give them (docs/RELEASE.md), or set MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY." }
-    Send-ByHand $version $Package $notes
-    # An exit code of its own: the caller reads it (mosaik.ps1 publish, then mosaik1.sh --app).
-    exit 0
-  }
   Say ''
   Say ("Mosaik {0} to the Microsoft Store (app {1}): {2}" -f $version, $StoreId, (Split-Path -Leaf $Package)) Cyan
   Say "What's new: $notes" DarkGray

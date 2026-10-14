@@ -19,7 +19,7 @@ re-run before each release.
 | 7. Hardening | done here: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers, soak, two screens at two scales; left for the owner by hand: sleep and resume, a screen unplugged; not possible here: RDP (Windows 11 Home has no Remote Desktop host), Windows 10 | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.1 | built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.1](#11) |
-| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0133): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 2.0.0.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's keys are kept (asked on the first run, ADR 0027), then deploys the site; the keys wait on the owner's Microsoft Entra tenant (the first one was blocked by Microsoft) | [2.0](#20) |
+| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0138): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 2.0.0.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's keys are kept (asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant for the keys made on 2026-10-13 | [2.0](#20) |
 
 ## Step 1: verify assumptions
 
@@ -1080,25 +1080,23 @@ edge, where the pointer stops).
   in 12 ms (0 px each), Undo put them back (0 px). The tour (job 0133) dragged Chrome onto Claude
   in the picture with the real mouse: they traded places, Reset put them back, and no window
   moved (Arrange is never clicked).
-- **Sending to the Store** (ADRs 0025 to 0027): `./mosaik1.sh --deploy --app` runs
+- **Sending to the Store** (ADRs 0025 and 0026): `./mosaik1.sh --deploy --app` runs
   `mosaik.ps1 publish`, which sends the package through the Store's API with nothing to answer,
-  then deploys the site; the first run asks for the Store's keys once and keeps them. Partner
-  Center (2026-10-13): the developer account had no Microsoft Entra tenant, which the keys need;
-  the one the owner made was blocked by Microsoft at sign-in ("Access to tenant is denied",
-  AADSTS5000228, its card check having failed), and the owner is making another. Until then,
-  Enter at the keys' question sends it by hand: Partner Center opens on Mosaïk's page (its
-  address checked in the owner's browser: "Application overview | Mosaïk", with Start update),
-  File Explorer shows the package, "What's new" is copied, and "Submitted?" decides whether the
-  site goes online. `installer/msix/test-publish.ps1`, part of `mosaik.ps1 test`, runs
-  `publish.ps1` against a stand-in of Microsoft's token and submission services that checks every
-  request (the token, the waiting submission deleted, a new one from the last published, the old
-  package removed and the new one added, "What's new" in the listing and nothing else changed, the
-  ZIP uploaded as a block blob, the commit, the status read until the Store has it): 16 checks
+  then deploys the site; the first run asks for the Store's keys once and keeps them. The keys
+  need a Microsoft Entra tenant, which the developer account did not have: Microsoft blocked the
+  first one the owner made ("Access to tenant is denied", AADSTS5000228, after its card check
+  failed); the second, `gimz.onmicrosoft.com`, was made on 2026-10-13 (its sign-in address
+  answers). `installer/msix/test-publish.ps1`, part of `mosaik.ps1 test`, runs `publish.ps1`
+  against a stand-in of Microsoft's token and submission services that checks every request (the
+  token, the waiting submission deleted, a new one from the last published, the old package
+  removed and the new one added, "What's new" in the listing and nothing else changed, the ZIP
+  uploaded as a block blob, the commit, the status read until the Store has it): 16 checks
   passing with keys in the environment and nobody to answer, with keys given on the first run
-  (kept, encrypted) and on the next run asking nothing; the question skipped, by hand, with what it
-  would open written instead; `-Yes` without keys refused. On the owner's PC (Windows PowerShell
-  5.1, job 0137) the publish.ps1 before this failed it (it asked "Send it now?" and sent nothing)
-  and the one now passes it all; jobs 0134 and 0135 did the same for the send by hand. The build step's own test
+  (kept, encrypted) and on the next run asking nothing; without keys given, nothing kept or sent;
+  `-Yes` without keys refused. On the owner's PC (Windows PowerShell 5.1, job 0137) the
+  publish.ps1 before the change failed it (it asked "Send it now?" and sent nothing) and the one
+  after passed.
+- **The build around a running Mosaïk.** The build step's own test
   (`installer/test-mosaik-ps1.ps1`): job 0132's `mosaik.ps1 build` stopped at once on Windows
   PowerShell 5.1 ("The property 'Count' cannot be found on this object"); job 0133 ran the test
   against the script as job 0132 had it (every case failing), as the next commit had it (the
@@ -1181,5 +1179,5 @@ edge, where the pointer stops).
   a picture in the middle of a zone. Windows dragged onto each other on Home's picture ("we
   should be able to drag drop apps to permute them"). The site and the app shipped in one line,
   `./mosaik1.sh --deploy --app`, with nothing to answer ("the simplest shipping possible ... dont
-  add paperwork for me", ADR 0027); the owner makes the Microsoft Entra tenant the Store's keys
-  need (Microsoft blocked the first).
+  add paperwork for me", ADR 0026); the owner made the Microsoft Entra tenant the Store's keys
+  need (`gimz.onmicrosoft.com`; Microsoft blocked the first).

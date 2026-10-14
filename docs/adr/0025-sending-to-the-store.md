@@ -1,6 +1,6 @@
 # 0025. Sending a new version to the Store from a script
 
-- Status: accepted; amended by ADR 0026 (by hand unless the API has keys)
+- Status: accepted; amended by ADR 0026 (nothing to answer once the keys are kept)
 - Date: 2026-10-13
 - Amends: ADR 0008 (the Microsoft Store), docs/RELEASE.md
 
