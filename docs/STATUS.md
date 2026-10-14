@@ -1183,13 +1183,26 @@ the site's section "One desktop, many kinds of work." gone, whole (ADR 0024).
 - **Minimised windows offered**: opening a workspace minimises the windows it does not use, and
   its page offered only windows on screen. It now offers every open window not already the
   workspace's, minimised ones too; one added to a zone shows again in its place. Test first:
-  smart's 3g minimises a window and expects it offered, then shown in its zone (job 0146).
+  smart's 3g minimises a window and expects it offered, then shown in its zone. Against the
+  engine before (4b361eb, job 0146): not offered. With the first fix (af51cb7, job 0146):
+  offered, but once added it stayed minimised, as the refit that places it leaves out every
+  minimised window; `plan_refit` now takes the window just added (4c6a249; the core test
+  `refit_shows_a_minimised_window_just_added` failed on the filter before, on every topology).
+  With it (job 0147): offered, added, shown in its zone 0 px off, every check of smart's arrange
+  part passing.
 - **The strip above a dropped window**: the dropped window was raised after its strip went above
   it, and an app that comes forward late covered the strip. A dropped window, one pulled out of
   its group and the windows a workspace opens with now have their strips and frames put back
   above them twice in the next half second, as a clicked tab already had. Test first: the
   probe's dummy window can come forward 250 ms late, and `workspace --drag` drops it on a tag and
-  checks the strip ends above it (job 0146).
+  checks the strip ends above it. Against the engine before (4b361eb, job 0146) the probe stopped
+  at the next step: the terminal, dropped on the code window's tag, covered the strip in that
+  window's title bar, so the code tab could not be clicked ("another window (MosaikProbeDummy, at
+  0,0 to 1056,1032) is where the probe would press the mouse at 756,19"). With the fix (job
+  0146): the strip above the late window after the drop, above the window shown after each of
+  three tab clicks, after the drop at the tag's start, and after both drops onto the strip where
+  Windows' snapping also watches; 3 of 3 windows in their zones; the joined terminal, the one
+  pulled out and the one dragged back all 0 px from their places.
 - **The Store while it checks the version sent before**: `publish.ps1` looks at the submission
   waiting in Partner Center before replacing it; one still being checked is left alone, nothing
   is sent, it says so and ends with 3, which `mosaik.ps1 publish` passes on, and `mosaik1.sh
@@ -1202,6 +1215,13 @@ the site's section "One desktop, many kinds of work." gone, whole (ADR 0024).
 - **The site** (`mosaik1.sh` 1.11.1): no section "One desktop, many kinds of work.", no "Who
   it's for" in the header, the small desktops it drew gone; type-checked and `shellcheck` clean.
 - Version 1.0.2: the changelog, and "What's new" with 1.0.1's for anyone still on 1.0.0.
+- **On the owner's PC** (jobs 0146 and 0147, Windows PowerShell 5.1): `mosaik.ps1 test` passing
+  whole (91 s, then 78 s), the publish test's new case and the 3 publish cases with it; the
+  build in 133 s and 127 s, `mosaikctl 1.0.2`, `mosaik.exe` file version 1.0.2; `Mosaik_1.0.2.0_x64.msix`
+  2.9 MB; `pack` 1.4 MB, 271 files, checked against the repository; `mosaik.ps1` beside the
+  repository, and the owner's `mosaik1.sh` there brought to 1.11.1 with his key line kept at
+  line 3, the rest the same as the repository's; Mosaïk 1.0.2 in the tray on his own data
+  (protocol 8, its watchdog, Win+Alt+Space registered).
 
 ## Owner decisions
 
