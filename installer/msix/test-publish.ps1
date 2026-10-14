@@ -4,8 +4,9 @@
   Checks publish.ps1 against a stand-in of Microsoft's services (store-standin.mjs, run with
   Node.js): the access token, the submission left waiting deleted, a new one made from the last
   published one, the package and "What's new" put in it with nothing else changed, the upload and
-  the commit, as Microsoft documents them. Nothing is sent to Microsoft, and no key of the user's
-  is read or kept.
+  the commit, as Microsoft documents them. Without keys, the send by hand in Partner Center: what
+  it opens and copies (written instead, MOSAIK_STORE_OPEN=print), and the answer it waits for.
+  Nothing is sent to Microsoft, nothing is opened, and no key of the user's is read or kept.
 #>
 [CmdletBinding()]
 param()
@@ -23,7 +24,7 @@ $version = $line.Matches[0].Groups[1].Value
 $work = Join-Path ([IO.Path]::GetTempPath()) "mosaik-publish-test-$PID"
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 $saved = @{}
-$names = 'MOSAIK_STORE_API', 'MOSAIK_STORE_LOGIN', 'MOSAIK_STORE_TENANT', 'MOSAIK_STORE_CLIENT', 'MOSAIK_STORE_KEY', 'APPDATA'
+$names = 'MOSAIK_STORE_API', 'MOSAIK_STORE_LOGIN', 'MOSAIK_STORE_TENANT', 'MOSAIK_STORE_CLIENT', 'MOSAIK_STORE_KEY', 'MOSAIK_STORE_OPEN', 'APPDATA'
 foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
 $quote = { param($s) '"' + $s + '"' }
 try {
@@ -68,17 +69,36 @@ try {
   }
   Write-Host ("publish.ps1 against a stand-in of the Store: {0} checks passing ({1})." -f $wanted.Count, (@($seen.seen) -join ', ')) -ForegroundColor Green
 
-  # 2. Without keys and with nobody to answer: it says what it needs, sends nothing.
+  # 2. Without keys (none in the environment, none kept in this APPDATA): by hand in Partner
+  #    Center. Its page, the package shown and "What's new" copied are written instead of done.
+  #    Submitted: it ends well. Not submitted, or nobody to answer: nothing sent, a failure.
   foreach ($n in 'MOSAIK_STORE_TENANT', 'MOSAIK_STORE_CLIENT', 'MOSAIK_STORE_KEY') { [Environment]::SetEnvironmentVariable($n, $null, 'Process') }
-  $out = '' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" }
-  $code = $LASTEXITCODE
-  if ($code -eq 0 -or -not (($out -join ' ') -match 'tenant ID, client ID and key')) {
-    throw ("publish.ps1 without keys: exit code {0}; it said: {1}" -f $code, ($out -join ' / '))
+  $env:MOSAIK_STORE_OPEN = 'print'
+  $page = 'https://partner.microsoft.com/dashboard/products/9PHR0L7S1QVD/overview'
+  foreach ($answer in 'y', 'n', '') {
+    $out = $answer | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package 2>&1 | ForEach-Object { "$_" }
+    $code = $LASTEXITCODE
+    $said = $out -join ' '
+    $shown = $said.Contains("Would open: $page") -and $said.Contains("Would show: $package") -and $said.Contains("Would copy: What's new") -and $said -match 'by hand'
+    $ended = if ($answer -eq 'y') { $code -eq 0 -and $said -match 'Sent' } else { $code -ne 0 -and $said -match 'Nothing was sent' }
+    if (-not $shown -or -not $ended -or $said -match 'Starting a submission|did not give access|tenant ID') {
+      throw ("publish.ps1 by hand, answered '{0}': exit code {1}; it said: {2}" -f $answer, $code, ($out -join ' / '))
+    }
   }
-  Write-Host 'publish.ps1 without keys and nobody to answer: it says what it needs, and sends nothing.' -ForegroundColor Green
+  Write-Host 'publish.ps1 without keys: by hand in Partner Center (its page, the package, What''s new copied); submitted ends well, not submitted or no answer sends nothing and fails.' -ForegroundColor Green
 
-  # 3. Answered no: nothing is sent, and it ends as a failure, so mosaik1.sh --deploy --app puts
-  #    nothing online either. Nothing listens where the services would be: any request is an error.
+  # 3. -Yes without keys: nobody is there to send it by hand, so nothing is opened or sent.
+  $out = '' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $publish -Package $package -Yes 2>&1 | ForEach-Object { "$_" }
+  $code = $LASTEXITCODE
+  $said = $out -join ' '
+  if ($code -eq 0 -or $said -notmatch 'keys' -or $said -match 'Would open') {
+    throw ("publish.ps1 -Yes without keys: exit code {0}; it said: {1}" -f $code, ($out -join ' / '))
+  }
+  Write-Host 'publish.ps1 -Yes without keys: it says the keys are needed, and opens and sends nothing.' -ForegroundColor Green
+
+  # 4. With keys, answered no: nothing is sent, and it ends as a failure, so mosaik1.sh --deploy
+  #    --app puts nothing online either. Nothing listens where the services would be now: any
+  #    request is an error.
   $env:MOSAIK_STORE_TENANT = 'test-tenant'
   $env:MOSAIK_STORE_CLIENT = 'test-client'
   $env:MOSAIK_STORE_KEY = 'test-key'

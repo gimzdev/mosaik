@@ -44,34 +44,49 @@ From the folder with `mosaik1.sh` and the repository (`mosaik/`) beside it, in G
 ./mosaik1.sh --deploy --app
 ```
 
-`--app` runs the app's `.\mosaik.ps1 publish` first: the tests, the build and the package, then,
-after you say yes, the package goes to the Microsoft Store (ADR 0025) with "What's new" from
-`installer/msix/whats-new.txt`; nothing else of the listing changes. If the app is not sent (a
-test fails, or you answer no), the site is not deployed either. Then `--deploy` puts the site online. The Store checks the new
-version, usually within a day or two, and then updates everyone. `./mosaik1.sh --app` sends the
-app alone; `.\mosaik.ps1 publish` does the same from PowerShell.
+`--app` runs the app's `.\mosaik.ps1 publish` first: the tests, the build and the package (a few
+minutes), then the Store (ADR 0026):
 
-### Sending from a script: set up once
+1. Partner Center opens on Mosaïk in your browser (signed in as you), File Explorer shows
+   `target\msix\Mosaik_<version>.0_x64.msix`, and "What's new" (from
+   `installer/msix/whats-new.txt`) is on the clipboard.
+2. In Partner Center: **Start update**; **Packages**: drag the package in and remove the older
+   one, **Save**; **Store listings**, English: paste into "What's new in this version", **Save**;
+   then submit it.
+3. Back in the terminal, answer **y** to "Submitted?".
 
-The Store's submission API acts for your Partner Center account through a Microsoft Entra
-application:
+If the app is not sent (a test fails, or you answer no), the site is not deployed either. Then
+`--deploy` puts the site online. The Store checks the new version, usually within a day or two,
+and then updates everyone. `./mosaik1.sh --app` sends the app alone; `.\mosaik.ps1 publish` does
+the same from PowerShell.
 
-1. Partner Center, **Settings** (gear), **Account settings**, **Tenants**: if the account has no
-   Microsoft Entra tenant yet, create one (free) and sign in to it once.
-2. **Account settings**, **User management**, **Microsoft Entra applications**: **Create Microsoft
-   Entra application** (or add an existing one), with the **Manager** role.
+### Sending through the Store's API (optional)
+
+With keys for the Store's submission API, `--app` sends the package itself, after you say yes:
+a new submission copied from the last one, this package in place of the old one and "What's
+new" (ADR 0025); nothing else of the listing changes. The API acts for the Partner Center
+account through a Microsoft Entra application, which needs the account to have a Microsoft
+Entra tenant:
+
+1. Partner Center, **Account settings**, **Tenants**: **Create Microsoft Entra ID** (Microsoft's
+   sign-up asks for a payment card whose country is the one chosen for the tenant; nothing is
+   charged), or **Associate Microsoft Entra ID** for one you have.
+2. **Account settings**, **User management**: sign in with Microsoft Entra ID, then **Microsoft
+   Entra applications**, **Create Microsoft Entra application**, with the **Manager** role.
 3. Select it: note its **Tenant ID** and **Client ID**, then **Add new key** and copy the **Key**
    (it is shown once).
-4. The first `--app` (or `.\mosaik.ps1 publish`) asks for the three and keeps them for your
-   Windows user only, encrypted (`%APPDATA%\Mosaik\store-publishing.xml`; delete it to give them
-   again). Keys expire: Partner Center shows when, and makes a new one the same way.
+4. `.\installer\msix\publish.ps1 -SetKeys` asks for the three and keeps them for your Windows user
+   only, encrypted (`%APPDATA%\Mosaik\store-publishing.xml`; delete it to go back to sending by
+   hand). Keys expire: Partner Center shows when, and makes a new one the same way.
 
-### By hand, in Partner Center
+On 2026-10-13 the owner's first tenant was blocked by Microsoft while being made ("Access to
+tenant is denied", AADSTS5000228, after its card check failed), so this account sends by hand.
 
-Apps and games, Mosaïk (Store ID `9PHR0L7S1QVD`), Start submission. 1.0.0 was published on
-2026-10-12; Partner Center copies the last submission, so only the package and "What's new"
-change. Upload `target\msix\Mosaik_2.0.0.0_x64.msix` (and remove the older package), paste
-`installer/msix/whats-new.txt` into "What's new in this version", and submit.
+### The submission, for reference
+
+Apps and games, Mosaïk (Store ID `9PHR0L7S1QVD`), Start update: what `--app` opens. 1.0.0 was
+published on 2026-10-12; Partner Center copies the last submission, so only the package and
+"What's new" change.
 
 The rest of the submission, for reference (already set by submission 1):
 

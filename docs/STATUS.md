@@ -19,7 +19,7 @@ re-run before each release.
 | 7. Hardening | done here: real apps, every kind of app window (borderless, fixed size, full screen), tags in title bars, Windows' snapping, other arrangers, soak, two screens at two scales; left for the owner by hand: sleep and resume, a screen unplugged; not possible here: RDP (Windows 11 Home has no Remote Desktop host), Windows 10 | [Step 7](#step-7-hardening) |
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.1 | built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.1](#11) |
-| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0133): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 2.0.0.0 ready; sending it from `./mosaik1.sh --deploy --app` checked against a stand-in of the Store, and waiting on the owner's Microsoft Entra tenant (Partner Center has none yet) | [2.0](#20) |
+| 2.0 | built, tested and packaged on Windows (jobs 0122 to 0133): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 2.0.0.0 ready; `./mosaik1.sh --deploy --app` tests, builds and packages it, then opens Partner Center for the owner to submit it (ADR 0026: Microsoft blocked the tenant the Store's API needs), and deploys the site once it is submitted | [2.0](#20) |
 
 ## Step 1: verify assumptions
 
@@ -1080,14 +1080,22 @@ edge, where the pointer stops).
   in 12 ms (0 px each), Undo put them back (0 px). The tour (job 0133) dragged Chrome onto Claude
   in the picture with the real mouse: they traded places, Reset put them back, and no window
   moved (Arrange is never clicked).
-- **Sending to the Store from a script** (ADR 0025): `./mosaik1.sh --deploy --app` runs
-  `mosaik.ps1 publish`, then deploys the site. `installer/msix/test-publish.ps1`, part of
-  `mosaik.ps1 test`, runs `publish.ps1` against a stand-in of Microsoft's token and submission
-  services that checks every request: 16 checks passing in jobs 0132 and 0133 (the token, the
-  waiting submission deleted, a new one from the last published, the old package removed and the
-  new one added, "What's new" in the listing and nothing else changed, the ZIP uploaded as a block
-  blob, the commit, the status read until the Store has it); without keys and nobody to answer,
-  it says what it needs and sends nothing. The build step's own test
+- **Sending to the Store** (ADRs 0025 and 0026): `./mosaik1.sh --deploy --app` runs
+  `mosaik.ps1 publish`, then deploys the site. Partner Center (2026-10-13): the developer account
+  had no Microsoft Entra tenant, which the Store's API needs; the one the owner made was blocked by
+  Microsoft at sign-in ("Access to tenant is denied", AADSTS5000228, its card check having failed),
+  and a second sign-up was sent back to it. So the package goes by hand unless keys are set:
+  Partner Center opens on Mosaïk's page (its address checked in the owner's browser: "Application
+  overview | Mosaïk", with Start update), File Explorer shows the package, "What's new" is copied,
+  and "Submitted?" decides whether the site goes online. `installer/msix/test-publish.ps1`, part
+  of `mosaik.ps1 test`: with keys, `publish.ps1` against a stand-in of Microsoft's token and
+  submission services that checks every request, 16 checks passing in jobs 0132 and 0133 (the
+  token, the waiting submission deleted, a new one from the last published, the old package
+  removed and the new one added, "What's new" in the listing and nothing else changed, the ZIP
+  uploaded as a block blob, the commit, the status read until the Store has it), and a no or no
+  answer sending nothing; without keys, by hand with what it would open written instead,
+  submitted ending well and not submitted ending as a failure, and `-Yes` refused (these written
+  test first, passing under PowerShell 7 here). The build step's own test
   (`installer/test-mosaik-ps1.ps1`): job 0132's `mosaik.ps1 build` stopped at once on Windows
   PowerShell 5.1 ("The property 'Count' cannot be found on this object"); job 0133 ran the test
   against the script as job 0132 had it (every case failing), as the next commit had it (the
@@ -1096,9 +1104,7 @@ edge, where the pointer stops).
   took 146 s, Mosaïk started again in the tray (a new process, the old one gone); with none
   running, 121 s. Smart App Control then refused the new `mosaikctl.exe` while `mosaik.exe` ran
   (job 0133): the build now stops a Mosaïk it cannot ask, and its watchdog brings back its
-  windows. Partner Center (2026-10-13): the developer account has no Microsoft Entra tenant yet,
-  which the submission API needs; making one creates an admin account with a password, the
-  owner's to do.
+  windows (two more cases, test first, 8 passing under PowerShell 7 here).
 - **Previews on the owner's own screen** (`mosaikctl preview`, asked only, job 0126): Smart in
   12 ms (Chrome 1114 x 1032 as the browser, Windows Terminal 806 x 568, Claude 806 x 464; File
   Explorer and two others minimised), Thirds and Quarters in 10 ms.
@@ -1115,10 +1121,10 @@ edge, where the pointer stops).
   opened by hand its window shows in 0.3 s, with `--background` none (job 0133; job 0128 read
   version 2.0.0, its watchdog and Win+Alt+Space registered through `mosaikctl`, which Smart App
   Control refused in job 0133).
-- **The site** (`mosaik1.sh` 1.9.0, with `--app`): its first home page back (the title, "Every
+- **The site** (`mosaik1.sh` 1.9.1, with `--app`): its first home page back (the title, "Every
   project gets its own workspace: your apps and windows arranged and ready in one click.", "Free
   and open source.", desktops of two to four windows); the site folder is what the script writes
-  (its 23 files compared one by one, 2026-10-13, again after 1.9.0); `shellcheck` clean.
+  (its 23 files compared one by one, 2026-10-13, again for 1.9.1); `shellcheck` clean.
 
 ## Owner decisions
 

@@ -40,9 +40,10 @@ Mosaïk 2 is a new window on the same engine, with everything the 1.1 builds add
 
 ### Making a release
 
-- `.\mosaik.ps1 publish` runs the tests, builds and packages Mosaïk, then sends the package to the
-  Microsoft Store with "What's new" (after asking: a no stops there); the site script's `--app`
-  does it too, so `./mosaik1.sh --deploy --app` ships the site and the app in one line.
+- `.\mosaik.ps1 publish` runs the tests, builds and packages Mosaïk, then opens Partner Center on
+  Mosaïk with the package shown and "What's new" copied, for you to submit (with the Store's API
+  keys set, it sends it itself after asking); the site script's `--app` does it too, so
+  `./mosaik1.sh --deploy --app` ships the site and the app in one line.
 
 ## 1.1.0 (development builds, not released on their own)
 

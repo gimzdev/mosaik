@@ -2,27 +2,40 @@
 <#
 .SYNOPSIS
   Sends Mosaik's Store package to the Microsoft Store: a new submission with the package and
-  "What's new in this version", committed for certification.
+  "What's new in this version", for certification. By hand in Partner Center, or through the
+  Store's API when this PC has its keys.
 
 .DESCRIPTION
-  Uses the Microsoft Store submission API (manage.devcenter.microsoft.com), the way Partner Center
-  takes a submission: the submission is a copy of the last published one, with this package in
-  place of the old one and the text of whats-new.txt (beside this script) as its "What's new";
-  nothing else of the listing changes. The Store then checks it, usually within a day or two, and
-  updates everyone.
+  By hand (no keys): Partner Center opens on Mosaik, File Explorer shows the package and "What's
+  new" (whats-new.txt, beside this script) is put on the clipboard; you start the update, drop the
+  package in, paste "What's new" and submit, then say so here.
 
-  Needs, once, a Microsoft Entra application of the Partner Center account (docs/RELEASE.md,
-  "Sending from a script"): its tenant ID, client ID and key are asked the first time and kept for
-  this Windows user only (encrypted with DPAPI, in %APPDATA%\Mosaik\store-publishing.xml), never
-  in the repository. MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY, when set, are
-  used instead (a build server).
+  With keys: the Microsoft Store submission API (manage.devcenter.microsoft.com) does it the way
+  Partner Center takes a submission: a copy of the last published one, with this package in place
+  of the old one and "What's new" from whats-new.txt; nothing else of the listing changes. The
+  keys are those of a Microsoft Entra application of the Partner Center account (docs/RELEASE.md,
+  "Sending through the Store's API"), given once with -SetKeys and kept for this Windows user only
+  (encrypted with DPAPI, in %APPDATA%\Mosaik\store-publishing.xml), never in the repository;
+  MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY, when set, are used instead (a
+  build server).
+
+  Either way the Store then checks it, usually within a day or two, and updates everyone.
 
 .PARAMETER Package
   The package to send; by default target\msix\Mosaik_<version>.0_x64.msix, as package.ps1 makes
   it for the version in Cargo.toml.
 
 .PARAMETER Yes
-  Sends without asking first (a script; a person is asked).
+  Sends through the Store's API without asking first (a script, with keys; a person is asked).
+
+.PARAMETER SetKeys
+  Asks for the Entra application's tenant ID, client ID and key, keeps them for this Windows user,
+  and sends through the Store's API from then on.
+
+.NOTES
+  MOSAIK_STORE_API and MOSAIK_STORE_LOGIN point it at a stand-in of Microsoft's services, and
+  MOSAIK_STORE_OPEN=print writes what a send by hand would open instead of opening it: both for
+  test-publish.ps1.
 
 .EXAMPLE
   .\installer\msix\publish.ps1
@@ -30,7 +43,8 @@
 [CmdletBinding()]
 param(
   [string]$Package,
-  [switch]$Yes
+  [switch]$Yes,
+  [switch]$SetKeys
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,8 +69,8 @@ function Get-Version {
   $line.Matches[0].Groups[1].Value
 }
 
-# The Entra application's tenant ID, client ID and key: from the environment, the file kept for
-# this user, or asked once.
+# The Entra application's tenant ID, client ID and key for the Store's API: from the environment,
+# the file kept for this user, or asked (-SetKeys). None: the package is sent by hand.
 function Get-Access {
   if ($env:MOSAIK_STORE_TENANT -and $env:MOSAIK_STORE_CLIENT -and $env:MOSAIK_STORE_KEY) {
     return [pscustomobject]@{
@@ -65,12 +79,15 @@ function Get-Access {
       Key    = ConvertTo-SecureString $env:MOSAIK_STORE_KEY -AsPlainText -Force
     }
   }
-  if (Test-Path $Keys) { return Import-Clixml $Keys }
-  if ([Console]::IsInputRedirected) {
-    Fail "Sending to the Store needs the Entra application's tenant ID, client ID and key (docs/RELEASE.md, `"Sending from a script`"). Run this once in a terminal to give them, or set MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY."
+  if (-not $SetKeys) {
+    if (Test-Path $Keys) { return Import-Clixml $Keys }
+    return $null
   }
-  Say 'Sending to the Store needs, once, the Microsoft Entra application of your Partner Center account' Cyan
-  Say '(docs/RELEASE.md, "Sending from a script"). They are kept for this Windows user only, encrypted.' Cyan
+  if ([Console]::IsInputRedirected) {
+    Fail "-SetKeys asks for the Entra application's tenant ID, client ID and key: run it in a terminal, or set MOSAIK_STORE_TENANT, MOSAIK_STORE_CLIENT and MOSAIK_STORE_KEY."
+  }
+  Say 'The Microsoft Entra application of your Partner Center account (docs/RELEASE.md, "Sending through' Cyan
+  Say 'the Store''s API"). Kept for this Windows user only, encrypted.' Cyan
   $tenant = (Read-Host 'Tenant ID').Trim()
   $client = (Read-Host 'Client ID').Trim()
   $key = Read-Host 'Key' -AsSecureString
@@ -96,7 +113,7 @@ function Get-Token($Access) {
       $reply = Invoke-RestMethod -Method Post -Uri "$Login/$($Access.Tenant)/oauth2/token" -Body $body -ContentType 'application/x-www-form-urlencoded'
     }
     catch {
-      Fail ("Microsoft did not give access with this tenant ID, client ID and key ({0}). Check them in Partner Center (Account settings, User management, Microsoft Entra applications); delete {1} to give them again." -f $_.Exception.Message, $Keys)
+      Fail ("Microsoft did not give access with this tenant ID, client ID and key ({0}). Check them in Partner Center (Account settings, User management, Microsoft Entra applications), then give them again: .\installer\msix\publish.ps1 -SetKeys (or delete {1} to send by hand)." -f $_.Exception.Message, $Keys)
     }
     $reply.access_token
   }
@@ -121,6 +138,38 @@ function Invoke-Store([string]$Method, [string]$Path, $Body = $null) {
   }
 }
 
+# A yes from the person here, or from a script on its input (nothing is a no).
+function Get-Yes([string]$Question) {
+  $answer = if ([Console]::IsInputRedirected) { Say $Question; [Console]::In.ReadLine() } else { Read-Host $Question }
+  "$answer".Trim() -match '^(y|yes|o|oui)$'
+}
+
+# By hand in Partner Center: its page for Mosaik opens, File Explorer shows the package, "What's
+# new" goes on the clipboard, and the steps are said; then the person says whether it was
+# submitted. Not submitted ends as a failure, so mosaik1.sh --deploy --app puts nothing online.
+function Send-ByHand([string]$Version, [string]$Path, [string]$Notes) {
+  $page = "https://partner.microsoft.com/dashboard/products/$StoreId/overview"
+  Say ''
+  Say ("Mosaik {0} to the Microsoft Store (app {1}), by hand in Partner Center: this PC has no keys for the Store's API (docs/RELEASE.md)." -f $Version, $StoreId) Cyan
+  if ($env:MOSAIK_STORE_OPEN -eq 'print') {
+    Say "Would open: $page"
+    Say "Would show: $Path"
+    Say "Would copy: What's new"
+  }
+  else {
+    Start-Process $page
+    Start-Process explorer.exe -ArgumentList "/select,`"$Path`""
+    Set-Clipboard -Value $Notes
+  }
+  Say "What's new (on the clipboard): $Notes" DarkGray
+  Say '  1. In Partner Center (it opened on Mosaik, signed in as you): Start update.'
+  Say ("  2. Packages: drag in {0} from the folder that opened; remove the older package; Save." -f (Split-Path -Leaf $Path))
+  Say '  3. Store listings, English: paste into "What''s new in this version" (it is on the clipboard); Save.'
+  Say '  4. Submit it.'
+  if (-not (Get-Yes 'Submitted? [y/N]')) { Say 'Nothing was sent.' Yellow; exit 1 }
+  Say ("Sent: Mosaik {0} is with the Store. It is usually checked within a day or two; then everyone gets it." -f $Version) Green
+}
+
 # Sets a property of an object read from JSON, adding it when the object has none.
 function Set-Field($Object, [string]$Name, $Value) {
   if ($Object.PSObject.Properties[$Name]) { $Object.$Name = $Value }
@@ -142,18 +191,19 @@ try {
   if (-not $notes) { Fail "Write what is new in $version in $notesFile first: the Store shows it as `"What's new in this version`"." }
 
   $access = Get-Access
+  if (-not $access) {
+    if ($Yes) { Fail "-Yes sends through the Store's API, and this PC has no keys for it: give them once with -SetKeys (docs/RELEASE.md), or send it by hand without -Yes." }
+    Send-ByHand $version $Package $notes
+    # An exit code of its own: the caller reads it (mosaik.ps1 publish, then mosaik1.sh --app).
+    exit 0
+  }
   Say ''
   Say ("Mosaik {0} to the Microsoft Store (app {1}): {2}" -f $version, $StoreId, (Split-Path -Leaf $Package)) Cyan
   Say "What's new: $notes" DarkGray
-  if (-not $Yes) {
-    # A person answers in the terminal; a script on its input, where nothing is a no (-Yes sends).
-    # A no ends as a failure: mosaik1.sh --deploy --app then puts nothing online either.
-    $question = 'Send it now? The Store checks it, then everyone gets it. [y/N]'
-    $answer = if ([Console]::IsInputRedirected) { Say $question; [Console]::In.ReadLine() } else { Read-Host $question }
-    if ("$answer".Trim() -notmatch '^(y|yes|o|oui)$') {
-      Say 'Nothing was sent.' Yellow
-      exit 1
-    }
+  # A no ends as a failure: mosaik1.sh --deploy --app then puts nothing online either.
+  if (-not $Yes -and -not (Get-Yes 'Send it now? The Store checks it, then everyone gets it. [y/N]')) {
+    Say 'Nothing was sent.' Yellow
+    exit 1
   }
 
   $script:Token = Get-Token $access
@@ -203,6 +253,7 @@ try {
     Fail ("The Store did not take the submission ({0}): {1}. It waits in Partner Center, where it can be fixed and sent." -f $status.status, ($errors -join '; '))
   }
   Say ("Sent: Mosaik {0} is with the Store ({1}). It is usually checked within a day or two; then everyone gets it." -f $version, $status.status) Green
+  exit 0
 }
 catch {
   Write-Host $_.Exception.Message -ForegroundColor Red
