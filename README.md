@@ -31,7 +31,7 @@ Your layouts stay on your computer.</p>
 
 <h3>Zones</h3>
 
-Named, coloured areas<br>
+Numbered, coloured areas<br>
 that belong to the project<br>
 Drag a window near one<br>
 and it is pulled in;<br>
@@ -101,11 +101,12 @@ if Mosaïk stops
 each in its zone. Choose one of ten layouts instead to see it first, and drag a window onto another to swap them.<br>
 <b>Arrange</b> does it; <b>Undo</b> puts them back.</p>
 
-<p>Beside it, your workspaces open in one click, and <b>Suggested</b> offers sets of your apps that go together, such as <b>Coding</b>:<br>
+<p>Beside it, click a workspace and the picture shows it as it will open; <b>Open</b> opens it.<br>
+<b>Suggested</b> offers sets of your apps that go together, such as <b>Coding</b>:<br>
 one click opens them side by side, three to a view, and starts the ones that are not open.</p>
 
 <p>Arrange the apps of one project, press <kbd>Win</kbd> <kbd>Alt</kbd> <kbd>Space</kbd>, then <kbd>S</kbd> and a name.<br>
-Each place becomes a zone with its own colour.</p>
+Each place becomes a zone with its own colour, numbered 1, 2, 3 from the top left.</p>
 
 <p>Press <kbd>Win</kbd> <kbd>Alt</kbd> <kbd>Space</kbd> again to switch: its windows come back and missing apps start.</p>
 
