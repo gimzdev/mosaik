@@ -170,6 +170,19 @@ impl Saved for WorkspacesFile {
 
     fn repair(&mut self) -> Vec<String> {
         let mut notes = Vec::new();
+        // Zones are numbered by place: names from before (after apps: "Code", "Browser") give
+        // way once, said in one note. The format stays, so an older Mosaïk still reads it.
+        let mut numbered = false;
+        for w in &mut self.workspaces {
+            let before: Vec<String> = w.layout.zones.iter().map(|z| z.name.clone()).collect();
+            w.layout.number_zones();
+            numbered |= w.layout.zones.iter().zip(&before).any(|(z, b)| &z.name != b);
+        }
+        if numbered {
+            notes.push(
+                "Zones are numbered 1, 2, 3\u{2026} by place now, rather than named after apps.".to_owned(),
+            );
+        }
         for w in &mut self.workspaces {
             let ended = w.layout.repair_tabs();
             if ended > 0 {
@@ -777,6 +790,43 @@ mod tests {
             "{:?}",
             loaded.notes
         );
+    }
+
+    #[test]
+    fn zones_named_before_they_were_numbered_are_numbered_on_load_once() {
+        // The owner's "Coding", saved by 1.0.2 with zones named after apps ("the names ... like
+        // assistant code zone etc are absolute bullshit they should be 1 2 3 4 5 6"): numbered
+        // in reading order on load, with one note, said once; an older Mosaïk still reads it.
+        let d = TempDir::new("numbered");
+        let zone = |id: &str, name: &str, l: f64, t: f64, r: f64, b: f64| {
+            format!(
+                r#"{{"id":"{id}","name":"{name}","color":"lapis","monitor":0,"area":{{"left":{l},"top":{t},"right":{r},"bottom":{b}}}}}"#
+            )
+        };
+        let file = format!(
+            r#"{{"version":1,"workspaces":[{{"id":"coding","name":"Coding","layout":{{
+                "monitors":[{{"id":"m","name":"M","bounds":{{"left":0,"top":0,"right":1920,"bottom":1080}},
+                  "work_area":{{"left":0,"top":0,"right":1920,"bottom":1032}},"dpi":96,"primary":true}}],
+                "zones":[{},{},{}],"slots":[],"tab_groups":[]}}}}],"active":null}}"#,
+            zone("z1", "Code", 0.0, 0.0, 0.6, 0.68),
+            zone("z2", "Terminal", 0.0, 0.68, 0.6, 1.0),
+            zone("z3", "Browser", 0.6, 0.0, 1.0, 1.0)
+        );
+        fs::write(d.0.join("workspaces.json"), file).unwrap();
+        let loaded = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
+        let names: Vec<&str> = loaded.value.workspaces[0]
+            .layout
+            .zones
+            .iter()
+            .map(|z| z.name.as_str())
+            .collect();
+        assert_eq!(names, ["1", "3", "2"]);
+        assert_eq!(loaded.notes.len(), 1, "{:?}", loaded.notes);
+        let again = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
+        assert!(again.notes.is_empty(), "{:?}", again.notes);
+        let on_disk: serde_json::Value =
+            serde_json::from_slice(&fs::read(d.0.join("workspaces.json")).unwrap()).unwrap();
+        assert_eq!(on_disk["version"], 1, "the format stays: 1.0.1 reads it");
     }
 
     #[test]

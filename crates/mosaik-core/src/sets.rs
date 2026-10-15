@@ -381,26 +381,8 @@ pub struct NewApp {
     pub launch: Option<Launch>,
 }
 
-/// A zone's name for an app of `kind` called `label`, not one of `taken`: "Code", "Terminal",
-/// "Code 2"; the app's own name for a kind without one.
-fn zone_name(kind: Kind, label: &str, taken: &[String]) -> String {
-    let base = kind
-        .zone_name()
-        .map_or_else(|| label.trim().to_owned(), str::to_owned);
-    (1..)
-        .map(|n| {
-            if n == 1 {
-                base.clone()
-            } else {
-                format!("{base} {n}")
-            }
-        })
-        .find(|c| !taken.iter().any(|t| t.eq_ignore_ascii_case(c)))
-        .unwrap_or(base)
-}
-
 /// The workspace for `apps` laid out by [`task::layout`] on `monitor`: a zone for each app in
-/// the view (three at most), named after its kind and coloured in turn, and each app of `tabs`
+/// the view (three at most), numbered in reading order and coloured in turn, and each app of `tabs`
 /// ([`task::tabs_for`]) a tab with the app it goes with, which shows. Apps neither in the view
 /// nor a tab are left out.
 pub fn build_workspace(
@@ -415,17 +397,14 @@ pub fn build_workspace(
         monitors: vec![monitor],
         ..Layout::default()
     };
-    let mut taken: Vec<String> = Vec::new();
     let slot_id = |n: usize| SlotId(format!("s{n}"));
     let mut next_slot = 1;
     for (k, p) in placed.placed.iter().enumerate() {
         let Some(a) = apps.get(p.window) else { continue };
         let zone = ZoneId(format!("z{}", k + 1));
-        let zname = zone_name(a.kind, &a.label, &taken);
-        taken.push(zname.clone());
         layout.zones.push(Zone {
             id: zone.clone(),
-            name: zname,
+            name: String::new(),
             color: ZoneColor::nth(k),
             monitor: 0,
             area: p.area,
@@ -466,6 +445,7 @@ pub fn build_workspace(
         }
         layout.slots.extend(slots);
     }
+    layout.number_zones();
     Workspace {
         id,
         name: name.to_owned(),
@@ -951,8 +931,10 @@ mod tests {
         assert_eq!(ws.layout.problems(), vec![]);
         assert_eq!(ws.layout.zones.len(), 3, "{:?}", ws.layout.zones);
         assert_eq!(ws.layout.slots.len(), 5);
+        // The editor's zone top left is 1, the browser's beside it 2, the terminal's under the
+        // editor 3: numbers by place, not names after apps.
         let zone_names: Vec<&str> = ws.layout.zones.iter().map(|z| z.name.as_str()).collect();
-        assert_eq!(zone_names, ["Code", "Terminal", "Browser"]);
+        assert_eq!(zone_names, ["1", "3", "2"]);
         // Claude is a tab with Chrome, File Explorer with the terminal; the editor is alone.
         let group_of = |label: &str| {
             let slot = ws

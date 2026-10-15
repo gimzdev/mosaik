@@ -16,7 +16,7 @@ use crate::layout::{Launch, Layout, Place, Slot, SlotId, Workspace, WorkspaceId}
 use crate::matching::{AppMatch, TitleMatch, assign};
 use crate::place::{Resolver, Target};
 use crate::settings::SwitchSettings;
-use crate::topology::{MonitorRef, Topology, map_monitors, remembered_index};
+use crate::topology::{MonitorId, MonitorRef, Topology, map_monitors, remembered_index};
 use crate::window::{WindowFacts, WindowHandle};
 use crate::zone::{FrameStyle, Zone, ZoneColor, ZoneId};
 
@@ -339,9 +339,8 @@ pub fn capture(
         })
         .collect();
 
-    // New zones, named after the front window of each group, coloured in reading order.
+    // New zones, coloured in reading order; every zone is numbered once they are all in.
     let mut taken_zone_ids: HashSet<String> = kept.iter().map(|z| z.id.0.clone()).collect();
-    let mut names: HashSet<String> = kept.iter().map(|z| z.name.clone()).collect();
     let mut order: Vec<usize> = (0..groups.len()).filter(|g| tiles[*g]).collect();
     order.sort_by_key(|g| {
         let (m, r, _) = &groups[*g];
@@ -349,36 +348,17 @@ pub fn capture(
     });
     let mut group_zone: HashMap<usize, ZoneId> = HashMap::new();
     for (n, g) in order.into_iter().enumerate() {
-        let (m, rect, members) = &groups[g];
+        let (m, rect, _) = &groups[g];
         let monitor = &topology.monitors()[*m];
         let Ok(area) = RatioRect::from_rect(*rect, monitor.work_area) else {
             continue;
         };
         let id = ZoneId(next_id("z", &taken_zone_ids));
         taken_zone_ids.insert(id.0.clone());
-        let base = members
-            .first()
-            .map_or_else(|| "Zone".to_owned(), |i| windows[*i].label.clone());
-        let base = if base.trim().is_empty() {
-            "Zone".to_owned()
-        } else {
-            base
-        };
-        let name = (1..)
-            .map(|k| {
-                if k == 1 {
-                    base.clone()
-                } else {
-                    format!("{base} {k}")
-                }
-            })
-            .find(|candidate| !names.contains(candidate))
-            .unwrap_or(base);
-        names.insert(name.clone());
         let monitor_index = remembered_index(&mut layout.monitors, monitor, topology);
         layout.zones.push(Zone {
             id: id.clone(),
-            name,
+            name: String::new(),
             color: ZoneColor::nth(kept.len() + n),
             monitor: monitor_index,
             area,
@@ -388,6 +368,7 @@ pub fn capture(
     let mut zones = kept;
     zones.append(&mut layout.zones);
     layout.zones = zones;
+    layout.number_zones();
 
     // Slots, front to back.
     let mut slot_ids = HashSet::new();
@@ -635,13 +616,39 @@ pub fn plan_switch(
     }
     let used: HashSet<WindowHandle> = assigned.values().copied().collect();
     if settings.minimize_others {
-        // Only windows on screen now: a previous window that is hidden (an app closed to the
-        // tray), on another desktop or gone is left alone, since minimising would show it.
+        // The monitors the workspace is on: its zones' and its apps' places. Every other window
+        // there goes to the taskbar, so nothing stays on top of it (the owner's game launcher
+        // did); a window of the workspace left goes wherever it is. Only windows on screen now:
+        // one hidden (an app closed to the tray), on another desktop or gone is left alone,
+        // since minimising would show it.
+        let mut its: HashSet<&MonitorId> = to
+            .layout
+            .zones
+            .iter()
+            .filter_map(|z| resolver.zone_rect(&z.id))
+            .map(|(r, _)| &topology.monitor_for_rect(r).id)
+            .collect();
+        for slot in &to.layout.slots {
+            match resolver.target(&slot.place) {
+                Some(Target::Frame(r)) => {
+                    its.insert(&topology.monitor_for_rect(r).id);
+                }
+                Some(Target::Maximized(m)) => {
+                    if let Some(m) = topology.get(&m) {
+                        its.insert(&m.id);
+                    }
+                }
+                None => {}
+            }
+        }
         plan.minimize = windows
             .iter()
             .filter(|w| w.visible && !w.minimized && w.cloak == crate::window::Cloak::None)
+            .filter(|w| !used.contains(&w.handle) && !full_screen.contains(&w.handle))
+            .filter(|w| {
+                previous.contains(&w.handle) || its.contains(&topology.monitor_for_rect(w.frame_rect).id)
+            })
             .map(|w| w.handle)
-            .filter(|h| previous.contains(h) && !used.contains(h) && !full_screen.contains(h))
             .collect();
     }
     // Slots are front to back: raise from the back so the first slot ends on top.
@@ -879,7 +886,7 @@ mod tests {
     }
 
     #[test]
-    fn tiled_windows_become_zones_named_after_their_apps() {
+    fn tiled_windows_become_zones_numbered_by_place() {
         let t = fixtures::single_1080p_100();
         let ws = snapped();
         let seen: Vec<Seen> = ws
@@ -890,8 +897,10 @@ mod tests {
         let w = capture(WorkspaceId("w".into()), "Mosaïk".into(), &seen, &t, style(), None);
         assert_eq!(w.layout.problems(), vec![]);
         assert_eq!(w.layout.zones.len(), 3);
+        // Numbered in reading order (the owner: "they should be 1 2 3 4 5 6"), never named after
+        // the apps in them: the left half 1, the top right 2, the bottom right 3.
         let names: Vec<&str> = w.layout.zones.iter().map(|z| z.name.as_str()).collect();
-        assert_eq!(names, ["Visual Studio Code", "Google Chrome", "Terminal"]);
+        assert_eq!(names, ["1", "2", "3"]);
         let colors: Vec<ZoneColor> = w.layout.zones.iter().map(|z| z.color).collect();
         assert_eq!(
             colors,
@@ -956,7 +965,7 @@ mod tests {
         assert_eq!(w.layout.problems(), vec![]);
         // The notes float over the editors, which share one zone; the mail stays maximised.
         assert_eq!(w.layout.zones.len(), 1);
-        assert_eq!(w.layout.zones[0].name, "Editor");
+        assert_eq!(w.layout.zones[0].name, "1");
         assert!(matches!(w.layout.slots[0].place, Place::Free { .. }));
         assert_eq!(
             w.layout.slots[1].place,
@@ -994,6 +1003,7 @@ mod tests {
         let ws = snapped();
         let seen1: Vec<Seen> = ws.iter().map(|w| seen(w, "App")).collect();
         let mut first = capture(WorkspaceId("w".into()), "W".into(), &seen1, &t, style(), None);
+        // A name saved before zones were numbered.
         first.layout.zones[0].name = "Code".into();
         // Mosaïk placed the windows inside their zones; a new window is added beside nothing.
         let r = Resolver::new(&first.layout, &t, style());
@@ -1019,9 +1029,10 @@ mod tests {
             style(),
             Some(&first),
         );
+        first.layout.zones[0].name = "1".into();
         assert_eq!(
             second.layout.zones, first.layout.zones,
-            "zones neither shrink nor get renamed"
+            "zones neither shrink nor move; the old name gives way to the zone's number"
         );
         assert_eq!(second.layout.slots.len(), 3);
         for s in &second.layout.slots {
@@ -1339,6 +1350,50 @@ mod tests {
             SwitchSettings::default(),
         );
         assert_eq!(plan.minimize, vec![mail.handle]);
+    }
+
+    #[test]
+    fn opening_a_workspace_minimises_the_other_windows_on_its_monitors() {
+        // The owner, opening "Coding" from Home: a game launcher and the Riot client stayed on
+        // top of it ("here's what happens when i click on code wtf"; his log: moved=3
+        // minimized=0), as only the windows of a workspace left were minimised. Every other
+        // window on a monitor the workspace is on goes to the taskbar; one on its other monitor
+        // stays, as does one in full screen, and a window of the workspace left goes wherever
+        // it is.
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let ws = snapped();
+        let seen: Vec<Seen> = ws.iter().map(|w| seen(w, "App")).collect();
+        let w = capture(WorkspaceId("w".into()), "W".into(), &seen, &t, style(), None);
+        let launcher = win(11, "launcher.exe", "Launcher", Rect::new(400, 300, 1600, 1000));
+        let riot = win(
+            12,
+            "riotclientux.exe",
+            "Riot Client",
+            Rect::new(800, 200, 2000, 900),
+        );
+        let side = win(13, "spotify.exe", "Spotify", Rect::new(4000, 600, 5000, 1400));
+        let left = win(14, "outlook.exe", "Inbox", Rect::new(4100, 700, 5200, 1500));
+        let video = WindowFacts {
+            full_screen: true,
+            ..win(15, "vlc.exe", "Film", Rect::new(0, 0, 3840, 2160))
+        };
+        let plan = plan_switch(
+            &w,
+            &[&launcher, &riot, &side, &left, &video, &ws[0], &ws[1], &ws[2]],
+            &[left.handle],
+            &t,
+            style(),
+            SwitchSettings::default(),
+        );
+        assert_eq!(plan.moves.len(), 3);
+        assert_eq!(plan.minimize, vec![launcher.handle, riot.handle, left.handle]);
+        // Without the setting, nothing is minimised.
+        let quiet = SwitchSettings {
+            minimize_others: false,
+            launch_missing: true,
+        };
+        let plan = plan_switch(&w, &[&launcher, &riot, &ws[0]], &[], &t, style(), quiet);
+        assert!(plan.minimize.is_empty());
     }
 
     #[test]

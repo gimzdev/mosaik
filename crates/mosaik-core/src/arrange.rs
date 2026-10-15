@@ -15,6 +15,7 @@
 
 use crate::fit;
 use crate::geometry::{RatioRect, Rect, Size};
+use crate::layout::reading_order;
 use crate::presets::Preset;
 use crate::task::{self, Role, Task};
 
@@ -378,25 +379,6 @@ impl Kind {
             Kind::Media => 0.3,
         }
     }
-
-    /// The name of a zone made for a window of this kind; `None` for one named after its app.
-    pub const fn zone_name(self) -> Option<&'static str> {
-        match self {
-            Kind::Code => Some("Code"),
-            Kind::Terminal => Some("Terminal"),
-            Kind::Browser => Some("Browser"),
-            Kind::Chat => Some("Chat"),
-            Kind::Assistant => Some("Assistant"),
-            Kind::Mail => Some("Mail"),
-            Kind::Notes => Some("Notes"),
-            Kind::Documents => Some("Documents"),
-            Kind::Design => Some("Design"),
-            Kind::Media => Some("Media"),
-            Kind::Files => Some("Files"),
-            Kind::Games => Some("Games"),
-            Kind::Other => None,
-        }
-    }
 }
 
 /// A window to arrange (or a tab group, shown by one of its windows).
@@ -429,9 +411,10 @@ pub struct Spot {
 pub struct NewZone {
     pub monitor: usize,
     pub area: RatioRect,
+    /// Its number, in reading order: "1" at the top left. It goes with the place.
     pub name: String,
     /// Its colour: the n-th of the plan's zones. A window the user moved keeps the colour of the
-    /// zone it was in, as its name goes with it (zones are named after their windows).
+    /// zone it was in, as a tile moved in a mosaic keeps its own.
     pub color: usize,
 }
 
@@ -612,20 +595,6 @@ fn make_room_for(
             None => return areas.to_vec(),
         }
     }
-}
-
-/// The first of `base`, `base 2`, `base 3`... not in `taken` (compared without case).
-fn free_name(base: &str, taken: &[String]) -> String {
-    (1..)
-        .map(|n| {
-            if n == 1 {
-                base.to_owned()
-            } else {
-                format!("{base} {n}")
-            }
-        })
-        .find(|c| !taken.iter().any(|t| t.eq_ignore_ascii_case(c)))
-        .unwrap_or_else(|| base.to_owned())
 }
 
 /// A layout the user picked for one monitor (the home page's layouts): that monitor's zones
@@ -811,7 +780,6 @@ pub fn plan_moved(
     }
 
     // 3. The windows the user moved on the picture of the screen.
-    let placed_before = new_zone_window.clone();
     let mut moved = vec![false; monitors.len()];
     for mv in moves {
         let Some(unit) = units.get(mv.unit) else {
@@ -895,48 +863,21 @@ pub fn plan_moved(
     let laid_out = |m: usize| tasks.get(m).is_some_and(Option::is_some) || picked(m);
     let gone: Vec<usize> = (0..zones.len()).filter(|&i| laid_out(zones[i].monitor)).collect();
 
-    // New zones are named after the window in them: its kind, else its app. Two of one kind are
-    // told apart in the order of the zones before any move ("Browser", "Browser 2"), so that a
-    // window the user moved keeps its zone's name as it keeps its colour: each zone's place in
-    // that order goes with the window that had it, and the empty zones take the places left.
-    let mut order: Vec<Option<usize>> = placed_before
-        .iter()
-        .map(|u| {
-            u.and_then(|u| match goes[u] {
-                Goes::Zone(r) => Some(r),
-                Goes::Minimize | Goes::Stay => None,
-            })
-        })
-        .collect();
-    let left: Vec<usize> = (0..new_zones.len())
-        .filter(|r| !order.contains(&Some(*r)))
-        .collect();
-    let mut left = left.into_iter();
-    for place in &mut order {
-        if place.is_none() {
-            *place = left.next();
-        }
-    }
-    let mut taken: Vec<String> = zones
-        .iter()
-        .filter(|z| !laid_out(z.monitor))
-        .map(|z| z.name.clone())
-        .collect();
-    for i in order.into_iter().flatten() {
-        let zone = &mut new_zones[i];
-        let base = new_zone_window[i]
-            .map(|u| &units[u])
-            .and_then(|u| {
-                u.kind
-                    .zone_name()
-                    .map(str::to_owned)
-                    .or_else(|| Some(u.label.trim().to_owned()).filter(|l| !l.is_empty()))
-            })
-            .unwrap_or_else(|| "Zone".to_owned());
-        let base: String = base.chars().take(crate::editing::MAX_NAME - 3).collect();
-        let name = free_name(&base, &taken);
-        taken.push(name.clone());
-        zone.name = name;
+    // New zones are numbered in reading order, after the zones kept on the monitors before
+    // theirs: a zone's name says where it is, never what it holds (`Layout::number_zones`
+    // numbers a workspace's zones the same way once they join it).
+    let mut order: Vec<usize> = (0..new_zones.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (za, zb) = (&new_zones[a], &new_zones[b]);
+        reading_order((za.monitor, za.area), (zb.monitor, zb.area))
+    });
+    for (n, i) in order.into_iter().enumerate() {
+        let m = new_zones[i].monitor;
+        let kept_before = zones
+            .iter()
+            .filter(|z| z.monitor < m && !laid_out(z.monitor))
+            .count();
+        new_zones[i].name = (kept_before + n + 1).to_string();
     }
     Plan {
         new_zones,
@@ -1005,7 +946,8 @@ mod tests {
     fn three_windows_on_a_bare_monitor_get_the_layout_of_their_task() {
         // No workspace open: an editor, a browser and a terminal say coding. The editor (the
         // window the task is done in) takes the most room, the terminal sits under it, the
-        // browser beside them; each zone is named for its window.
+        // browser beside them; the zones are numbered in reading order, as the owner asked
+        // ("they should be 1 2 3 4 5 6"), not named after their windows.
         let units = [
             unit("chrome.exe", "Google Chrome", Rect::new(300, 50, 1500, 900)),
             unit("code.exe", "Visual Studio Code", Rect::new(100, 100, 900, 700)),
@@ -1015,11 +957,11 @@ mod tests {
         assert_eq!(plan.new_zones.len(), 3);
         assert_eq!(plan.tasks, vec![Some(Task::Coding)]);
         let zone = |u: usize| &plan.new_zones[zone_of(&plan, u)];
-        assert_eq!(zone(1).name, "Code");
+        assert_eq!(zone(1).name, "1");
         assert_eq!(zone(1).area, RatioRect::new(0.0, 0.0, 0.6, 0.68).unwrap());
-        assert_eq!(zone(2).name, "Terminal");
+        assert_eq!(zone(2).name, "3");
         assert_eq!(zone(2).area, RatioRect::new(0.0, 0.68, 0.6, 1.0).unwrap());
-        assert_eq!(zone(0).name, "Browser");
+        assert_eq!(zone(0).name, "2");
         assert_eq!(zone(0).area, RatioRect::new(0.6, 0.0, 1.0, 1.0).unwrap());
     }
 
@@ -1050,7 +992,7 @@ mod tests {
         assert_eq!(plan.gone, vec![0, 1, 2], "the rows make way");
         assert_eq!(plan.tasks, vec![Some(Task::Coding)]);
         let main = zone_of(&plan, 3);
-        assert_eq!(plan.new_zones[main].name, "Code");
+        assert_eq!(plan.new_zones[main].name, "1");
         assert!(
             plan.new_zones[main].area.width() >= 0.55 - 1e-9,
             "{:?}",
@@ -1083,10 +1025,11 @@ mod tests {
         let plan = plan(&units, &zones, &[WORK, side]);
         assert_eq!(plan.gone, vec![0]);
         assert_eq!(plan.tasks, vec![Some(Task::Coding), None]);
-        // Windows stay on their monitor; a new zone's name is not one the workspace keeps.
+        // Windows stay on their monitor. The new zones are numbered first, as their monitor
+        // reads first; the zone kept on the other monitor comes after them.
         assert!(plan.new_zones.iter().all(|z| z.monitor == 0));
-        let edge = &plan.new_zones[zone_of(&plan, 1)];
-        assert_eq!(edge.name, "Browser 2");
+        assert_eq!(plan.new_zones[zone_of(&plan, 0)].name, "1");
+        assert_eq!(plan.new_zones[zone_of(&plan, 1)].name, "2");
     }
 
     #[test]
@@ -1216,7 +1159,7 @@ mod tests {
             .collect();
         assert_eq!(placed, vec![0, 3, 9], "{:?}", plan.goes);
         let main = zone_of(&plan, 3);
-        assert_eq!(plan.new_zones[main].name, "Code");
+        assert_eq!(plan.new_zones[main].name, "1");
         assert!(plan.new_zones[main].area.left().abs() < 1e-9, "on the left");
         let term = zone_of(&plan, 9);
         assert!(
@@ -1278,7 +1221,7 @@ mod tests {
         assert_eq!(plan.new_zones.iter().filter(|z| z.monitor == 1).count(), 1);
         let c = zone_of(&plan, 2);
         assert_eq!(plan.new_zones[c].monitor, 1);
-        assert_eq!(plan.new_zones[c].name, "Chat");
+        assert_eq!(plan.new_zones[c].name, "3", "after the two of the monitor before");
     }
 
     #[test]
@@ -1305,8 +1248,7 @@ mod tests {
     #[test]
     fn a_layout_picked_for_a_monitor_replaces_its_zones() {
         // The home page: the open workspace has two zones on the main screen; the user picks
-        // Thirds for it. Every window goes into a zone of the new shape, and each new zone is
-        // named for its window.
+        // Thirds for it. Every window goes into a zone of the new shape, numbered left to right.
         let zones = [spot("Code"), spot("Browser")];
         let units = [
             unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 960, 1032)),
@@ -1329,9 +1271,7 @@ mod tests {
         used.dedup();
         assert_eq!(used.len(), 3, "one window per zone");
         let names: Vec<&str> = plan.new_zones.iter().map(|z| z.name.as_str()).collect();
-        for name in ["Code", "Browser", "Terminal"] {
-            assert!(names.contains(&name), "{names:?}");
-        }
+        assert_eq!(names, ["1", "2", "3"]);
     }
 
     #[test]
@@ -1445,13 +1385,19 @@ mod tests {
         assert_eq!(plan.new_zones[zone_of(&plan, 1)].monitor, 1);
         // Zones of the picked layout with no window stay, ready for windows dragged in.
         assert!(
-            plan.new_zones
-                .iter()
-                .filter(|z| z.monitor == 0)
-                .any(|z| z.name == "Zone"),
+            (0..plan.new_zones.len())
+                .filter(|&r| plan.new_zones[r].monitor == 0)
+                .any(|r| !plan.goes.contains(&Goes::Zone(r))),
             "{:?}",
             plan.new_zones
         );
+        // The main monitor's thirds are 1 to 3 from the left, the other monitor's zone 4.
+        let names: Vec<(usize, &str)> = plan
+            .new_zones
+            .iter()
+            .map(|z| (z.monitor, z.name.as_str()))
+            .collect();
+        assert_eq!(names, [(1, "4"), (0, "1"), (0, "2"), (0, "3")]);
     }
 
     /// The zones the plan makes on the main monitor, in its order: what the picture shows.
@@ -1464,8 +1410,8 @@ mod tests {
     #[test]
     fn a_window_moved_on_the_picture_trades_places_with_the_window_there() {
         // The owner: "we should be able to drag drop apps to permute them". The editor dropped
-        // on the browser's zone: the two trade places; each zone keeps its place and size, and
-        // its name and colour go with the window, as a tile moved in a mosaic.
+        // on the browser's zone: the two trade places; each zone keeps its place, size and
+        // number, and its colour goes with the window, as a tile moved in a mosaic.
         let units = [
             unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
             unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
@@ -1493,9 +1439,8 @@ mod tests {
                 moved.new_zones[r].area, base.new_zones[r].area,
                 "zone {r} keeps its place"
             );
+            assert_eq!(moved.new_zones[r].name, base.new_zones[r].name, "and its number");
         }
-        assert_eq!(moved.new_zones[browser].name, "Code");
-        assert_eq!(moved.new_zones[code].name, "Browser");
         assert_eq!(moved.new_zones[browser].color, base.new_zones[code].color);
         assert_eq!(moved.new_zones[code].color, base.new_zones[browser].color);
         assert_eq!(moved.tasks, base.tasks);
@@ -1532,8 +1477,12 @@ mod tests {
         assert_eq!(zone_of(&moved, 0), empty);
         assert_eq!(zone_of(&moved, 1), used[1]);
         assert_eq!(zone_of(&moved, 2), used[2]);
-        assert_eq!(moved.new_zones[empty].name, "Code");
-        assert_eq!(moved.new_zones[used[0]].name, "Zone");
+        for r in 0..4 {
+            assert_eq!(
+                moved.new_zones[r].name, base.new_zones[r].name,
+                "zone {r} keeps its number"
+            );
+        }
         let mut colors: Vec<usize> = moved.new_zones.iter().map(|z| z.color).collect();
         colors.sort_unstable();
         assert_eq!(colors, vec![0, 1, 2, 3], "every zone a colour of its own");
@@ -1541,10 +1490,9 @@ mod tests {
     }
 
     #[test]
-    fn windows_of_one_app_keep_their_own_zone_names_when_moved() {
-        // Two browser windows in halves, "Browser" and "Browser 2": the first dropped on the
-        // second, each keeps its zone's name as it keeps its colour (job 0132: the names stayed
-        // with the places, so "Browser 2" went to the window that was "Browser").
+    fn windows_of_one_app_keep_their_colours_and_zones_their_numbers_when_moved() {
+        // Two browser windows in halves, 1 and 2: the first dropped on the second, each keeps
+        // its colour (job 0132: they went with the places) and each half its number.
         let units = [
             unit("chrome.exe", "Google Chrome", Rect::new(0, 0, 1000, 1000)),
             unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
@@ -1555,7 +1503,10 @@ mod tests {
         };
         let base = plan_with(&units, &[], &[WORK], Some(halves));
         let (a, b) = (zone_of(&base, 0), zone_of(&base, 1));
-        assert_ne!(base.new_zones[a].name, base.new_zones[b].name);
+        assert_eq!(
+            (base.new_zones[a].name.as_str(), base.new_zones[b].name.as_str()),
+            ("1", "2")
+        );
         let moved = plan_moved(
             &units,
             &[],
@@ -1569,12 +1520,12 @@ mod tests {
         );
         assert_eq!((zone_of(&moved, 0), zone_of(&moved, 1)), (b, a));
         for (now, was) in [(b, a), (a, b)] {
-            assert_eq!(moved.new_zones[now].name, base.new_zones[was].name);
+            assert_eq!(moved.new_zones[now].name, base.new_zones[now].name);
             assert_eq!(moved.new_zones[now].color, base.new_zones[was].color);
         }
 
-        // Quarters for three of them, one quarter empty: the first dropped there keeps its name,
-        // and the quarter it left is the empty one's.
+        // Quarters for three of them, one quarter empty: the first dropped there takes its
+        // colour along; every quarter keeps its number.
         let three = [
             units[0].clone(),
             units[1].clone(),
@@ -1598,11 +1549,9 @@ mod tests {
                 zone: empty,
             }],
         );
-        assert_eq!(moved.new_zones[empty].name, base.new_zones[used[0]].name);
-        assert_eq!(moved.new_zones[used[0]].name, base.new_zones[empty].name);
-        for &r in &used[1..] {
-            assert_eq!(moved.new_zones[r].name, base.new_zones[r].name);
-        }
+        assert_eq!(moved.new_zones[empty].color, base.new_zones[used[0]].color);
+        let names: Vec<&str> = moved.new_zones.iter().map(|z| z.name.as_str()).collect();
+        assert_eq!(names, ["1", "2", "3", "4"], "quarters numbered row by row");
     }
 
     #[test]

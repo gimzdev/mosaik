@@ -92,9 +92,9 @@ fn prepare(roaming: &Path) -> Result<Value, String> {
             layout: Layout {
                 monitors: vec![topology.primary().to_ref()],
                 zones: vec![
-                    zone("z1", "Code", ZoneColor::Lapis, [0.0, 0.0, 0.5, 1.0])?,
-                    zone("z2", "Browser", ZoneColor::Verdigris, [0.5, 0.0, 1.0, 0.5])?,
-                    zone("z3", "Notes", ZoneColor::Saffron, [0.5, 0.5, 1.0, 1.0])?,
+                    zone("z1", "1", ZoneColor::Lapis, [0.0, 0.0, 0.5, 1.0])?,
+                    zone("z2", "2", ZoneColor::Verdigris, [0.5, 0.0, 1.0, 0.5])?,
+                    zone("z3", "3", ZoneColor::Saffron, [0.5, 0.5, 1.0, 1.0])?,
                 ],
                 slots: Vec::new(),
                 tab_groups: Vec::new(),

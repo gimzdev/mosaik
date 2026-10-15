@@ -19,7 +19,7 @@ use crate::window::WindowFacts;
 use crate::workspace::{app_match, free_place, next_id};
 use crate::zone::{FrameStyle, Zone, ZoneColor, ZoneId};
 
-/// The longest workspace or zone name, in characters.
+/// The longest workspace name, in characters.
 pub const MAX_NAME: usize = 60;
 /// The most zones on one monitor: more would be too small to drop a window into.
 pub const MAX_ZONES_PER_MONITOR: usize = 16;
@@ -31,6 +31,9 @@ pub const MIN_ZONE: f64 = 0.05;
 pub struct ZoneEdit {
     /// The zone's id; `None` for a zone made in the editor.
     pub id: Option<ZoneId>,
+    /// Its number in reading order, as shown. What the editor sends back is not kept: zones are
+    /// numbered by place when saved.
+    #[serde(default)]
     pub name: String,
     pub color: ZoneColor,
     /// The monitor it is on, one of those connected now.
@@ -46,10 +49,6 @@ pub enum EditError {
     EmptyName,
     #[error("Names are {MAX_NAME} characters at most.")]
     LongName,
-    #[error("Every zone needs a name.")]
-    UnnamedZone,
-    #[error("Zone names are {MAX_NAME} characters at most: \u{201c}{0}\u{2026}\u{201d} is longer.")]
-    LongZoneName(String),
     #[error("Another workspace is called \u{201c}{0}\u{201d}.")]
     NameTaken(String),
     #[error("A zone is on a monitor that is not connected any more. Open the editor again.")]
@@ -58,7 +57,7 @@ pub enum EditError {
     UnknownZone,
     #[error("The same zone was sent twice. Open the editor again.")]
     DuplicateZone,
-    #[error("Zone \u{201c}{0}\u{201d} is too small: zones are at least a twentieth of the screen each way.")]
+    #[error("Zone {0} is too small: zones are at least a twentieth of the screen each way.")]
     TooSmall(String),
     #[error("A monitor has more than {MAX_ZONES_PER_MONITOR} zones.")]
     TooManyZones,
@@ -68,7 +67,7 @@ pub enum EditError {
     GoneZone,
 }
 
-/// Checks a workspace or zone name, returning it trimmed.
+/// Checks a workspace name, returning it trimmed.
 pub fn checked_name(name: &str) -> Result<String, EditError> {
     let name = name.trim();
     if name.is_empty() {
@@ -78,14 +77,6 @@ pub fn checked_name(name: &str) -> Result<String, EditError> {
         return Err(EditError::LongName);
     }
     Ok(name.to_owned())
-}
-
-/// Checks a zone's name; the problem says which zone.
-fn zone_name(name: &str) -> Result<String, EditError> {
-    checked_name(name).map_err(|e| match e {
-        EditError::EmptyName => EditError::UnnamedZone,
-        _ => EditError::LongZoneName(name.trim().chars().take(20).collect()),
-    })
 }
 
 /// A workspace's zones on the monitors connected now.
@@ -121,8 +112,8 @@ pub fn revision(ws: &Workspace, topology: &Topology) -> String {
     )
 }
 
-/// The workspace with the editor's zones. A window or tab group in a zone that was removed
-/// keeps the place it had on screen, as a place of its own.
+/// The workspace with the editor's zones, numbered in reading order. A window or tab group in a
+/// zone that was removed keeps the place it had on screen, as a place of its own.
 pub fn apply_zones(
     ws: &Workspace,
     edits: &[ZoneEdit],
@@ -137,6 +128,7 @@ pub fn apply_zones(
     let layout = &mut out.layout;
     let mut taken: HashSet<String> = layout.zones.iter().map(|z| z.id.0.clone()).collect();
     let mut sent: HashSet<&ZoneId> = HashSet::new();
+    let mut edited: HashSet<ZoneId> = HashSet::new();
     // Zones the editor did not show stay as they are.
     let mut zones: Vec<Zone> = layout
         .zones
@@ -146,10 +138,6 @@ pub fn apply_zones(
         .collect();
     for e in edits {
         let monitor = topology.get(&e.monitor).ok_or(EditError::UnknownMonitor)?;
-        let name = zone_name(&e.name)?;
-        if e.area.width() < MIN_ZONE - 1e-9 || e.area.height() < MIN_ZONE - 1e-9 {
-            return Err(EditError::TooSmall(name));
-        }
         let (id, kept_monitor) = match &e.id {
             Some(id) => {
                 let shown = shown_on.get(id).ok_or(EditError::UnknownZone)?;
@@ -168,9 +156,10 @@ pub fn apply_zones(
             }
         };
         let monitor = kept_monitor.unwrap_or_else(|| layout.monitor_index(monitor, topology));
+        edited.insert(id.clone());
         zones.push(Zone {
             id,
-            name,
+            name: String::new(),
             color: e.color,
             monitor,
             area: e.area,
@@ -189,6 +178,13 @@ pub fn apply_zones(
     let kept: HashSet<ZoneId> = zones.iter().map(|z| z.id.clone()).collect();
     free_places(&mut out.layout, ws, |z| !kept.contains(z), topology, style);
     out.layout.zones = zones;
+    out.layout.number_zones();
+    // A zone made too small is named by its number, as the editor shows it.
+    if let Some(small) = out.layout.zones.iter().find(|z| {
+        edited.contains(&z.id) && (z.area.width() < MIN_ZONE - 1e-9 || z.area.height() < MIN_ZONE - 1e-9)
+    }) {
+        return Err(EditError::TooSmall(small.name.clone()));
+    }
     Ok(out)
 }
 
@@ -198,6 +194,7 @@ pub fn without_zones(ws: &Workspace, gone: &[ZoneId], topology: &Topology, style
     let mut out = ws.clone();
     free_places(&mut out.layout, ws, |z| gone.contains(z), topology, style);
     out.layout.zones.retain(|z| !gone.contains(&z.id));
+    out.layout.number_zones();
     out
 }
 
@@ -353,7 +350,7 @@ mod tests {
         let monitors: Vec<_> = t.monitors().iter().map(Monitor::to_ref).collect();
         let zone = |id: &str, monitor: usize, area: RatioRect| Zone {
             id: ZoneId::new(id),
-            name: id.to_uppercase(),
+            name: id.trim_start_matches('z').to_owned(),
             color: ZoneColor::Lapis,
             monitor,
             area,
@@ -432,8 +429,22 @@ mod tests {
         let out = apply_zones(&ws, &zones, &t, FrameStyle::default()).unwrap();
         assert_eq!(out.layout.problems(), vec![]);
         assert_eq!(out.layout.zones.len(), 3);
-        let new = out.layout.zones.iter().find(|z| z.name == "Notes").unwrap();
+        let new = out
+            .layout
+            .zones
+            .iter()
+            .find(|z| z.color == ZoneColor::Saffron)
+            .unwrap();
         assert_eq!(new.id, ZoneId::new("z4"), "a new id, not one just removed");
+        // Numbered in reading order whatever the editor called it: the whole left monitor is 1;
+        // on the right one, the zone kept and the new one start at its top left, kept first.
+        let names: Vec<(&str, &str)> = out
+            .layout
+            .zones
+            .iter()
+            .map(|z| (z.id.0.as_str(), z.name.as_str()))
+            .collect();
+        assert_eq!(names, [("z1", "1"), ("z3", "2"), ("z4", "3")]);
         // The tab group that sat in z2 keeps its place there.
         assert!(matches!(
             out.layout.tab_groups[0].place,
@@ -458,6 +469,7 @@ mod tests {
             3,
             "every zone shows, on the monitor standing in for its own"
         );
+        // A name sent back is not kept: zones are numbered by place.
         shown[0].name = "Code".into();
         let out = apply_zones(&ws, &shown, &one, FrameStyle::default()).unwrap();
         assert_eq!(out.layout.problems(), vec![]);
@@ -475,7 +487,7 @@ mod tests {
                 .find(|z| z.id == ZoneId::new("z1"))
                 .unwrap()
                 .name,
-            "Code"
+            "1"
         );
     }
 
@@ -483,12 +495,6 @@ mod tests {
     fn bad_edits_are_refused_with_a_reason() {
         let t = fixtures::single_1080p_100();
         let ws = workspace(&fixtures::uhd_200_plus_1080p_100());
-        let mut zones = zones_for_editor(&ws, &t);
-        zones[0].name = "   ".into();
-        assert_eq!(
-            apply_zones(&ws, &zones, &t, FrameStyle::default()),
-            Err(EditError::UnnamedZone)
-        );
         let mut zones = zones_for_editor(&ws, &t);
         zones[0].area = ratio(0.0, 0.0, 0.01, 1.0);
         assert!(matches!(
@@ -510,7 +516,7 @@ mod tests {
         let many: Vec<ZoneEdit> = (0..17)
             .map(|i| ZoneEdit {
                 id: None,
-                name: format!("Z{i}"),
+                name: (i + 1).to_string(),
                 color: ZoneColor::Slate,
                 monitor: t.monitors()[0].id.clone(),
                 area: RatioRect::FULL,
@@ -632,7 +638,7 @@ mod tests {
         ws.layout.zones = (0..20u32)
             .map(|i| Zone {
                 id: ZoneId::new(format!("z{}", i + 1)),
-                name: format!("Z{i}"),
+                name: (i + 1).to_string(),
                 color: ZoneColor::Slate,
                 monitor: usize::from(i >= 10),
                 area: ratio(f64::from(i % 10) / 10.0, 0.0, f64::from(i % 10 + 1) / 10.0, 1.0),
@@ -662,24 +668,32 @@ mod tests {
     }
 
     #[test]
-    fn zone_name_problems_say_which_zone() {
+    fn zones_are_numbered_by_place_and_a_small_one_is_named_by_its_number() {
+        // The owner: zone names "should be 1 2 3 4 5 6". The right half moved to the top left
+        // and made a quarter: it reads first now, so it is 1 and the left half 2, whatever the
+        // editor sent; made too thin, the problem names it by that number.
         let t = fixtures::uhd_200_plus_1080p_100();
         let ws = workspace(&t);
         let mut zones = zones_for_editor(&ws, &t);
-        zones[1].name = "x".repeat(61);
+        let names: Vec<&str> = zones.iter().map(|z| z.name.as_str()).collect();
+        assert_eq!(names, ["1", "2", "3"], "the editor shows the numbers");
+        zones[1].area = ratio(0.0, 0.0, 0.5, 0.5);
+        zones[1].name = "Browser".into();
+        zones[0].area = ratio(0.0, 0.5, 0.5, 1.0);
+        let out = apply_zones(&ws, &zones, &t, FrameStyle::default()).unwrap();
+        let names: Vec<(&str, &str)> = out
+            .layout
+            .zones
+            .iter()
+            .map(|z| (z.id.0.as_str(), z.name.as_str()))
+            .collect();
+        assert_eq!(names, [("z1", "2"), ("z2", "1"), ("z3", "3")]);
+        zones[1].area = ratio(0.0, 0.0, 0.01, 0.5);
         assert_eq!(
             apply_zones(&ws, &zones, &t, FrameStyle::default())
                 .unwrap_err()
                 .to_string(),
-            format!(
-                "Zone names are {MAX_NAME} characters at most: \u{201c}{}\u{2026}\u{201d} is longer.",
-                "x".repeat(20)
-            )
-        );
-        zones[1].name = " ".into();
-        assert_eq!(
-            apply_zones(&ws, &zones, &t, FrameStyle::default()),
-            Err(EditError::UnnamedZone)
+            "Zone 1 is too small: zones are at least a twentieth of the screen each way."
         );
     }
 

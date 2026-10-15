@@ -407,7 +407,7 @@
       "zones": [
         {
           "color": "lapis",
-          "name": "Code",
+          "name": "1",
           "rect": {
             "bottom": 1032,
             "left": 0,
@@ -417,7 +417,7 @@
         },
         {
           "color": "verdigris",
-          "name": "Browser",
+          "name": "2",
           "rect": {
             "bottom": 1032,
             "left": 960,

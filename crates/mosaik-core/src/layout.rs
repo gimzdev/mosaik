@@ -168,9 +168,37 @@ fn spaced(name: &str) -> String {
     out
 }
 
+/// Which of two zones, each a monitor and an area on it, is read first: monitor by monitor, then
+/// row by row from the top, then from the left. A zone whose top is within 2% of another's is
+/// in its row, so zones a few pixels apart still read across.
+pub fn reading_order(a: (usize, RatioRect), b: (usize, RatioRect)) -> std::cmp::Ordering {
+    a.0.cmp(&b.0).then_with(|| {
+        if (a.1.top() - b.1.top()).abs() < 0.02 {
+            a.1.left().total_cmp(&b.1.left())
+        } else {
+            a.1.top().total_cmp(&b.1.top())
+        }
+    })
+}
+
 impl Layout {
     pub fn zone(&self, id: &ZoneId) -> Option<&Zone> {
         self.zones.iter().find(|z| &z.id == id)
+    }
+
+    /// Names the zones 1, 2, 3... in reading order: monitor by monitor, then row by row from the
+    /// top, then from the left (a zone whose top is within 2% of another's is in its row). A
+    /// zone's name says where it is, never what it holds (the owner: "names like assistant code
+    /// zone etc are absolute bullshit they should be 1 2 3 4 5 6"). Its id and colour stay.
+    pub fn number_zones(&mut self) {
+        let mut order: Vec<usize> = (0..self.zones.len()).collect();
+        order.sort_by(|&a, &b| {
+            let (za, zb) = (&self.zones[a], &self.zones[b]);
+            reading_order((za.monitor, za.area), (zb.monitor, zb.area))
+        });
+        for (n, i) in order.into_iter().enumerate() {
+            self.zones[i].name = (n + 1).to_string();
+        }
     }
 
     pub fn slot(&self, id: &SlotId) -> Option<&Slot> {
@@ -588,6 +616,37 @@ mod tests {
                 },
             }],
         }
+    }
+
+    #[test]
+    fn zones_are_numbered_in_reading_order() {
+        // Quarters given bottom-right first, a zone on the second monitor among them: numbered
+        // monitor by monitor, row by row, left to right, whatever they were called.
+        let zone = |id: &str, name: &str, monitor: usize, l: f64, t: f64, r: f64, b: f64| Zone {
+            id: ZoneId::new(id),
+            name: name.into(),
+            color: ZoneColor::Lapis,
+            monitor,
+            area: RatioRect::new(l, t, r, b).unwrap(),
+        };
+        let mut l = layout();
+        l.zones = vec![
+            zone("d", "Assistant", 0, 0.5, 0.5, 1.0, 1.0),
+            zone("e", "Zone", 1, 0.0, 0.0, 1.0, 1.0),
+            zone("c", "Terminal", 0, 0.0, 0.5, 0.5, 1.0),
+            zone("b", "Browser", 0, 0.5, 0.01, 1.0, 0.5),
+            zone("a", "Code", 0, 0.0, 0.0, 0.5, 0.5),
+        ];
+        l.number_zones();
+        let named: Vec<(&str, &str)> = l
+            .zones
+            .iter()
+            .map(|z| (z.id.0.as_str(), z.name.as_str()))
+            .collect();
+        assert_eq!(
+            named,
+            vec![("d", "4"), ("e", "5"), ("c", "3"), ("b", "2"), ("a", "1")]
+        );
     }
 
     #[test]

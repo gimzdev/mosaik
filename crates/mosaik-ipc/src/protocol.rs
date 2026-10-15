@@ -1104,12 +1104,12 @@ mod wire {
                 work_area: Rect::new(0, 0, 1920, 1032),
                 zones: vec![
                     PreviewZone {
-                        name: "Code".into(),
+                        name: "1".into(),
                         color: ZoneColor::Lapis,
                         rect: Rect::new(0, 0, 960, 1032),
                     },
                     PreviewZone {
-                        name: "Browser".into(),
+                        name: "2".into(),
                         color: ZoneColor::Verdigris,
                         rect: Rect::new(960, 0, 1920, 1032),
                     },

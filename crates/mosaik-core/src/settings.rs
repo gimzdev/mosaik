@@ -188,7 +188,8 @@ impl FrameSettings {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SwitchSettings {
-    /// Minimise windows of the previous workspace that the new one does not use.
+    /// Minimise the windows the workspace does not use on the monitors it is on, and those of
+    /// the workspace left wherever they are.
     pub minimize_others: bool,
     /// Start apps the workspace needs that are not open.
     pub launch_missing: bool,

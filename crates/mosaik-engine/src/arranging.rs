@@ -258,6 +258,8 @@ impl Engine {
             });
             made.push(Some(id));
         }
+        // Numbered with the zones kept, in reading order.
+        ws.layout.number_zones();
         let zone_id = |i: usize| made.get(i).cloned().flatten();
 
         // Each window's slot: the one it fills, or a new one for a window going into a zone (a
