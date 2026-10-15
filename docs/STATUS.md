@@ -1223,6 +1223,41 @@ the site's section "One desktop, many kinds of work." gone, whole (ADR 0024).
   line 3, the rest the same as the repository's; Mosaïk 1.0.2 in the tray on his own data
   (protocol 8, its watchdog, Win+Alt+Space registered).
 
+### Asked on 2026-10-15 (01:33 to 01:41), in 1.0.2
+
+The owner, with two screenshots of a workspace's page and of "Coding" opened from Home: zone
+names "like assistant code zone etc are absolute bullshit they should be 1 2 3 4 5 6"; the zone
+list in each app row read as a list of apps, with "Zone" among them and "A tab" on some rows;
+"show all dots and the selected one is highlighted", "the remove should be a cross", "for all
+apps"; "show visually the zones same as homepage for that workspace specifically with
+arrangements aswell"; on Home, "we shouldnt open the workspace when clicking on it it should show
+it in the anim as preview and show an open button"; opening "Coding" left a game launcher and the
+Riot client on top (his log: moved=3 minimized=0); and "the tab thing is still fucked up also when
+switching a multi tab window from a zone to another the tab list disappears and we cannot drag
+only 1 tab it drags the whole window".
+
+- **Zones numbered by place** (5c28852, ADR 0028): `Layout::number_zones` everywhere zones are
+  made or change, the editor without a name field, files renumbered once on load (format 1 kept).
+  Tests first: 17 core tests asserting numbers failed on the code before (run with the new tests
+  on the old sources) and pass; the file test failed before and passes. Core 253.
+- **Opening a workspace minimises the other windows on its monitors** (5c28852): the switch test
+  with a launcher and the Riot client beside the workspace on its monitor, a window on its other
+  monitor and one in full screen failed before (only the workspace left's window minimised) and
+  passes.
+- **Tab groups below a band** (a14bce2, ADR 0027): the core style test failed before and passes;
+  the band-by-reading machinery and the strip's title-bar place removed (core 250 after their
+  three tests went with them); the strip put back above a group dropped elsewhere.
+- **A workspace shown before it opens, its page's picture and dot rows** (a14bce2, protocol 9,
+  `preview_workspace`): interface tests 98, Playwright 28 with axe in dark, light and high
+  contrast (both run here, against the stand-in engine); pictures of Home with a workspace
+  picked, of a workspace's page and of the zone editor checked by eye.
+- **Site and notes** (3cc4db2): the site's desktops wear numbers (1.11.2), the changelog and
+  What's new say what changed; the publish test passes.
+- **On the owner's PC: not yet run.** The probes that check all of it on Windows (job 0151:
+  `workspace --drag`, with tags in title bars and above windows; smart's arrange part; the UI
+  tour) and the build that ships it (job 0150, brought to these commits) wait for the runner,
+  stopped since 2026-10-14 16:10 UTC.
+
 ## Owner decisions
 
 - 2026-10-11: the Patreon link is https://www.patreon.com/gimzdev (About and the tray menu only).
