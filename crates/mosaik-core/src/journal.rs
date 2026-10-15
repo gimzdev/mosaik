@@ -35,6 +35,9 @@ pub struct HiddenWindow {
     pub title: String,
 }
 
+/// The journal's file, in Mosaïk's data folder: the watchdog reads it, the engine writes it.
+pub const FILE: &str = "hidden-windows.json";
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Journal {
     pub version: u32,

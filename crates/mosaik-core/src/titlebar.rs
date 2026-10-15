@@ -5,13 +5,13 @@
 //! whether Windows draws that title bar (a classic one) or the app does (browsers, editors,
 //! terminals, Office). Mosaïk asks the same question along one row of the title bar ([`scan`]) and
 //! draws the tag in such a stretch ([`TitleRoom::spot`]), so the window keeps its whole zone. A
-//! tag with less room than its name needs is cut short, then to the zone's initial
-//! ([`crate::zone::tag_cut`]); a window with no stretch even for that wears no tag (its ring
-//! alone, with rings on), at the top of its zone like its neighbours. A tab group's strip is never
-//! in a title bar: the group sits below a band for it (ADR 0027).
+//! tag with less room than it needs is drawn compact ([`crate::zone::tag_cut`]); a window with no
+//! stretch even for that wears no tag (its ring alone, with rings on), at the top of its zone
+//! like its neighbours. A tab group's strip is never in a title bar: the group sits below a band
+//! for it (ADR 0027).
 
 use crate::geometry::{Point, Rect, scale_for_dpi};
-use crate::zone::{CHIP_HEIGHT, TAG_INITIAL};
+use crate::zone::{CHIP_HEIGHT, compact_width};
 
 /// What a window answers for a point of its title bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,12 +74,12 @@ pub struct Fit {
 }
 
 impl Fit {
-    /// A zone's tag, `natural` pixels wide with its whole name, on a monitor at `dpi`.
+    /// A zone's tag, `natural` pixels wide whole, on a monitor at `dpi`.
     pub fn tag(natural: i32, dpi: u32) -> Self {
         let px = |v: i32| scale_for_dpi(v, dpi);
         Self {
             need: natural,
-            least: px(TAG_INITIAL),
+            least: compact_width(natural, dpi),
             margin: px(MARGIN),
             height: px(CHIP_HEIGHT),
         }
@@ -220,12 +220,21 @@ mod tests {
         let frame = Rect::new(0, 0, 1200, 800);
         let room = scan(frame, 96, bar(&[(8, 120), (700, 1062)], 0, 40)).unwrap();
         assert_eq!(room.runs.len(), 2);
-        let right = room.spot(frame, Fit::tag(90, 96)).unwrap();
+        let right = room.spot(frame, Fit::tag(36, 96)).unwrap();
         assert!(right.left >= 700 && right.right <= 1062, "{right:?}");
-        // Too wide for any stretch: the widest one that has room for the least.
-        let long = room.spot(frame, Fit::tag(900, 96)).unwrap();
-        let (left, right) = room.runs_on(frame)[1];
-        assert_eq!((long.left, long.right), (left + 6, right - 6));
+        // Too narrow everywhere for zone 123's whole tag (43 px): compact, in the widest stretch
+        // with room for that.
+        let room = scan(frame, 96, bar(&[(8, 60), (700, 740)], 0, 40)).unwrap();
+        let runs = room.runs_on(frame);
+        assert_eq!(runs.len(), 2);
+        assert!(runs.iter().all(|(l, r)| r - l - 12 < 43), "{runs:?}");
+        let widest = *runs.iter().max_by_key(|(l, r)| r - l).unwrap();
+        let spot = room.spot(frame, Fit::tag(43, 96)).unwrap();
+        assert_eq!((spot.left, spot.right), (widest.0 + 6, widest.1 - 6));
+        assert_eq!(
+            crate::zone::tag_cut(43, spot.width(), 96),
+            crate::zone::TagCut::Compact(27)
+        );
     }
 
     #[test]
@@ -241,20 +250,20 @@ mod tests {
     }
 
     #[test]
-    fn a_short_stretch_still_has_room_for_the_initial_of_a_tag() {
-        // A browser full of tabs keeps 46 px of caption by its buttons to be grabbed by: no room
-        // for a 90 px name, nor for letters and an ellipsis, but for the zone's initial.
+    fn a_short_stretch_still_has_room_for_a_compact_tag() {
+        // A browser full of tabs keeps 40 px of caption by its buttons to be grabbed by: no room
+        // for zone 12's whole tag (36 px and a margin at each end), but for it compact.
         let frame = Rect::new(0, 0, 1200, 800);
-        let room = scan(frame, 96, bar(&[(1000, 1046)], 0, 40)).unwrap();
-        let spot = room.spot(frame, Fit::tag(90, 96)).unwrap();
-        assert!(spot.left >= 1000 && spot.right <= 1046, "{spot:?}");
+        let room = scan(frame, 96, bar(&[(1000, 1040)], 0, 40)).unwrap();
+        let spot = room.spot(frame, Fit::tag(36, 96)).unwrap();
+        assert!(spot.left >= 1000 && spot.right <= 1040, "{spot:?}");
         assert_eq!(
-            crate::zone::tag_cut(90, spot.width(), 96),
-            crate::zone::TagCut::Initial(24)
+            crate::zone::tag_cut(36, spot.width(), 96),
+            crate::zone::TagCut::Compact(21)
         );
-        // 34 px of caption is too short even for that: the window wears no tag.
-        let room = scan(frame, 96, bar(&[(1000, 1034)], 0, 40)).unwrap();
-        assert_eq!(room.spot(frame, Fit::tag(90, 96)), None);
+        // 30 px of caption is too short even for that: the window wears no tag.
+        let room = scan(frame, 96, bar(&[(1000, 1030)], 0, 40)).unwrap();
+        assert_eq!(room.spot(frame, Fit::tag(36, 96)), None);
     }
 
     #[test]

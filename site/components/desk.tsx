@@ -369,7 +369,7 @@ export function SwitcherArt() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[15px] font-semibold">
                   {w.name}
-                  {i === 0 && <span className="ml-2 text-[12.5px] text-[#8A9BFF]">Open</span>}
+                  {i === 0 && <span className="ml-2 text-[12.5px] text-[#8A9BFF]">On screen</span>}
                 </p>
                 <p className="truncate text-[12.5px] text-[#A0A9B8]">{w.windows.map((x) => APP_WORDS[x.kind]).join(', ')}</p>
               </div>
@@ -379,7 +379,7 @@ export function SwitcherArt() {
         </div>
         <div className="flex items-center gap-5 border-t border-white/10 px-5 py-2.5 text-[12px] text-[#A0A9B8]">
           <span><b className="font-semibold text-[#EDEFEA]">Enter</b> open</span>
-          <span><b className="font-semibold text-[#EDEFEA]">S</b> save current layout</span>
+          <span><b className="font-semibold text-[#EDEFEA]">S</b> save as workspace</span>
           <span><b className="font-semibold text-[#EDEFEA]">Esc</b> close</span>
         </div>
       </div>

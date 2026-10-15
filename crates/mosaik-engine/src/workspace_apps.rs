@@ -170,7 +170,7 @@ impl Engine {
     /// moved there, that is), and tab groups show what they should. `added`, minimised, is shown
     /// again in its place.
     fn place_in(&mut self, zone: &ZoneId, added: Option<WindowHandle>) {
-        let Some(topology) = self.refresh_topology() else {
+        let Some(topology) = self.read_topology() else {
             return;
         };
         let only: HashSet<ZoneId> = HashSet::from([zone.clone()]);
@@ -188,7 +188,7 @@ impl Engine {
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
-        let Some(topology) = self.refresh_topology() else {
+        let Some(topology) = self.read_topology() else {
             return no_monitors();
         };
         let Some(facts) = self

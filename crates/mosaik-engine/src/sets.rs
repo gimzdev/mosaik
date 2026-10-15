@@ -19,30 +19,46 @@ use mosaik_core::workspace::{app_match, same_name, workspace_id};
 use mosaik_ipc::protocol::{AppSetInfo, ErrorCode, Reply};
 use mosaik_win::apps::{self, StartApp};
 use mosaik_win::window;
+use std::ffi::c_void;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
+use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
-use crate::thread::Engine;
+use crate::thread::{Engine, WM_START_APPS};
 
 /// The Start menu is read again after this long.
 const FRESH_FOR: Duration = Duration::from_secs(10 * 60);
 
 type Read = Arc<Mutex<Option<(Instant, Vec<StartApp>)>>>;
 
-/// The apps of the Start menu, read on a thread of their own (the shell can take a moment) and
-/// kept for a while.
-#[derive(Default)]
+/// The apps of the Start menu, read on a thread of their own (the shell can take a moment, 170
+/// ms warm on the owner's PC, more after a restart) and kept for a while.
 pub(crate) struct StartApps {
     read: Read,
     reading: Option<JoinHandle<()>>,
+    /// The engine's window (as a number, for the reading thread), told when a read is done.
+    engine: isize,
+    /// The suggestions were asked for before the first read was done.
+    asked_early: bool,
 }
 
 impl StartApps {
+    pub(crate) fn new(engine: isize) -> Self {
+        Self {
+            read: Read::default(),
+            reading: None,
+            engine,
+            asked_early: false,
+        }
+    }
+
     /// Starts reading the Start menu, unless a read is under way.
     pub(crate) fn refresh(&mut self) {
         if self.reading.as_ref().is_some_and(|r| !r.is_finished()) {
             return;
         }
         let read = Arc::clone(&self.read);
+        let engine = self.engine;
         self.reading = std::thread::Builder::new()
             .name("mosaik-start-apps".into())
             .spawn(move || {
@@ -65,13 +81,23 @@ impl StartApps {
                 if let Ok(mut r) = read.lock() {
                     *r = Some((Instant::now(), list));
                 }
+                // SAFETY: posts to the engine's window; harmless if it has gone.
+                let _ = unsafe {
+                    PostMessageW(
+                        Some(HWND(engine as *mut c_void)),
+                        WM_START_APPS,
+                        WPARAM(0),
+                        LPARAM(0),
+                    )
+                };
             })
             .ok();
     }
 
-    /// The apps of the Start menu: waits for the first read; a list older than [`FRESH_FOR`] is
+    /// The apps of the Start menu as read so far, without waiting: none before the first read is
+    /// done (the interface is told when it is, `read_done`). A list older than [`FRESH_FOR`] is
     /// used while a new read runs.
-    pub(crate) fn get(&mut self) -> Vec<StartApp> {
+    pub(crate) fn now(&mut self) -> Vec<StartApp> {
         let current = self.read.lock().ok().and_then(|r| r.clone());
         match current {
             Some((at, list)) => {
@@ -81,17 +107,30 @@ impl StartApps {
                 list
             }
             None => {
+                self.asked_early = true;
                 self.refresh();
-                if let Some(r) = self.reading.take() {
-                    let _ = r.join();
-                }
-                self.read
-                    .lock()
-                    .ok()
-                    .and_then(|r| r.as_ref().map(|(_, l)| l.clone()))
-                    .unwrap_or_default()
+                Vec::new()
             }
         }
+    }
+
+    /// The apps of the Start menu, waiting for the first read: to open a set, which the user
+    /// can only have been offered once it was done (or asked for by `mosaikctl`).
+    pub(crate) fn waiting(&mut self) -> Vec<StartApp> {
+        if self.read.lock().ok().is_some_and(|r| r.is_none()) {
+            self.refresh();
+            if let Some(r) = self.reading.take() {
+                let _ = r.join();
+            }
+        }
+        self.now()
+    }
+
+    /// A read is done: whether the suggestions were asked for before it, so the interface
+    /// asks again.
+    pub(crate) fn read_done(&mut self) -> bool {
+        let has_list = self.read.lock().ok().is_some_and(|r| r.is_some());
+        has_list && std::mem::take(&mut self.asked_early)
     }
 }
 
@@ -125,10 +164,14 @@ impl Engine {
             .collect()
     }
 
-    fn suggested(&mut self) -> Vec<AppSet> {
-        let installed: Vec<Installed> = self
-            .start_apps
-            .get()
+    /// The sets suggested now; `wait` waits for the Start menu's first read.
+    fn suggested(&mut self, wait: bool) -> Vec<AppSet> {
+        let apps = if wait {
+            self.start_apps.waiting()
+        } else {
+            self.start_apps.now()
+        };
+        let installed: Vec<Installed> = apps
             .into_iter()
             .map(|a| Installed {
                 name: a.name,
@@ -145,7 +188,7 @@ impl Engine {
     }
 
     pub(crate) fn sets_reply(&mut self) -> Reply {
-        let sets = self.suggested();
+        let sets = self.suggested(false);
         Reply::Sets {
             sets: sets
                 .iter()
@@ -167,7 +210,7 @@ impl Engine {
 
     /// The main monitor's topology, or the reply that says it could not be read.
     fn main_topology(&mut self) -> Result<Topology, Reply> {
-        self.refresh_topology().ok_or_else(|| {
+        self.read_topology().ok_or_else(|| {
             error(
                 ErrorCode::Failed,
                 "Mosaïk could not read the monitor layout.",
@@ -204,7 +247,7 @@ impl Engine {
     /// task on the main monitor ("Coding", or "Coding 2" when that name is taken), starting the
     /// apps that are not open.
     pub(crate) fn open_set(&mut self, id: &str) -> Reply {
-        let sets = self.suggested();
+        let sets = self.suggested(true);
         let Some(set) = sets.iter().find(|s| s.task.id() == id.trim()) else {
             return error(
                 ErrorCode::NotFound,

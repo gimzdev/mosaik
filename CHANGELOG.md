@@ -4,8 +4,31 @@
 
 - Click a workspace on Home and the picture shows it as it will open: its apps glide to their
   zones, the apps it will start show where they open, a group of tabs shows its tabs, and the
-  windows it will minimise are named below. Open opens it; a layout, or a second click, goes back
-  to Arrange. Its ⋯ menu still opens it at once.
+  windows it will minimise are named below. Open (or a double-click) opens it; Back, or Esc, goes
+  back to your screen. Its ⋯ menu still opens it at once.
+- Easier to read and to click: larger text, every button on Home and a workspace's page at least
+  40 px, and Ctrl with + or - zooms Mosaïk's window.
+- Home says what it shows ("Nothing moves until you press Arrange", how to swap two windows in the
+  picture, "Undo swaps"). Smart is now Automatic; Halves, Thirds, Main + side, Half + stack and
+  Quarters show with their names, the other five under More layouts. What an action did shows in
+  one place, under the picture.
+- The workspace on screen is marked "On screen" (it read as a button), in Mosaïk's window, the side
+  menu and the switcher. "Save layout" is "Save as workspace"; Arrange says which workspace now
+  opens its way, or the new one it was saved as.
+- A suggested set shows the apps it will start before it starts them: "Start these apps".
+- Settings start with what most people change; where tags go, what hidden tabs do and what Shift
+  does while dragging are under More settings.
+- The side menu ignores a click made as it opens by itself (a browser's scroll bar runs along the
+  same edge). Its Save row says what it does ("Update “Email”", "Save as workspace"), and a save
+  there or in the switcher is confirmed.
+- A zone number with little room shows whole, smaller, never as one digit of a bigger number.
+- Quicker: Mosaïk reads only the windows on screen (23 of 326 on a busy PC), stops waiting as soon
+  as a window has moved or a tab has changed, and Home never waits for the Start menu.
+- A newer Mosaïk taking an older one's place asks it to quit in a way it can (the Store's 1.0.1
+  was left half closed); closed by an installer or `taskkill`, Mosaïk quits properly, every window
+  it hid coming back.
+- Settings edited by hand with a number out of range are mended on start, with a note; a damaged
+  workspace is described in words.
 - Zones are numbered 1, 2, 3 by place, top left first, instead of being named after the apps in
   them ("Code", "Browser 2", "Zone"). Your workspaces' zones are numbered the first time 1.0.2
   starts, once.

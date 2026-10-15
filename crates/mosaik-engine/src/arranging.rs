@@ -12,7 +12,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use mosaik_core::arrange::{Chosen, Goes, Kind, Move, Spot, Unit, plan_moved};
+use mosaik_core::arrange::{Chosen, Goes, KeptZone, Kind, Move, Unit, plan_moved};
 use mosaik_core::editing::without_zones;
 use mosaik_core::geometry::Rect;
 use mosaik_core::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
@@ -131,7 +131,7 @@ impl Engine {
                 None,
             ));
         }
-        let Some(topology) = self.refresh_topology() else {
+        let Some(topology) = self.read_topology() else {
             return Err(error(
                 ErrorCode::Failed,
                 "Mosaïk could not read the monitor layout.",
@@ -156,10 +156,9 @@ impl Engine {
             .position(|m| m.id == topology.primary().id)
             .unwrap_or(0);
         let live = self.active.as_ref().map(|a| a.zones.clone()).unwrap_or_default();
-        let spots: Vec<Spot> = live
+        let spots: Vec<KeptZone> = live
             .iter()
-            .map(|z| Spot {
-                name: z.name.clone(),
+            .map(|z| KeptZone {
                 monitor: monitor_of(z.rect),
             })
             .collect();
@@ -386,7 +385,7 @@ impl Engine {
                 .map(|w| (w.handle, w.frame_rect, w.maximized))
                 .collect(),
         });
-        let (id, name, zones_n) = (p.ws.id.clone(), p.ws.name.clone(), p.ws.layout.zones.len());
+        let (id, name) = (p.ws.id.clone(), p.ws.name.clone());
         match p.index {
             Some(i) => self.file.workspaces[i] = p.ws,
             None => self.file.workspaces.push(p.ws),
@@ -433,32 +432,27 @@ impl Engine {
             preset = p.preset.map(Preset::id),
             "windows arranged"
         );
-        // The windows put in zones; the ones minimised are said after.
+        // In short sentences: what moved, what went to the taskbar, and the workspace that now
+        // opens this way (Arrange keeps its zones in one, so tags, snapping and tabs work).
         let placed_n = p.windows.len().saturating_sub(p.minimize.len());
         let mut message = match p.preset {
             Some(preset) => format!(
-                "Arranged {} in the \u{201c}{}\u{201d} layout",
+                "Arranged {} in {}.",
                 plural(placed_n, "window", "windows"),
                 preset.label()
             ),
-            None => match p.task.and_then(Task::words) {
-                Some(words) => format!("Arranged {} for {words}", plural(placed_n, "window", "windows")),
-                None => format!(
-                    "Arranged {} in {}",
-                    plural(placed_n, "window", "windows"),
-                    plural(zones_n, "zone", "zones")
-                ),
-            },
+            None => format!("Arranged {}.", plural(placed_n, "window", "windows")),
         };
-        if p.index.is_none() {
-            message.push_str(&format!(" of \u{201c}{name}\u{201d}, a new workspace"));
-        }
         match p.minimize.len() {
             0 => {}
-            1 => message.push_str("; 1 window minimized"),
-            n => message.push_str(&format!("; {n} windows minimized")),
+            1 => message.push_str(" 1 window minimized."),
+            n => message.push_str(&format!(" {n} windows minimized.")),
         }
-        message.push('.');
+        if p.index.is_none() {
+            message.push_str(&format!(" Saved as a new workspace, \u{201c}{name}\u{201d}."));
+        } else {
+            message.push_str(&format!(" \u{201c}{name}\u{201d} now opens this way."));
+        }
         Reply::Done { message }
     }
 
@@ -577,7 +571,7 @@ impl Engine {
         // Every window back where it was, the ones minimised too.
         self.hiding.resume();
         self.sync_tabs();
-        let topology = self.refresh_topology();
+        let topology = self.read_topology();
         let moves: Vec<(WindowHandle, To)> = undo
             .windows
             .iter()

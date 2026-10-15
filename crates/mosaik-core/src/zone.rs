@@ -1,9 +1,10 @@
-//! Zones: named, coloured areas of a monitor that belong to a workspace.
+//! Zones: numbered, coloured areas of a monitor that belong to a workspace.
 //!
 //! A zone is stored as a fraction of its monitor's work area, so it keeps its shape when the
 //! resolution, the scale or the taskbar changes. The window fills its zone, edge to edge with its
-//! neighbours, and wears the zone's tag in its own title bar, or sits below a band that carries
-//! the tag when tags are set to go above windows.
+//! neighbours, and wears the zone's tag (its number) in its own title bar, or sits below a band
+//! that carries the tag when tags are set to go above windows. A tab group sits below a band
+//! with its strip either way (ADR 0027).
 
 use serde::{Deserialize, Serialize};
 
@@ -101,9 +102,9 @@ pub struct FrameStyle {
     pub tag_band: i32,
     /// Width of the coloured ring around the window, when rings are shown.
     pub border: i32,
-    /// Tags and tab strips go in each window's own title bar (`crate::titlebar`): windows fill
-    /// their zones, tab groups too. Set from the settings for the session; not saved with the
-    /// style.
+    /// Tags go in each window's own title bar (`crate::titlebar`): windows alone fill their
+    /// zones; a tab group sits below a band for its strip (`for_tabs`). Set from the settings
+    /// for the session; not saved with the style.
     #[serde(skip)]
     pub title_bars: bool,
 }
@@ -122,22 +123,21 @@ impl Default for FrameStyle {
 /// The height of a tag and of a tab's chip at 100%.
 pub const CHIP_HEIGHT: i32 = 21;
 
-/// The width of a tag cut down to its zone's initial, at 100%: the least room a tag is drawn in.
-pub const TAG_INITIAL: i32 = 24;
+/// The room at each end of a tag's number, at 100%.
+pub const TAG_PAD: i32 = 11;
 
-/// The least room, at 100%, for a tag's name cut short with an ellipsis ("Res…"); with less, the
-/// initial alone.
-pub const TAG_TRIMMED: i32 = 48;
+/// The room at each end of a tag's number drawn compact, at 100%.
+pub const TAG_PAD_COMPACT: i32 = 3;
 
-/// How a zone's tag fits the room it has.
+/// How a zone's tag fits the room it has. A tag shows its zone's number, all of it or nothing:
+/// zone 12 cut to "1" would name another zone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TagCut {
-    /// The whole name, this wide.
+    /// With room at each end, this wide.
     Whole(i32),
-    /// The name cut short with an ellipsis, this wide.
-    Trimmed(i32),
-    /// The zone's initial alone, this wide.
-    Initial(i32),
+    /// Without that room, in a chip at least as wide as it is tall, this wide: a title bar
+    /// full of a browser's tabs keeps a short stretch to be grabbed by.
+    Compact(i32),
     /// No room: no tag.
     Hidden,
 }
@@ -146,24 +146,31 @@ impl TagCut {
     /// How wide the tag is drawn (0 when it is not).
     pub const fn width(self) -> i32 {
         match self {
-            TagCut::Whole(w) | TagCut::Trimmed(w) | TagCut::Initial(w) => w,
+            TagCut::Whole(w) | TagCut::Compact(w) => w,
             TagCut::Hidden => 0,
         }
     }
 }
 
-/// How a tag whose whole name is `natural` pixels wide fits in `room` pixels, on a monitor at
-/// `dpi`: whole, cut short, cut to its initial, or not at all.
-pub fn tag_cut(natural: i32, room: i32, dpi: u32) -> TagCut {
+/// How wide a tag `natural` pixels wide whole is drawn compact, on a monitor at `dpi`: the least
+/// room it is drawn in.
+pub fn compact_width(natural: i32, dpi: u32) -> i32 {
     let px = |v: i32| scale_for_dpi(v, dpi);
+    (natural - 2 * px(TAG_PAD) + 2 * px(TAG_PAD_COMPACT)).max(px(CHIP_HEIGHT))
+}
+
+/// How a tag `natural` pixels wide whole fits in `room` pixels, on a monitor at `dpi`: whole,
+/// compact, or not at all.
+pub fn tag_cut(natural: i32, room: i32, dpi: u32) -> TagCut {
     if natural <= 0 {
-        TagCut::Hidden
-    } else if natural <= room {
-        TagCut::Whole(natural)
-    } else if room >= px(TAG_TRIMMED) {
-        TagCut::Trimmed(room)
-    } else if room >= px(TAG_INITIAL) {
-        TagCut::Initial(px(TAG_INITIAL))
+        return TagCut::Hidden;
+    }
+    if natural <= room {
+        return TagCut::Whole(natural);
+    }
+    let compact = compact_width(natural, dpi);
+    if compact <= room {
+        TagCut::Compact(compact)
     } else {
         TagCut::Hidden
     }
@@ -312,26 +319,23 @@ mod tests {
     }
 
     #[test]
-    fn a_tag_with_little_room_is_cut_to_its_initial_then_to_nothing() {
-        // "Research", 81 px wide whole, in title bars with less and less room.
-        assert_eq!(tag_cut(81, 300, 96), TagCut::Whole(81));
-        assert_eq!(tag_cut(81, 81, 96), TagCut::Whole(81));
-        // The name cut short ("Res…"), as wide as the room.
-        assert_eq!(tag_cut(81, 60, 96), TagCut::Trimmed(60));
-        assert_eq!(tag_cut(81, 48, 96), TagCut::Trimmed(48));
-        // Too little for letters and an ellipsis: the initial alone, in a chip of its own width
-        // (a browser full of tabs keeps a short stretch to be grabbed by).
-        assert_eq!(tag_cut(81, 47, 96), TagCut::Initial(24));
-        assert_eq!(tag_cut(81, 24, 96), TagCut::Initial(24));
+    fn a_tag_with_little_room_shows_its_whole_number_compact_then_nothing() {
+        // Zone 12's tag, 36 px wide whole, in title bars with less and less room.
+        assert_eq!(tag_cut(36, 300, 96), TagCut::Whole(36));
+        assert_eq!(tag_cut(36, 36, 96), TagCut::Whole(36));
+        // Less: the whole number without the room at its ends, in a chip at least as wide as it
+        // is tall (a browser full of tabs keeps a short stretch to be grabbed by). Never its
+        // first digit alone, as tags cut to a name's initial were: "1" names another zone.
+        assert_eq!(tag_cut(36, 35, 96), TagCut::Compact(21));
+        assert_eq!(tag_cut(36, 21, 96), TagCut::Compact(21));
+        // A wider number keeps all its digits: zone 123, 43 px wide whole, 27 compact.
+        assert_eq!(tag_cut(43, 30, 96), TagCut::Compact(27));
         // Less than that: no tag.
-        assert_eq!(tag_cut(81, 23, 96), TagCut::Hidden);
-        assert_eq!(tag_cut(81, 0, 96), TagCut::Hidden);
-        // A short name fits where its initial would.
-        assert_eq!(tag_cut(30, 30, 96), TagCut::Whole(30));
+        assert_eq!(tag_cut(36, 20, 96), TagCut::Hidden);
+        assert_eq!(tag_cut(36, 0, 96), TagCut::Hidden);
         // Everything scales with the monitor.
-        assert_eq!(tag_cut(162, 90, 192), TagCut::Initial(48));
-        assert_eq!(tag_cut(162, 96, 192), TagCut::Trimmed(96));
-        assert_eq!(tag_cut(162, 47, 192), TagCut::Hidden);
+        assert_eq!(tag_cut(72, 50, 192), TagCut::Compact(42));
+        assert_eq!(tag_cut(72, 41, 192), TagCut::Hidden);
         // Nothing measured yet (no canvas): nothing to draw.
         assert_eq!(tag_cut(0, 300, 96), TagCut::Hidden);
     }

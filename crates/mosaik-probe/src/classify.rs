@@ -11,14 +11,19 @@ use serde_json::{Value, json};
 use crate::report::stats;
 
 pub fn run() -> Result<Value, String> {
+    // A fresh scanner each time measures the cold cost, including process lookups: the scan the
+    // engine makes (the windows Windows shows), and one of every top-level window, as Mosaïk
+    // made before 1.0.2 and as this probe reads them all to count them.
     let mut timings = Vec::new();
+    let mut timings_all = Vec::new();
     let mut facts = Vec::new();
     for i in 0..10 {
-        // A fresh scanner each time measures the cold cost, including process lookups.
-        let mut scanner = Scanner::new();
         let start = Instant::now();
-        let f = scanner.scan();
+        let _ = Scanner::new().scan();
         timings.push(start.elapsed().as_secs_f64() * 1000.0);
+        let start = Instant::now();
+        let f = Scanner::new().scan_all();
+        timings_all.push(start.elapsed().as_secs_f64() * 1000.0);
         if i == 0 {
             facts = f;
         }
@@ -51,9 +56,10 @@ pub fn run() -> Result<Value, String> {
         }
     }
     println!(
-        "{} top-level windows; full scan {:.1} ms (median of 10)",
+        "{} top-level windows; the engine's scan {:.1} ms, every window {:.1} ms (medians of 10)",
         facts.len(),
-        stats(&timings)["p50"].as_f64().unwrap_or(0.0)
+        stats(&timings)["p50"].as_f64().unwrap_or(0.0),
+        stats(&timings_all)["p50"].as_f64().unwrap_or(0.0)
     );
     for (k, n) in &counts {
         println!("  {k:<28} {n}");
@@ -67,5 +73,11 @@ pub fn run() -> Result<Value, String> {
             r["verdict"].as_str().unwrap_or("")
         );
     }
-    Ok(json!({ "windows": facts.len(), "scan_ms": stats(&timings), "counts": counts, "visible": rows }))
+    Ok(json!({
+        "windows": facts.len(),
+        "scan_ms": stats(&timings),
+        "scan_all_ms": stats(&timings_all),
+        "counts": counts,
+        "visible": rows,
+    }))
 }

@@ -147,6 +147,23 @@ pub fn primary_button_down() -> bool {
     state < 0
 }
 
+/// Shift is held down now (either one): it inverts snapping while a window is dragged.
+pub fn shift_down() -> bool {
+    key_down(windows::Win32::UI::Input::KeyboardAndMouse::VK_SHIFT)
+}
+
+/// Escape is held down now: it cancels a press on a tab strip or a window's band.
+pub fn escape_down() -> bool {
+    key_down(windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE)
+}
+
+fn key_down(vk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    // SAFETY: reads the state of one key; the top bit is set while it is down.
+    let state = unsafe { GetAsyncKeyState(i32::from(vk.0)) };
+    state < 0
+}
+
 /// The pointer's shape, as far as it tells a move from a resize: Windows shows one of its
 /// resize arrows for the whole of a resize, whichever app the window belongs to.
 pub fn pointer() -> mosaik_core::snap::Pointer {

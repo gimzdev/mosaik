@@ -114,7 +114,7 @@ impl Engine {
         }
         // By the corner of the screen the pointer is on, as Windows' own notifications are by
         // the clock of the screen being used.
-        let Some(topology) = self.refresh_topology() else {
+        let Some(topology) = self.read_topology() else {
             return;
         };
         let pointer = input::cursor();

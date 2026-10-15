@@ -1,10 +1,15 @@
 //! Other programs that arrange, snap or group windows (`mosaik_core::others`), and Windows' own
 //! snapping: the user is told once, ever, rather than having two of them fight silently.
 
+use std::time::{Duration, Instant};
+
 use mosaik_core::geometry::Point;
 use mosaik_core::others::{self, Kind};
 
 use crate::thread::Engine;
+
+/// How often, at most, the programs running are looked through again.
+const OTHERS_EVERY: Duration = Duration::from_secs(5 * 60);
 
 impl Engine {
     /// Tells the user something once, ever: the key is kept in the settings (in memory only while
@@ -36,13 +41,20 @@ impl Engine {
         }
     }
 
-    /// When Mosaïk starts, and once things settle after a switch or a display change: other
-    /// programs that arrange windows. Nothing is listed once each of them has been told.
+    /// When Mosaïk starts, and once things settle after a switch or a display change, at most
+    /// every [`OTHERS_EVERY`]: other programs that arrange windows. Nothing is listed once each
+    /// of them has been told.
     pub(crate) fn check_others(&mut self) {
         // A probe or test runs beside the user's own Mosaïk: the warning is not for it to give.
         if self.config.manage_only.is_some() || self.config.safe_mode {
             return;
         }
+        // Listing every process (about 300) after each switch found nothing new for most people,
+        // who run none of these programs.
+        if self.others_checked.is_some_and(|at| at.elapsed() < OTHERS_EVERY) {
+            return;
+        }
+        self.others_checked = Some(Instant::now());
         let shown = &self.settings.notices_shown;
         if others::KNOWN
             .iter()

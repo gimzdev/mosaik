@@ -360,10 +360,6 @@ impl RatioRect {
     pub fn height(self) -> f64 {
         self.bottom - self.top
     }
-
-    pub fn contains_point(self, x: f64, y: f64) -> bool {
-        x >= self.left && x < self.right && y >= self.top && y < self.bottom
-    }
 }
 
 /// Rounds half away from zero and saturates at the `i32` range.
@@ -388,11 +384,6 @@ pub fn round_to_i32(v: f64) -> i32 {
 /// rounding like Win32 `MulDiv`.
 pub fn scale_for_dpi(logical: i32, dpi: u32) -> i32 {
     mul_div(logical, dpi, BASE_DPI)
-}
-
-/// Converts a length in physical pixels at `dpi` to device-independent pixels (96 DPI).
-pub fn unscale_for_dpi(physical: i32, dpi: u32) -> i32 {
-    mul_div(physical, BASE_DPI, dpi)
 }
 
 fn mul_div(value: i32, numerator: u32, denominator: u32) -> i32 {
@@ -508,7 +499,6 @@ mod tests {
         assert_eq!(scale_for_dpi(48, 144), 72);
         assert_eq!(scale_for_dpi(7, 120), 9, "8.75 rounds to 9");
         assert_eq!(scale_for_dpi(-7, 120), -9);
-        assert_eq!(unscale_for_dpi(72, 144), 48);
     }
 
     fn arb_reference() -> impl Strategy<Value = Rect> {

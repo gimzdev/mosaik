@@ -1,22 +1,6 @@
 //! `mosaikctl`: talk to the running Mosaïk from a terminal or a script.
 //!
-//! ```text
-//! mosaikctl state [--json]                   monitors, DPI, windows and their rectangles
-//! mosaikctl workspaces [--json]              the saved workspaces
-//! mosaikctl switch <workspace>               open a workspace
-//! mosaikctl save [<name>]                    save the windows on screen (the open workspace by default)
-//! mosaikctl rename <workspace> <name>        rename a workspace
-//! mosaikctl delete <workspace>               delete a workspace (its windows stay where they are)
-//! mosaikctl hotkey <workspace> <shortcut>    give a workspace its own shortcut (`none` removes it)
-//! mosaikctl check-hotkey <shortcut> [<workspace>]  whether a shortcut can be used
-//! mosaikctl zones <workspace>                a workspace's zones, as JSON
-//! mosaikctl apps <workspace> [--json]        a workspace's apps, and the windows it could take
-//! mosaikctl add-app <workspace> <window> [<zone>]  add a window's app (its handle, from `apps`)
-//! mosaikctl move-app <workspace> <app> <zone>  put an app in another zone
-//! mosaikctl remove-app <workspace> <app>     take an app out (its window stays)
-//! mosaikctl rescue                           bring back every window Mosaïk hid (works even if it is not running)
-//! mosaikctl switcher | settings | quit | version
-//! ```
+//! Its commands are listed by `mosaikctl` alone (`USAGE` below).
 //!
 //! A `<workspace>` is a workspace's name (case does not count) or its id, names first.
 //!
@@ -63,8 +47,9 @@ mod windows_main {
                                  with a layout, the main screen takes it first: full, halves,
                                  thirds, main-side, side-main, quarters, half-stack,
                                  stack-half, rows, three-rows
-  preview [<layout>] [--json]    what arrange would do on the main screen, without doing it
-  preview-workspace <workspace> [--json]  what opening a workspace would do there
+  preview [<layout>]             what arrange would do on the main screen, without doing it
+                                 (as JSON)
+  preview-workspace <workspace>  what opening a workspace would do there (as JSON)
   undo-arrange                   put back what the last arrange changed
   rename <workspace> <name>      rename a workspace
   delete <workspace>             delete a workspace (its windows stay)

@@ -25,7 +25,6 @@ import {
   type Rect,
   type Reply,
   type Settings,
-  TASK_WORDS,
   type Task,
   type WorkspaceApp,
   type WorkspaceSummary,
@@ -484,17 +483,18 @@ function arrange(preset: string | undefined, moves: ArrangeMove[] = []): Reply {
     return w?.minimized ? [] : [{ ...s, now: w?.then ?? s.now }];
   });
   const gone = p.windows.length - onScreen.length;
-  const words = p.task ? TASK_WORDS[p.task] : null;
-  const what = known
-    ? `in the “${known.label}” layout`
-    : words
-      ? `for ${words}`
-      : `in ${String(p.zones.length)} ${p.zones.length === 1 ? 'zone' : 'zones'}`;
   const n = onScreen.length;
+  // As the engine says it: what moved, what went to the taskbar, and the workspace on screen,
+  // which now opens this way (the engine also makes one when none is open; this stand-in does not).
+  const open = workspaces.find((w) => w.id === active);
   return done(
-    `Arranged ${String(n)} ${n === 1 ? 'window' : 'windows'} ${what}${
-      gone ? `; ${gone === 1 ? '1 window' : `${String(gone)} windows`} minimized` : ''
-    }.`,
+    [
+      `Arranged ${String(n)} ${n === 1 ? 'window' : 'windows'}${known ? ` in ${known.label}` : ''}.`,
+      gone ? `${gone === 1 ? '1 window' : `${String(gone)} windows`} minimized.` : '',
+      open ? `“${open.name}” now opens this way.` : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
   );
 }
 

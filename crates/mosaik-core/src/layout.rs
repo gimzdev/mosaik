@@ -559,13 +559,21 @@ fn keep_place(onto: &Place, layout: &Layout) -> Option<Place> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Something wrong in a saved layout (a file edited by hand, or damaged), in words for the
+/// user: what is wrong, not where in the file.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LayoutProblem {
+    #[error("two of its parts share the id \u{201c}{0}\u{201d}")]
     DuplicateId(String),
+    #[error("a zone is on a monitor the workspace does not know")]
     ZoneMonitorMissing(ZoneId),
+    #[error("an app's zone is gone")]
     SlotZoneMissing(SlotId),
+    #[error("an app is on a monitor the workspace does not know")]
     SlotMonitorMissing(SlotId),
+    #[error("an app and its tab group do not agree")]
     TabGroupMismatch(SlotId),
+    #[error("a tab group has tabs that are gone")]
     TabGroupBroken(TabGroupId),
 }
 

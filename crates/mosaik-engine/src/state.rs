@@ -37,7 +37,7 @@ pub(crate) fn snapshot(i: Inputs<'_>) -> StateSnapshot {
     // hidden ones it hid itself.
     let windows = i
         .scanner
-        .scan()
+        .scan_all()
         .into_iter()
         .filter_map(|f| {
             let verdict = classify(&f, i.rules);

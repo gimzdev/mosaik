@@ -86,6 +86,10 @@ impl Saved for Settings {
     const FILE: &'static str = "settings.json";
     const VERSION: u32 = SETTINGS_VERSION;
 
+    fn repair(&mut self) -> Vec<String> {
+        self.clamp().into_iter().collect()
+    }
+
     fn migrate(
         mut value: serde_json::Value,
         from: u32,
@@ -195,11 +199,16 @@ impl Saved for WorkspacesFile {
         for w in &self.workspaces {
             let problems = w.layout.problems();
             if !problems.is_empty() {
+                let said: Vec<String> = problems.iter().map(ToString::to_string).collect();
                 notes.push(format!(
-                    "Workspace \"{}\" has {} problem(s) Mosaïk will skip over: {:?}",
+                    "Workspace \u{201c}{}\u{201d} has {} Mosaïk will skip over: {}.",
                     w.name,
-                    problems.len(),
-                    problems
+                    if problems.len() == 1 {
+                        "1 problem".to_owned()
+                    } else {
+                        format!("{} problems", problems.len())
+                    },
+                    said.join("; ")
                 ));
             }
         }
@@ -214,7 +223,7 @@ impl Saved for WorkspacesFile {
 }
 
 impl Saved for Journal {
-    const FILE: &'static str = "hidden-windows.json";
+    const FILE: &'static str = crate::journal::FILE;
     const VERSION: u32 = JOURNAL_VERSION;
 }
 
@@ -716,6 +725,52 @@ mod tests {
         // A file that is not even JSON is not a newer one.
         fs::write(d.0.join("settings.json"), b"garbage").unwrap();
         assert!(store.load_newer::<Settings>().is_none());
+    }
+
+    #[test]
+    fn settings_edited_by_hand_out_of_range_are_brought_into_range_once_with_a_note() {
+        // A band of 500 px above every window, or a side menu off the edge, from a file edited
+        // by hand: used as written, it left windows half a screen below their zones.
+        let d = TempDir::new("settings-range");
+        let json = format!(
+            r#"{{"version":{SETTINGS_VERSION},"frames":{{"tags_in_title_bar":false,"style":{{"gap":0,"tag_band":500,"border":2}}}},"edge":{{"position":-20}}}}"#
+        );
+        let loaded = load_settings(&d, json.as_bytes());
+        assert_eq!(loaded.value.frames.style.tag_band, 64);
+        assert_eq!(loaded.value.edge.position, 0);
+        assert_eq!(loaded.value.problem(), None);
+        assert_eq!(loaded.notes.len(), 1, "{:?}", loaded.notes);
+        assert!(loaded.notes[0].contains("The tag band"), "{:?}", loaded.notes);
+        // Mended once: said once.
+        let again = Store::new(&d.0).load::<Settings>().unwrap();
+        assert!(again.notes.is_empty(), "{:?}", again.notes);
+        assert_eq!(again.value, loaded.value);
+    }
+
+    #[test]
+    fn a_workspace_with_problems_is_told_in_words() {
+        // An app whose zone is gone: said as such, not as Rust's debug output
+        // ("[SlotZoneMissing(SlotId(\"s1\"))]").
+        let d = TempDir::new("problems");
+        fs::write(
+            d.0.join("workspaces.json"),
+            br#"{"version":1,"workspaces":[{"id":"w","name":"Email","layout":{
+                "monitors":[{"id":"m","name":"M","bounds":{"left":0,"top":0,"right":1920,"bottom":1080},
+                  "work_area":{"left":0,"top":0,"right":1920,"bottom":1032},"dpi":96,"primary":true}],
+                "zones":[],
+                "slots":[{"id":"s1","app":{"exe":"outlook.exe"},"place":{"kind":"zone","zone":"gone"}}],
+                "tab_groups":[]}}],"active":null}"#,
+        )
+        .unwrap();
+        let loaded = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
+        let said = loaded.notes.join(" ");
+        assert!(
+            said.contains(
+                "Workspace \u{201c}Email\u{201d} has 1 problem Mosaïk will skip over: an app's zone is gone."
+            ),
+            "{said}"
+        );
+        assert!(!said.contains("SlotZoneMissing"), "{said}");
     }
 
     #[test]

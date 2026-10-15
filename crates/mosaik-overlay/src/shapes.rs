@@ -159,7 +159,8 @@ pub struct TagLook {
 impl TagLook {
     /// Text size and side padding at 100%, as on mosaïk.com.
     const TEXT: f32 = 11.5;
-    const PAD: f32 = 11.0;
+    #[allow(clippy::cast_precision_loss)]
+    const PAD: f32 = mosaik_core::zone::TAG_PAD as f32;
 
     pub fn height(&self) -> i32 {
         px(f(mosaik_core::zone::CHIP_HEIGHT) * self.scale)
@@ -173,20 +174,15 @@ impl TagLook {
         dpi.max(1)
     }
 
-    /// What the tag shows when it is cut to `cut`, and the room kept at each end: the zone's
-    /// name, or its initial alone (in capitals, as initials are written).
+    /// What the tag shows when it is cut to `cut`, and the room kept at each end: its whole
+    /// number either way, centred in a compact tag.
     fn shown(&self, cut: TagCut) -> Option<(String, f32)> {
-        let text = match cut {
+        let pad = match cut {
             TagCut::Hidden => return None,
-            TagCut::Initial(_) => self.text.trim().chars().next()?.to_uppercase().collect(),
-            TagCut::Whole(_) | TagCut::Trimmed(_) => self.text.clone(),
+            TagCut::Whole(_) => Self::PAD * self.scale,
+            TagCut::Compact(_) => 0.0,
         };
-        let pad = if matches!(cut, TagCut::Initial(_)) {
-            0.0
-        } else {
-            Self::PAD * self.scale
-        };
-        (!text.trim().is_empty()).then_some((text, pad))
+        (!self.text.trim().is_empty()).then(|| (self.text.clone(), pad))
     }
 }
 
@@ -213,8 +209,8 @@ impl Tag {
         })
     }
 
-    /// How the tag is drawn for `look` in at most `max_width` pixels: whole, cut short, cut to
-    /// its initial, or not at all (`mosaik_core::zone::tag_cut`).
+    /// How the tag is drawn for `look` in at most `max_width` pixels: whole, compact, or not at
+    /// all (`mosaik_core::zone::tag_cut`).
     pub fn cut(&mut self, canvas: &mut Canvas, look: &TagLook, max_width: i32) -> TagCut {
         // Scales are a few hundred percent at most.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

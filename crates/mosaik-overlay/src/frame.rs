@@ -41,8 +41,8 @@ pub struct FrameLook {
     /// Windows 11 rounds window corners (8 px at 100%); Windows 10 does not.
     pub rounded: bool,
     pub ring: bool,
-    pub tag: bool,
-    pub tag_at: TagPlace,
+    /// Where its tag goes; `None`: it wears none.
+    pub tag: Option<TagPlace>,
     /// The band above the window that is its own (its tag, or its group's strip, sits in it):
     /// inside its ring with the window, so the two read as one. `None` when it wears its tag in
     /// its own title bar.
@@ -145,7 +145,7 @@ impl Frame {
         } else {
             self.ring.hide();
         }
-        if look.tag {
+        if let Some(tag_at) = look.tag {
             let tag = TagLook {
                 text: look.label.clone(),
                 fill: Rgba::of(look.color.fill(), 1.0),
@@ -155,7 +155,7 @@ impl Frame {
             // 25 px up from the window's top edge, or the band's bottom: 3 px below the band's
             // top, 4 px above the window.
             let above = px(25.0 * s);
-            match look.tag_at {
+            match tag_at {
                 TagPlace::TitleBar(room) => {
                     let width = self.tag.width(canvas, &tag, room.width());
                     let at = Point::new(room.right - width, room.top + (room.height() - tag.height()) / 2);

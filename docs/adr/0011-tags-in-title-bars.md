@@ -128,3 +128,18 @@ A tab group's strip now always goes in its visible tab's title bar, at its right
 end of a stretch too short for it rather than below a band; only a window whose title bar never
 answers wears its strip above it. A band changes only within 3 seconds of an action of the
 user's: a title bar read again later (a window brought forward) moves no window.
+
+## Amended by ADR 0027 (2026-10-15)
+
+A tab group's strip is never in a title bar: the group sits below a band with its strip, every tab
+with a chip of its own to drag out. A window alone keeps its tag in its title bar.
+
+## Amended by ADR 0028 (2026-10-15)
+
+A tag shows its zone's number (zones are numbered 1, 2, 3 by place), not a name.
+
+## Amended by ADR 0029 (2026-10-15)
+
+With little room, a tag is drawn compact: its whole number without the side padding, in a chip at
+least as wide as it is tall; with less, none. It is never cut to its first character, which for
+zone 12 would name zone 1.

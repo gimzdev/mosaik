@@ -2,7 +2,8 @@
 
 - Status: accepted
 - Date: 2026-10-15
-- Amends: ADR 0016 (Home), 0018 (a workspace's apps), 0024 (the window rebuilt)
+- Amends: ADR 0014 and 0019 (zones named after their windows), 0016 (Home), 0018 (a
+  workspace's apps), 0024 (the window rebuilt)
 
 ## Context
 
@@ -52,3 +53,8 @@ minimised.
 - The probe checks that a saved workspace's zones are numbered 1 to N, that its windows land
   where the preview put them, that a window always on top that is not the workspace's is
   minimised when it opens, and that zones split in the editor are numbered by place.
+
+## Amended by ADR 0029 (2026-10-15)
+
+A second click on a picked workspace keeps it picked; Back (or Esc) returns to the screen as it
+is, and a double-click opens the workspace.

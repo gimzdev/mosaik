@@ -76,3 +76,7 @@ A window too big for its zone no longer waits in the taskbar: the zones make roo
 zone growing just enough and the zones beside it giving up the room, and it keeps its place in
 the layout. The main zone's cap (three quarters of the screen) is gone. A window is minimised
 only when the windows cannot all fit.
+
+## Amended by ADR 0028 (2026-10-15)
+
+New zones are numbered by place, not named after the windows put in them.

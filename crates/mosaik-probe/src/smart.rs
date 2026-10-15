@@ -110,7 +110,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     };
     // The watchdog, as in the app: without it nothing hides, and a tab group shows all its
     // windows.
-    let watchdog = match mosaik_engine::watchdog::start(&dir.join("hidden-windows.json")) {
+    let watchdog = match mosaik_engine::watchdog::start(&dir.join(mosaik_core::journal::FILE)) {
         Ok(w) => Some(w),
         Err(e) => {
             println!("watchdog not started ({e}): tabs will not hide windows");
@@ -982,7 +982,7 @@ fn arrange(
             "others_back_px": others_back,
             "still_a_tab": e_grouped,
             "all_shown": all_shown,
-            "ok": fifth.contains("; 1 window minimized.") && e_main && minimized.len() == 1
+            "ok": fifth.contains(" 1 window minimized.") && e_main && minimized.len() == 1
                 && e_back.is_some_and(|b| b <= SLACK) && others_back <= SLACK && !e_grouped
                 && all_shown,
         }),
@@ -1975,6 +1975,23 @@ fn quick_menu(
                 && !labels.contains(&"Undo arrange")
                 && menu.rows.first().is_some_and(|r| r.label == "Mosaïk")
                 && (!focused || kept_keyboard),
+        }),
+    );
+
+    // 4b2. A press as the menu opens by itself does nothing: it was meant for what was under the
+    // pointer (a browser's scroll bar runs along the same edge), and on the row now under it
+    // would have rearranged the windows. The menu stays open and no window moves.
+    let before: Vec<Option<Rect>> = w.iter().map(|h| frame_rect(*h)).collect();
+    drop(LeftButton::press());
+    pump_until(400, || false);
+    let after: Vec<Option<Rect>> = w.iter().map(|h| frame_rect(*h)).collect();
+    let still_open = is_open(state(engine)?.quick_menu.as_ref());
+    out.insert(
+        "press_as_it_opens".into(),
+        json!({
+            "menu_still_open": still_open,
+            "windows_moved": before != after,
+            "ok": still_open && before == after,
         }),
     );
 

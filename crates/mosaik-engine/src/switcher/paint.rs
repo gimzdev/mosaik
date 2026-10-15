@@ -25,8 +25,8 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::HDC;
 use windows::core::w;
 
-/// What marks the workspace open now, after its name (as on its card in Mosaïk's window).
-const OPEN: &str = "Open";
+/// What marks the workspace on screen, after its name (as in Mosaïk's window).
+const OPEN: &str = "On screen";
 
 /// Layout at 96 DPI; everything is scaled by `dpi / 96`.
 pub(crate) mod size {
@@ -368,7 +368,7 @@ impl Painter {
             let filter = model.filter();
             let naming = model.naming().is_some();
             let (label, color) = if naming {
-                ("Save this layout as", theme.muted)
+                ("Save as workspace", theme.muted)
             } else if filter.is_empty() {
                 ("Switch workspace", theme.muted)
             } else {
@@ -403,7 +403,7 @@ impl Painter {
             let hints: &[(&str, &str)] = if naming {
                 &[("Enter", "save"), ("Esc", "back")]
             } else {
-                &[("Enter", "open"), ("S", "save current layout"), ("Esc", "close")]
+                &[("Enter", "open"), ("S", "save as workspace"), ("Esc", "close")]
             };
             for &(key, what) in hints {
                 let kw = self.measure(key, &self.title) * 0.8 + 2.0 * s;
@@ -539,7 +539,7 @@ impl Painter {
                 }
             }
             self.stroke_round(thumb, 6.0 * s, theme.line, s);
-            // Name, "Open" after it when it is the one open, and its apps.
+            // Name, "On screen" after it when it is the one open, and its apps.
             let x = tx + tw + 16.0 * s;
             let key_room = if key.is_some() { 56.0 * s } else { 16.0 * s };
             let open_room = if current {

@@ -40,9 +40,3 @@ fn classify(call: &'static str, source: windows::core::Error) -> Error {
         Error::Win32 { call, source }
     }
 }
-
-/// The calling thread's last Win32 error as an `Error`, for APIs that report failure through a
-/// return value.
-pub fn last_error(call: &'static str) -> Error {
-    classify(call, windows::core::Error::from_thread())
-}

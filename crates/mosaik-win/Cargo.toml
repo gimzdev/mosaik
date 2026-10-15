@@ -45,8 +45,9 @@ features = [
     "Win32_UI_WindowsAndMessaging",
 ]
 
+# For the `#[interface]` macro's `::windows_core` paths (the shell's cloak, hide.rs).
 [target.'cfg(windows)'.dependencies.windows-core]
-version = "0.62.2"
+workspace = true
 
 [lints]
 workspace = true

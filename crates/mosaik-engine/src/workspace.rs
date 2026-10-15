@@ -221,20 +221,6 @@ impl Engine {
         all
     }
 
-    /// Reads the monitors again; keeps the last known arrangement if Windows cannot say.
-    pub(crate) fn refresh_topology(&mut self) -> Option<Topology> {
-        match mosaik_win::monitors::topology() {
-            Ok(t) => {
-                self.topology = Some(t.clone());
-                Some(t)
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "monitors not read");
-                self.topology.clone()
-            }
-        }
-    }
-
     /// `workspaces.json` could not be read at start.
     pub(crate) fn file_locked(&mut self, problem: &StoreError) {
         let message = problem.to_string();
@@ -373,7 +359,7 @@ impl Engine {
                 None,
             );
         }
-        let Some(topology) = self.refresh_topology() else {
+        let Some(topology) = self.read_topology() else {
             return error(
                 ErrorCode::Failed,
                 "Mosaïk could not read the monitor layout.",
@@ -579,7 +565,7 @@ impl Engine {
             );
         };
         let started = Instant::now();
-        let Some(topology) = self.refresh_topology() else {
+        let Some(topology) = self.read_topology() else {
             return error(
                 ErrorCode::Failed,
                 "Mosaïk could not read the monitor layout.",
@@ -782,9 +768,12 @@ impl Engine {
     /// windows on screen move; hidden, minimised and other-desktop windows are left alone.
     pub(crate) fn displays_changed(&mut self) {
         let before = self.topology.as_ref().map(Topology::fingerprint);
-        let Some(topology) = self.refresh_topology() else {
+        let Some(topology) = self.read_topology() else {
             return;
         };
+        // The one place the arrangement read is kept as the last known: a preview or a switch
+        // read in the 400 ms before this runs must not hide the change from it.
+        self.topology = Some(topology.clone());
         if before.as_deref() == Some(topology.fingerprint().as_str()) {
             self.refresh_frames();
             return;

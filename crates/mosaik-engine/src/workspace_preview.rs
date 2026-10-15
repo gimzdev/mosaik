@@ -23,7 +23,7 @@ impl Engine {
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
-        let Some(topology) = self.refresh_topology() else {
+        let Some(topology) = self.read_topology() else {
             return Reply::Error {
                 code: ErrorCode::Failed,
                 message: "Mosaïk could not read the monitor layout.".into(),

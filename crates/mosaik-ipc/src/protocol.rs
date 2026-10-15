@@ -238,7 +238,7 @@ pub enum Reply {
         /// Sent back with `set_zones`.
         revision: String,
     },
-    /// What `preview_arrange` found.
+    /// What `preview_arrange` or `preview_workspace` found.
     Preview(Box<ArrangePreview>),
     /// What `apps` found (also the answer to `add_app`, `move_app` and `remove_app`).
     Apps(Box<WorkspaceApps>),
@@ -326,19 +326,20 @@ pub struct OpenWindow {
     pub icon: Option<String>,
 }
 
-/// What Arrange would do on the main monitor, in screen pixels.
+/// What Arrange (`preview_arrange`), or opening a workspace (`preview_workspace`), would do on
+/// the main monitor, in screen pixels.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArrangePreview {
     /// The main monitor's work area: the zones and windows below are on it.
     pub work_area: Rect,
-    /// Its zones once arranged: the open workspace's, new ones, or the picked layout's.
+    /// Its zones then: the open workspace's, new ones, the picked layout's, or the workspace's.
     pub zones: Vec<PreviewZone>,
     /// Its windows, front to back.
     pub windows: Vec<PreviewWindow>,
-    /// Windows on the other monitors, which Arrange arranges there.
+    /// Windows that go to the other monitors.
     pub elsewhere: u32,
-    /// What the main monitor's windows say the user is doing, which its layout is made for
-    /// (`None` for a layout picked, or no windows).
+    /// What the main monitor's windows say the user is doing, which Arrange's layout is made for
+    /// (`None` for a layout picked, a workspace, or no windows).
     #[serde(default)]
     pub task: Option<Task>,
 }
@@ -425,8 +426,8 @@ pub struct StateSnapshot {
     /// The tab strips on screen, so tests can click a tab by its numbers.
     #[serde(default)]
     pub tab_strips: Vec<TabStripState>,
-    /// Windows whose title bars are being read (where their tags and strips go may still
-    /// change), so tests can wait for them.
+    /// Windows whose title bars are being read (where their tags go may still change), so
+    /// tests can wait for them.
     #[serde(default)]
     pub title_bars_reading: u32,
     /// The quick menu at the screen's edge, while it shows, so tests can point at it by its

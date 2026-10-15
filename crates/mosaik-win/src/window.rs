@@ -95,14 +95,20 @@ pub fn top_level() -> Vec<HWND> {
     out
 }
 
-/// Asks every top-level window of process `pid` to close, as an installer or `taskkill` (without
-/// `/F`) does: a program that handles it, as Mosaïk does, ends properly. How many were asked.
-pub fn ask_to_close(pid: u32) -> usize {
-    let windows: Vec<HWND> = top_level().into_iter().filter(|h| self::pid(*h) == pid).collect();
-    windows
-        .iter()
+/// The class of Mosaïk's engine window: the window that quits Mosaïk properly when asked to
+/// close (every window it hid comes back).
+pub const ENGINE_CLASS: &str = "MosaikEngine";
+
+/// Asks the Mosaïk of process `pid` to quit through its engine's window alone, as an installer
+/// asks a window to close. Its other windows are not asked: the one its interface's events go
+/// through closes when asked, and the Store's 1.0.1, asked through every window it had (job
+/// 0150), then never quit ("the interface thread is gone"). How many windows were asked.
+pub fn ask_mosaik_to_quit(pid: u32) -> usize {
+    top_level()
+        .into_iter()
+        .filter(|h| self::pid(*h) == pid && class_name(*h) == ENGINE_CLASS)
         // SAFETY: posts a message to a window; one that is gone meanwhile only fails the post.
-        .filter(|h| unsafe { PostMessageW(Some(**h), WM_CLOSE, WPARAM(0), LPARAM(0)) }.is_ok())
+        .filter(|h| unsafe { PostMessageW(Some(*h), WM_CLOSE, WPARAM(0), LPARAM(0)) }.is_ok())
         .count()
 }
 
@@ -597,9 +603,23 @@ impl Scanner {
         self.process(pid).path
     }
 
-    /// Facts about every top-level window, front to back. Processes that have exited are
-    /// forgotten.
+    /// Facts about every top-level window Windows shows, front to back: the only ones Mosaïk
+    /// manages (`classify` leaves the others out first), the ones it hid included, since its ways
+    /// of hiding a window keep it shown (cloaked, minimised, or off screen). Most top-level
+    /// windows are not shown (303 of 326 on the owner's PC), and reading one takes a dozen calls,
+    /// one of them through COM. Processes that have exited are forgotten.
     pub fn scan(&mut self) -> Vec<WindowFacts> {
+        self.processes.retain(|_, c| !c.exited());
+        top_level()
+            .into_iter()
+            .filter(|h| is_visible(*h))
+            .filter_map(|h| self.facts(h))
+            .collect()
+    }
+
+    /// Facts about every top-level window, front to back, the ones not shown included: for
+    /// `mosaikctl state` and the probes, which list or count them.
+    pub fn scan_all(&mut self) -> Vec<WindowFacts> {
         self.processes.retain(|_, c| !c.exited());
         top_level().into_iter().filter_map(|h| self.facts(h)).collect()
     }

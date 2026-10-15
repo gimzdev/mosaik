@@ -25,7 +25,6 @@ use mosaik_overlay::layered::Stack;
 use crate::UiEvent;
 use crate::tabs::AsIsize;
 use crate::thread::Engine;
-use crate::watch::shift_down;
 
 /// The zones of the monitor a window being resized fills a zone of, as they were when the
 /// resize began.
@@ -74,7 +73,9 @@ impl Engine {
     /// Zones follow a window resized by hand now: the setting is on, along with snapping, and
     /// Shift (or its absence, when the setting swaps them) does not ask for a free resize.
     fn zones_follow(&self) -> bool {
-        !self.config.safe_mode && self.settings.snap.resize_zones && self.settings.snap.active(shift_down())
+        !self.config.safe_mode
+            && self.settings.snap.resize_zones
+            && self.settings.snap.active(mosaik_win::input::shift_down())
     }
 
     /// When a drag of `h` starts, with its visible frame at `start`: the zones its resize would

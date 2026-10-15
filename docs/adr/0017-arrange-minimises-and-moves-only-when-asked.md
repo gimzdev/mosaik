@@ -65,3 +65,13 @@ title bar depending on each reading, so they moved from window to window.
 - Measured with `mosaik-probe smart` (3d, 3e: minimised windows; 3f: windows brought to the front
   move 0 px; 4b: the menu open in 250 ms or less, its rows) and `mosaik-probe workspace --drag`
   (the strip in the same place for two apps), in `docs/STATUS.md`.
+
+## Amended by ADR 0027 (2026-10-15)
+
+Strips are no longer in title bars: a tab group sits below a band with its strip, and no window
+moves into or out of a band after a title bar is read.
+
+## Amended by ADR 0029 (2026-10-15)
+
+The quick menu's Save row says what it does ("Update “Email”", or "Save as workspace") and a toast
+confirms the save. A press in the 300 ms after the menu opened by itself does nothing.

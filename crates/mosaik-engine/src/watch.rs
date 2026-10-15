@@ -26,7 +26,6 @@ use mosaik_overlay::layered::Stack;
 use mosaik_overlay::tabbar::{self, BarLook, BarPlace, TabBar, TabView};
 use mosaik_win::events::{self, Hooks, WinEvent};
 use mosaik_win::{arrange, input, window};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CHILDID_SELF, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_LOCATIONCHANGE,
     EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_CAPTUREEND,
@@ -37,7 +36,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::mover::{self, To};
 use crate::tabs::{AsIsize, BarDrag, Spot};
 use crate::thread::{Engine, WM_EVENTS, timer};
-use crate::titles::TitleSpot;
+use crate::titles::TagSpot;
 
 /// Events hooked for every window.
 const GLOBAL: [(u32, u32); 6] = [
@@ -192,12 +191,6 @@ impl Watch {
 
 fn top_level_window(e: &WinEvent) -> bool {
     e.object == OBJID_WINDOW.0 && e.child == i32::try_from(CHILDID_SELF).unwrap_or(0) && e.window.0 != 0
-}
-
-pub(crate) fn shift_down() -> bool {
-    // SAFETY: reads the key state; no preconditions.
-    let state = unsafe { GetAsyncKeyState(i32::from(VK_SHIFT.0)) };
-    state.cast_unsigned() & 0x8000 != 0
 }
 
 impl Engine {
@@ -385,13 +378,14 @@ impl Engine {
         {
             mosaik_overlay::layered::restack_windows(&[bar.hwnd()], Stack::Above(h.0.cast_signed_isize()));
         }
-        // Its app may have changed its title bar while it was behind (a browser opened a tab):
-        // read again, and the tag or strip moves if it must.
-        if (self.watch.frames.contains_key(&h) || group.is_some())
-            && let Some(g) = window::geometry(window::hwnd(h))
-        {
-            self.titles.stale(h);
-            let _ = self.title_bar(h, g.frame);
+        // A window wearing its tag in its title bar: its app may have changed that title bar
+        // while it was behind. A tab of a group wears its group's strip, in a band, instead.
+        let wears_tag = self.style().title_bars
+            && self.settings.frames.show_tags
+            && self.watch.frames.contains_key(&h)
+            && group.is_none_or(|g| g.open.len() < 2);
+        if wears_tag && let Some(g) = window::geometry(window::hwnd(h)) {
+            self.read_title_again(h, g.frame);
         }
         false
     }
@@ -510,8 +504,9 @@ impl Engine {
         if self.watch.drag.as_ref().is_some_and(|d| d.window == h) || self.hiding.hidden.contains_key(&h) {
             return None;
         }
-        let in_group = self.group_of_window(h).is_some_and(|g| g.open.len() > 1);
-        let (ring, tag) = (frames.show_frames, frames.show_tags && !in_group);
+        // A tab of a group of two or more wears its group's strip instead of a tag.
+        let group = self.group_of_window(h).filter(|g| g.open.len() > 1);
+        let (ring, tag) = (frames.show_frames, frames.show_tags && group.is_none());
         if !(ring || tag) {
             return None;
         }
@@ -525,59 +520,54 @@ impl Engine {
         }
         let zone = self.zone_of(h, g.frame, g.resizable, style)?.clone();
         // The tag goes in the window's title bar, or above it, in the band at the top of its
-        // zone when tags go above windows (or while it still sits below one); not at all for the
-        // moment its title bar is being read.
-        let (tag, tag_at, drop_area) = if tag {
+        // zone when tags go above windows; not at all for the moment its title bar is being read.
+        let (tag_at, drop_area) = if tag {
             match self.tag_spot(h, g.frame, &zone.name, zone.dpi) {
-                TitleSpot::In(r) => (true, TagPlace::TitleBar(r), Some((r, BarPlace::TitleBar))),
+                TagSpot::InTitleBar(r) => (Some(TagPlace::TitleBar(r)), Some((r, BarPlace::TitleBar))),
                 // A window over its whole monitor has no band above it: a tag above it would lie
                 // on its own title bar, so it wears none.
-                TitleSpot::Above
+                TagSpot::Above
                     if self
                         .topology
                         .as_ref()
                         .is_some_and(|t| covers_monitor(g.frame, t.monitor_for_rect(g.frame).bounds)) =>
                 {
-                    (false, TagPlace::Above, None)
+                    (None, None)
                 }
-                // With tags in title bars, a window alone whose title bar has no room even for
-                // its zone's initial wears no tag, at the top of its zone like its
-                // neighbours: it is never moved below a band for its tag.
-                TitleSpot::Above if self.style().title_bars => (false, TagPlace::Above, None),
-                TitleSpot::Above => {
+                TagSpot::Above => {
                     // Right above the window (one that cannot be resized sits lower in its zone).
-                    let band = self
-                        .style()
+                    let band = style
                         .tag_area(zone.rect, zone.dpi)
                         .map(|b| band_above(g.frame, b));
                     (
-                        true,
-                        band.map_or(TagPlace::Above, TagPlace::Band),
+                        Some(band.map_or(TagPlace::Above, TagPlace::Band)),
                         band.map(|b| (b, BarPlace::Band)),
                     )
                 }
-                TitleSpot::NotYet | TitleSpot::NoAnswer => (false, TagPlace::Above, None),
+                // With tags in title bars, a window alone whose title bar has no room even for
+                // its zone's number wears no tag, at the top of its zone like its neighbours: it
+                // is never moved below a band for its tag. None either while its title bar is
+                // read, or while its app does not answer.
+                TagSpot::NoRoom | TagSpot::NotYet | TagSpot::NoAnswer => (None, None),
             }
         } else {
-            (false, TagPlace::Above, None)
+            (None, None)
         };
-        if !(ring || tag) {
+        if !ring && tag_at.is_none() {
             return None;
         }
         // The band above the window that is its own: its tag's, or, for the tab that shows, its
-        // group's strip's when that goes above it. The strip fills its band itself.
-        let band = match (&tag_at, self.group_of_window(h).filter(|g| g.open.len() > 1)) {
-            (_, Some(g)) if g.visible().is_some_and(|(_, w)| *w == h) => match self.strip_spot(&g.id, h) {
-                Spot::At {
-                    band,
-                    place: BarPlace::Band,
-                    ..
-                } => Some(band),
+        // group's strip's. The strip fills its band itself.
+        let band = match &group {
+            Some(g) if g.visible().is_some_and(|(_, w)| *w == h) => match self.strip_spot(&g.id, h) {
+                Spot::At { band, .. } => Some(band),
+                Spot::Later | Spot::Nowhere => None,
+            },
+            Some(_) => None,
+            None => match tag_at {
+                Some(TagPlace::Band(b)) => Some(b),
                 _ => None,
             },
-            (_, Some(_)) => None,
-            (TagPlace::Band(b), None) if tag => Some(*b),
-            _ => None,
         };
         let look = FrameLook {
             color: zone.color,
@@ -585,10 +575,9 @@ impl Engine {
             dpi: zone.dpi,
             rounded: self.watch.rounded,
             ring,
-            tag,
-            tag_at,
+            tag: tag_at,
             band,
-            fill_band: !in_group,
+            fill_band: group.is_none(),
             dark: self.dark_theme(),
         };
         Some(FrameInfo {
@@ -969,7 +958,7 @@ impl Engine {
             }
             _ => return,
         }
-        let snapping = self.settings.snap.active(shift_down());
+        let snapping = self.settings.snap.active(mosaik_win::input::shift_down());
         let cursor = input::cursor();
         // Over a window's tag or tab strip: the dragged window would become one of its tabs.
         let tab_target = if snapping {

@@ -7,7 +7,7 @@
 //! (`mover`). The thread works through requests in order, so an answer that comes late never
 //! undoes a newer request; late answers are picked up by the next call.
 
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use mosaik_core::journal::HideMethod;
@@ -16,6 +16,8 @@ use mosaik_win::error::Error;
 use mosaik_win::hide::{Hidden, Hider};
 use mosaik_win::window;
 use windows::Win32::Foundation::{LPARAM, WPARAM};
+
+use crate::mover::Wake;
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -109,6 +111,8 @@ pub(crate) struct Worker {
     thread_id: u32,
     /// Requests sent and not answered yet.
     open: usize,
+    /// Set by the thread after each answer, so a wait ends as soon as the last one comes.
+    wake: Option<Arc<Wake>>,
 }
 
 impl Worker {
@@ -116,6 +120,8 @@ impl Worker {
         let (jobs, job_rx) = mpsc::channel::<(WindowHandle, Request)>();
         let (answer_tx, answers) = mpsc::channel::<Answer>();
         let (ready_tx, ready) = mpsc::channel::<u32>();
+        let wake = Wake::new();
+        let thread_wake = wake.clone();
         std::thread::Builder::new()
             .name("mosaik-hide".into())
             .spawn(move || {
@@ -139,6 +145,9 @@ impl Worker {
                             if answer_tx.send(run_one(&mut hider, window, request)).is_err() {
                                 return;
                             }
+                            if let Some(w) = &thread_wake {
+                                w.set();
+                            }
                         }
                         continue;
                     }
@@ -158,6 +167,7 @@ impl Worker {
             answers,
             thread_id,
             open: 0,
+            wake,
         })
     }
 
@@ -203,7 +213,8 @@ impl Worker {
             if self.open == 0 || Instant::now() >= deadline {
                 break;
             }
-            crate::mover::pump_for(5);
+            let wake = self.wake.as_deref();
+            crate::mover::pump_for(crate::mover::slice(deadline, wake), wake);
         }
         answers
     }

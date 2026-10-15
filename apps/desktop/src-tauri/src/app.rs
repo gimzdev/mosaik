@@ -171,7 +171,7 @@ pub fn run(args: Vec<String>) -> i32 {
     };
 
     // The watchdog before anything is hidden (ADR 0006).
-    let journal = data_dir.join("hidden-windows.json");
+    let journal = data_dir.join(mosaik_core::journal::FILE);
     let mut own_pids = vec![mosaik_win::process::own_pid()];
     let watchdog = match mosaik_engine::watchdog::start(&journal) {
         Ok(watchdog) => {
@@ -322,14 +322,14 @@ enum Replaced {
     Failed(String),
 }
 
-/// When the Mosaïk running is older than this one, asks it to quit as an installer would (every
-/// window it hid comes back) and takes its place.
+/// When the Mosaïk running is older than this one, asks it to quit through its engine's window
+/// (every window it hid comes back) and takes its place.
 fn replace_older() -> Replaced {
     let Some((pid, version)) = running_older() else {
         return Replaced::NotOlder;
     };
     tracing::info!(pid, running = %version, "an older Mosaïk is running: it is asked to quit");
-    let asked = mosaik_win::window::ask_to_close(pid);
+    let asked = mosaik_win::window::ask_mosaik_to_quit(pid);
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(250));
@@ -463,6 +463,7 @@ fn message(title: &str, body: &str, icon: MESSAGEBOX_STYLE) {
 
 /// Called on the engine thread: everything that touches windows runs on the main thread.
 fn on_ui_event(handle: &AppHandle, event: UiEvent) {
+    let exit = matches!(event, UiEvent::Exit);
     let h = handle.clone();
     let ran = handle.run_on_main_thread(move || match event {
         UiEvent::ShowSettings => show_settings(&h),
@@ -487,6 +488,17 @@ fn on_ui_event(handle: &AppHandle, event: UiEvent) {
     });
     if let Err(e) = ran {
         tracing::error!(error = %e, "the interface thread is gone");
+        // Asked to close through every window it has (`taskkill` without /F, an installer), the
+        // window the interface's events go through closed too, so the interface cannot quit:
+        // Mosaïk quits from here, its engine putting back every window it hid first. Off the
+        // engine's thread, which this is called on and which has to stop.
+        if exit {
+            let h = handle.clone();
+            std::thread::spawn(move || {
+                shut_down(&h);
+                std::process::exit(0);
+            });
+        }
     }
 }
 
@@ -522,6 +534,8 @@ fn show_settings(app: &AppHandle) {
         .title("Mosaïk")
         .inner_size(980.0, 720.0)
         .min_inner_size(760.0, 560.0)
+        // Ctrl and + or - make everything in the window bigger or smaller, as in a browser.
+        .zoom_hotkeys_enabled(true)
         .center()
         .build();
     if let Err(e) = built {
@@ -569,7 +583,7 @@ fn tray_menu(
     }
     menu.append_items(&[
         &MenuItem::with_id(app, "arrange", "Arrange windows", true, None::<&str>)?,
-        &MenuItem::with_id(app, "switcher", "Open the switcher", true, None::<&str>)?,
+        &MenuItem::with_id(app, "switcher", "Switch workspace", true, None::<&str>)?,
         &MenuItem::with_id(app, "settings", "Open Mosaïk", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "rescue", "Rescue windows", true, None::<&str>)?,

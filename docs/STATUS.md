@@ -474,6 +474,9 @@ of its own; a posted `SC_MOVE` (job 0080) had moved nothing.
 
 ### Tags and tabs in title bars (jobs 0062 to 0070) — ADR 0011
 
+(Measured then. Since ADR 0027 a tab group's strip is in a band above it, never in a title bar;
+tags of windows alone stay in their title bars.)
+
 Tags and tab strips now go in each window's own title bar, in a stretch the window answers
 "caption" for, and windows fill their zones (28 px more each at 100%). The probe windows (classic
 title bars, 1048 and 856 px wide):
@@ -1253,10 +1256,69 @@ only 1 tab it drags the whole window".
   picked, of a workspace's page and of the zone editor checked by eye.
 - **Site and notes** (3cc4db2): the site's desktops wear numbers (1.11.2), the changelog and
   What's new say what changed; the publish test passes.
-- **On the owner's PC: not yet run.** The probes that check all of it on Windows (job 0151:
-  `workspace --drag`, with tags in title bars and above windows; smart's arrange part; the UI
-  tour) and the build that ships it (job 0150, brought to these commits) wait for the runner,
-  stopped since 2026-10-14 16:10 UTC.
+- **On the owner's PC** (runner started 2026-10-15 21:46 UTC; jobs 0149 to 0151, at 45835e6):
+  - Build 1.0.2: 3 min 05 s (Smart App Control refused one build file once; made again), then
+    2 min 24 s. `mosaik.ps1 test`: every test passing (interface 98; publish 4, 17 and 3 cases;
+    the build with a Mosaïk running, all cases). Pack: 1.4 MB, 275 files.
+  - `workspace --drag`, tags in title bars / above windows: saved 21 / 61 ms, opened 47 / 53 ms;
+    zones saved as 1, 2, 3; the preview before opening named the window it minimises, and every
+    window landed 0 px from its zone and 0 px from where the preview put it; the window always on
+    top minimised. Tabs: 1 strip, 2 tabs, chips 81 and 100 px, every tab a chip, the strip in a
+    band above; after each of 3 tab clicks the strip above, in the same place, 0 px off; a tab
+    pulled out by its chip 0 px from its zone; the group moved to another zone and back with its
+    strip above it both times, 0 px; dropped onto the strip, a tab; at the screen's left edge, the
+    zone (Windows' snapping on), 0 px. A zone split in the editor: numbered by place, the code
+    window 0 px above windows and 28 px in title bars, where it was a tab of a group (the probe
+    expected it without its band; it now expects the band of a window in a group). Memory with
+    frames: 9.4 and 9.7 MB private.
+  - `smart --only arrange`: no check failing; a window put on another in the picture: preview
+    3.9 ms, Arrange 20.6 ms, both windows 0 px from where the preview put them, Undo back.
+  - UI tour (a profile of its own): 31 pictures; a tile dragged onto another traded places and
+    Reset put them back; a workspace picked showed Open, and went back to Arrange.
+  - Mosaïk left in the tray on the owner's data: 1.0.2, protocol 9, watchdog, Win+Alt+Space
+    registered.
+  - **Found**: the new build, asking the Store's 1.0.1 to quit, closed all nine of its windows,
+    the one its interface's events go through among them: 1.0.1 logged "asked to close", then
+    "the interface thread is gone", and kept running without a way to quit; the build said so
+    after 15 s ("An older Mosaïk is running and did not quit"). Fixed below (ADR 0029).
+
+### Asked on 2026-10-15 (16:33): the app reviewed for people new to it, speed and the code
+
+"lets review the app entirely for efficiency, optimizations, and cleanness in order for the use
+of the app for complete boomers be quick and effective". Three reviews (25 findings on use, 18 on
+speed, 27 on the code); what they found and what changed is ADR 0029.
+
+- **An older Mosaïk asked to quit** through its engine's window alone, and Mosaïk asked to close
+  through all its windows (`taskkill`, an installer) quits from its engine side when its
+  interface can no longer be reached. Test first: `a_mosaik_asked_to_quit_is_asked_through_its_
+  engine_window_alone` (Windows, mosaik-win), waiting for the PC; on the PC, the Store's 1.0.1 as
+  the older copy, before (job 0150) and after (job 0152).
+- **Mosaïk's window** (c87c397): larger text and 40 px controls, a preview that says so, Back,
+  double-click to open, Automatic and five named layouts, results in one place, "On screen",
+  "Save as workspace", a suggested set shown before it starts, Settings in the order people use
+  them, a first-run line; one read per burst. Request-count tests failed on the code before (3, 3
+  and 2 reads where 1 was expected) and pass. Interface 117 tests, Playwright 30 (60 of 60
+  repeated); a flaky drag test fixed in the stand-in engine (it forgot the swaps after Arrange).
+- **Native words**: Arrange's message in short sentences with the workspace that now opens this
+  way; "On screen" in the side menu and the switcher; the side menu's Save row says what it does
+  and a save there or in the switcher is confirmed; "save as workspace" in the switcher (and the
+  site's switcher, mosaik1.sh 1.11.3).
+- **The side menu** ignores a press in the 300 ms after it opened by itself (smart's new step 4b2
+  checks that nothing moves and the menu stays).
+- **Number tags** whole or compact, never one digit of a bigger number: the core test failed
+  before (no compact form) and passes.
+- **Speed**: scans of the windows shown only (classify now measures both scans), event-driven
+  waits for the move, hide and follow threads, no `DwmFlush` when the switcher opens, previews
+  that no longer keep the monitors they read, the Start menu never waited for by Home (suggestions
+  follow once it is read), other arrangers looked for at most every 5 minutes.
+- **Files**: settings out of range mended on load with one note (the test failed before: 500 px
+  kept); damaged workspaces said in words (the test failed before: Rust's debug output).
+- **Code**: the strip's title-bar leftovers, a dead field, an untrue notice, the planner's unused
+  zone names, public functions nothing called, two unused dependencies, the journal's file name in
+  one place, key state read through mosaik-win; ADRs 0011, 0014 to 0019, 0022, 0024 and 0028
+  marked as amended; architecture and README brought up to date.
+- Checks here: fmt; clippy -D warnings for Windows on every crate; core 251, ipc 11; interface
+  117; Playwright 30; the site type-checks; shellcheck.
 
 ## Owner decisions
 

@@ -25,7 +25,7 @@ fn journal_dir() -> std::path::PathBuf {
 }
 
 fn journal_path() -> std::path::PathBuf {
-    journal_dir().join("hidden-windows.json")
+    journal_dir().join(mosaik_core::journal::FILE)
 }
 
 /// Where the stand-in writes what went wrong, since nobody reads its console.
@@ -129,7 +129,7 @@ fn smoke_test() -> Result<(), String> {
         &watchdog_exe()?.to_string_lossy(),
         &format!(
             "--rescue --quiet --journal \"{}\"",
-            dir.join("hidden-windows.json").display()
+            dir.join(mosaik_core::journal::FILE).display()
         ),
     )
     .map_err(|e| e.to_string())?;

@@ -131,11 +131,6 @@ fn restore_one(hider: &mut Hider, h: HWND, entry: &HiddenWindow, report: &mut Re
     }
 }
 
-/// True when the window carries Mosaïk's hidden-window marker.
-pub fn has_marker(h: HWND) -> bool {
-    marker(h).is_some()
-}
-
 /// What [`restore_hidden`] did, and anything the user should know about the journal.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Outcome {

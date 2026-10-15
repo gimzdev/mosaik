@@ -8,7 +8,7 @@
 //! It never takes the keyboard: whatever the user was typing in keeps it. The same actions are
 //! in the switcher, the tray menu and the settings window, for the keyboard and screen readers.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use mosaik_core::geometry::{Point, Rect, scale_for_dpi};
 use mosaik_core::presets::Preset;
@@ -147,10 +147,17 @@ pub(crate) struct Quick {
     /// Mosaïk (a game turning its view with the mouse hides it): the handle does not answer it.
     /// Over the handle, the pointer is Mosaïk's own and shows, whatever the game did with it.
     pointer_hidden: bool,
+    /// When the menu opened by itself, the pointer resting on the handle.
+    rested_open: Option<Instant>,
 }
 
 /// How often the pointer is looked at while a window covering the main monitor is in front.
 const POINTER_MS: u32 = 200;
+
+/// For this long after the menu opened by itself, a press on it does nothing: it was meant for
+/// what was under the pointer a moment before (the scroll bar of a browser filling the screen
+/// runs along the same edge), and would otherwise land on a row and rearrange the windows.
+const REST_GUARD: Duration = Duration::from_millis(300);
 
 impl Engine {
     pub(crate) fn quick_palette(&self) -> Palette {
@@ -292,8 +299,8 @@ impl Engine {
             .and_then(|k| LAYOUTS.get(k))
             .map(|p| p.label().to_owned());
         let mut rows = vec![
-            // Mosaïk itself: a click opens its window. The workspace open is marked in the list
-            // below ("Open" there means open now; here it would read the same).
+            // Mosaïk itself: a click opens its window. The workspace on screen is marked in the
+            // list below.
             (
                 Action::Open,
                 Row {
@@ -352,8 +359,9 @@ impl Engine {
                     Action::Workspace(i),
                     Row {
                         enabled: moves,
+                        // "On screen", as in Mosaïk's window: "Open" read like a button.
                         detail: if active == Some(&w.id) {
-                            Some("Open".to_owned())
+                            Some("On screen".to_owned())
                         } else {
                             w.hotkey.map(|h| h.to_string())
                         },
@@ -379,12 +387,18 @@ impl Engine {
                 ));
             }
         }
+        // What Save does, said: the workspace on screen takes what is on screen now, or a new
+        // one is made.
+        let save = match &workspace {
+            Some(name) => format!("Update \u{201c}{name}\u{201d}"),
+            None => "Save as workspace".to_owned(),
+        };
         rows.push((
             Action::Save,
             Row {
                 enabled: moves,
                 rule_before: true,
-                ..row("Save layout")
+                ..row(&save)
             },
         ));
         rows.push((
@@ -398,7 +412,7 @@ impl Engine {
             Action::Snapping,
             Row {
                 detail: Some(if self.settings.snap.enabled { "On" } else { "Off" }.to_owned()),
-                ..row("Snap while dragging")
+                ..row("Snap windows to zones")
             },
         ));
         rows
@@ -529,6 +543,7 @@ impl Engine {
     fn open_menu(&mut self) {
         self.kill_timer(timer::QUICK);
         self.quick.hot = None;
+        self.quick.rested_open = None;
         // Sliding in from the edge, or back in from where a fade left it.
         let closing = matches!(self.quick.anim, Some((_, false)));
         if !self.menu_open() || closing {
@@ -632,6 +647,7 @@ impl Engine {
                 EdgeInput::Hover => {
                     if !self.menu_open() && self.quick.press.is_none() {
                         self.open_menu();
+                        self.quick.rested_open = Some(Instant::now());
                     }
                 }
                 EdgeInput::Leave => {
@@ -646,6 +662,10 @@ impl Engine {
                 }
                 EdgeInput::Down(at) => {
                     self.kill_timer(timer::QUICK_HOVER);
+                    if self.menu_open() && self.quick.rested_open.is_some_and(|t| t.elapsed() < REST_GUARD) {
+                        tracing::debug!("quick menu: a press as it opened by itself does nothing");
+                        continue;
+                    }
                     let row = self.quick.edge.as_ref().and_then(|e| e.row_at(at));
                     self.quick.press = Some(Press {
                         at,
@@ -707,6 +727,7 @@ impl Engine {
         if on_it && !self.pointer_taken() {
             tracing::debug!("quick menu opens: the pointer rested on the handle");
             self.open_menu();
+            self.quick.rested_open = Some(Instant::now());
         }
     }
 
@@ -853,7 +874,14 @@ impl Engine {
                 self.show_switcher(Instant::now());
                 return;
             }
-            Action::Save => self.handle(Command::Save { workspace: None }),
+            Action::Save => {
+                let reply = self.handle(Command::Save { workspace: None });
+                // The menu has closed: what was saved is said, or nothing would show it was.
+                if let Reply::Done { message } = &reply {
+                    self.queue_toast("Mosaïk".to_owned(), message.clone());
+                }
+                reply
+            }
             Action::EditZones => {
                 if let Some(a) = &self.active {
                     (self.ui)(UiEvent::EditZones {

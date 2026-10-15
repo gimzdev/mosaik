@@ -99,8 +99,8 @@ impl Layout {
             .fold(0.0, f32::max)
     }
 
-    /// The same layout against the right end of a strip `width` wide, as in a title bar, where
-    /// the strip sits next to the window's buttons.
+    /// The same layout against the right end of a strip `width` wide, as over a window's tag
+    /// in its title bar ("Drop to add"), next to the window's buttons.
     pub fn align_right(mut self, width: f32) -> Self {
         let dx = (width - self.end()).max(0.0);
         let shift = |s: &mut Span| s.x += dx;

@@ -1,8 +1,9 @@
-//! The tab strip of a tab group: the zone's tag, then one chip per tab, where a single window
-//! shows its tag: in the visible tab's own title bar, against its buttons, or in the band above
-//! it. Unlike the other overlays it takes the mouse: a click shows a tab, a drag reorders the
-//! tabs or pulls one out. It never takes the keyboard focus. Transparent pixels let clicks
-//! through, as with every layered window, so the title bar between chips still moves the window.
+//! The tab strip of a tab group: the zone's tag, then one chip per tab, in the band above the
+//! visible tab (ADR 0027). The strip that says where a dragged window would join a single window
+//! ("Drop to add") also shows over that window's tag in its title bar, against its buttons.
+//! Unlike the other overlays it takes the mouse: a click shows a tab, a drag reorders the tabs
+//! or pulls one out. It never takes the keyboard focus. Transparent pixels let clicks through, as
+//! with every layered window, so the band between chips still moves the window.
 
 use std::cell::{Cell, RefCell};
 

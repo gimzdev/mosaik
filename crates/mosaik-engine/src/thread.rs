@@ -47,6 +47,8 @@ use crate::{Config, Message, UiEvent, UiSink, WM_WAKE, switcher};
 pub(crate) const WM_EVENTS: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
 /// The toast was clicked (`mosaik_overlay::toast`).
 pub(crate) const WM_TOAST: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 8;
+/// The Start menu's apps were read (`sets::StartApps`).
+pub(crate) const WM_START_APPS: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 9;
 
 /// Timers on the engine's window.
 pub(crate) mod timer {
@@ -105,6 +107,8 @@ struct Pending {
     drag_esc: bool,
     /// The toast was clicked.
     toast: bool,
+    /// The Start menu's apps were read.
+    start_apps: bool,
 }
 
 impl Pending {
@@ -119,6 +123,7 @@ impl Pending {
             || self.close
             || self.drag_esc
             || self.toast
+            || self.start_apps
     }
 
     fn merge(&mut self, o: Pending) {
@@ -134,6 +139,7 @@ impl Pending {
         self.close |= o.close;
         self.drag_esc |= o.drag_esc;
         self.toast |= o.toast;
+        self.start_apps |= o.start_apps;
     }
 }
 
@@ -150,6 +156,7 @@ thread_local! {
         close: false,
         drag_esc: false,
         toast: false,
+        start_apps: false,
     }) };
 }
 
@@ -186,7 +193,7 @@ pub(crate) struct Engine {
     pub(crate) watch: Watch,
     /// Background tabs Mosaïk has hidden, and the journal the watchdog reads.
     pub(crate) hiding: Hiding,
-    /// Windows' title bars, where tags and tab strips go.
+    /// Windows' title bars, where tags go.
     pub(crate) titles: Titles,
     /// Notices given once per session, by key.
     pub(crate) told: HashSet<&'static str>,
@@ -197,6 +204,8 @@ pub(crate) struct Engine {
     pub(crate) toasts: crate::toasts::Toasts,
     /// The apps of the Start menu, for sets.
     pub(crate) start_apps: crate::sets::StartApps,
+    /// When the programs running were last looked through for other window arrangers.
+    pub(crate) others_checked: Option<std::time::Instant>,
 }
 
 pub(crate) fn run(
@@ -210,21 +219,22 @@ pub(crate) fn run(
     // SAFETY: COM for this thread (the shell cloak and app activation need it), for the thread's
     // whole life.
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-    let window = match WindowClass::register("MosaikEngine", Some(engine_proc)).and_then(|class| {
-        class.create(
-            "Mosaïk engine",
-            WS_POPUP,
-            WS_EX_TOOLWINDOW,
-            mosaik_core::geometry::Rect::default(),
-            None,
-        )
-    }) {
-        Ok(w) => w,
-        Err(e) => {
-            let _ = ready.send(Err(format!("its window could not be created: {e}")));
-            return;
-        }
-    };
+    let window =
+        match WindowClass::register(mosaik_win::window::ENGINE_CLASS, Some(engine_proc)).and_then(|class| {
+            class.create(
+                "Mosaïk engine",
+                WS_POPUP,
+                WS_EX_TOOLWINDOW,
+                mosaik_core::geometry::Rect::default(),
+                None,
+            )
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                let _ = ready.send(Err(format!("its window could not be created: {e}")));
+                return;
+            }
+        };
     let store = Store::new(&config.data_dir);
     let mut notices = Vec::new();
     let (settings, settings_on_disk) = match store.load::<Settings>() {
@@ -301,7 +311,8 @@ pub(crate) fn run(
         undo: None,
         quick: crate::quick::Quick::default(),
         toasts: crate::toasts::Toasts::default(),
-        start_apps: crate::sets::StartApps::default(),
+        start_apps: crate::sets::StartApps::new(window.0 as isize),
+        others_checked: None,
     };
     // Read early: the home page asks for sets as soon as it opens.
     engine.start_apps.refresh();
@@ -401,6 +412,10 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         },
         WM_TOAST => Pending {
             toast: true,
+            ..Pending::default()
+        },
+        WM_START_APPS => Pending {
+            start_apps: true,
             ..Pending::default()
         },
         WM_HOTKEY if i32::try_from(wparam.0) == Ok(hotkeys::SWITCHER) => Pending {
@@ -527,6 +542,11 @@ impl Engine {
         }
         if todo.toast {
             self.toast_clicked();
+        }
+        // The suggestions were asked for before the Start menu was read: the interface asks
+        // again now that they can be made.
+        if todo.start_apps && self.start_apps.read_done() {
+            (self.ui)(UiEvent::WorkspacesChanged);
         }
         if todo.displays {
             // Windows sends several of these for one change; act once it is done.
@@ -658,17 +678,23 @@ impl Engine {
     }
 
     fn on_choice(&mut self, choice: switcher::Choice) {
-        let reply = match choice {
-            switcher::Choice::Open(id) => self.handle(Command::Switch { workspace: id.0 }),
-            switcher::Choice::Save(name) => self.handle(Command::Save {
-                workspace: Some(name),
-            }),
+        let (reply, saved) = match choice {
+            switcher::Choice::Open(id) => (self.handle(Command::Switch { workspace: id.0 }), false),
+            switcher::Choice::Save(name) => (
+                self.handle(Command::Save {
+                    workspace: Some(name),
+                }),
+                true,
+            ),
         };
-        if let Reply::Error { message, hint, .. } = reply {
-            self.notice(
+        match reply {
+            Reply::Error { message, hint, .. } => self.notice(
                 "Mosaïk",
                 hint.map_or(message.clone(), |h| format!("{message} {h}")),
-            );
+            ),
+            // The switcher has closed: what was saved is said, or nothing would show it was.
+            Reply::Done { message } if saved => self.queue_toast("Mosaïk".to_owned(), message),
+            _ => {}
         }
     }
 

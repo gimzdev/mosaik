@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::geometry::{Insets, RatioRect, Rect};
+use crate::geometry::{RatioRect, Rect};
 use crate::layout::{Launch, Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
 use crate::matching::{AppMatch, TitleMatch, assign};
 use crate::place::{Resolver, Target};
@@ -339,7 +339,8 @@ pub fn capture(
         })
         .collect();
 
-    // New zones, coloured in reading order; every zone is numbered once they are all in.
+    // New zones, coloured monitor by monitor, from the left; every zone is numbered once they
+    // are all in, in reading order.
     let mut taken_zone_ids: HashSet<String> = kept.iter().map(|z| z.id.0.clone()).collect();
     let mut order: Vec<usize> = (0..groups.len()).filter(|g| tiles[*g]).collect();
     order.sort_by_key(|g| {
@@ -798,14 +799,6 @@ pub fn suggested_name(existing: &[Workspace]) -> String {
         .map(|n| format!("Workspace {n}"))
         .find(|n| !names.contains(&n.to_lowercase()))
         .unwrap_or_else(|| "Workspace".to_owned())
-}
-
-/// The frame a window has inside a zone, the inverse of [`FrameStyle::window_area`] (for tests
-/// and tools: the zone a window at `frame` would need).
-pub fn zone_around(frame: Rect, style: FrameStyle, dpi: u32) -> Rect {
-    let half_gap = crate::geometry::scale_for_dpi(style.gap, dpi) / 2;
-    let band = crate::geometry::scale_for_dpi(style.tag_band, dpi);
-    frame.outset(Insets::new(half_gap, band + half_gap, half_gap, half_gap))
 }
 
 #[cfg(test)]
@@ -1776,14 +1769,5 @@ mod tests {
         };
         assert_eq!(suggested_name(&[]), "Workspace 1");
         assert_eq!(suggested_name(&[one]), "Workspace 2");
-    }
-
-    #[test]
-    fn zone_around_inverts_window_area() {
-        for dpi in [96, 120, 144, 192] {
-            let frame = Rect::new(100, 200, 900, 800);
-            let zone = zone_around(frame, style(), dpi);
-            assert_eq!(style().window_area(zone, dpi), frame, "at {dpi}");
-        }
     }
 }

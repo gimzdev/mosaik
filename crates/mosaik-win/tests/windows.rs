@@ -5,6 +5,7 @@
 // Tests may unwrap: a panic is a failed test.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use mosaik_core::classify::{Rules, Verdict, classify};
@@ -20,8 +21,8 @@ use mosaik_win::{monitors, titlebar, window};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, HTCAPTION, SW_MAXIMIZE, SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE, ShowWindow,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_OVERLAPPEDWINDOW,
-    WS_SYSMENU,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WS_CAPTION, WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_OVERLAPPED,
+    WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU,
 };
 
 /// One test at a time on the desktop: windows moved at the same time would cover each other.
@@ -235,4 +236,46 @@ fn a_hidden_window_comes_back_where_it_was() {
         assert!(!g.minimized && !g.cloaked, "{method:?}: {g:?}");
         assert_eq!(edge_error(g.frame, place), 0, "{method:?}: back at {:?}", g.frame);
     }
+}
+
+/// Whether the stand-in for Mosaïk's engine window below was asked to close.
+static ENGINE_ASKED: AtomicBool = AtomicBool::new(false);
+
+/// Mosaïk's engine window quits Mosaïk when asked to close; this one only notes it.
+unsafe extern "system" fn engine_like(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if msg == WM_CLOSE {
+        ENGINE_ASKED.store(true, Ordering::SeqCst);
+        return LRESULT(0);
+    }
+    // SAFETY: the default handling of a message this window was sent.
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+/// A Mosaïk asked to quit (by a newer one taking its place) is asked through its engine's window
+/// alone. The Store's 1.0.1, asked through every window it had (job 0150), lost the window its
+/// interface's events go through, logged "the interface thread is gone" and never quit; a window
+/// of its own that closes when asked, as this test's other window does, must stay.
+#[test]
+fn a_mosaik_asked_to_quit_is_asked_through_its_engine_window_alone() {
+    let _desktop = desktop();
+    let other = TestWindow::new("Mosaïk test: not the engine");
+    let class = WindowClass::register(window::ENGINE_CLASS, Some(engine_like)).expect("window class");
+    let engine = class
+        .create(
+            "Mosaïk test: engine",
+            WS_POPUP,
+            WS_EX_TOOLWINDOW,
+            Rect::default(),
+            None,
+        )
+        .expect("window");
+    ENGINE_ASKED.store(false, Ordering::SeqCst);
+    let asked = window::ask_mosaik_to_quit(mosaik_win::process::own_pid());
+    pump_until(300, || ENGINE_ASKED.load(Ordering::SeqCst));
+    let engine_asked = ENGINE_ASKED.load(Ordering::SeqCst);
+    let other_left = window::exists(other.0);
+    own::destroy(engine);
+    assert_eq!(asked, 1, "windows asked");
+    assert!(engine_asked, "the engine's window was not asked to close");
+    assert!(other_left, "another window of the process was closed");
 }

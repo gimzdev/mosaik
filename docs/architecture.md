@@ -24,8 +24,12 @@ The owner's first rule, above every other trade-off: **minimal, efficient, elega
 ```
 mosaik.exe            engine thread: windows, zones, workspaces, tabs, hotkey, the switcher and
   │                   the overlays (native, ADR 0002)
-  ├─ mover threads    one per window being moved, so a hung app never holds up the engine
+  ├─ mover threads    one per window being moved, so a hung app never holds up the engine;
+  │                   one following a window dragged by its band (`mosaik-follow`)
   ├─ hiding thread    hides and shows background tabs (the shell cloak is a call into Explorer)
+  ├─ titles thread    reads windows' title bars, where their tags go (`mosaik-titles`)
+  ├─ Start menu       reads the apps installed, for the sets of apps (`mosaik-start-apps`)
+  ├─ launch threads   start a workspace's or a set's apps that are not open (`mosaik-launch`)
   ├─ pipe threads     mosaikctl and second launches (ADR 0007)
   ├─ main thread      Tauri: the tray icon, and Mosaïk's window (Home, a workspace's page, the
   │                   zone editor, Settings), created when opened and destroyed when closed
@@ -39,10 +43,12 @@ order on one thread with a Win32 message loop (hotkeys, window events, timers). 
 and `mosaikctl` send it the same commands (`mosaik_ipc::protocol`); the interface in process,
 `mosaikctl` over the pipe. Moving a window is a synchronous call into its app, so the engine
 hands each move to a short-lived thread and keeps handling its messages while it waits, at most
-2.5 s (`mover.rs`).
+2.5 s (`mover.rs`); the wait ends as soon as the last thread has answered (an event it sets).
+Scans read the windows Windows shows (ADR 0029): the rest, nine in ten top-level windows, are
+never Mosaïk's to manage.
 
 Mosaïk's window is the same app: its commands reach the engine in process, in protocol
-version 6. A save from the zone editor carries the revision of the zones it was opened on, so it
+version 9. A save from the zone editor carries the revision of the zones it was opened on, so it
 is refused, with the reason, when the monitors or the zones changed meanwhile. While the shortcut
 recorder listens, Mosaïk's own shortcuts let go (`hold_hotkeys`, at most a minute), so pressing
 one records it instead of opening the switcher.
@@ -90,8 +96,8 @@ the engine gathers windows and applies the result.
 - **Tags** (ADR 0011): the tag goes in a free stretch of the window's own title bar, against its
   buttons, found by asking the window what is under a row of points, as Windows does wherever
   the pointer goes (`WM_NCHITTEST`), on a thread of its own (`titles`). Every window fills its
-  zone and starts at its top: a tag with little room is cut short, then to the zone's initial
-  (`zone::tag_cut`), and a window with no room even for that wears none. A tab group's visible
+  zone and starts at its top: a tag with little room is drawn compact, its whole number without
+  its side padding (`zone::tag_cut`), and a window with no room even for that wears none. A tab group's visible
   tab sits below a band with the group's strip in it (ADR 0027). A setting puts every tag in a
   bar at the top of its zone instead, above every window. A band is solid and,
   with rings on, inside the window's ring, so the two read as one window; the window can be
@@ -132,8 +138,9 @@ the engine gathers windows and applies the result.
   dot moves it there. Adding a window on screen, moving an app to another zone or removing it is
   a pure edit (`mosaik_core::editing`), saved, then applied at once in the open workspace.
 - **Home** (ADR 0016, 0024): a picture of the main monitor as the layout chosen would leave it,
-  drawn from `preview_arrange` (the same preparation as Arrange, changing nothing): Smart first
-  (Arrange's own layout for the task it reads), or one of ten layouts; the windows it would
+  drawn from `preview_arrange` (the same preparation as Arrange, changing nothing): Automatic
+  first (Arrange's own layout for the task it reads), or one of ten layouts (five named beside
+  it, five under More layouts, ADR 0029); the windows it would
   minimise are named under it. A window dragged onto another in the picture trades places with
   it (a click or Enter picks one, a second puts it there); the moves go with the preview and with
   Arrange (`mosaik_core::arrange::plan_moved`), each window keeping its colour, each zone its
@@ -141,9 +148,12 @@ the engine gathers windows and applies the result.
   apps' icons: a click shows it in the picture as opening it would leave the screen
   (`preview_workspace`, the plan opening it follows: its apps glide to their zones, the apps it
   would start drawn dashed where they open, a tab group with its tabs, the windows it would
-  minimise named below), with Open in place of Arrange (ADR 0028); a layout chosen, or the
-  workspace clicked again, goes back to Arrange. A ⋯ menu has Open and the rest, then come the
-  suggested sets. Mosaïk's window has two places, Home and Settings (with About at its end).
+  minimise named below), with Open in place of Arrange (ADR 0028); a double-click opens it, and
+  Back, Esc or a layout chosen goes back to Arrange. A ⋯ menu has Open and the rest, then come
+  the suggested sets, shown the same way before "Start these apps" (ADR 0029). What an action did
+  shows under the picture. The window reads from the engine once per burst (`reads.ts`: focus, a
+  change and its own action make one read 150 ms after the last). Mosaïk's window has two
+  places, Home and Settings (with About at its end).
 - **Apps' icons** (ADR 0024): replies name each app's icon by a key (`app:<AppUserModelID>` or
   `exe:<path>`, `mosaik_core::icons`); the window asks for the ones it shows in one batch
   (`app_icons`), read once per app as 48 px PNGs by the shell's image factory on a thread of their
@@ -211,8 +221,8 @@ hidden with the shell's cloak (ADR 0003).
   its place to the tab on its right, else on its left. A background tab an app brings forward
   (a notification, a link) shows for now; the layout keeps the user's choice.
 - **Layouts**: groups, their tab order and the tab that shows are part of the workspace, saved
-  where the visible tab is. With tags above windows, a group's windows sit below a band with
-  room for the strip even when tags are hidden. Opening a workspace moves only the tabs that
+  where the visible tab is. A group's windows sit below a band with room for the strip, whether
+  tags are in title bars, above windows or hidden (ADR 0027). Opening a workspace moves only the tabs that
   show; a tab goes to its group's place when it is shown.
 
 ## Crates

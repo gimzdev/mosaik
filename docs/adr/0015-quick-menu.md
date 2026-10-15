@@ -63,3 +63,8 @@ other edge when that one does (another screen or the taskbar beyond the edge cho
 Mosaïk says once, ever, the next time its window is opened. While an app hides the pointer or keeps it inside part of the screen, as a game
 does while the mouse turns the view, the line does not open the menu. In Settings, the quick menu
 is one choice: right edge, left edge, or off.
+
+## Amended by ADR 0029 (2026-10-15)
+
+A press in the 300 ms after the menu opened by itself, the pointer resting on its line, does
+nothing: it was meant for what was there a moment before (a browser's scroll bar).

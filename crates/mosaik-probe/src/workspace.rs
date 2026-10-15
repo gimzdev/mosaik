@@ -304,7 +304,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
     pump_until(400, || false);
     // The watchdog, as in the app: without it nothing hides (tab groups then show all their
     // windows, stacked, which the results show).
-    let watchdog = match mosaik_engine::watchdog::start(&dir.join("hidden-windows.json")) {
+    let watchdog = match mosaik_engine::watchdog::start(&dir.join(mosaik_core::journal::FILE)) {
         Ok(w) => Some(w),
         Err(e) => {
             println!("watchdog not started ({e}): tabs will not hide windows");
@@ -846,6 +846,12 @@ fn editing(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Value, S
     pump_until(700, || false);
     let work = code.tiled_monitor_work();
     let code_frame = frame_rect(code.hwnd).ok_or("the code window vanished")?;
+    // The code window is still a tab of the group the drag steps made with the terminal: it sits
+    // below the group's band (ADR 0027), in title bars as above windows.
+    let code_grouped = settled(engine)?
+        .tab_strips
+        .iter()
+        .any(|s| s.tabs.iter().any(|t| t.window == handle(code.hwnd)));
     // Numbered 1 to N by place, whatever the editor called the new zone.
     let mut numbers: Vec<usize> = after_split.iter().filter_map(|z| z.name.parse().ok()).collect();
     numbers.sort_unstable();
@@ -855,7 +861,8 @@ fn editing(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Value, S
         "zone_names": after_split.iter().map(|z| z.name.clone()).collect::<Vec<_>>(),
         "numbered_by_place": numbers == (1..=after_split.len()).collect::<Vec<_>>(),
         "new_zone_has_an_id": after_split.iter().all(|z| z.id.is_some()),
-        "code_error_px": edge_error(code_frame, styles.area(left.area.to_rect(work), false)),
+        "code_in_a_group": code_grouped,
+        "code_error_px": edge_error(code_frame, styles.area(left.area.to_rect(work), code_grouped)),
     });
 
     // The editor that was open before the split is now stale: its save is refused.

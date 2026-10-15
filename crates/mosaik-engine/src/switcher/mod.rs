@@ -17,9 +17,7 @@ use mosaik_core::settings::Theme as ThemeSetting;
 use mosaik_core::switcher::{Action, Entry, Key, Model};
 use mosaik_win::own::{WindowClass, destroy};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Dwm::{
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmFlush, DwmSetWindowAttribute,
-};
+use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateSolidBrush, DeleteObject, EndPaint, GetMonitorInfoW, GetSysColor, HBRUSH, HGDIOBJ,
     InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, PAINTSTRUCT, SYS_COLOR_INDEX,
@@ -243,12 +241,10 @@ pub(crate) fn open(entries: Vec<Entry>, active: Option<WorkspaceId>, shortcut: S
         }
         let _ = UpdateWindow(window);
     }
-    let painted = asked.elapsed();
-    // SAFETY: waits for the next composition, so the time logged is when it reached the screen.
-    let _ = unsafe { DwmFlush() };
+    // Not waiting for the screen to show it (`DwmFlush`): that held the engine a frame (13-17
+    // ms) after each opening, with the user's first key waiting behind it, only for this line.
     tracing::info!(
-        painted_ms = format!("{:.1}", painted.as_secs_f64() * 1000.0),
-        on_screen_ms = format!("{:.1}", asked.elapsed().as_secs_f64() * 1000.0),
+        painted_ms = format!("{:.1}", asked.elapsed().as_secs_f64() * 1000.0),
         "switcher open"
     );
 }
@@ -363,21 +359,20 @@ fn refill() {
                 None => "new workspace".to_owned(),
             };
             let spoken = vec![format!(
-                "Save this layout as: {}. {what}. Type a name, Enter to save, Escape to go back.",
+                "Save as workspace: {}. {what}. Type a name, Enter to save, Escape to go back.",
                 if n.name.is_empty() {
                     "no name yet"
                 } else {
                     n.name.as_str()
                 }
             )];
-            return Some((s.list, s.window, spoken, "Save this layout".to_owned(), Some(0)));
+            return Some((s.list, s.window, spoken, "Save as workspace".to_owned(), Some(0)));
         }
         let spoken: Vec<String> = (0..s.model.shown().len())
             .filter_map(|i| s.model.spoken(i))
             .collect();
         let name = if s.model.is_empty() {
-            "No workspaces yet. Arrange your windows, then press S to save the layout as a workspace."
-                .to_owned()
+            "No workspaces yet. Arrange your windows, then press S to save them as a workspace.".to_owned()
         } else if s.model.shown().is_empty() {
             format!(
                 "No workspace matches \u{201c}{}\u{201d}. Press Escape to clear the filter.",

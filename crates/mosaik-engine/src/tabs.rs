@@ -26,12 +26,11 @@ use mosaik_overlay::tabbar::{self, BarInput, BarLook, BarPlace, Hit, TabBar, Tab
 use mosaik_win::hide::Hidden;
 use mosaik_win::process::Process;
 use mosaik_win::{apps, arrange, window};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
 
 use crate::hider::{self, Answer, Kind, Request, Worker};
 use crate::mover::{self, To};
 use crate::thread::{Engine, timer};
-use crate::watch::{DRAG_TICK_MS, shift_down};
+use crate::watch::DRAG_TICK_MS;
 
 /// After a tab is shown, strips go back above their windows this long after, then again.
 const STACK_FIRST_MS: u32 = 120;
@@ -115,22 +114,20 @@ pub(crate) enum BarMode {
     PullingOut,
 }
 
-/// Where a group's strip goes.
+/// Where a group's strip goes: always in a band above its visible tab (ADR 0027).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Spot {
     At {
         band: Rect,
-        /// In the visible tab's title bar, or in a band above it.
-        place: BarPlace,
         color: ZoneColor,
         /// The zone's name; empty outside zones.
         label: String,
         dpi: u32,
     },
-    /// The visible tab is minimised or on another desktop, maximised with no room in its title
-    /// bar, or its title bar is being read: the strip comes back with it.
+    /// The visible tab is minimised, maximised, in full screen or on another desktop: the strip
+    /// comes back with it.
     Later,
-    /// No room for a strip, in the visible tab's title bar or above it.
+    /// No room for a band above the visible tab.
     Nowhere,
 }
 
@@ -156,12 +153,6 @@ fn still_hidden(w: WindowHandle, how: &Hidden) -> bool {
         HideMethod::Minimize => window::geometry(hwnd).is_some_and(|g| g.minimized),
         HideMethod::Park => true,
     }
-}
-
-fn esc_down() -> bool {
-    // SAFETY: reads the key state; no preconditions.
-    let state = unsafe { GetAsyncKeyState(i32::from(VK_ESCAPE.0)) };
-    state.cast_unsigned() & 0x8000 != 0
 }
 
 impl Engine {
@@ -240,28 +231,26 @@ impl Engine {
     /// its title bar (ADR 0027): a group sits below a band for its strip, tags in title bars or
     /// not, so every tab has room to be dragged out.
     pub(crate) fn strip_spot(&mut self, group: &TabGroupId, visible: WindowHandle) -> Spot {
-        let (frame, maximized) = if self.hiding.hidden.contains_key(&visible) {
+        let geometry = window::geometry(window::hwnd(visible));
+        let frame = if self.hiding.hidden.contains_key(&visible) {
             // Still hidden: it shows in the group's place.
             match self.group_target(group) {
-                Some(To::Frame(r)) => (r, false),
+                Some(To::Frame(r)) => r,
                 Some(To::Maximized(_)) => return Spot::Later,
                 None => return Spot::Nowhere,
             }
         } else {
-            let Some(g) = window::geometry(window::hwnd(visible)) else {
+            let Some(g) = &geometry else {
                 return Spot::Nowhere;
             };
             if g.minimized || g.cloaked || g.full_screen || g.maximized {
                 return Spot::Later;
             }
-            (g.frame, g.maximized)
+            g.frame
         };
         let banded = self.style().for_tabs();
-        let resizable = window::geometry(window::hwnd(visible)).is_none_or(|g| g.resizable);
-        let zone = self
-            .zone_of(visible, frame, resizable, banded)
-            .filter(|_| !maximized)
-            .cloned();
+        let resizable = geometry.is_none_or(|g| g.resizable);
+        let zone = self.zone_of(visible, frame, resizable, banded).cloned();
         let monitor = self.topology.as_ref().map(|t| t.monitor_for_rect(frame).clone());
         let dpi = zone
             .as_ref()
@@ -277,7 +266,6 @@ impl Engine {
             return Spot::At {
                 // Right above the visible tab (one that cannot be resized sits lower in the zone).
                 band: band_above(frame, band),
-                place: BarPlace::Band,
                 color,
                 label,
                 dpi,
@@ -297,7 +285,6 @@ impl Engine {
         }
         Spot::At {
             band,
-            place: BarPlace::Band,
             color,
             label,
             dpi,
@@ -421,7 +408,6 @@ impl Engine {
             Some(visible),
             Some(Spot::At {
                 band,
-                place,
                 color,
                 label,
                 dpi,
@@ -461,7 +447,7 @@ impl Engine {
             (Some(_), Some(d)) => d,
             _ => visible,
         };
-        let (band, place) = (*band, *place);
+        let band = *band;
         if self.canvas_ready().is_none() {
             return Some(false);
         }
@@ -472,7 +458,7 @@ impl Engine {
             Some(bar) => match bar.show(
                 &mut canvas,
                 band,
-                place,
+                BarPlace::Band,
                 &look,
                 &tabs,
                 drop_at,
@@ -1155,7 +1141,9 @@ impl Engine {
     /// On the drag timer: Esc ends a press on a strip, or on a band (its window goes back).
     /// Esc is held by Mosaïk meanwhile (`hold_esc`); this reads it when another app holds it.
     pub(crate) fn bar_tick(&mut self) {
-        if (self.watch.bar_drag.is_some() || self.watch.band_press.is_some()) && esc_down() {
+        if (self.watch.bar_drag.is_some() || self.watch.band_press.is_some())
+            && mosaik_win::input::escape_down()
+        {
             self.cancel_presses();
         }
     }
@@ -1254,7 +1242,7 @@ impl Engine {
             BarMode::PullingOut => {
                 // Zones show as for a window dragged by its title bar: Shift (or the setting)
                 // moves it freely.
-                let snapping = self.settings.snap.active(shift_down());
+                let snapping = self.settings.snap.active(mosaik_win::input::shift_down());
                 let target = if snapping {
                     self.watch.bar_drag.as_ref().and_then(|bd| {
                         let id = snap::target(at, &bd.zones, self.settings.snap)?;

@@ -74,3 +74,8 @@ they go with, so all of them open. The writing and design sets have no assistant
 that is open is used, never started again, packaged apps included (their windows take their
 process's AppUserModelID), and opening a set twice while its apps start starts each once. A
 started app takes its zone as soon as its window shows, also when it shows cloaked first.
+
+## Amended by ADR 0029 (2026-10-15)
+
+A suggested set clicked on Home is shown first, with the apps it would start; "Start these apps"
+opens it.

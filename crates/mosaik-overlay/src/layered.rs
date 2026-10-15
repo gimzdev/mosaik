@@ -216,11 +216,6 @@ impl LayeredWindow {
     pub fn shown_at(&self) -> Option<Rect> {
         self.shown
     }
-
-    /// Frees the bitmap of a hidden overlay (large previews are only kept while dragging).
-    pub fn release_surface(&mut self) {
-        self.surface = None;
-    }
 }
 
 impl Drop for LayeredWindow {

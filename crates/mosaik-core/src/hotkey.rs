@@ -27,9 +27,6 @@ impl Modifiers {
     pub const fn bits(self) -> u8 {
         self.0
     }
-    pub const fn from_bits(bits: u8) -> Self {
-        Self(bits & 0xF)
-    }
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
@@ -124,10 +121,6 @@ impl Key {
 
     pub const fn is_digit(self) -> bool {
         matches!(self.0, 0x30..=0x39) || matches!(self.0, 0x60..=0x69)
-    }
-
-    pub const fn is_function(self) -> bool {
-        matches!(self.0, 0x70..=0x87)
     }
 
     /// Punctuation keys move between layouts (the `[` key is `^` on a French keyboard).

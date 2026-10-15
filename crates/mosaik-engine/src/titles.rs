@@ -3,9 +3,9 @@
 //!
 //! Reading a title bar asks the window's app about a few hundred points, which takes a few
 //! milliseconds, longer when the app is busy: never on the engine's thread. A window is read when
-//! it first needs a tag or a strip, and again when its size or title changes or it comes to the
-//! front (its app may have changed its title bar: a browser opened a tab). Meanwhile the last
-//! reading is used, its free stretches kept next to the window's edges.
+//! it first needs a tag, and again when its size or title changes or it comes to the front (its
+//! app may have changed its title bar: a browser opened a tab). Meanwhile the last reading is
+//! used, its free stretches kept next to the window's edges.
 //!
 //! A window whose title bar has no room for its tag wears it cut short, or its initial, or none,
 //! at the top of its zone like its neighbours. A tab group's strip never goes in a title bar: the
@@ -49,20 +49,23 @@ pub(crate) enum Bar {
     Room(TitleRoom),
     /// Not read yet: nothing goes in it until it is.
     Pending,
-    /// Its app does not answer, or title bars cannot be read: the tag goes above the window.
+    /// Its app does not answer, or title bars cannot be read: nothing goes in it.
     Unread,
 }
 
-/// Where a window's tag, or its group's strip, goes.
+/// Where a window's tag goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TitleSpot {
+pub(crate) enum TagSpot {
     /// In this free stretch of its title bar.
-    In(Rect),
-    /// Above the window: tags go above windows, or its title bar has no room.
+    InTitleBar(Rect),
+    /// Above the window: tags go above windows.
     Above,
+    /// Its title bar has no room for it, even cut short: the window wears none, and is never
+    /// lowered for one.
+    NoRoom,
     /// Its title bar is not read yet: nothing for a moment.
     NotYet,
-    /// Its app does not answer: no tag until it does.
+    /// Its app does not answer, or title bars cannot be read: no tag until it does.
     NoAnswer,
 }
 
@@ -70,10 +73,9 @@ struct Known {
     /// The window's size when it was last read.
     size: Size,
     title: String,
-    /// The last reading the app answered in full (`None`: it never has), and the size the window
-    /// had then: its stretches are a guess at any other size.
+    /// The last reading the app answered in full (`None`: it never has): its stretches are a
+    /// guess at any other size.
     room: Option<TitleRoom>,
-    room_size: Size,
     /// When it was last read, and whether the app failed to answer then.
     at: Instant,
     failed: bool,
@@ -231,8 +233,8 @@ impl Engine {
                     tracing::error!(error = %e, "title bars cannot be read");
                     self.tell_once(
                         "titles",
-                        "Tags go above windows",
-                        format!("Mosaïk could not start reading title bars ({e}), so each window wears its tag and tab strip above it."),
+                        "Zone numbers are not in title bars",
+                        format!("Mosaïk could not start reading title bars ({e}), so windows wear no zone number in theirs until it starts again. To show the numbers above windows instead, choose Above for Zone tags in Settings, More settings."),
                     );
                     return;
                 }
@@ -261,13 +263,8 @@ impl Engine {
             let previous = self.titles.known.get(&w);
             let before = previous.and_then(|k| k.room.clone());
             let resized = previous.is_none_or(|k| k.size != reading.frame.size());
-            // An app busy for a moment keeps the room it was last read with, at the size it was
-            // read at.
+            // An app busy for a moment keeps the room it was last read with.
             let failed = reading.room.is_none();
-            let room_size = match previous {
-                Some(k) if failed => k.room_size,
-                _ => reading.frame.size(),
-            };
             let (took, room_runs) = (reading.took, reading.room.as_ref().map(|r| r.runs.len()));
             let room = reading.room.or_else(|| before.clone());
             let changed = resized || room != before;
@@ -281,7 +278,6 @@ impl Engine {
                     size: reading.frame.size(),
                     title: reading.title,
                     room,
-                    room_size,
                     at: reading.at,
                     failed,
                     stale: false,
@@ -337,19 +333,24 @@ impl Engine {
     }
 
     /// Where the tag `label` of `h` (whose frame is `frame`, on a monitor at `dpi`) goes.
-    pub(crate) fn tag_spot(&mut self, h: WindowHandle, frame: Rect, label: &str, dpi: u32) -> TitleSpot {
+    pub(crate) fn tag_spot(&mut self, h: WindowHandle, frame: Rect, label: &str, dpi: u32) -> TagSpot {
+        if !self.style().title_bars {
+            return TagSpot::Above;
+        }
         let need = self.tag_width(label, dpi);
-        self.title_spot(h, frame, Fit::tag(need, dpi))
+        match self.title_bar(h, frame) {
+            Bar::Room(room) => room
+                .spot(frame, Fit::tag(need, dpi))
+                .map_or(TagSpot::NoRoom, TagSpot::InTitleBar),
+            Bar::Pending => TagSpot::NotYet,
+            Bar::Unread => TagSpot::NoAnswer,
+        }
     }
 
-    fn title_spot(&mut self, h: WindowHandle, frame: Rect, fit: Fit) -> TitleSpot {
-        if !self.style().title_bars {
-            return TitleSpot::Above;
-        }
-        match self.title_bar(h, frame) {
-            Bar::Room(room) => room.spot(frame, fit).map_or(TitleSpot::Above, TitleSpot::In),
-            Bar::Pending => TitleSpot::NotYet,
-            Bar::Unread => TitleSpot::NoAnswer,
-        }
+    /// `h`'s app may have changed its title bar (it came to the front: a browser opened a tab
+    /// while it was behind): it is read again, and its tag moves if it must.
+    pub(crate) fn read_title_again(&mut self, h: WindowHandle, frame: Rect) {
+        self.titles.stale(h);
+        let _ = self.title_bar(h, frame);
     }
 }

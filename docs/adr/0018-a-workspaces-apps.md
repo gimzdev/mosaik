@@ -41,3 +41,9 @@ drop into a zone, or a window moved by hand. Nothing showed which apps a workspa
 
 The Workspaces page is part of Home: a workspace's apps open from its ⋯ menu, "Change its
 apps…", and close from the same menu, "Hide its apps".
+
+## Amended by ADR 0028 (2026-10-15)
+
+A workspace's page lists its apps one row each, with a numbered dot for every zone (the app's own
+lit; a click on another moves the app there) and × to take it out; the page shows the workspace's
+picture as it would open.

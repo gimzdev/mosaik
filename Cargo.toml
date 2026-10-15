@@ -36,6 +36,10 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 windows = "0.62.2"
+# The `#[interface]` macro (the shell's cloak, mosaik-win's hide.rs) writes `::windows_core`
+# paths, so the crate it comes from is named as a dependency of its own, at the version
+# `windows` uses.
+windows-core = "0.62.2"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

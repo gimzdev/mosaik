@@ -97,13 +97,13 @@ if Mosaïk stops
 
 <h2>Using it</h2>
 
-<p>Open Mosaïk from the Start menu or its tray icon: <b>Your screen</b> shows your windows as <b>Smart</b> would lay them out,<br>
-each in its zone. Choose one of ten layouts instead to see it first, and drag a window onto another to swap them.<br>
-<b>Arrange</b> does it; <b>Undo</b> puts them back.</p>
+<p>Open Mosaïk from the Start menu or its tray icon: <b>Your screen</b> shows your windows as <b>Automatic</b> would lay them out,<br>
+each in its zone. Choose a layout instead to see it first, and drag a window onto another to swap them.<br>
+Nothing moves until <b>Arrange</b>; <b>Undo</b> puts them back.</p>
 
 <p>Beside it, click a workspace and the picture shows it as it will open; <b>Open</b> opens it.<br>
 <b>Suggested</b> offers sets of your apps that go together, such as <b>Coding</b>:<br>
-one click opens them side by side, three to a view, and starts the ones that are not open.</p>
+<b>Start these apps</b> opens them side by side, three to a view, and starts the ones that are not open.</p>
 
 <p>Arrange the apps of one project, press <kbd>Win</kbd> <kbd>Alt</kbd> <kbd>Space</kbd>, then <kbd>S</kbd> and a name.<br>
 Each place becomes a zone with its own colour, numbered 1, 2, 3 from the top left.</p>

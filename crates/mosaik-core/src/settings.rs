@@ -107,12 +107,21 @@ impl Settings {
             .map(|((what, lo, hi), v)| format!("{what} must be from {lo} to {hi}; it is {v}."))
     }
 
-    /// The same settings with every number brought into its range.
-    pub fn clamped(mut self) -> Self {
-        for ((_, lo, hi), v) in RANGES.iter().zip(self.numbers_mut()) {
-            *v = (*v).clamp(*lo, *hi);
+    /// Brings every number into its range (a settings file edited by hand), saying what changed
+    /// in one sentence, if anything did.
+    pub fn clamp(&mut self) -> Option<String> {
+        let mut changed = Vec::new();
+        for ((what, lo, hi), v) in RANGES.iter().zip(self.numbers_mut()) {
+            let was = *v;
+            *v = was.clamp(*lo, *hi);
+            if *v != was {
+                changed.push(format!(
+                    "{what} was {was}, out of its range of {lo} to {hi}: it is {} now.",
+                    *v
+                ));
+            }
         }
-        self
+        (!changed.is_empty()).then(|| changed.join(" "))
     }
 }
 
@@ -122,12 +131,13 @@ pub struct FrameSettings {
     /// Draw each zone's coloured ring around its windows. Off by default: windows meet edge to
     /// edge. With rings, windows sit at least two rings apart, so no ring covers a neighbour.
     pub show_frames: bool,
-    /// Show the zone's name on its windows.
+    /// Show the zone's number on its windows.
     pub show_tags: bool,
-    /// Tags and tab strips go in each window's own title bar (the default), so every window
-    /// fills its zone, with no band of empty space above it: a window whose title bar has room
-    /// for less wears its tag cut short, or its initial, or its ring alone, and stays at the top
-    /// of its zone like its neighbours. Off: in a bar at the top of each zone, above every window.
+    /// Tags go in each window's own title bar (the default), so every window alone fills its
+    /// zone, with no band of empty space above it: a window whose title bar has room for less
+    /// wears its tag compact, or its ring alone, and stays at the top of its zone like its
+    /// neighbours. Off: in a band at the top of each zone, above every window. A tab group sits
+    /// below a band with its strip either way (ADR 0027).
     pub tags_in_title_bar: bool,
     pub style: FrameStyle,
 }
@@ -156,10 +166,8 @@ impl FrameSettings {
         }
     }
 
-    /// The style of a window that wears its tag above it: every window when tags go above
-    /// windows, and with tags in title bars, the tab that shows of a group whose title bar has no
-    /// room for the group's strip (the way to its other tabs must stay in reach).
-    pub fn banded_style(self) -> FrameStyle {
+    /// The style windows are placed with when tags go above them, below a band.
+    fn banded_style(self) -> FrameStyle {
         let style = self.spaced(FrameStyle {
             title_bars: false,
             ..self.style
@@ -271,8 +279,7 @@ mod tests {
         let style = s.frames.effective_style();
         assert!(style.title_bars);
         assert_eq!(style.tag_band, 0, "windows fill their zones");
-        // The tab that shows of a group whose title bar has no room for its strip sits below
-        // the usual band.
+        // Below a band, the usual one.
         assert_eq!(s.frames.banded_style(), FrameStyle::default());
         // In a bar above every window (the choice is saved, the session-only flag is not).
         let above = FrameSettings {
@@ -355,16 +362,24 @@ mod tests {
             s.problem().as_deref(),
             Some("The space between zones must be from 0 to 64; it is 500.")
         );
-        let c = s.clamped();
+        let mut c = s.clone();
+        assert_eq!(
+            c.clamp().as_deref(),
+            Some(
+                "The space between zones was 500, out of its range of 0 to 64: it is 64 now. The distance zones pull windows from was -3, out of its range of 0 to 400: it is 0 now."
+            )
+        );
         assert_eq!((c.frames.style.gap, c.snap.near), (64, 0));
+        assert_eq!(c.problem(), None);
+        assert_eq!(c.clamp(), None, "nothing more to change");
         let mut s = Settings::default();
         s.edge.position = 1400;
         assert_eq!(
             s.problem().as_deref(),
             Some("The side menu's place along the edge must be from 0 to 1000; it is 1400.")
         );
-        assert_eq!(s.clamped().edge.position, 1000);
-        assert_eq!(c.problem(), None);
+        let _ = s.clamp();
+        assert_eq!(s.edge.position, 1000);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! Reading a window's title bar: what its app answers, point by point, to the question Windows
-//! asks wherever the pointer goes (`WM_NCHITTEST`). Where tags and strips then go is decided by
+//! asks wherever the pointer goes (`WM_NCHITTEST`). Where tags then go is decided by
 //! `mosaik_core::titlebar`.
 //!
 //! Each point is asked of the window real input would reach there: the deepest visible, enabled

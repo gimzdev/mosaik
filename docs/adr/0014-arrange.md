@@ -59,3 +59,13 @@ to be saved before its zones existed.
   steer it: name a zone "Terminal" and terminals go there.
 - Arrange adds the windows it places to the workspace: opening it later brings them back there.
 - Measured with `mosaik-probe smart` (`docs/STATUS.md`).
+
+## Amended by ADR 0028 (2026-10-15)
+
+Zones are numbered by place, so a zone's name no longer steers Arrange: the planner goes by the
+kinds of the windows and the task they suggest (ADR 0019).
+
+## Amended by ADR 0029 (2026-10-15)
+
+Arrange says what it did in short sentences, and which workspace now opens this way, or the new
+one it was saved as.

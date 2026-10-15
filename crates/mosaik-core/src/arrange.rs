@@ -385,7 +385,8 @@ impl Kind {
 #[derive(Clone, Debug)]
 pub struct Unit {
     pub kind: Kind,
-    /// The app's name, as zones made for it are called ("Visual Studio Code").
+    /// The app's name ("Visual Studio Code"), for what is said about the plan; the plan does
+    /// not go by it.
     pub label: String,
     /// Its visible frame now.
     pub frame: Rect,
@@ -398,10 +399,9 @@ pub struct Unit {
     pub monitor: usize,
 }
 
-/// A zone of the open workspace.
-#[derive(Clone, Debug)]
-pub struct Spot {
-    pub name: String,
+/// A zone of the open workspace, which the plan keeps unless its monitor is laid out anew.
+#[derive(Clone, Copy, Debug)]
+pub struct KeptZone {
     /// The monitor it is on now (an index into the monitors given to [`plan`]).
     pub monitor: usize,
 }
@@ -608,14 +608,14 @@ pub struct Chosen {
 /// Plans where every unit goes. `units` are front to back (the window used last first);
 /// `zones` are the open workspace's zones (none when no workspace is open); `monitors` are the
 /// work areas of the monitors connected now.
-pub fn plan(units: &[Unit], zones: &[Spot], monitors: &[Rect]) -> Plan {
+pub fn plan(units: &[Unit], zones: &[KeptZone], monitors: &[Rect]) -> Plan {
     plan_with(units, zones, monitors, None)
 }
 
 /// [`plan`], with a layout the user picked for one monitor: there, its zones replace the open
 /// workspace's, for the windows that fit them and matter most to the task; the others are
 /// minimised.
-pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Option<Chosen>) -> Plan {
+pub fn plan_with(units: &[Unit], zones: &[KeptZone], monitors: &[Rect], chosen: Option<Chosen>) -> Plan {
     plan_moved(units, zones, monitors, chosen, &[])
 }
 
@@ -624,7 +624,7 @@ pub fn plan_with(units: &[Unit], zones: &[Spot], monitors: &[Rect], chosen: Opti
 /// place. The zones of a monitor with moves make room again for the windows now in them.
 pub fn plan_moved(
     units: &[Unit],
-    zones: &[Spot],
+    zones: &[KeptZone],
     monitors: &[Rect],
     chosen: Option<Chosen>,
     moves: &[Move],
@@ -645,7 +645,7 @@ pub fn plan_moved(
             .map_or_else(|| units[u].kind.weight(), |t| t.fit(units[u].kind))
     };
     let mut new_zones: Vec<NewZone> = Vec::new();
-    // The window each new zone was made for, once known: it names the zone.
+    // The window in each new zone, once known.
     let mut new_zone_window: Vec<Option<usize>> = Vec::new();
     // Each new zone's area as its layout made it, before making room for a window: moves make
     // room again from there.
@@ -905,11 +905,8 @@ mod tests {
     }
 
     /// A zone of the open workspace on the main monitor.
-    fn spot(name: &str) -> Spot {
-        Spot {
-            name: name.into(),
-            monitor: 0,
-        }
+    fn kept() -> KeptZone {
+        KeptZone { monitor: 0 }
     }
 
     fn zone_of(plan: &Plan, u: usize) -> usize {
@@ -971,7 +968,7 @@ mod tests {
         // but not good enough: it should assess the main window, VS Code is superior to a
         // terminal, and make a split view depending on the task." The rows make way: the editor
         // takes the most room, the terminal goes under it, the windows that help sit beside it.
-        let zones = [spot("Notepad++"), spot("Zone 1"), spot("Zone 2")];
+        let zones = [kept(), kept(), kept()];
         let exes = [
             ("claude.exe", "Claude"),
             ("chrome.exe", "Google Chrome"),
@@ -1011,13 +1008,7 @@ mod tests {
     #[test]
     fn zones_on_a_monitor_without_windows_stay() {
         let side = Rect::new(1920, 0, 3840, 1032);
-        let zones = [
-            spot("Code"),
-            Spot {
-                name: "Browser".into(),
-                monitor: 1,
-            },
-        ];
+        let zones = [kept(), KeptZone { monitor: 1 }];
         let units = [
             unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1900, 1000)),
             unit("msedge.exe", "Microsoft Edge", Rect::new(300, 300, 800, 800)),
@@ -1071,13 +1062,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let zones: Vec<Spot> = first
+        let zones: Vec<KeptZone> = first
             .new_zones
             .iter()
-            .map(|z| Spot {
-                name: z.name.clone(),
-                monitor: z.monitor,
-            })
+            .map(|z| KeptZone { monitor: z.monitor })
             .collect();
         let shown: Vec<Unit> = again.iter().map(|(_, u)| u.clone()).collect();
         let second = plan(&shown, &zones, &[WORK]);
@@ -1249,7 +1237,7 @@ mod tests {
     fn a_layout_picked_for_a_monitor_replaces_its_zones() {
         // The home page: the open workspace has two zones on the main screen; the user picks
         // Thirds for it. Every window goes into a zone of the new shape, numbered left to right.
-        let zones = [spot("Code"), spot("Browser")];
+        let zones = [kept(), kept()];
         let units = [
             unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 960, 1032)),
             unit("chrome.exe", "Google Chrome", Rect::new(960, 0, 1920, 1032)),

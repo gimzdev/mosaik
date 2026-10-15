@@ -42,10 +42,6 @@ impl Monitor {
         (self.dpi * 100 + BASE_DPI / 2) / BASE_DPI
     }
 
-    pub fn is_portrait(&self) -> bool {
-        self.bounds.height() > self.bounds.width()
-    }
-
     pub fn to_ref(&self) -> MonitorRef {
         MonitorRef {
             id: self.id.clone(),
@@ -146,13 +142,6 @@ impl Topology {
             Some((_, m)) => m,
             None => self.nearest_monitor(r.center()),
         }
-    }
-
-    /// The bounding box of every monitor (Win32's virtual screen).
-    pub fn virtual_bounds(&self) -> Rect {
-        self.monitors
-            .iter()
-            .fold(Rect::default(), |acc, m| acc.union(m.bounds))
     }
 
     /// True when at least a corner region of `r` (a 32 px square by default) is on some

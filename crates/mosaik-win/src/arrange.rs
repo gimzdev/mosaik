@@ -3,9 +3,9 @@
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, HWND_TOP, IsHungAppWindow, IsIconic, SW_SHOWMINNOACTIVE, SWP_ASYNCWINDOWPOS,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
-    SetWindowPos, ShowWindowAsync,
+    GetForegroundWindow, HWND_TOP, IsHungAppWindow, SW_SHOWMINNOACTIVE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos,
+    ShowWindowAsync,
 };
 
 use crate::error::{Context, Result};
@@ -21,11 +21,6 @@ pub fn foreground() -> Option<HWND> {
 pub fn is_hung(hwnd: HWND) -> bool {
     // SAFETY: a read-only query on any handle.
     unsafe { IsHungAppWindow(hwnd) }.as_bool()
-}
-
-pub fn is_minimized(hwnd: HWND) -> bool {
-    // SAFETY: a read-only query on any handle.
-    unsafe { IsIconic(hwnd) }.as_bool()
 }
 
 /// Puts a window on top of the other normal windows without activating it.

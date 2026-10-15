@@ -476,10 +476,10 @@ impl Tour {
     }
 
     /// Drags the first window of Home's picture onto the second, as a person does (the button
-    /// held down all the way), and takes the picture once the two have traded places; Reset then
-    /// puts them back. Only the picture changes: no window moves until Arrange.
+    /// held down all the way), and takes the picture once the two have traded places; Undo swaps
+    /// then puts them back. Only the picture changes: no window moves until Arrange.
     fn drag_in_picture(&mut self, shot: &str) -> Result<(), String> {
-        let smart = self.find("radio", "Smart")?;
+        let smart = self.find("radio", "Automatic")?;
         let title = self.heading("Your screen")?;
         let tiles = |tour: &Self| -> Vec<Control> {
             tour.uia
@@ -531,7 +531,7 @@ impl Tour {
         let traded = at(&a.name).is_some_and(|p| b.rect.contains(p))
             && at(&b.name).is_some_and(|p| a.rect.contains(p));
         let file = self.shot(shot)?;
-        let reset = self.find("button", "Reset");
+        let reset = self.find("button", "Undo swaps");
         if let Ok(r) = &reset {
             self.click(r)?;
             pump_until(900, || false);
@@ -673,18 +673,18 @@ impl Tour {
         pump_until(1000, || false);
         self.page("home", true)?;
         self.choose_layout("Thirds", "home-thirds")?;
-        self.choose_layout("Smart", "home-smart")?;
+        self.choose_layout("Automatic", "home-smart")?;
         self.drag_in_picture("home-dragged")?;
 
         // The workspace picked: the picture shows it as it would open, with Open in place of
-        // Arrange (nothing opens); picked again, Home goes back to Arrange.
+        // Arrange (nothing opens); Back returns to the screen as it is, and Arrange.
         let row = self.reveal("button", WORKSPACE)?;
         self.click(&row)?;
         pump_until(1200, || false);
         let open = self.find("button", &format!("Open “{WORKSPACE}”")).is_ok();
         let picked_shot = self.shot("home-picked")?;
-        let row = self.reveal("button", WORKSPACE)?;
-        self.click(&row)?;
+        let back = self.find("button", "Back to my screen")?;
+        self.click(&back)?;
         pump_until(800, || false);
         let page = json!({
             "page": "home-picked",
@@ -707,13 +707,13 @@ impl Tour {
             Self::press(VK_ESCAPE.0);
         }
 
-        // The zone editor, from the workspace's page; Settings, then Advanced and About.
+        // The zone editor, from the workspace's page; Settings, then More settings and About.
         let zones = self.reveal("button", "Edit zones")?;
         self.click(&zones)?;
         self.page("zones", true)?;
         self.nav("Settings")?;
         self.page("settings", true)?;
-        let advanced = self.reveal("button", "Advanced")?;
+        let advanced = self.reveal("button", "More settings")?;
         self.click(&advanced)?;
         self.page("settings-advanced", false)?;
         self.reveal("button", "Logs")?;

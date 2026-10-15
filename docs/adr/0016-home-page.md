@@ -82,3 +82,13 @@ finds no set.
 Home and Settings are the only places, in a bar along the top. Every saved workspace is on Home,
 with its apps at a glance and Open; its ⋯ menu changes its apps, edits its zones, gives it a
 shortcut, renames or deletes it. There is no Workspaces page.
+
+## Amended by ADR 0028 (2026-10-15)
+
+A workspace clicked is shown in the picture as it would open, with Open in place of Arrange.
+
+## Amended by ADR 0029 (2026-10-15)
+
+The picture says it is a preview. "Automatic" (was Smart) and five named layouts show, the other
+five under More layouts. A picked workspace or suggested set has Back, and opens with Open (a
+set: Start these apps) or a double-click. What an action did shows under the picture only.

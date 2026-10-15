@@ -93,3 +93,13 @@ interrupted with a dialog or a banner.
   of `mosaik-probe` walks the new pages in the three themes.
 - Words were cut everywhere: a control says what it does, a summary says what the picture shows,
   a problem says what happened and what to do.
+
+## Amended by ADR 0028 (2026-10-15)
+
+A click on a workspace shows how it opens; Open opens it. Zones are numbered by place.
+
+## Amended by ADR 0029 (2026-10-15)
+
+Larger text and controls, Automatic and five named layouts, Back from a preview, results under the
+picture only, "On screen" for the workspace open, "Save as workspace", and Settings in the order
+people use them.
