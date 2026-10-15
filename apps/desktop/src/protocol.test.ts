@@ -14,6 +14,7 @@ const COMMANDS = [
   'rescue',
   'arrange',
   'preview_arrange',
+  'preview_workspace',
   'undo_arrange',
   'show_switcher',
   'show_settings',

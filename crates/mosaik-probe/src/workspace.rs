@@ -171,7 +171,8 @@ pub(crate) struct Probe {
 }
 
 /// The styles the engine places windows with: its own (tags in title bars, or in a band above
-/// windows), and that of a window wearing its tag above it for want of room in its title bar.
+/// windows), and that of a window wearing something above it: a tab group's visible tab, below
+/// its strip's band (ADR 0027), or a window whose tag goes above windows.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Styles {
     pub style: FrameStyle,
@@ -186,7 +187,7 @@ impl Styles {
         match engine.request(Command::Settings, TIMEOUT) {
             Reply::Settings { settings, .. } => Ok(Self {
                 style: settings.frames.effective_style(),
-                banded: settings.frames.banded_style().for_tabs(),
+                banded: settings.frames.effective_style().for_tabs(),
                 dpi,
                 rings: settings.frames.show_frames,
             }),
@@ -201,8 +202,8 @@ impl Styles {
 }
 
 /// Whether `w` wears its tag, or its group's strip, above its frame, in a band (tags set to go
-/// above windows, or no room in its title bar): it starts above the window's top edge. (A window
-/// whose app keeps a height that runs into the band is overlapped by it.)
+/// above windows, or the tab that shows of a group): it starts above the window's top edge. (A
+/// window whose app keeps a height that runs into the band is overlapped by it.)
 pub(crate) fn wears_above(st: &StateSnapshot, w: HWND) -> bool {
     let Some(me) = st.windows.iter().find(|x| x.handle == handle(w)) else {
         return false;
@@ -442,7 +443,28 @@ fn scenario(
     let _ = unsafe { ShowWindow(probes[1].hwnd, SW_MINIMIZE) };
     pump_until(600, || false);
 
-    // 3. Switch back.
+    // 3. What opening it would do (Home's picture of a workspace picked, with Open: the owner,
+    // "it should show it in the anim as preview and show an open button"), then switch back:
+    // each window goes where the picture put it. Its zones are numbered by place.
+    // A window that is not the workspace's, on its monitor and always on top: opening the
+    // workspace minimises it (the owner, opening "Coding": a game launcher and the Riot client
+    // stayed on top of it).
+    let work = probes[0].tiled_monitor_work();
+    let (other_process, other) = dummy::spawn(
+        "Probe Other",
+        Rect::from_origin_size(work.left + 300, work.top + 200, 600, 400),
+        true,
+    )?;
+    pump_until(500, || false);
+    let preview = match engine.request(
+        Command::PreviewWorkspace {
+            workspace: "Probe workspace".into(),
+        },
+        TIMEOUT,
+    ) {
+        Reply::Preview(p) => Some(p),
+        _ => None,
+    };
     let (reply, switch_ms) = ask(
         engine,
         Command::Switch {
@@ -451,17 +473,39 @@ fn scenario(
     );
     let switched = done(&reply)?;
     pump_until(900, || false);
+    let other_minimized = mosaik_win::window::geometry(other).is_some_and(|g| g.minimized);
+    crate::apps::close(other);
+    if !other_process.wait(3000) {
+        let _ = other_process.kill();
+    }
     let mut after_switch = Vec::new();
     for p in probes {
         let tag = tag_of(engine, p.hwnd).ok().map(|(t, _)| t);
         let frame = frame_rect(p.hwnd).ok_or("a probe window vanished")?;
         let wanted = styles.area(p.tiled, false);
+        let previewed = preview
+            .as_ref()
+            .and_then(|pv| pv.windows.iter().find(|w| w.window == handle(p.hwnd)))
+            .and_then(|w| w.then);
         after_switch.push(json!({
             "window": p.title,
             "error_px": edge_error(frame, wanted),
+            "preview_error_px": previewed.map(|r| edge_error(frame, r)),
             "frame": colour_of(p.title).map(|c| frame_colours(frame, c, dpi, tag, styles.rings)),
         }));
     }
+    let mut zone_names: Vec<String> = ws.layout.zones.iter().map(|z| z.name.clone()).collect();
+    zone_names.sort();
+    let previewed = preview.as_ref().map(|pv| {
+        let mut names: Vec<&str> = pv.zones.iter().map(|z| z.name.as_str()).collect();
+        names.sort_unstable();
+        json!({
+            "zones": names,
+            "windows": pv.windows.len(),
+            "minimized": pv.windows.iter().filter(|w| w.minimized).map(|w| w.label.clone()).collect::<Vec<_>>(),
+            "starting": pv.windows.iter().filter(|w| w.starting).count(),
+        })
+    });
     let state = match engine.request(Command::State, TIMEOUT) {
         Reply::State(s) => s,
         other => return Err(format!("state: {other:?}")),
@@ -567,6 +611,9 @@ fn scenario(
         "save_ms": save_ms,
         "switch_ms": switch_ms,
         "after_save": after_save,
+        "zone_names": zone_names,
+        "preview": previewed,
+        "other_window_minimized": other_minimized,
         "after_switch": after_switch,
         "windows_in_zones": in_zones,
         "drag": dragged,
@@ -799,9 +846,14 @@ fn editing(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Value, S
     pump_until(700, || false);
     let work = code.tiled_monitor_work();
     let code_frame = frame_rect(code.hwnd).ok_or("the code window vanished")?;
+    // Numbered 1 to N by place, whatever the editor called the new zone.
+    let mut numbers: Vec<usize> = after_split.iter().filter_map(|z| z.name.parse().ok()).collect();
+    numbers.sort_unstable();
     let split_result = json!({
         "ms": split_ms,
         "zones": after_split.len(),
+        "zone_names": after_split.iter().map(|z| z.name.clone()).collect::<Vec<_>>(),
+        "numbered_by_place": numbers == (1..=after_split.len()).collect::<Vec<_>>(),
         "new_zone_has_an_id": after_split.iter().all(|z| z.id.is_some()),
         "code_error_px": edge_error(code_frame, styles.area(left.area.to_rect(work), false)),
     });
@@ -1031,9 +1083,9 @@ const SETTLE_MAX: Duration = Duration::from_secs(5);
 
 /// The engine's state once its windows stay put: where each window in a zone or group is, its tag
 /// and drop target, which windows are hidden, the tab strips and their chips. A window's title bar
-/// is read after it moves, and once read its tag or strip may move, or the window into or out of
-/// a band (ADR 0011): what is measured or pressed is read only when no title bar is being read
-/// and two reads in a row agree, or at most 5 s after the first.
+/// is read after it moves, and once read its tag may move (ADR 0011): what is measured or pressed
+/// is read only when no title bar is being read and two reads in a row agree, or at most 5 s
+/// after the first.
 pub(crate) fn settled(engine: &Engine) -> Result<Box<StateSnapshot>, String> {
     type Mark = (u64, Rect, Option<Rect>, Option<Rect>, bool);
     let marks = |st: &StateSnapshot| {
@@ -1085,8 +1137,8 @@ fn shell_windows() -> Vec<(u64, String)> {
 
 /// Drops where Windows' own snapping also watches the pointer: the review window onto the code
 /// group's strip (with tags above windows, at the screen's top edge and at its top centre, where
-/// Windows 11 shows its snap layouts bar; with tags in title bars the strip is in the code
-/// window's title bar, below the edge), and into the code zone at the screen's left edge. After
+/// Windows 11 shows its snap layouts bar; with tags in title bars at the strip's middle, in the
+/// band above the code window), and into the code zone at the screen's left edge. After
 /// each: where the window ended, whether Windows maximised or arranged it, which shell windows
 /// appeared. Then the window goes back to its zone.
 fn windows_snapping(engine: &Engine, probes: &[Probe], styles: Styles) -> Result<Value, String> {
@@ -1245,10 +1297,24 @@ fn tabs_and_snap(
         Some([f.right - strip.rect.right, strip.rect.top - f.top])
     };
     let joined_at = from_right(&after_join, terminal.hwnd);
+    // Each tab has a chip of its own to drag out, in a band above the window shown (ADR 0027:
+    // in a crowded title bar the strip showed the zone's tag and "+1" only, and a press dragged
+    // the whole window: "we cannot drag only 1 tab it drags the whole window").
+    let chips: Vec<i32> = strip
+        .as_ref()
+        .map(|st| st.tabs.iter().map(|tb| tb.chip.width()).collect())
+        .unwrap_or_default();
+    let in_band = strip
+        .as_ref()
+        .zip(frame_rect(terminal.hwnd))
+        .map(|(st, f)| st.rect.bottom <= f.top + px(2.0));
     let joined = json!({
         "strips": after_join.tab_strips.len(),
         "tabs": strip.as_ref().map_or(0, |st| st.tabs.len()),
-        "terminal_error_px": frame_rect(terminal.hwnd).map(|f| edge_error(f, styles.area(code.tiled, false))),
+        "chip_widths": chips,
+        "every_tab_has_a_chip": !chips.is_empty() && chips.iter().all(|w| *w >= px(40.0)),
+        "strip_in_band_above": in_band,
+        "terminal_error_px": frame_rect(terminal.hwnd).map(|f| edge_error(f, styles.area(code.tiled, true))),
         "code_hidden": hidden(&after_join, code.hwnd),
         "terminal_hidden": hidden(&after_join, terminal.hwnd),
         "late_raise_ms": late.then_some(LATE_RAISE_MS),
@@ -1287,7 +1353,7 @@ fn tabs_and_snap(
             json!({
                 "code_hidden": hidden(&st, code.hwnd),
                 "terminal_hidden": hidden(&st, terminal.hwnd),
-                "code_error_px": frame_rect(code.hwnd).map(|f| edge_error(f, styles.area(code.tiled, false))),
+                "code_error_px": frame_rect(code.hwnd).map(|f| edge_error(f, styles.area(code.tiled, true))),
                 "strip_with_terminal": joined_at,
                 "strip_with_code": code_at,
                 "strip_same_place": joined_at.is_some() && joined_at == code_at,
@@ -1354,6 +1420,59 @@ fn tabs_and_snap(
         "terminal_frame": frame_rect(terminal.hwnd).map(|f| [f.left, f.top, f.right, f.bottom]),
         "strip_above": strip_above(terminal.hwnd),
     });
+
+    // 6. The group, by its window's title bar, into the terminal's own zone and back: its strip
+    // goes along, above it, with both tabs, and the tab hidden shows there when clicked (the
+    // owner: "when switching a multi tab window from a zone to another the tab list
+    // disappears").
+    let mut group_moves = Vec::new();
+    for (name, to) in [
+        ("to the terminal's zone", terminal.tiled),
+        ("back to the code zone", code.tiled),
+    ] {
+        let st = settled(engine)?;
+        let Some(shown) = st
+            .tab_strips
+            .first()
+            .and_then(|s| s.tabs.iter().find(|t| t.visible))
+            .map(|t| mosaik_win::window::hwnd(t.window))
+        else {
+            group_moves.push(json!({ "move": name, "skipped": "no tab group" }));
+            continue;
+        };
+        let f = frame_rect(shown).ok_or("the window shown vanished")?;
+        drag(Point::new(f.left + f.width() / 3, f.top + 12), to.center(), shown)?;
+        let st = settled(engine)?;
+        // Past the moment Mosaïk takes to put its strip back above the window.
+        pump_until(800, || false);
+        let strip = st.tab_strips.first().cloned();
+        let frame = frame_rect(shown);
+        let mut row = json!({
+            "move": name,
+            "strips": st.tab_strips.len(),
+            "tabs": strip.as_ref().map_or(0, |s| s.tabs.len()),
+            "shown_error_px": frame.map(|f| edge_error(f, styles.area(to, true))),
+            "strip_in_band_above": strip.as_ref().zip(frame).map(|(s, f)| s.rect.bottom <= f.top + px(2.0) && s.rect.top >= to.top - px(2.0)),
+            "strip_above": strip_above(shown),
+        });
+        // The other tab, clicked: it shows in the group's new place.
+        if let Some(other) = strip
+            .as_ref()
+            .and_then(|s| s.tabs.iter().find(|t| !t.visible))
+            .cloned()
+        {
+            let at = other.chip.center();
+            let other_hwnd = mosaik_win::window::hwnd(other.window);
+            drag(at, at, other_hwnd)?;
+            let st = settled(engine)?;
+            pump_until(600, || false);
+            row["other_shown_error_px"] =
+                json!(frame_rect(other_hwnd).map(|f| edge_error(f, styles.area(to, true))));
+            row["other_hidden"] = json!(hidden(&st, other_hwnd));
+            row["strip_above_other"] = json!(strip_above(other_hwnd));
+        }
+        group_moves.push(row);
+    }
     input::move_to(original);
     Ok(json!({
         "joined": joined,
@@ -1364,5 +1483,6 @@ fn tabs_and_snap(
             "frame": back_colours,
         },
         "joined_at_tag_start": at_tag_start,
+        "group_moved": group_moves,
     }))
 }

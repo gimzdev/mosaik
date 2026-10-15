@@ -18,7 +18,7 @@ async function windowDoesNotScroll(page: Page) {
 const shown = (page: Page, text: string) => page.locator('main').getByText(text, { exact: true });
 
 /** The stand-in's screen as the smart layout would leave it. */
-const SMART = 'Visual Studio Code in Code, Google Chrome in Browser, Windows Terminal in Terminal, Slack in Chat.';
+const SMART = 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 4, Slack in zone 3.';
 const arrange = (page: Page) => page.getByRole('button', { name: 'Arrange', exact: true });
 
 /** Opens a workspace's page from its card's menu on Home. */
@@ -55,7 +55,7 @@ test.describe('Home', () => {
     await expect(shown(page, 'Slack will be minimized.')).toBeVisible();
     await expect(
       page.getByRole('group', {
-        name: 'Visual Studio Code in Code, Google Chrome in Browser, Windows Terminal in Terminal, Slack minimized.',
+        name: 'Visual Studio Code in zone 2, Google Chrome in zone 1, Windows Terminal in zone 3, Slack minimized.',
       }),
     ).toBeVisible();
     await arrange(page).click();
@@ -79,8 +79,9 @@ test.describe('Home', () => {
     // The owner: "we should be able to drag drop apps to permute them".
     await page.goto('/');
     await expect(page.getByRole('group', { name: SMART })).toBeVisible();
-    const code = page.getByRole('button', { name: 'Visual Studio Code in Code' });
-    const browser = page.getByRole('button', { name: 'Google Chrome in Browser' });
+    // Picked by where they start: the names say their zones, which change as they move.
+    const code = page.getByRole('button', { name: /^Visual Studio Code in zone/ });
+    const browser = page.getByRole('button', { name: /^Google Chrome in zone/ });
     const [a, b] = [await code.boundingBox(), await browser.boundingBox()];
     if (!a || !b) throw new Error('the windows are not drawn');
     await page.mouse.move(a.x + a.width / 2, a.y + 10);
@@ -88,7 +89,7 @@ test.describe('Home', () => {
     await page.mouse.move(a.x + a.width / 2 + 20, a.y + 20, { steps: 4 });
     await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
     await page.mouse.up();
-    // Each lands in the other's place, with its zone's name and colour.
+    // Each lands in the other's place, with its colour; the zones keep their numbers.
     await expect
       .poll(async () => {
         const [c, d] = [await code.boundingBox(), await browser.boundingBox()];
@@ -116,21 +117,31 @@ test.describe('Home', () => {
     await expect(shown(page, 'Windows Terminal and Slack will be minimized.')).toBeVisible();
   });
 
-  test('a workspace opens in one click, and is marked open', async ({ page }) => {
+  test('a workspace picked shows how it opens, and opens with Open', async ({ page }) => {
+    // The owner: "we shouldnt open the workspace when clicking on it it should show it in the
+    // anim as preview and show an open button".
     await page.goto('/');
     const list = page.getByRole('list', { name: 'Workspaces' });
-    await expect(list.getByRole('button', { name: 'Open “Ship the release” (open now)' })).toBeVisible();
-    await list.getByRole('button', { name: 'Open “Brand refresh”' }).click();
-    await expect(shown(page, 'Opened “Brand refresh”.')).toBeVisible();
-    await expect(list.getByRole('button', { name: 'Open “Brand refresh” (open now)' })).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Ship the release (open now)', exact: true })).toBeVisible();
+    await list.getByRole('button', { name: 'Brand refresh', exact: true }).click();
+    await expect(
+      page.getByRole('group', {
+        name: 'Figma starts in zone 1, Notepad starts in zone 2, Visual Studio Code minimized, Google Chrome minimized, Windows Terminal minimized, Slack minimized.',
+      }),
+    ).toBeVisible();
+    await expect(shown(page, 'As “Brand refresh” opens')).toBeVisible();
     await accessible(page);
+    await page.getByRole('button', { name: 'Open “Brand refresh”' }).click();
+    await expect(shown(page, 'Opened “Brand refresh”.')).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Brand refresh (open now)', exact: true })).toBeVisible();
+    await expect(arrange(page)).toBeVisible();
   });
 
   test('a suggested workspace opens its apps in one click, and stays as a workspace', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: /^Open the suggested workspace “Coding”/ }).click();
     await expect(shown(page, 'Opened “Coding”.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open “Coding” (open now)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Coding (open now)', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /^Open the suggested workspace “Coding”/ })).toHaveCount(0);
   });
 
@@ -148,7 +159,7 @@ test.describe('Home', () => {
     await name.fill('Review');
     await page.keyboard.press('Enter');
     await expect(shown(page, 'Saved “Review”.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open “Review” (open now)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Review (open now)', exact: true })).toBeVisible();
     await accessible(page);
   });
 
@@ -166,13 +177,19 @@ test.describe('Home', () => {
 });
 
 test.describe('a workspace’s page', () => {
-  test('lists its apps, and moves, removes and adds them', async ({ page }) => {
+  test('shows how it opens, lists its apps with their zones, and moves, removes and adds them', async ({ page }) => {
     await page.goto('/');
     await editWorkspace(page, 'Ship the release');
+    await expect(
+      page.getByRole('group', {
+        name: 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 3 with Slack as tabs.',
+      }),
+    ).toBeVisible();
     const apps = page.getByRole('list', { name: 'Apps of “Ship the release”' });
     await expect(apps.getByRole('listitem')).toHaveCount(4);
-    await page.getByRole('combobox', { name: 'Zone of Slack' }).selectOption({ label: 'Browser' });
-    await expect(shown(page, 'Slack goes in Browser.')).toBeVisible();
+    await page.getByRole('button', { name: 'Put Slack in zone 2' }).click();
+    await expect(shown(page, 'Slack goes in zone 2.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Slack is in zone 2' })).toHaveAttribute('aria-pressed', 'true');
     await page.getByRole('button', { name: 'Remove Slack' }).click();
     await expect(apps.getByRole('listitem')).toHaveCount(3);
     await page.getByRole('button', { name: 'Add a window to “Ship the release”' }).click();
@@ -201,7 +218,7 @@ test.describe('a workspace’s page', () => {
     await accessible(page);
     await dialog.getByRole('button', { name: 'Delete workspace' }).click();
     await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Open “Brand 2”/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Brand 2/ })).toHaveCount(0);
   });
 });
 
@@ -313,7 +330,7 @@ test.describe('the zone editor', () => {
   test('resizes zones from the keyboard and saves them', async ({ page }) => {
     await page.goto('/');
     await editZones(page);
-    const line = page.getByRole('separator', { name: 'Line right of Code, left of Browser and Terminal' });
+    const line = page.getByRole('separator', { name: 'Line right of zone 1, left of zone 2 and zone 3' });
     await line.focus();
     await page.keyboard.press('ArrowLeft');
     await expect(line).toHaveAttribute('aria-valuenow', '58');
@@ -336,11 +353,11 @@ test.describe('the zone editor', () => {
     await accessible(page);
   });
 
-  test('picks a zone to edit', async ({ page }) => {
+  test('picks a zone to edit, by its number', async ({ page }) => {
     await page.goto('/');
     await editZones(page);
-    await page.getByRole('button', { name: /^Code,/ }).click();
-    await expect(page.getByRole('textbox', { name: 'Name' })).toHaveValue('Code');
+    await page.getByRole('button', { name: /^Zone 1,/ }).click();
+    await expect(page.getByRole('region', { name: 'Zone 1' })).toBeVisible();
     await accessible(page);
   });
 });
@@ -414,7 +431,7 @@ test.describe('in high contrast', () => {
     await page.getByRole('radio', { name: 'Thirds' }).check();
     await accessible(page);
     await editZones(page);
-    await page.getByRole('button', { name: /^Code,/ }).click();
+    await page.getByRole('button', { name: /^Zone 1,/ }).click();
     await accessible(page);
   });
 });

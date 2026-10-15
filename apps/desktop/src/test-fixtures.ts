@@ -46,8 +46,8 @@ export const WORK = { left: 0, top: 0, right: 1920, bottom: 1032 };
 export const coding: ArrangePreview = {
   work_area: WORK,
   zones: [
-    { name: 'Code', color: 'lapis', rect: { left: 0, top: 0, right: 1152, bottom: 1032 } },
-    { name: 'Browser', color: 'verdigris', rect: { left: 1152, top: 0, right: 1920, bottom: 1032 } },
+    { name: '1', color: 'lapis', rect: { left: 0, top: 0, right: 1152, bottom: 1032 } },
+    { name: '2', color: 'verdigris', rect: { left: 1152, top: 0, right: 1920, bottom: 1032 } },
   ],
   windows: [
     {
@@ -72,6 +72,49 @@ export const coding: ArrangePreview = {
 };
 
 export const preview = (p: ArrangePreview): Reply => ({ reply: 'preview', ...p });
+
+/** A workspace about to open: the editor goes to zone 1, the terminal starts in zone 2 with
+ * Claude as a tab behind it, and the browser, not the workspace's, is minimised. */
+export const opening: ArrangePreview = {
+  work_area: WORK,
+  zones: [
+    { name: '1', color: 'lapis', rect: { left: 0, top: 0, right: 1152, bottom: 1032 } },
+    { name: '2', color: 'verdigris', rect: { left: 1152, top: 0, right: 1920, bottom: 1032 } },
+  ],
+  windows: [
+    {
+      window: 101,
+      label: 'Visual Studio Code',
+      icon: 'exe:C:\\Code.exe',
+      now: { left: 200, top: 100, right: 1300, bottom: 900 },
+      then: { left: 0, top: 0, right: 1152, bottom: 1032 },
+      minimized: false,
+    },
+    {
+      window: 0,
+      label: 'Windows Terminal',
+      icon: null,
+      now: { left: 1152, top: 0, right: 1920, bottom: 1032 },
+      then: { left: 1152, top: 0, right: 1920, bottom: 1032 },
+      minimized: false,
+      starting: true,
+      tabs: [
+        { label: 'Windows Terminal', icon: null, shown: true },
+        { label: 'Claude', icon: 'app:Claude', shown: false },
+      ],
+    },
+    {
+      window: 102,
+      label: 'Google Chrome',
+      icon: 'app:Chrome',
+      now: { left: 600, top: 200, right: 1800, bottom: 1000 },
+      then: null,
+      minimized: true,
+    },
+  ],
+  elsewhere: 0,
+  task: null,
+};
 
 export const nothingOpen: ArrangePreview = { work_area: WORK, zones: [], windows: [], elsewhere: 0, task: null };
 
@@ -112,8 +155,8 @@ export function appsOf(over: Partial<WorkspaceApps> = {}): Reply {
       { id: 's2', label: 'Google Chrome', icon: 'app:Chrome', zone: 'z2', tab: false },
     ],
     zones: [
-      { id: 'z1', name: 'Code', color: 'lapis' },
-      { id: 'z2', name: 'Browser', color: 'verdigris' },
+      { id: 'z1', name: '1', color: 'lapis' },
+      { id: 'z2', name: '2', color: 'verdigris' },
     ],
     windows: [{ window: 0x2_04f2, label: 'Slack', title: 'releases - Slack', icon: null }],
     ...over,

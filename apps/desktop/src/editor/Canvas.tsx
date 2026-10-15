@@ -157,7 +157,7 @@ export function Canvas({
               key={z.key}
               type="button"
               aria-pressed={on}
-              aria-label={`${z.name.trim() || 'Unnamed zone'}, ${percent(a.right - a.left)} wide, ${percent(a.bottom - a.top)} high`}
+              aria-label={`Zone ${z.name}, ${percent(a.right - a.left)} wide, ${percent(a.bottom - a.top)} high`}
               onClick={() => {
                 onSelect(z.key);
               }}
@@ -176,7 +176,7 @@ export function Canvas({
               }}
             >
               <span
-                className="zone-chip max-w-full truncate rounded-full px-2 py-0.5 text-caption font-semibold"
+                className="zone-chip grid min-w-6 place-items-center rounded-full px-2 py-0.5 text-caption font-bold tabular-nums"
                 style={
                   {
                     '--chip': `var(--zone-${z.color})`,
@@ -184,7 +184,7 @@ export function Canvas({
                   } as CSSProperties
                 }
               >
-                {z.name.trim() || 'Unnamed'}
+                {z.name}
               </span>
             </button>
           );

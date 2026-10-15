@@ -64,6 +64,7 @@ mod windows_main {
                                  thirds, main-side, side-main, quarters, half-stack,
                                  stack-half, rows, three-rows
   preview [<layout>] [--json]    what arrange would do on the main screen, without doing it
+  preview-workspace <workspace> [--json]  what opening a workspace would do there
   undo-arrange                   put back what the last arrange changed
   rename <workspace> <name>      rename a workspace
   delete <workspace>             delete a workspace (its windows stay)
@@ -164,6 +165,9 @@ A <workspace> is its name or its id.";
                 preset: Some((*layout).to_owned()),
                 moves: Vec::new(),
             },
+            ("preview-workspace", [w]) => Command::PreviewWorkspace {
+                workspace: (*w).to_owned(),
+            },
             ("undo-arrange", []) => Command::UndoArrange,
             ("sets", []) => Command::Sets,
             ("open-set", [set]) => Command::OpenSet {
@@ -233,6 +237,7 @@ A <workspace> is its name or its id.";
     fn workspace_of(cmd: &mut Command) -> Option<&mut String> {
         match cmd {
             Command::Switch { workspace }
+            | Command::PreviewWorkspace { workspace }
             | Command::Zones { workspace }
             | Command::Apps { workspace }
             | Command::AddApp { workspace, .. }

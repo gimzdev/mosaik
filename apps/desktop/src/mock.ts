@@ -8,7 +8,7 @@
 // (the side menu is on the other edge), `?newer=1` (settings from a newer Mosaïk), `?notes=1`
 // (Mosaïk has notes waiting), `?light=1` (the light theme).
 
-import { PRESETS, type Preset, presetShape } from './editor/model';
+import { PRESETS, type Preset, fromZones, numbered, presetShape, toZones } from './editor/model';
 import {
   type AppSet,
   type ArrangeMove,
@@ -18,7 +18,9 @@ import {
   type MiniZone,
   type MonitorState,
   type Notice,
+  type PreviewTab,
   type PreviewWindow,
+  type PreviewZone,
   type RatioRect,
   type Rect,
   type Reply,
@@ -107,17 +109,17 @@ const workspaces: Workspace[] =
             { id: 's4', label: 'Slack', icon: null, zone: 'z3', tab: true },
           ],
           zoneList: [
-            { id: 'z1', name: 'Code', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.6, bottom: 1 } },
+            { id: 'z1', name: '1', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.6, bottom: 1 } },
             {
               id: 'z2',
-              name: 'Browser',
+              name: '2',
               color: 'verdigris',
               monitor: 'm1',
               area: { left: 0.6, top: 0, right: 1, bottom: 0.5 },
             },
             {
               id: 'z3',
-              name: 'Terminal',
+              name: '3',
               color: 'saffron',
               monitor: 'm1',
               area: { left: 0.6, top: 0.5, right: 1, bottom: 1 },
@@ -137,14 +139,14 @@ const workspaces: Workspace[] =
           zoneList: [
             {
               id: 'z1',
-              name: 'Figma',
+              name: '1',
               color: 'madder',
               monitor: 'm1',
               area: { left: 0, top: 0, right: 0.5, bottom: 1 },
             },
             {
               id: 'z2',
-              name: 'Notes',
+              name: '2',
               color: 'slate',
               monitor: 'm1',
               area: { left: 0.5, top: 0, right: 1, bottom: 1 },
@@ -196,9 +198,9 @@ function openSet(id: string): Reply {
         zone: `z${String(i + 1)}`,
         tab: false,
       })),
-      zoneList: set.apps.map((label, i) => ({
+      zoneList: set.apps.map((_, i) => ({
         id: `z${String(i + 1)}`,
-        name: label,
+        name: String(i + 1),
         color: ZONE_COLORS[i % ZONE_COLORS.length] ?? 'slate',
         monitor: 'm1',
         area: { left: i / n, top: 0, right: (i + 1) / n, bottom: 1 },
@@ -225,8 +227,6 @@ interface OnScreen {
   label: string;
   /** What it is, as `arrange::Kind` says. */
   kind: 'code' | 'browser' | 'terminal' | 'chat';
-  /** What Arrange names its zone. */
-  zone: string;
   now: Rect;
 }
 let onScreen: OnScreen[] =
@@ -237,28 +237,24 @@ let onScreen: OnScreen[] =
           window: 0x30a2,
           label: 'Visual Studio Code',
           kind: 'code',
-          zone: 'Code',
           now: { left: 180, top: 120, right: 1500, bottom: 980 },
         },
         {
           window: 0x12f8,
           label: 'Google Chrome',
           kind: 'browser',
-          zone: 'Browser',
           now: { left: 900, top: 260, right: 2300, bottom: 1240 },
         },
         {
           window: 0x5c1e,
           label: 'Windows Terminal',
           kind: 'terminal',
-          zone: 'Terminal',
           now: { left: 1400, top: 760, right: 2200, bottom: 1300 },
         },
         {
           window: 0x7d04,
           label: 'Slack',
           kind: 'chat',
-          zone: 'Chat',
           now: { left: 300, top: 640, right: 1100, bottom: 1250 },
         },
       ];
@@ -353,27 +349,90 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = []): Arrange
       [colorOf[from], colorOf[m.zone]] = [colorOf[m.zone] ?? m.zone, colorOf[from] ?? from];
     }
   }
-  const windows: PreviewWindow[] = onScreen.map((s, n) => {
+  const windows: PreviewWindow[] = onScreen.map((s, n): PreviewWindow => {
     const zone = zoneOf[n];
     const rect = zone === undefined ? undefined : rects[zone];
     return rect === undefined
       ? { window: s.window, label: s.label, icon: null, now: s.now, then: null, minimized: true }
       : { window: s.window, label: s.label, icon: null, now: s.now, then: rect, minimized: false };
   });
+  const numbers = readingNumbers(shape);
   return {
     work_area: work,
-    zones: rects.map((rect, i) => {
-      const n = zoneOf.indexOf(i);
-      return {
-        name: onScreen[n]?.zone ?? (i === 0 ? 'Zone' : `Zone ${String(i + 1)}`),
-        color: ZONE_COLORS[(colorOf[i] ?? i) % ZONE_COLORS.length] ?? 'slate',
-        rect,
-      };
-    }),
+    zones: rects.map((rect, i) => ({
+      name: numbers[i] ?? String(i + 1),
+      color: ZONE_COLORS[(colorOf[i] ?? i) % ZONE_COLORS.length] ?? 'slate',
+      rect,
+    })),
     windows,
     elsewhere: 0,
     task: auto?.task ?? null,
   };
+}
+
+/** Each area's number in reading order (row by row from the top, then from the left), as Mosaïk
+ * numbers zones. */
+function readingNumbers(areas: readonly RatioRect[]): string[] {
+  const order = areas
+    .map((a, i) => ({ a, i }))
+    .sort((x, y) => (Math.abs(x.a.top - y.a.top) < 0.02 ? x.a.left - y.a.left : x.a.top - y.a.top) || x.i - y.i);
+  const out: string[] = [];
+  order.forEach(({ i }, n) => {
+    out[i] = String(n + 1);
+  });
+  return out;
+}
+
+/** Zones numbered as Mosaïk saves them. */
+function numberZones(zones: ZoneEdit[]): ZoneEdit[] {
+  return toZones(
+    numbered(
+      fromZones(zones),
+      monitors.map((m) => m.id),
+    ),
+  );
+}
+
+/** What opening `w` would do on the main screen: its zones, its apps from where they are to
+ * their zones (an app not on screen starts there; a tab group shows its first tab, with its
+ * tabs), the other windows minimised. */
+function previewWorkspace(w: Workspace): ArrangePreview {
+  const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
+  const px = (a: RatioRect): Rect => ({
+    left: Math.round(work.left + a.left * (work.right - work.left)),
+    top: Math.round(work.top + a.top * (work.bottom - work.top)),
+    right: Math.round(work.left + a.right * (work.right - work.left)),
+    bottom: Math.round(work.top + a.bottom * (work.bottom - work.top)),
+  });
+  const here = w.zoneList.filter((z) => z.monitor === 'm1');
+  const zones: PreviewZone[] = here.map((z) => ({ name: z.name, color: z.color, rect: px(z.area) }));
+  const windows: PreviewWindow[] = [];
+  for (const z of here) {
+    const inZone = w.appList.filter((a) => a.zone === z.id);
+    const shown = inZone[0];
+    if (!shown) continue;
+    const rect = px(z.area);
+    const open = onScreen.find((o) => o.label === shown.label);
+    const tabs: PreviewTab[] =
+      inZone.length > 1 && inZone.every((a) => a.tab)
+        ? inZone.map((a) => ({ label: a.label, icon: a.icon, shown: a === shown }))
+        : [];
+    windows.push({
+      window: open?.window ?? 0,
+      label: shown.label,
+      icon: shown.icon,
+      now: open?.now ?? rect,
+      then: rect,
+      minimized: false,
+      starting: !open,
+      tabs,
+    });
+  }
+  for (const o of onScreen) {
+    if (w.appList.some((a) => a.label === o.label)) continue;
+    windows.push({ window: o.window, label: o.label, icon: null, now: o.now, then: null, minimized: true });
+  }
+  return { work_area: work, zones, windows, elsewhere: 0, task: null };
 }
 
 function arrange(preset: string | undefined, moves: ArrangeMove[] = []): Reply {
@@ -515,7 +574,7 @@ const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.0.2-dev', protocol: 8 };
+      return { reply: 'hello', app_version: '1.0.2-dev', protocol: 9 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -562,14 +621,16 @@ function answer(command: Command): Reply {
       }
       const taken = new Set(w.zoneList.map((z) => z.id));
       let n = 0;
-      w.zoneList = command.zones.map((z) => {
-        if (z.id) return z;
-        do {
-          n += 1;
-        } while (taken.has(`z${String(n)}`));
-        taken.add(`z${String(n)}`);
-        return { ...z, id: `z${String(n)}` };
-      });
+      w.zoneList = numberZones(
+        command.zones.map((z) => {
+          if (z.id) return z;
+          do {
+            n += 1;
+          } while (taken.has(`z${String(n)}`));
+          taken.add(`z${String(n)}`);
+          return { ...z, id: `z${String(n)}` };
+        }),
+      );
       w.zones = w.zoneList.length;
       revision += 1;
       return zones(w);
@@ -654,6 +715,10 @@ function answer(command: Command): Reply {
       return done('Nothing was hidden: every window is already on screen.');
     case 'arrange':
       return arrange(command.preset, command.moves);
+    case 'preview_workspace': {
+      const w = find(command.workspace);
+      return w ? { reply: 'preview', ...previewWorkspace(w) } : missing(command.workspace);
+    }
     case 'preview_arrange': {
       const known = PRESETS.find((p) => p.id === command.preset);
       if (command.preset !== undefined && !known) return arrange(command.preset);
@@ -675,7 +740,7 @@ function answer(command: Command): Reply {
       return {
         reply: 'state',
         app_version: '1.0.2-dev',
-        protocol: 8,
+        protocol: 9,
         safe_mode: false,
         watchdog: true,
         monitors,
@@ -716,9 +781,9 @@ function answer(command: Command): Reply {
           zone: `z${String(i + 1)}`,
           tab: false,
         })),
-        zoneList: autoLayout().shape.map((area, i) => ({
+        zoneList: autoLayout().shape.map((area, i, all) => ({
           id: `z${String(i + 1)}`,
-          name: onScreen[i]?.zone ?? `Zone ${String(i + 1)}`,
+          name: readingNumbers(all)[i] ?? String(i + 1),
           color: ZONE_COLORS[i % ZONE_COLORS.length] ?? 'slate',
           monitor: 'm1',
           area,

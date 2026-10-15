@@ -1,6 +1,6 @@
-// The zone editor: one workspace's zones on each monitor connected now. Drag the lines between
-// zones (or focus one and use the arrow keys) to resize; pick a zone to rename, recolour, split
-// or remove it; start from a layout. Nothing changes until "Save zones".
+// The zone editor: one workspace's zones on each monitor connected now, numbered by place. Drag
+// the lines between zones (or focus one and use the arrow keys) to resize; pick a zone to
+// recolour, split or remove it; start from a layout. Nothing changes until "Save zones".
 
 import { useEffect, useMemo, useState } from 'react';
 
@@ -10,12 +10,13 @@ import {
   PRESETS,
   applyPreset,
   fromZones,
+  numbered,
   presetShape,
   problem as draftProblem,
+  recolor,
   remove,
   split,
   toZones,
-  update,
 } from './editor/model';
 import { ZonePanel } from './editor/ZonePanel';
 import { request } from './engine';
@@ -57,7 +58,7 @@ export function ZoneEditor({
   const [loadProblem, setLoadProblem] = useState<string | null>(null);
   const [monitor, setMonitor] = useState<string | null>(null);
   const [saved, setSaved] = useState<Draft[]>([]);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [drafts, setDraftsAsIs] = useState<Draft[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -76,12 +77,18 @@ export function ZoneEditor({
       setLoaded({ name: reply.name, monitors: reply.monitors, revision: reply.revision });
       setMonitor((reply.monitors.find((m) => m.primary) ?? reply.monitors[0])?.id ?? null);
       setSaved(d);
-      setDrafts(d);
+      setDraftsAsIs(d);
     });
     return () => {
       live = false;
     };
   }, [workspace]);
+
+  // Every change numbers the zones again, by place, as saving them does.
+  const order = useMemo(() => (loaded ? loaded.monitors.map((m) => m.id) : []), [loaded]);
+  const setDrafts = (next: Draft[]) => {
+    setDraftsAsIs(numbered(next, order));
+  };
 
   const dirty = useMemo(() => JSON.stringify(toZones(drafts)) !== JSON.stringify(toZones(saved)), [drafts, saved]);
   useEffect(() => {
@@ -107,7 +114,7 @@ export function ZoneEditor({
       setSelected((key) => sameZone(drafts, next, key));
       setLoaded({ name: reply.name, monitors: reply.monitors, revision: reply.revision });
       setSaved(next);
-      setDrafts(next);
+      setDraftsAsIs(next);
       setOutcome({ text: 'Zones saved.', error: false });
       announce('Zones saved.');
     });
@@ -213,11 +220,8 @@ export function ZoneEditor({
         {zone ? (
           <ZonePanel
             zone={zone}
-            onRename={(name) => {
-              setDrafts(update(drafts, zone.key, { name }));
-            }}
             onColor={(color) => {
-              setDrafts(update(drafts, zone.key, { color }));
+              setDrafts(recolor(drafts, zone.key, color));
             }}
             onSplit={(direction) => {
               setDrafts(split(drafts, zone.key, direction));
@@ -232,7 +236,7 @@ export function ZoneEditor({
             }}
           />
         ) : (
-          <p className="text-small text-[var(--muted)]">Pick a zone to rename, recolour, split or remove it.</p>
+          <p className="text-small text-[var(--muted)]">Pick a zone to recolour, split or remove it.</p>
         )}
         <div className="mt-2">
           <Status text={problem} error />

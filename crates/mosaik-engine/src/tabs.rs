@@ -1,6 +1,6 @@
 //! Tabs for any app: windows that share one place, one visible at a time, with a tab strip in
-//! the visible one's title bar, or in the band above it (ADR 0003 for how background tabs are
-//! hidden, ADR 0011 for where strips go).
+//! the band above the visible one (ADR 0003 for how background tabs are hidden, ADR 0027 for
+//! where strips go).
 //!
 //! Which window shows is decided in one place, [`Engine::sync_tabs`], with the rule of
 //! `mosaik_core::tabs`: a window stays hidden only while it is a background tab of a group of the
@@ -31,7 +31,6 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
 use crate::hider::{self, Answer, Kind, Request, Worker};
 use crate::mover::{self, To};
 use crate::thread::{Engine, timer};
-use crate::titles::TitleSpot;
 use crate::watch::{DRAG_TICK_MS, shift_down};
 
 /// After a tab is shown, strips go back above their windows this long after, then again.
@@ -210,46 +209,40 @@ impl Engine {
             .find(|g| g.open.iter().any(|(_, w)| *w == h))
     }
 
-    /// Where `window` goes at `place`, from the layout: below a band in its zone when it wears
-    /// its tag above it.
-    fn resolve(&self, place: &Place, window: WindowHandle) -> Option<To> {
+    /// Where a window at `place` goes, from the layout.
+    fn resolve(&self, place: &Place) -> Option<To> {
         let active = self.active.as_ref()?;
         let ws = self.file.workspaces.iter().find(|w| w.id == active.id)?;
         let topology = self.topology.as_ref()?;
         let resolver = Resolver::new(&ws.layout, topology, self.style());
-        if let Some((zone, dpi)) = resolver.zone_of(place)
-            && let Some(area) = self.banded_area(window, zone, dpi)
-        {
-            return Some(To::Frame(area));
-        }
         match resolver.target(place)? {
             Target::Frame(r) => Some(To::Frame(r)),
             Target::Maximized(m) => topology.get(&m).map(|mon| To::Maximized(mon.work_area)),
         }
     }
 
-    /// Where `window`, a tab of `group`, goes: the group's place, from the layout (with tags
-    /// above windows, below a band with room for the strip).
-    pub(crate) fn group_target(&self, group: &TabGroupId, window: WindowHandle) -> Option<To> {
-        self.resolve(&Place::Tab { group: group.clone() }, window)
+    /// Where the tabs of `group` go: the group's place, from the layout, below a band with room
+    /// for its strip.
+    pub(crate) fn group_target(&self, group: &TabGroupId) -> Option<To> {
+        self.resolve(&Place::Tab { group: group.clone() })
     }
 
     /// Where the window of a slot goes, from the layout.
-    pub(crate) fn slot_target(&self, slot: &SlotId, window: WindowHandle) -> Option<To> {
+    pub(crate) fn slot_target(&self, slot: &SlotId) -> Option<To> {
         let active = self.active.as_ref()?;
         let ws = self.file.workspaces.iter().find(|w| w.id == active.id)?;
         let place = ws.layout.slot(slot)?.place.clone();
-        self.resolve(&place, window)
+        self.resolve(&place)
     }
 
-    /// Where a group's strip goes, given its visible tab: in its title bar (tags in title bars,
-    /// with room there), else in the band of the zone holding it, or right above it outside
-    /// zones when there is room on its monitor.
+    /// Where a group's strip goes, given its visible tab: in the band above it, in the zone
+    /// holding it, or right above it outside zones when there is room on its monitor. Never in
+    /// its title bar (ADR 0027): a group sits below a band for its strip, tags in title bars or
+    /// not, so every tab has room to be dragged out.
     pub(crate) fn strip_spot(&mut self, group: &TabGroupId, visible: WindowHandle) -> Spot {
-        let style = self.style();
         let (frame, maximized) = if self.hiding.hidden.contains_key(&visible) {
             // Still hidden: it shows in the group's place.
-            match self.group_target(group, visible) {
+            match self.group_target(group) {
                 Some(To::Frame(r)) => (r, false),
                 Some(To::Maximized(_)) => return Spot::Later,
                 None => return Spot::Nowhere,
@@ -258,14 +251,15 @@ impl Engine {
             let Some(g) = window::geometry(window::hwnd(visible)) else {
                 return Spot::Nowhere;
             };
-            if g.minimized || g.cloaked || g.full_screen || (g.maximized && !style.title_bars) {
+            if g.minimized || g.cloaked || g.full_screen || g.maximized {
                 return Spot::Later;
             }
             (g.frame, g.maximized)
         };
+        let banded = self.style().for_tabs();
         let resizable = window::geometry(window::hwnd(visible)).is_none_or(|g| g.resizable);
         let zone = self
-            .zone_of(visible, frame, resizable, style)
+            .zone_of(visible, frame, resizable, banded)
             .filter(|_| !maximized)
             .cloned();
         let monitor = self.topology.as_ref().map(|t| t.monitor_for_rect(frame).clone());
@@ -277,28 +271,6 @@ impl Engine {
         let (color, label) = zone
             .as_ref()
             .map_or((ZoneColor::Slate, String::new()), |z| (z.color, z.name.clone()));
-        match self.strip_spot_in_title(visible, frame, dpi) {
-            TitleSpot::In(band) => {
-                return Spot::At {
-                    band,
-                    place: BarPlace::TitleBar,
-                    color,
-                    label,
-                    dpi,
-                };
-            }
-            TitleSpot::NotYet => return Spot::Later,
-            // A maximised window has no room above it.
-            TitleSpot::Above | TitleSpot::NoAnswer if maximized => return Spot::Later,
-            TitleSpot::Above | TitleSpot::NoAnswer => {}
-        }
-        // Above the window: in the band it sits below once banded (with tags in title bars, the
-        // band's height even before it moves there, so the strip can be reached at once).
-        let banded = if style.title_bars {
-            self.settings.frames.banded_style().for_tabs()
-        } else {
-            self.style_of(visible).for_tabs()
-        };
         if let Some(z) = &zone
             && let Some(band) = banded.tag_area(z.rect, z.dpi)
         {
@@ -378,8 +350,8 @@ impl Engine {
         for w in &plan.show {
             let slot = self.active.as_ref().and_then(|a| a.slot_of(*w)).cloned();
             let target = match (member.get(w), &slot) {
-                (Some(g), _) => self.group_target(g, *w),
-                (None, Some(s)) => self.slot_target(s, *w),
+                (Some(g), _) => self.group_target(g),
+                (None, Some(s)) => self.slot_target(s),
                 (None, None) => None,
             };
             if let Some(to) = target
@@ -1032,7 +1004,7 @@ impl Engine {
                 a.shown.remove(l);
             }
         }
-        if let Some(to) = self.group_target(&group, dropped) {
+        if let Some(to) = self.group_target(&group) {
             for o in mover::move_all(&[(dropped, to)], mover::WAIT_ONE) {
                 if let Err(e) = o.result {
                     self.tell_once(
@@ -1069,11 +1041,9 @@ impl Engine {
         });
         // Its zone's window area, or its own size centred under the pointer.
         let target = match &live {
-            Some(z) => self
-                .banded_area(window, z.rect, z.dpi)
-                .unwrap_or_else(|| style.window_area(z.rect, z.dpi)),
+            Some(z) => style.window_area(z.rect, z.dpi),
             None => {
-                let size = match self.group_target(group, window) {
+                let size = match self.group_target(group) {
                     Some(To::Frame(r)) => (r.width(), r.height()),
                     _ => (800, 600),
                 };
@@ -1115,8 +1085,6 @@ impl Engine {
     /// Mouse input on tab strips: a click shows a tab, a drag along the strip reorders it, a
     /// drag away from the strip pulls it out (zones show, as when dragging a window).
     pub(crate) fn on_bar_inputs(&mut self, inputs: Vec<BarInput>) {
-        // A click on a tab shows another window in the group's place.
-        self.acted();
         for input in inputs {
             match input {
                 BarInput::Down { bar, at } => {

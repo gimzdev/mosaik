@@ -2,7 +2,7 @@
 // them, splitting, removing, presets. The engine checks the result again when it is saved
 // (crates/mosaik-core/src/editing.rs); the limits here match it.
 
-import { MAX_NAME, type RatioRect, type ZoneColor, type ZoneEdit } from '../protocol';
+import type { RatioRect, ZoneColor, ZoneEdit } from '../protocol';
 
 /** The smallest a zone may be, as a fraction of its monitor's work area on each side. */
 export const MIN_ZONE = 0.05;
@@ -45,13 +45,28 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
-/** A name not used by any zone yet: "Zone 1", "Zone 2"… */
-export function freeName(drafts: Draft[]): string {
-  const used = new Set(drafts.map((d) => d.name.trim().toLowerCase()));
-  for (let n = 1; ; n += 1) {
-    const name = `Zone ${String(n)}`;
-    if (!used.has(name.toLowerCase())) return name;
-  }
+/** The zones numbered 1, 2, 3… in reading order, as Mosaïk numbers them when they are saved
+ * (`Layout::number_zones`): monitor by monitor (in `monitors`' order), then row by row from the
+ * top, then from the left; a zone whose top is within 2% of another's is in its row. A zone's
+ * number says where it is, never what it holds. */
+export function numbered(drafts: Draft[], monitors: readonly string[]): Draft[] {
+  const rank = (d: Draft) => {
+    const i = monitors.indexOf(d.monitor);
+    return i < 0 ? monitors.length : i;
+  };
+  const order = drafts
+    .map((d, i) => ({ d, i }))
+    .sort(
+      (x, y) =>
+        rank(x.d) - rank(y.d) ||
+        (Math.abs(x.d.area.top - y.d.area.top) < 0.02 ? x.d.area.left - y.d.area.left : x.d.area.top - y.d.area.top) ||
+        x.i - y.i,
+    );
+  const numbers = new Map(order.map(({ d }, n) => [d.key, String(n + 1)]));
+  return drafts.map((d) => {
+    const name = numbers.get(d.key) ?? d.name;
+    return name === d.name ? d : { ...d, name };
+  });
 }
 
 /** The colour least used on the monitor, so neighbours differ. */
@@ -189,13 +204,13 @@ export function moveLine(drafts: Draft[], line: Line, monitor: string, to: numbe
   });
 }
 
-/** What a screen reader calls a line: "Line between Code and Browser", or for a longer one
- * "Line right of Code and Notes, left of Browser". */
+/** What a screen reader calls a line: "Line between zone 1 and zone 2", or for a longer one
+ * "Line right of zone 1 and zone 3, left of zone 2". */
 export function lineLabel(drafts: Draft[], line: Line): string {
   const names = (keys: string[]) => {
     const list = keys.map((k) => {
       const name = drafts.find((d) => d.key === k)?.name.trim() ?? '';
-      return name === '' ? 'a zone' : name;
+      return name === '' ? 'a zone' : `zone ${name}`;
     });
     return list.length <= 1 ? (list[0] ?? '') : `${list.slice(0, -1).join(', ')} and ${list.at(-1) ?? ''}`;
   };
@@ -211,8 +226,8 @@ export function lineLabel(drafts: Draft[], line: Line): string {
 }
 
 /** Splits a zone in two, side by side (`columns`) or one above the other (`rows`). The new half
- * gets a name and colour of its own. Unchanged when either half would be too small once on the
- * grid, or the monitor is full. */
+ * gets a colour of its own (and a number once `numbered`). Unchanged when either half would be
+ * too small once on the grid, or the monitor is full. */
 export function split(drafts: Draft[], key: string, direction: 'columns' | 'rows'): Draft[] {
   const z = drafts.find((d) => d.key === key);
   if (!z) return drafts;
@@ -226,7 +241,7 @@ export function split(drafts: Draft[], key: string, direction: 'columns' | 'rows
   const added: Draft = {
     key: newKey(),
     id: null,
-    name: freeName(drafts),
+    name: '',
     color: freeColor(drafts, z.monitor),
     monitor: z.monitor,
     area: second,
@@ -239,8 +254,8 @@ export function remove(drafts: Draft[], key: string): Draft[] {
   return drafts.filter((d) => d.key !== key);
 }
 
-export function update(drafts: Draft[], key: string, change: Partial<Pick<Draft, 'name' | 'color'>>): Draft[] {
-  return drafts.map((d) => (d.key === key ? { ...d, ...change } : d));
+export function recolor(drafts: Draft[], key: string, color: ZoneColor): Draft[] {
+  return drafts.map((d) => (d.key === key ? { ...d, color } : d));
 }
 
 /** The same presets as `mosaik_core::presets::Preset`, by the same ids and shapes. */
@@ -321,7 +336,7 @@ export function presetShape(preset: Preset): readonly RatioRect[] {
 }
 
 /** Replaces one monitor's zones with a preset. Existing zones are reused in reading order (they
- * keep their ids, names and colours, so their windows stay in them); extra ones are removed. */
+ * keep their ids and colours, so their windows stay in them); extra ones are removed. */
 export function applyPreset(drafts: Draft[], monitor: string, preset: Preset): Draft[] {
   const here = drafts
     .filter((d) => d.monitor === monitor)
@@ -334,7 +349,7 @@ export function applyPreset(drafts: Draft[], monitor: string, preset: Preset): D
       made.push({ ...existing, area });
     } else {
       const all = [...others, ...made];
-      made.push({ key: newKey(), id: null, name: freeName(all), color: freeColor(all, monitor), monitor, area });
+      made.push({ key: newKey(), id: null, name: '', color: freeColor(all, monitor), monitor, area });
     }
   });
   return [...others, ...made];
@@ -344,12 +359,9 @@ export function applyPreset(drafts: Draft[], monitor: string, preset: Preset): D
  * splitting refuses past the limit.) */
 export function problem(drafts: Draft[]): string | null {
   for (const d of drafts) {
-    const name = d.name.trim();
-    if (!name) return 'Every zone needs a name.';
-    if (Array.from(name).length > MAX_NAME) return `Zone names are ${String(MAX_NAME)} characters at most.`;
     const a = d.area;
     if (a.right - a.left < MIN_ZONE - EPSILON || a.bottom - a.top < MIN_ZONE - EPSILON) {
-      return `Zone “${name}” is too small.`;
+      return `Zone ${d.name} is too small.`;
     }
   }
   return null;

@@ -1,8 +1,9 @@
-// The picked zone: its name and colour, splitting it in two, removing it.
+// The picked zone: its number, its colour, splitting it in two, removing it. Zones are numbered
+// by place (1 at the top left), so they have no name to type.
 
-import { useId } from 'react';
+import { type CSSProperties, useId } from 'react';
 
-import { MAX_NAME, type ZoneColor } from '../protocol';
+import type { ZoneColor } from '../protocol';
 import { Button } from '../ui';
 import { COLORS, type Draft } from './model';
 
@@ -16,13 +17,11 @@ const COLOR_NAMES: Record<ZoneColor, string> = {
 
 export function ZonePanel({
   zone,
-  onRename,
   onColor,
   onSplit,
   onRemove,
 }: {
   zone: Draft;
-  onRename: (name: string) => void;
   onColor: (color: ZoneColor) => void;
   onSplit: (direction: 'columns' | 'rows') => void;
   onRemove: () => void;
@@ -30,24 +29,23 @@ export function ZonePanel({
   const nameId = useId();
   return (
     <section
-      aria-label={`Zone ${zone.name.trim() || 'without a name'}`}
+      aria-labelledby={nameId}
       className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4"
     >
-      <div className="flex flex-col gap-1">
-        <label htmlFor={nameId} className="text-small font-semibold">
-          Name
-        </label>
-        <input
-          id={nameId}
-          value={zone.name}
-          maxLength={MAX_NAME}
-          aria-invalid={zone.name.trim() === ''}
-          onChange={(e) => {
-            onRename(e.target.value);
-          }}
-          className="field w-52"
-        />
-      </div>
+      <h3 id={nameId} className="flex items-center gap-2 self-center font-display text-heading font-bold">
+        Zone{' '}
+        <span
+          className="zone-chip grid min-w-7 place-items-center rounded-full px-2 text-small font-bold tabular-nums"
+          style={
+            {
+              '--chip': `var(--zone-${zone.color})`,
+              '--on-chip': zone.color === 'saffron' ? 'var(--on-zone-saffron)' : 'var(--on-zone)',
+            } as CSSProperties
+          }
+        >
+          {zone.name}
+        </span>
+      </h3>
       <fieldset>
         <legend className="text-small font-semibold">Colour</legend>
         <div className="mt-1 flex gap-1.5">

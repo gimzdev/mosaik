@@ -60,8 +60,8 @@ const shipZones: Reply = {
     },
   ],
   zones: [
-    { id: 'z1', name: 'Code', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.5, bottom: 1 } },
-    { id: 'z2', name: 'Browser', color: 'verdigris', monitor: 'm1', area: { left: 0.5, top: 0, right: 1, bottom: 1 } },
+    { id: 'z1', name: '1', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.5, bottom: 1 } },
+    { id: 'z2', name: '2', color: 'verdigris', monitor: 'm1', area: { left: 0.5, top: 0, right: 1, bottom: 1 } },
   ],
   revision: '1',
 };
@@ -210,7 +210,7 @@ describe('Mosaïk’s window', () => {
     expect(await screen.findByRole('heading', { name: 'Ship', level: 1 })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Edit zones' }));
     expect(await screen.findByRole('heading', { name: 'Ship', level: 1 })).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: /^Code,/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Zone 1,/ })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Back' }));
     // Back where the editor was opened from: the workspace's page.
     expect(await screen.findByRole('button', { name: 'Rename “Ship”' })).toBeInTheDocument();
@@ -229,7 +229,7 @@ describe('Mosaïk’s window', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'Your screen' });
     ask();
-    expect(await screen.findByRole('button', { name: /^Code,/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Zone 1,/ })).toBeInTheDocument();
   });
 
   it('asks before leaving unsaved zones for another page', async () => {
@@ -237,7 +237,7 @@ describe('Mosaïk’s window', () => {
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
     await userEvent.click(screen.getByRole('button', { name: 'Edit zones' }));
-    await userEvent.click(await screen.findByRole('button', { name: /^Code,/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /^Zone 1,/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Split side by side' }));
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(await screen.findByRole('dialog', { name: 'Leave without saving?' })).toBeInTheDocument();

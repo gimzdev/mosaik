@@ -1,8 +1,9 @@
 // The workspaces on Home, in a column beside the screen: each a row with its layout in small and
-// its apps' icons, opened in one click, with the rest in its ⋯ menu. Below them, workspaces Mosaïk
+// its apps' icons. A click picks one, and Home's picture shows it as opening it would leave the
+// screen, with Open; its ⋯ menu opens it at once, and has the rest. Below them, workspaces Mosaïk
 // suggests from the apps installed that go together (coding: an editor, a terminal, a browser...),
-// opened the same way: their apps start and are laid out for the task. "Save layout" keeps what is
-// on screen as a new one.
+// opened in one click: their apps start and are laid out for the task. "Save layout" keeps what
+// is on screen as a new one.
 
 import { type SyntheticEvent, useCallback, useEffect, useId, useState } from 'react';
 
@@ -119,10 +120,16 @@ const Opening = () => (
 );
 
 export function Workspaces({
+  picked,
+  onPick,
   onEdit,
   onEditZones,
   onOpened,
 }: {
+  /** The workspace Home shows (its id). */
+  picked: string | null;
+  /** A workspace clicked: Home shows it (the one shown, clicked again, goes). */
+  onPick: (workspace: WorkspaceSummary) => void;
   onEdit: (workspace: string) => void;
   onEditZones: (workspace: string) => void;
   /** A workspace was opened: Home reads the screen again. */
@@ -259,17 +266,25 @@ export function Workspaces({
       <ul aria-label="Workspaces" className="mt-2 flex flex-col gap-0.5">
         {(list ?? []).map((w) => {
           const isOpen = active === w.id;
+          const shown = picked === w.id;
           return (
             <li key={w.id} className="relative" data-workspace={w.id}>
               <button
                 type="button"
-                aria-label={`Open “${w.name}”${isOpen ? ' (open now)' : ''}`}
+                aria-label={`${w.name}${isOpen ? ' (open now)' : ''}`}
+                aria-pressed={shown}
                 aria-busy={opening === w.id || undefined}
                 disabled={opening !== null}
                 onClick={() => {
-                  open(w);
+                  onPick(w);
                 }}
-                className={`${ROW} ${isOpen ? 'bg-[var(--raised)]' : 'hover:bg-[var(--raised)]'}`}
+                className={`${ROW} ${
+                  shown
+                    ? 'bg-[var(--raised)] ring-1 ring-[var(--accent)] forced-colors:ring-[Highlight]'
+                    : isOpen
+                      ? 'bg-[var(--raised)]'
+                      : 'hover:bg-[var(--raised)]'
+                }`}
               >
                 <span className="relative">
                   <MiniLayout layout={w.layout} width={56} height={34} />
@@ -279,7 +294,7 @@ export function Workspaces({
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="truncate font-semibold">{w.name}</span>
                     {isOpen ? (
-                      <span className="shrink-0 text-caption font-semibold text-[var(--accent)]">Open</span>
+                      <span className="shrink-0 text-caption font-semibold text-[var(--accent)]">Open now</span>
                     ) : null}
                   </span>
                   <span className="flex min-w-0 items-center gap-2">
@@ -301,6 +316,12 @@ export function Workspaces({
                 <MenuButton
                   label={`More for “${w.name}”`}
                   items={[
+                    {
+                      label: isOpen ? 'Open again' : 'Open',
+                      onSelect: () => {
+                        open(w);
+                      },
+                    },
                     ...(isOpen
                       ? [
                           {

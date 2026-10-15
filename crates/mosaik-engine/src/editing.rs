@@ -201,12 +201,9 @@ impl Engine {
         if old.edge != self.settings.edge || old.theme != self.settings.theme {
             self.place_quick();
         }
-        if old.frames.effective_style() != self.settings.frames.effective_style()
-            || old.frames.banded_style() != self.settings.frames.banded_style()
-        {
+        if old.frames.effective_style() != self.settings.frames.effective_style() {
             // Tags moved between title bars and bands above windows, or bands came or went:
             // windows take their places again.
-            self.titles.unband_all();
             if let Some(topology) = self.topology.clone() {
                 self.refit_open_workspace(&topology);
             }

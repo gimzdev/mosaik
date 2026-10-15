@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Command, Reply } from './protocol';
-import { appsOf, done, failed, shown, workspace, workspacesReply } from './test-fixtures';
+import { appsOf, done, failed, opening, preview, shown, workspace, workspacesReply } from './test-fixtures';
 import { Announcer } from './ui';
 import { WorkspacePage } from './WorkspacePage';
 
@@ -32,6 +32,8 @@ function answer(extra: (c: Command) => Reply | null = () => null, exists = true)
         return Promise.resolve(workspacesReply(exists ? [workspace({ id: 'ship', name, hotkey })] : [], 'ship'));
       case 'apps':
         return Promise.resolve(appsOf({ name }));
+      case 'preview_workspace':
+        return Promise.resolve(preview(opening));
       case 'rename_workspace':
         name = c.name;
         return Promise.resolve(done(`Renamed to “${c.name}”.`));
@@ -80,14 +82,39 @@ function page(onBack = vi.fn(), onEditZones = vi.fn()) {
 }
 
 describe('a workspace’s page', () => {
-  it('shows its apps in their zones, and moves, removes and adds them', async () => {
+  it('shows how it opens: its zones, with its apps in them', async () => {
+    // The owner: "show visually the zones same as homepage for that workspace specifically with
+    // arrangements aswell".
+    const asked = answer();
+    page();
+    expect(
+      await screen.findByRole('group', {
+        name: 'Visual Studio Code in zone 1, Windows Terminal starts in zone 2 with Claude as tabs, Google Chrome minimized.',
+      }),
+    ).toBeInTheDocument();
+    expect(asked).toContainEqual({ cmd: 'preview_workspace', workspace: 'ship' });
+  });
+
+  it('shows each app with a dot for every zone, its own lit, and moves, removes and adds them', async () => {
+    // The owner: "show all dots and the selected one is highlighted", "the remove should be a
+    // cross", zones "1 2 3 4 5 6".
     const asked = answer();
     page();
     const apps = await screen.findByRole('list', { name: 'Apps of “Ship”' });
     expect(within(apps).getByText('Visual Studio Code')).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Zone of Visual Studio Code' }), 'Browser');
+    const dots = within(screen.getByRole('group', { name: 'Zone of Visual Studio Code' })).getAllByRole('button');
+    expect(dots.map((d) => d.textContent)).toEqual(['1', '2']);
+    expect(screen.getByRole('button', { name: 'Visual Studio Code is in zone 1' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByText('A tab')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Put Visual Studio Code in zone 2' }));
     expect(asked).toContainEqual({ cmd: 'move_app', workspace: 'ship', app: 's1', zone: 'z2' });
-    expect(await shown('Visual Studio Code goes in Browser.')).toBeInTheDocument();
+    expect(await shown('Visual Studio Code goes in zone 2.')).toBeInTheDocument();
+    // The picture follows.
+    expect(asked.filter((c) => c.cmd === 'preview_workspace').length).toBeGreaterThan(1);
     await userEvent.click(screen.getByRole('button', { name: 'Remove Visual Studio Code' }));
     expect(asked).toContainEqual({ cmd: 'remove_app', workspace: 'ship', app: 's1' });
     expect(await shown('Visual Studio Code removed.')).toBeInTheDocument();

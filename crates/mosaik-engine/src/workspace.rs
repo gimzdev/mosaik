@@ -164,23 +164,15 @@ impl Engine {
         self.settings.frames.effective_style()
     }
 
-    /// The moves of a plan, in the form the mover takes: a window wearing its tag above it goes
-    /// below a band in its zone.
+    /// The moves of a plan, in the form the mover takes.
     fn to_moves(&self, moves: &[Move], topology: &Topology) -> Vec<(WindowHandle, To)> {
         moves
             .iter()
-            .filter_map(|m| {
-                if let Some((zone, dpi)) = m.zone
-                    && let Some(area) = self.banded_area(m.window, zone, dpi)
-                {
-                    return Some((m.window, To::Frame(area)));
-                }
-                match &m.target {
-                    Target::Frame(r) => Some((m.window, To::Frame(*r))),
-                    Target::Maximized(monitor) => topology
-                        .get(monitor)
-                        .map(|mon| (m.window, To::Maximized(mon.work_area))),
-                }
+            .filter_map(|m| match &m.target {
+                Target::Frame(r) => Some((m.window, To::Frame(*r))),
+                Target::Maximized(monitor) => topology
+                    .get(monitor)
+                    .map(|mon| (m.window, To::Maximized(mon.work_area))),
             })
             .collect()
     }
@@ -209,7 +201,7 @@ impl Engine {
 
     /// A window that can fill a slot when a workspace opens: a managed one, a minimised one it
     /// restores, or one in full screen, which it leaves as it is (`plan_switch`).
-    fn movable(&self, f: &WindowFacts) -> bool {
+    pub(crate) fn movable(&self, f: &WindowFacts) -> bool {
         self.allowed(f)
             && matches!(
                 classify(f, &self.settings.rules),
@@ -406,11 +398,18 @@ impl Engine {
             .into_iter()
             .filter(|f| self.manageable(f) && !self.hiding.hidden.contains_key(&f.handle))
             .collect();
-        // A window wearing its tag above it takes the band with it: the zone made for it
+        // The tab that shows of a group sits below its strip's band: the zone made for it
         // includes the band.
+        let style = self.style();
+        let extra = style.for_tabs().tag_band - style.tag_band;
+        let shown_tabs: std::collections::HashSet<WindowHandle> = self
+            .groups_now()
+            .iter()
+            .filter_map(|g| g.visible().map(|(_, w)| *w))
+            .collect();
         for f in &mut windows {
-            if self.titles.banded.contains(&f.handle) {
-                f.frame_rect.top -= scale_for_dpi(self.style_of(f.handle).tag_band, f.dpi.max(96));
+            if extra > 0 && shown_tabs.contains(&f.handle) {
+                f.frame_rect.top -= scale_for_dpi(extra, f.dpi.max(96));
             }
         }
         if windows.is_empty() {
@@ -511,15 +510,9 @@ impl Engine {
             .iter()
             .zip(&windows)
             .filter(|(s, _)| matches!(s.place, Place::Zone { .. } | Place::Tab { .. }))
-            .filter_map(|(s, w)| {
-                let banded = resolver
-                    .zone_of(&s.place)
-                    .and_then(|(zone, dpi)| self.banded_area(w.handle, zone, dpi));
-                match (banded, resolver.target(&s.place)) {
-                    (Some(area), _) => Some((w.handle, To::Frame(area))),
-                    (None, Some(Target::Frame(r))) => Some((w.handle, To::Frame(r))),
-                    _ => None,
-                }
+            .filter_map(|(s, w)| match resolver.target(&s.place) {
+                Some(Target::Frame(r)) => Some((w.handle, To::Frame(r))),
+                _ => None,
             })
             .collect();
         let (windows_n, zones_n) = (ws.layout.slots.len(), ws.layout.zones.len());
@@ -924,7 +917,6 @@ impl Engine {
             return;
         };
         let style = self.style();
-        self.acted();
         let Some(active) = &mut self.active else { return };
         let launched = active.launching.remove(pos);
         active.windows.insert(launched.slot.clone(), h);

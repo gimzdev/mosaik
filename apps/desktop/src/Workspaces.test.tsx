@@ -58,13 +58,14 @@ function answer(
   return asked;
 }
 
-function render_(onEdit = vi.fn(), onEditZones = vi.fn(), onOpened = vi.fn()) {
+function render_(onEdit = vi.fn(), onEditZones = vi.fn(), onOpened = vi.fn(), picked: string | null = null) {
+  const onPick = vi.fn<(w: WorkspaceSummary) => void>();
   render(
     <Announcer>
-      <Workspaces onEdit={onEdit} onEditZones={onEditZones} onOpened={onOpened} />
+      <Workspaces picked={picked} onPick={onPick} onEdit={onEdit} onEditZones={onEditZones} onOpened={onOpened} />
     </Announcer>,
   );
-  return { onEdit, onEditZones, onOpened };
+  return { onEdit, onEditZones, onOpened, onPick };
 }
 
 const list = () => screen.getByRole('list', { name: 'Workspaces' });
@@ -73,10 +74,10 @@ describe('the workspaces', () => {
   it('shows each with its apps and shortcut, the one open marked', async () => {
     answer();
     render_();
-    const open = await screen.findByRole('button', { name: 'Open “Ship” (open now)' });
-    expect(within(open).getByText('Open')).toBeInTheDocument();
+    const open = await screen.findByRole('button', { name: 'Ship (open now)' });
+    expect(within(open).getByText('Open now')).toBeInTheDocument();
     expect(within(open).getByText('Win + Alt + J')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open “Brand”' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Brand' })).toBeInTheDocument();
     // Apps show by their icons, read once for every app on the page.
     await waitFor(() => {
       expect(open.querySelector('img[src="data:image/png;base64,AA=="]')).not.toBeNull();
@@ -84,10 +85,28 @@ describe('the workspaces', () => {
     expect(engine.appIcons).toHaveBeenCalled();
   });
 
-  it('opens one in a click, and says so where it was opened', async () => {
+  it('picks one in a click, for Home to show, without opening it', async () => {
+    // The owner: "we shouldnt open the workspace when clicking on it it should show it in the
+    // anim as preview and show an open button".
+    const asked = answer();
+    const { onPick } = render_();
+    await userEvent.click(await screen.findByRole('button', { name: 'Brand' }));
+    expect(onPick).toHaveBeenCalledWith(brand);
+    expect(asked.some((c) => c.cmd === 'switch')).toBe(false);
+  });
+
+  it('marks the one Home shows', async () => {
+    answer();
+    render_(vi.fn(), vi.fn(), vi.fn(), 'brand');
+    expect(await screen.findByRole('button', { name: 'Brand' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Ship (open now)' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('opens one from its menu, and says so where it was opened', async () => {
     const asked = answer();
     const { onOpened } = render_();
-    await userEvent.click(await screen.findByRole('button', { name: 'Open “Brand”' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'More for “Brand”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(asked).toContainEqual({ cmd: 'switch', workspace: 'brand' });
     expect(await shown('Opened “brand”.')).toBeInTheDocument();
     expect(onOpened).toHaveBeenCalled();
@@ -96,7 +115,8 @@ describe('the workspaces', () => {
   it('says why one could not be opened', async () => {
     answer([ship, brand], [], (c) => (c.cmd === 'switch' ? failed('Its monitor is gone.', 'Edit its zones.') : null));
     render_();
-    await userEvent.click(await screen.findByRole('button', { name: 'Open “Brand”' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'More for “Brand”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Its monitor is gone. Edit its zones.');
   });
 
@@ -116,7 +136,7 @@ describe('the workspaces', () => {
   it('does not suggest a set that is a workspace already', async () => {
     answer([ship], [{ ...coding, workspace: 'ship' }]);
     render_();
-    await screen.findByRole('button', { name: 'Open “Ship” (open now)' });
+    await screen.findByRole('button', { name: 'Ship (open now)' });
     expect(screen.queryByRole('button', { name: /suggested workspace/ })).not.toBeInTheDocument();
   });
 
@@ -176,10 +196,10 @@ describe('the workspaces', () => {
       return Promise.resolve(done('Done.'));
     });
     render_();
-    await screen.findByRole('button', { name: 'Open “Ship”' });
+    await screen.findByRole('button', { name: 'Ship' });
     names = [ship, brand];
     changed();
-    expect(await screen.findByRole('button', { name: 'Open “Brand”' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Brand' })).toBeInTheDocument();
   });
 
   it('says what workspaces are when there is none and nothing to suggest', async () => {

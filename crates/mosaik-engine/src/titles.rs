@@ -1,5 +1,5 @@
-//! Windows' title bars, read on a thread of their own: where a window's zone tag, or its tab
-//! group's strip, can go in it (`mosaik_core::titlebar`, ADR 0011).
+//! Windows' title bars, read on a thread of their own: where a window's zone tag can go in it
+//! (`mosaik_core::titlebar`, ADR 0011).
 //!
 //! Reading a title bar asks the window's app about a few hundred points, which takes a few
 //! milliseconds, longer when the app is busy: never on the engine's thread. A window is read when
@@ -7,25 +7,23 @@
 //! front (its app may have changed its title bar: a browser opened a tab). Meanwhile the last
 //! reading is used, its free stretches kept next to the window's edges.
 //!
-//! A window whose title bar has no room wears its tag (or its group's strip) above it, in a
-//! band at the top of its zone, as when tags are set to go above windows: it is "banded", and
-//! wherever Mosaïk puts it in a zone, it goes below that band ([`Engine::banded_area`]).
+//! A window whose title bar has no room for its tag wears it cut short, or its initial, or none,
+//! at the top of its zone like its neighbours. A tab group's strip never goes in a title bar: the
+//! group sits below a band for it (ADR 0027).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use mosaik_core::geometry::{Rect, Size};
-use mosaik_core::titlebar::{self, BandStep, Fit, TitleRoom};
-use mosaik_core::window::{WindowHandle, covers_monitor};
-use mosaik_core::zone::FrameStyle;
+use mosaik_core::titlebar::{Fit, TitleRoom};
+use mosaik_core::window::WindowHandle;
 use mosaik_win::titlebar::Reading;
 use mosaik_win::window;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
-use crate::mover::{self, To};
 use crate::thread::{Engine, WM_EVENTS};
 
 /// How long before a window whose app did not answer is read again, if nothing else changes.
@@ -64,7 +62,7 @@ pub(crate) enum TitleSpot {
     Above,
     /// Its title bar is not read yet: nothing for a moment.
     NotYet,
-    /// Its app does not answer: no tag until it does; a tab group's strip goes above it.
+    /// Its app does not answer: no tag until it does.
     NoAnswer,
 }
 
@@ -160,17 +158,8 @@ pub(crate) struct Titles {
     known: HashMap<WindowHandle, Known>,
     /// Asked and not answered yet, and when the reading is due.
     asked: HashMap<WindowHandle, Instant>,
-    /// Windows wearing their tag or strip above them: their title bar never answered.
-    pub(crate) banded: HashSet<WindowHandle>,
-    /// Windows a reading would move into (`true`) or out of their band, and since when: they
-    /// move once a reading taken late enough agrees (`titlebar::band_step`).
-    proposed: HashMap<WindowHandle, (bool, Instant)>,
     /// Tag widths by zone name and DPI (measuring text lays it out).
     tag_widths: HashMap<(String, u32), i32>,
-    /// When the user last did something that places windows (opened a workspace, arranged,
-    /// dropped a window, clicked a tab): for a moment after, windows may still go into or out of
-    /// their band as their title bars are read; never later (`titlebar::PLACING`).
-    pub(crate) acted_at: Option<Instant>,
 }
 
 impl Titles {
@@ -187,40 +176,15 @@ impl Titles {
 
     pub(crate) fn forget(&mut self, h: WindowHandle) {
         self.known.remove(&h);
-        self.banded.remove(&h);
-        self.proposed.remove(&h);
     }
 
-    /// Forgets which windows are banded (tags moved between title bars and bands).
-    pub(crate) fn unband_all(&mut self) {
-        self.banded.clear();
-        self.proposed.clear();
-    }
-
-    /// Forgets the bands of windows that left the open workspace.
-    pub(crate) fn keep_only(&mut self, windows: &HashSet<WindowHandle>) {
-        self.banded.retain(|h| windows.contains(h));
-        self.proposed.retain(|h, _| windows.contains(h));
-    }
-
-    /// How many windows' title bars are being read, or will be to decide a change of band.
+    /// How many windows' title bars are being read.
     pub(crate) fn reading(&self) -> u32 {
-        let waiting = self
-            .proposed
-            .keys()
-            .filter(|h| !self.asked.contains_key(h))
-            .count();
-        u32::try_from(self.asked.len() + waiting).unwrap_or(u32::MAX)
+        u32::try_from(self.asked.len()).unwrap_or(u32::MAX)
     }
 }
 
 impl Engine {
-    /// The user did something that places windows: for a moment, their title bars may still
-    /// put them into or out of a band (`titlebar::PLACING`).
-    pub(crate) fn acted(&mut self) {
-        self.titles.acted_at = Some(Instant::now());
-    }
-
     /// What is known of `h`'s title bar while its frame is `frame`, asking for a reading when
     /// there is none for this size and title (the last one is still the best guess meanwhile).
     pub(crate) fn title_bar(&mut self, h: WindowHandle, frame: Rect) -> Bar {
@@ -281,9 +245,7 @@ impl Engine {
         }
     }
 
-    /// Takes the readings that arrived: each window read shows its tag or strip where it now
-    /// goes, and moves into or out of a band when that changed. A tab group whose visible tab was
-    /// read may now reach its other tabs differently: what shows is decided again.
+    /// Takes the readings that arrived: each window read shows its tag where it now goes.
     pub(crate) fn take_titles(&mut self) {
         let Some(reader) = &self.titles.reader else {
             return;
@@ -347,20 +309,12 @@ impl Engine {
             if let Some(wait) = again {
                 self.ask_title_after(w, wait);
             }
-            // A change of band waiting for this reading is decided now, also when nothing changed.
-            if changed || self.titles.proposed.contains_key(&w) {
+            if changed {
                 read.push(w);
             }
         }
-        if read.is_empty() {
-            return;
-        }
-        let tabs = read.iter().any(|w| self.group_of_window(*w).is_some());
         for w in read {
             self.refresh_frame(w);
-        }
-        if tabs {
-            self.sync_tabs();
         }
     }
 
@@ -388,173 +342,14 @@ impl Engine {
         self.title_spot(h, frame, Fit::tag(need, dpi))
     }
 
-    /// Where the strip of a tab group whose visible tab is `h` goes: always in its title bar, at
-    /// the right end ([`TitleRoom::strip_spot`]), unless the title bar never answered.
-    pub(crate) fn strip_spot_in_title(&mut self, h: WindowHandle, frame: Rect, dpi: u32) -> TitleSpot {
-        if !self.style().title_bars || self.titles.banded.contains(&h) {
-            return TitleSpot::Above;
-        }
-        // A strip takes the widest stretch: the more room, the more chips.
-        match self.title_bar(h, frame) {
-            Bar::Room(room) => TitleSpot::In(room.strip_spot(frame, Fit::strip(i32::MAX, dpi), dpi)),
-            Bar::Pending => TitleSpot::NotYet,
-            Bar::Unread => TitleSpot::NoAnswer,
-        }
-    }
-
     fn title_spot(&mut self, h: WindowHandle, frame: Rect, fit: Fit) -> TitleSpot {
-        if !self.style().title_bars || self.titles.banded.contains(&h) {
+        if !self.style().title_bars {
             return TitleSpot::Above;
         }
         match self.title_bar(h, frame) {
             Bar::Room(room) => room.spot(frame, fit).map_or(TitleSpot::Above, TitleSpot::In),
             Bar::Pending => TitleSpot::NotYet,
             Bar::Unread => TitleSpot::NoAnswer,
-        }
-    }
-
-    /// The style a window is placed with: below a band when it wears its tag above it.
-    pub(crate) fn style_of(&self, h: WindowHandle) -> FrameStyle {
-        if self.titles.banded.contains(&h) {
-            self.settings.frames.banded_style().for_tabs()
-        } else {
-            self.style()
-        }
-    }
-
-    /// Where `h` goes in the zone `zone` (on a monitor at `dpi`) when it wears its tag above it:
-    /// below the band. `None` when it does not, and goes where the layout says.
-    pub(crate) fn banded_area(&self, h: WindowHandle, zone: Rect, dpi: u32) -> Option<Rect> {
-        self.titles
-            .banded
-            .contains(&h)
-            .then(|| self.style_of(h).window_area(zone, dpi))
-    }
-
-    /// Whether `h` must wear its group's strip above it: tags go in title bars, it is the tab
-    /// that shows of a group, and its title bar never answered (the way to the group's other
-    /// tabs must stay in reach). A strip otherwise goes in the title bar, at its right end, room
-    /// or not ([`TitleRoom::strip_spot`]). A window alone never goes below a band: one whose
-    /// title bar has too little room for its tag wears it cut short, or none, at the
-    /// top of its zone like its neighbours (the owner: "we shouldn't have blank lost space").
-    /// Unchanged while its title bar is not read.
-    fn wants_band(&mut self, h: WindowHandle) -> bool {
-        let banded = self.titles.banded.contains(&h);
-        if !self.style().title_bars || self.titles.broken {
-            return false;
-        }
-        let Some(g) = window::geometry(window::hwnd(h)) else {
-            return false;
-        };
-        // A background tab Mosaïk keeps hidden (parked off screen, say) stays as it is, and so
-        // does a window over its whole monitor: one that keeps Windows' title bar and resize
-        // frame in full screen is not told from one placed there, and moving it below a band
-        // would take it out of full screen.
-        let over_monitor = self
-            .topology
-            .as_ref()
-            .is_some_and(|t| covers_monitor(g.frame, t.monitor_for_rect(g.frame).bounds));
-        if !g.framable() || over_monitor || self.hiding.hidden.contains_key(&h) {
-            return banded;
-        }
-        let strip = self
-            .group_of_window(h)
-            .is_some_and(|grp| grp.open.len() > 1 && grp.visible().is_some_and(|(_, w)| *w == h));
-        if !strip {
-            return false;
-        }
-        match self.title_bar(h, g.frame) {
-            Bar::Room(_) => false,
-            // Never answered: the strip must be in reach, so it goes above the window.
-            Bar::Unread => true,
-            Bar::Pending => banded,
-        }
-    }
-
-    /// Puts each of `windows` into or out of a band when its title bar says so, and moves it to
-    /// its place again: only right after an action of the user's placed it, never while the
-    /// user is moving it, nor while it is a hidden tab. Where it goes now is what a switch's
-    /// settling checks.
-    pub(crate) fn update_bands(&mut self, windows: &[WindowHandle]) {
-        let mut moves = Vec::new();
-        for &h in windows {
-            // Decided again when it is shown, or put down: a change proposed meanwhile would be
-            // confirmed by readings taken while it was hidden or moving.
-            if self.watch.moving == Some(h) || self.hiding.hidden.contains_key(&h) {
-                self.titles.proposed.remove(&h);
-                continue;
-            }
-            let want = self.wants_band(h);
-            let read_at = self.titles.known.get(&h).map(|k| k.at);
-            let proposed = self.titles.proposed.get(&h).copied();
-            let placing = self
-                .titles
-                .acted_at
-                .is_some_and(|t| t.elapsed() < titlebar::PLACING);
-            match titlebar::band_step(
-                self.titles.banded.contains(&h),
-                want,
-                read_at,
-                proposed,
-                Instant::now(),
-                placing,
-            ) {
-                BandStep::Keep => {
-                    self.titles.proposed.remove(&h);
-                    continue;
-                }
-                BandStep::Propose => {
-                    self.titles.proposed.insert(h, (want, Instant::now()));
-                    self.ask_title_after(h, titlebar::CONFIRM);
-                    continue;
-                }
-                BandStep::Wait(wait) => {
-                    self.ask_title_after(h, wait);
-                    continue;
-                }
-                BandStep::Change => {
-                    self.titles.proposed.remove(&h);
-                }
-            }
-            // The zone it is in, found before it moves.
-            let zone = window::geometry(window::hwnd(h)).and_then(|g| {
-                self.zone_of(h, g.frame, g.resizable, self.style_of(h))
-                    .map(|z| (z.rect, z.dpi))
-            });
-            if want {
-                self.titles.banded.insert(h);
-            } else {
-                self.titles.banded.remove(&h);
-            }
-            tracing::debug!(banded = want, "title bar room");
-            // Its group's place, or its zone's, with or without the band now.
-            let target = match self.group_of_window(h) {
-                Some(g) => self.group_target(&g.id, h),
-                None => zone.map(|(rect, dpi)| {
-                    To::Frame(
-                        self.banded_area(h, rect, dpi)
-                            .unwrap_or_else(|| self.style().window_area(rect, dpi)),
-                    )
-                }),
-            };
-            if let Some(to) = target {
-                moves.push((h, to));
-            }
-        }
-        if moves.is_empty() {
-            return;
-        }
-        for o in mover::move_all(&moves, mover::WAIT_ONE) {
-            match o.result {
-                Ok(wanted) => {
-                    if let Some(a) = &mut self.active
-                        && let Some(p) = a.placed.iter_mut().find(|(w, _)| *w == o.window)
-                    {
-                        p.1 = wanted;
-                    }
-                }
-                Err(e) => tracing::debug!(error = %e, "window not moved into or out of its band"),
-            }
         }
     }
 }

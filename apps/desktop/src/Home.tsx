@@ -2,7 +2,9 @@
 // workspaces in a column of their own. The smart layout is chosen first (Arrange reads what the
 // windows are for); any of the ten layouts can be chosen instead, and the picture shows it before
 // anything moves. Windows dragged onto each other in the picture trade places. Arrange does it;
-// Undo puts everything back.
+// Undo puts everything back. A workspace picked in the column shows in the picture as opening it
+// would leave the screen, with Open (the owner: "we shouldnt open the workspace when clicking on
+// it it should show it in the anim as preview and show an open button").
 
 import { useCallback, useEffect, useId, useState } from 'react';
 
@@ -10,7 +12,14 @@ import { PRESETS, type Preset, presetShape } from './editor/model';
 import { onWorkspacesChanged, request } from './engine';
 import { Glyph } from './icons';
 import { LayoutGlyph } from './Layouts';
-import { type ArrangeMove, type ArrangePreview, type Command, TASK_WORDS, errorMessage } from './protocol';
+import {
+  type ArrangeMove,
+  type ArrangePreview,
+  type Command,
+  TASK_WORDS,
+  type WorkspaceSummary,
+  errorMessage,
+} from './protocol';
 import { Screen, moved, settled } from './Screen';
 import { Button, PageTitle, Status, useAnnounce } from './ui';
 import { Workspaces } from './Workspaces';
@@ -40,6 +49,26 @@ const NO_MOVES: ArrangeMove[] = [];
 function names(list: string[]): string {
   if (list.length <= 1) return list.join('');
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1] ?? ''}`;
+}
+
+/** What opening a workspace does besides moving its windows, in a sentence under its picture:
+ * the apps it starts, the windows it minimises, the windows that go to other screens. */
+function openingNote(preview: ArrangePreview | null): string | null {
+  if (!preview) return null;
+  const starting = preview.windows.filter((w) => w.starting).map((w) => w.label);
+  const gone = preview.windows.filter((w) => w.minimized).map((w) => w.label);
+  const parts: string[] = [];
+  if (starting.length) parts.push(`${names(starting)} will start.`);
+  if (gone.length) parts.push(`${names(gone)} will be minimized.`);
+  if (preview.elsewhere) {
+    parts.push(
+      preview.elsewhere === 1
+        ? 'One of its windows goes to your other screen.'
+        : `${String(preview.elsewhere)} of its windows go to your other screens.`,
+    );
+  }
+  if (!parts.length && settled(preview)) return 'It is open like this already.';
+  return parts.length ? parts.join(' ') : null;
 }
 
 /** What the picture shows, in a sentence under it: what will be minimised, or that nothing moves. */
@@ -85,6 +114,10 @@ export function Home({
   const [early, setEarly] = useState<ArrangePreview | null>(null);
   /** The window picked on the picture (its app's name), waiting to be put elsewhere. */
   const [picking, setPicking] = useState<string | null>(null);
+  /** The workspace picked in the column, shown as opening it would leave the screen. */
+  const [picked, setPicked] = useState<WorkspaceSummary | null>(null);
+  /** Its picture, once Mosaïk has said (for the workspace it was asked for). */
+  const [opening, setOpening] = useState<{ id: string; preview: ArrangePreview } | null>(null);
   /** Counts the times the screen is read again: windows moved, a workspace opened… */
   const [reads, setReads] = useState(0);
   const readAgain = useCallback(() => {
@@ -122,6 +155,25 @@ export function Home({
       live = false;
     };
   }, [reads, smartMoves]);
+
+  // The workspace picked is asked for; an answer for one picked before is dropped.
+  const pickedId = picked?.id ?? null;
+  useEffect(() => {
+    if (pickedId === null) return;
+    let live = true;
+    void request({ cmd: 'preview_workspace', workspace: pickedId }).then((reply) => {
+      if (!live) return;
+      if (reply.reply === 'preview') {
+        setOpening({ id: pickedId, preview: reply });
+      } else {
+        setPicked(null);
+        setOutcome({ text: errorMessage(reply) ?? 'That workspace could not be shown.', error: true });
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [pickedId, reads]);
 
   // The layout chosen is asked for; an answer for one chosen before is dropped.
   useEffect(() => {
@@ -166,6 +218,35 @@ export function Home({
     setOutcome(null);
   };
 
+  /** Opens the workspace picked, as its picture shows. */
+  const openPicked = () => {
+    if (!picked) return;
+    const w = picked;
+    setBusy(true);
+    setOutcome(null);
+    void request({ cmd: 'switch', workspace: w.id }).then((reply) => {
+      setBusy(false);
+      if (reply.reply === 'done') {
+        setOutcome({ text: reply.message, error: false });
+        announce(reply.message);
+        setPicked(null);
+        setOpening(null);
+        // What Undo would undo is not on screen any more.
+        setUndoable(false);
+      } else {
+        setOutcome({ text: errorMessage(reply) ?? `“${w.name}” could not be opened.`, error: true });
+      }
+      readAgain();
+    });
+  };
+
+  /** Picks a workspace to show (again to let it go), or a layout to arrange with. */
+  const pick = (w: WorkspaceSummary | null) => {
+    setPicked((now) => (w && now?.id !== w.id ? w : null));
+    setOutcome(null);
+    setPicking(null);
+  };
+
   const undo = () => {
     setUndoable(false);
     void request({ cmd: 'undo_arrange' }).then((reply) => {
@@ -179,9 +260,10 @@ export function Home({
     });
   };
 
-  // While a layout's answer is on its way, the last picture stays.
-  const picture =
+  // While a layout's or a workspace's answer is on its way, the last picture stays.
+  const arranged =
     early ?? (choice === 'smart' ? smart : chosen?.choice === choice ? chosen.preview : (chosen?.preview ?? smart));
+  const picture = picked ? (opening?.preview ?? arranged) : arranged;
   const hasWindows = (smart?.windows.length ?? 0) > 0;
   const words = smart?.task ? TASK_WORDS[smart.task] : null;
   const title =
@@ -190,7 +272,13 @@ export function Home({
         ? `Smart layout for ${words}`
         : 'Smart layout'
       : (PRESETS.find((p) => p.id === choice)?.label ?? 'Layout');
-  const said = picking ? `Choose where ${picking} goes. Esc cancels.` : note(picture, choice);
+  const said = picked
+    ? opening?.id === picked.id
+      ? openingNote(opening.preview)
+      : null
+    : picking
+      ? `Choose where ${picking} goes. Esc cancels.`
+      : note(picture, choice);
 
   return (
     <article aria-labelledby="home-title">
@@ -205,20 +293,40 @@ export function Home({
                 Your screen
               </h2>
               <p className="mt-0.5 truncate text-small text-[var(--muted)]">
-                {problem ? 'Your screen could not be read' : hasWindows || !smart ? title : 'Open some apps first'}
+                {picked
+                  ? `As “${picked.name}” opens`
+                  : problem
+                    ? 'Your screen could not be read'
+                    : hasWindows || !smart
+                      ? title
+                      : 'Open some apps first'}
               </p>
             </div>
-            <Button tone="primary" size="lg" pending={busy} disabled={!hasWindows || busy} onClick={arrange}>
-              {busy ? null : <Glyph name="spark" />}
-              Arrange
-            </Button>
+            {picked ? (
+              <Button
+                tone="primary"
+                size="lg"
+                pending={busy}
+                disabled={busy}
+                label={`Open “${picked.name}”`}
+                onClick={openPicked}
+              >
+                {busy ? null : <Glyph name="play" size={13} />}
+                Open
+              </Button>
+            ) : (
+              <Button tone="primary" size="lg" pending={busy} disabled={!hasWindows || busy} onClick={arrange}>
+                {busy ? null : <Glyph name="spark" />}
+                Arrange
+              </Button>
+            )}
           </div>
 
           <div className="mt-4">
             <Screen
               preview={picture}
-              unread={problem !== null}
-              onMove={hasWindows && !busy ? move : undefined}
+              unread={problem !== null && !picked}
+              onMove={hasWindows && !busy && !picked ? move : undefined}
               onPick={setPicking}
             />
           </div>
@@ -229,7 +337,7 @@ export function Home({
             <legend className="sr-only">Layout</legend>
             <div className="flex flex-wrap items-center gap-0.5">
               {[{ id: 'smart' as const, label: 'Smart' }, ...LAYOUTS].map((option) => {
-                const on = choice === option.id;
+                const on = !picked && choice === option.id;
                 return (
                   <label
                     key={option.id}
@@ -251,6 +359,7 @@ export function Home({
                         setMoves(NO_MOVES);
                         setEarly(null);
                         setOutcome(null);
+                        setPicked(null);
                       }}
                       // Over the whole chip, unseen: a click anywhere on it chooses it.
                       className="absolute inset-0 m-0 cursor-pointer appearance-none rounded-full opacity-0 disabled:cursor-default"
@@ -280,7 +389,7 @@ export function Home({
                 Undo
               </Button>
             ) : null}
-            {moves.length && !busy ? (
+            {moves.length && !busy && !picked ? (
               <Button
                 tone="quiet"
                 size="sm"
@@ -297,12 +406,15 @@ export function Home({
         </section>
 
         <Workspaces
+          picked={picked?.id ?? null}
+          onPick={pick}
           onEdit={onEditWorkspace}
           onEditZones={onEditZones}
           onOpened={() => {
             // What Undo would undo is not on screen any more.
             setUndoable(false);
             setOutcome(null);
+            setPicked(null);
             readAgain();
           }}
         />

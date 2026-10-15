@@ -35,8 +35,8 @@ const reply = (zones: ZoneEdit[], revision = '1'): Reply => ({
 });
 
 const two: ZoneEdit[] = [
-  { id: 'z1', name: 'Code', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.5, bottom: 1 } },
-  { id: 'z2', name: 'Browser', color: 'verdigris', monitor: 'm1', area: { left: 0.5, top: 0, right: 1, bottom: 1 } },
+  { id: 'z1', name: '1', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.5, bottom: 1 } },
+  { id: 'z2', name: '2', color: 'verdigris', monitor: 'm1', area: { left: 0.5, top: 0, right: 1, bottom: 1 } },
 ];
 
 /** An engine that keeps what it is sent, giving new zones ids as Mosaïk does. */
@@ -72,16 +72,16 @@ describe('the zone editor', () => {
   it('moves a line from the keyboard and saves', async () => {
     const sent = engineWithZones();
     const { onDirtyChange } = editor();
-    const line = await screen.findByRole('separator', { name: 'Line between Code and Browser' });
+    const line = await screen.findByRole('separator', { name: 'Line between zone 1 and zone 2' });
     expect(line.getAttribute('aria-valuenow')).toBe('50');
     expect(line.getAttribute('aria-valuemin')).toBe('5');
     expect(line.getAttribute('aria-valuemax')).toBe('95');
     const save = screen.getByRole('button', { name: 'Save zones' });
     expect(save).toHaveProperty('disabled', true);
     fireEvent.keyDown(line, { key: 'ArrowRight', shiftKey: true });
-    expect(screen.getByRole('separator', { name: 'Line between Code and Browser' }).getAttribute('aria-valuenow')).toBe(
-      '58',
-    );
+    expect(
+      screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' }).getAttribute('aria-valuenow'),
+    ).toBe('58');
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
     await userEvent.click(save);
     expect(sent.find((c) => c.cmd === 'set_zones')).toMatchObject({
@@ -99,11 +99,11 @@ describe('the zone editor', () => {
   it('keeps the ids of new zones once saved, so saving again does not replace them', async () => {
     const sent = engineWithZones();
     editor();
-    await userEvent.click(await screen.findByRole('button', { name: /^Code,/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /^Zone 1,/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Split side by side' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save zones' }));
     await shown('Zones saved.');
-    const line = screen.getByRole('separator', { name: 'Line between Code and Zone 1' });
+    const line = screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' });
     fireEvent.keyDown(line, { key: 'ArrowLeft' });
     await userEvent.click(screen.getByRole('button', { name: 'Save zones' }));
     const saves = sent.filter((c) => c.cmd === 'set_zones');
@@ -112,20 +112,26 @@ describe('the zone editor', () => {
     expect(saves[1]?.cmd === 'set_zones' && saves[1].zones.every((z) => z.id !== null)).toBe(true);
   });
 
-  it('renames, recolours, splits and removes a zone', async () => {
+  it('numbers zones by place as they are split and removed, and recolours them', async () => {
+    // The owner: zone names "should be 1 2 3 4 5 6". Zones have no name to type.
     engine.request.mockResolvedValue(reply(two));
     editor();
-    await userEvent.click(await screen.findByRole('button', { name: /^Code,/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /^Zone 1,/ }));
+    expect(screen.getByRole('region', { name: 'Zone 1' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    // Split, the left half's new bottom reads last: 1 at the top left, 2 on the right, 3 below.
     await userEvent.click(screen.getByRole('button', { name: 'Split top and bottom' }));
-    expect(screen.getAllByRole('button', { pressed: false }).some((b) => b.textContent === 'Zone 1')).toBe(true);
+    const zones = () => screen.getAllByRole('button', { name: /^Zone \d,/ }).map((b) => b.getAttribute('aria-label'));
+    expect(zones()).toEqual([
+      'Zone 1, 50% wide, 50% high',
+      'Zone 3, 50% wide, 50% high',
+      'Zone 2, 50% wide, 100% high',
+    ]);
     await userEvent.click(screen.getByRole('radio', { name: 'Saffron' }));
-    const name = screen.getByRole('textbox', { name: 'Name' });
-    await userEvent.clear(name);
-    expect(screen.getByText('Every zone needs a name.').getAttribute('role')).toBe('alert');
-    expect(screen.getByRole('button', { name: 'Save zones' })).toHaveProperty('disabled', true);
-    await userEvent.type(name, 'Editor');
+    expect(screen.getByRole('button', { name: 'Save zones' })).toHaveProperty('disabled', false);
     await userEvent.click(screen.getByRole('button', { name: 'Remove zone' }));
-    expect(screen.queryByRole('button', { name: /^Editor,/ })).toBeNull();
+    // The zone on the right reads first now.
+    expect(zones()).toEqual(['Zone 2, 50% wide, 50% high', 'Zone 1, 50% wide, 100% high']);
   });
 
   it('asks before leaving with changes', async () => {

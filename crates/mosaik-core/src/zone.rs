@@ -177,17 +177,20 @@ impl FrameStyle {
         Self { tag_band: 0, ..self }
     }
 
-    /// The style a tab group's windows are placed with: the band above them always has room
-    /// for the tab strip, even when tags are hidden, since the strip is the way to the group's
-    /// other tabs. With tags in title bars, the strip goes in the visible tab's title bar.
+    /// The style a tab group's windows are placed with: below a band with room for the tab
+    /// strip, always, since the strip is the way to the group's other tabs: when tags are
+    /// hidden, and when tags go in title bars (ADR 0027: a crowded title bar left the strip room
+    /// for the zone's tag and "+1" only, with no tab to drag out).
     pub fn for_tabs(self) -> Self {
-        if self.title_bars || self.tag_band >= TAB_STRIP_BAND {
-            self
+        let tag_band = if self.tag_band >= TAB_STRIP_BAND {
+            self.tag_band
         } else {
-            Self {
-                tag_band: Self::default().tag_band,
-                ..self
-            }
+            Self::default().tag_band
+        };
+        Self {
+            tag_band,
+            title_bars: false,
+            ..self
         }
     }
 
@@ -254,12 +257,19 @@ mod tests {
         // A tab group keeps its strip's band when tags are hidden.
         assert_eq!(style.without_tags().for_tabs(), style);
         assert_eq!(style.for_tabs(), style);
-        // With tags in title bars, windows and tab groups fill their zones.
+        // With tags in title bars, windows fill their zones; a tab group sits below a band for
+        // its strip all the same (ADR 0027): in a crowded title bar the strip had room for the
+        // zone's tag and "+1" only, and no tab to drag out (the owner: "we cannot drag only 1
+        // tab it drags the whole window").
         let title_bars = FrameStyle {
             title_bars: true,
             ..style.without_tags()
         };
-        assert_eq!(title_bars.for_tabs(), title_bars);
+        assert_eq!(title_bars.for_tabs(), style);
+        assert_eq!(
+            title_bars.for_tabs().window_area(zone, 96),
+            Rect::new(0, 28, 960, 1032)
+        );
         assert_eq!(title_bars.window_area(zone, 96), zone);
         assert_eq!(title_bars.tag_area(zone, 96), None);
         // A space between zones: half of it on each side of a window.

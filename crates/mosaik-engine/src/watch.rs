@@ -439,8 +439,7 @@ impl Engine {
         }
     }
 
-    /// Shows, moves or hides the frames and strips of every window of the open workspace, each
-    /// window first in or out of a band as its title bar's room says.
+    /// Shows, moves or hides the frames and strips of every window of the open workspace.
     pub(crate) fn refresh_frames(&mut self) {
         let windows: Vec<WindowHandle> = self
             .active
@@ -449,8 +448,6 @@ impl Engine {
             .unwrap_or_default();
         let keep: HashSet<WindowHandle> = windows.iter().copied().collect();
         self.watch.frames.retain(|h, _| keep.contains(h));
-        self.titles.keep_only(&keep);
-        self.update_bands(&windows);
         for h in windows {
             self.refresh_ring(h);
         }
@@ -458,12 +455,8 @@ impl Engine {
         self.sync_tabs();
     }
 
-    /// The frame of one window, and its group's strip when it is the tab that shows; the window
-    /// first in or out of a band if its title bar's room, or what it shows, says so.
+    /// The frame of one window, and its group's strip when it is the tab that shows.
     pub(crate) fn refresh_frame(&mut self, h: WindowHandle) {
-        if self.style().title_bars && self.active.as_ref().is_some_and(|a| a.slot_of(h).is_some()) {
-            self.update_bands(&[h]);
-        }
         self.refresh_ring(h);
         if let Some(g) = self.group_of_window(h)
             && g.visible().is_some_and(|(_, w)| *w == h)
@@ -537,8 +530,8 @@ impl Engine {
         let (tag, tag_at, drop_area) = if tag {
             match self.tag_spot(h, g.frame, &zone.name, zone.dpi) {
                 TitleSpot::In(r) => (true, TagPlace::TitleBar(r), Some((r, BarPlace::TitleBar))),
-                // A window over its whole monitor is never moved below a band (`wants_band`): a
-                // tag above it would lie on its own title bar, so it wears none.
+                // A window over its whole monitor has no band above it: a tag above it would lie
+                // on its own title bar, so it wears none.
                 TitleSpot::Above
                     if self
                         .topology
@@ -549,14 +542,12 @@ impl Engine {
                 }
                 // With tags in title bars, a window alone whose title bar has no room even for
                 // its zone's initial wears no tag, at the top of its zone like its
-                // neighbours: it is never moved below a band for its tag (`wants_band`).
-                TitleSpot::Above if self.style().title_bars && !self.titles.banded.contains(&h) => {
-                    (false, TagPlace::Above, None)
-                }
+                // neighbours: it is never moved below a band for its tag.
+                TitleSpot::Above if self.style().title_bars => (false, TagPlace::Above, None),
                 TitleSpot::Above => {
                     // Right above the window (one that cannot be resized sits lower in its zone).
                     let band = self
-                        .style_of(h)
+                        .style()
                         .tag_area(zone.rect, zone.dpi)
                         .map(|b| band_above(g.frame, b));
                     (
@@ -1185,8 +1176,6 @@ impl Engine {
     }
 
     fn drag_end(&mut self, h: WindowHandle) {
-        // A window put down by the user: its band is decided as its title bar is read.
-        self.acted();
         if self.watch.moving == Some(h) {
             self.watch.moving = None;
         }
@@ -1266,7 +1255,9 @@ impl Engine {
     }
 
     /// The user moved or resized a window by hand: the open workspace remembers it. A tab
-    /// group's visible tab brings its group along, and keeps room above it for its strip.
+    /// group's visible tab brings its group along, and keeps room above it for its strip, which
+    /// goes back above it once its app has raised it after the drop (the owner: "when switching
+    /// a multi tab window from a zone to another the tab list disappears").
     fn after_user_move(&mut self, h: WindowHandle) {
         let group = self.group_of_window(h).map(|g| g.id);
         if let Some(g) = &group {
@@ -1276,6 +1267,7 @@ impl Engine {
         self.refresh_frame(h);
         if group.is_some() {
             self.sync_tabs();
+            self.restack_soon();
         }
     }
 
@@ -1290,7 +1282,7 @@ impl Engine {
         }
         let Some(topology) = &self.topology else { return };
         let work = topology.monitor_for_rect(geo.frame).work_area;
-        let band = scale_for_dpi(self.style_of(h).for_tabs().tag_band, geo.dpi.max(96));
+        let band = scale_for_dpi(self.style().for_tabs().tag_band, geo.dpi.max(96));
         let top = work.top + band;
         if geo.frame.top >= top {
             return;
@@ -1324,9 +1316,7 @@ impl Engine {
             Some(_) => self.style().for_tabs(),
             None => self.style(),
         };
-        let target = self
-            .banded_area(h, live.rect, live.dpi)
-            .unwrap_or_else(|| style.window_area(live.rect, live.dpi));
+        let target = style.window_area(live.rect, live.dpi);
         let moved = mover::move_all(&[(h, To::Frame(target))], mover::WAIT_ONE);
         let kept = match moved.into_iter().next().map(|o| o.result) {
             Some(Err(e)) => {

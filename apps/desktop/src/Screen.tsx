@@ -1,13 +1,15 @@
-// The picture of the main screen as the chosen layout would leave it: each window in its zone, a
-// thin line of desktop apart, a tile of its zone's colour with its app's icon and name and its
-// zone's tag in its title bar, as on screen. A window the layout has no zone for is not in the
-// picture (Home names it below). When the layout changes, the windows glide to their new places.
+// The picture of the main screen as the chosen layout, or a workspace opened, would leave it:
+// each window in its zone, a thin line of desktop apart, a tile of its zone's colour with its
+// app's icon and name and its zone's number in its title bar, as on screen. A tab group shows its
+// tabs above the tab that shows; an app a workspace starts shows dashed, where it will open. A
+// window the layout has no zone for is not in the picture (Home names it below). When the layout
+// changes, the windows glide to their new places.
 //
 // The windows can be put in other places before anything moves: a window dragged onto another
 // trades places with it, or takes an empty zone (the owner: "we should be able to drag drop apps
 // to permute them"). Without a mouse, Enter (or a click) picks a window and Enter on another
-// window, or on an empty zone, puts it there; Escape lets go. Each window keeps its zone's name
-// and colour when it moves, as a tile moved in a mosaic.
+// window, or on an empty zone, puts it there; Escape lets go. Each window keeps its colour when
+// it moves, as a tile moved in a mosaic; each zone keeps its number, which says where it is.
 
 import {
   type CSSProperties,
@@ -55,22 +57,28 @@ export function zoneOf(preview: ArrangePreview, w: PreviewWindow): PreviewZone |
 export const settled = (preview: ArrangePreview) =>
   preview.windows.length > 0 && preview.windows.every((w) => w.minimized || (w.then !== null && near(w.now, w.then)));
 
+/** Where a window is, in words: "Visual Studio Code in zone 1", "Windows Terminal starts in
+ * zone 3", with a tab group's other tabs. */
+function said(preview: ArrangePreview, w: PreviewWindow): string {
+  if (w.minimized) return `${w.label} minimized`;
+  const zone = zoneOf(preview, w);
+  const where = zone ? `in zone ${zone.name}` : 'where it is';
+  const others = (w.tabs ?? []).filter((t) => !t.shown).map((t) => t.label);
+  const tabs = others.length ? ` with ${others.join(', ')} as tabs` : '';
+  return `${w.label} ${w.starting ? 'starts ' : ''}${where}${tabs}`;
+}
+
 /** The picture in words, for screen readers. */
 export function describe(preview: ArrangePreview): string {
   if (preview.windows.length === 0) return 'Nothing is open on your main screen.';
-  const parts = preview.windows.map((w) => {
-    if (w.minimized) return `${w.label} minimized`;
-    const zone = zoneOf(preview, w);
-    return zone ? `${w.label} in ${zone.name}` : `${w.label} where it is`;
-  });
-  return `${parts.join(', ')}.`;
+  return `${preview.windows.map((w) => said(preview, w)).join(', ')}.`;
 }
 
 /**
  * The picture once `window` is put in the `zone`-th zone, before Mosaïk says: it trades places
- * with the window there (or leaves its own zone empty), and the two zones' names and colours go
- * with their windows. Mosaïk's own answer follows (it may also make room for a window that needs
- * more).
+ * with the window there (or leaves its own zone empty), and the two zones' colours go with their
+ * windows; the zones keep their numbers. Mosaïk's own answer follows (it may also make room for a
+ * window that needs more).
  */
 export function moved(preview: ArrangePreview, window: number, zone: number): ArrangePreview {
   const target = preview.zones[zone];
@@ -84,11 +92,7 @@ export function moved(preview: ArrangePreview, window: number, zone: number): Ar
       x === w ? { ...x, then: target.rect } : x === there ? { ...x, then: from.rect } : x,
     ),
     zones: preview.zones.map((z) =>
-      z === target
-        ? { ...z, name: from.name, color: from.color }
-        : z === from
-          ? { ...z, name: target.name, color: target.color }
-          : z,
+      z === target ? { ...z, color: from.color } : z === from ? { ...z, color: target.color } : z,
     ),
   };
 }
@@ -109,11 +113,14 @@ export function Screen({
   preview,
   unread = false,
   className = '',
+  tallest = 52,
   onMove,
   onPick,
 }: {
   /** null while Mosaïk is asked, or when it could not say (`unread`). */
   preview: ArrangePreview | null;
+  /** The most of the window's height it takes, in percent: less where more goes below it. */
+  tallest?: number;
   /** Mosaïk could not read the screen (safe mode, say): the picture stays empty, and says so. */
   unread?: boolean;
   className?: string;
@@ -252,7 +259,7 @@ export function Screen({
       className={`desk relative overflow-hidden rounded-[18px] forced-colors:border forced-colors:border-[CanvasText] ${className}`}
       // As wide as there is room for, and never so tall that the layouts below it are out of
       // sight in a small window.
-      style={{ aspectRatio: String(ratio), width: `min(100%, calc(52vh * ${String(ratio)}))` }}
+      style={{ aspectRatio: String(ratio), width: `min(100%, calc(${String(tallest)}vh * ${String(ratio)}))` }}
       role="group"
       aria-label={label}
       aria-busy={(preview === null && !unread) || undefined}
@@ -326,32 +333,59 @@ export function Screen({
             look.transitionProperty = 'none';
             look.zIndex = 20;
           }
+          // A tab group: its tabs above the one that shows, as its strip is on screen.
+          const tabs = w.tabs && w.tabs.length > 1 ? w.tabs : null;
           const tile = (
             <span
               className={`flex h-full flex-col overflow-hidden rounded-[9px] border forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] ${
                 dragging ? 'shadow-[0_22px_40px_-12px_rgb(0_0_0/0.85)]' : 'shadow-[0_10px_24px_-14px_rgb(0_0_0/0.8)]'
-              } ${lit || over ? 'outline-2 outline-offset-1 outline-[var(--text)]' : ''}`}
+              } ${lit || over ? 'outline-2 outline-offset-1 outline-[var(--text)]' : ''} ${
+                // An app a workspace starts: where it will open, drawn in outline.
+                w.starting ? 'border-dashed' : ''
+              }`}
               style={{
                 // Each window a tile lit by its zone's colour, as in a mosaic.
                 borderColor: zone ? `color-mix(in srgb, ${tint(zone.color)} 70%, transparent)` : 'var(--desk-line)',
-                background: zone
-                  ? `linear-gradient(180deg, color-mix(in srgb, ${tint(zone.color)} 18%, var(--desk-window)), var(--desk-window) 75%)`
-                  : 'var(--desk-window)',
+                background: w.starting
+                  ? 'transparent'
+                  : zone
+                    ? `linear-gradient(180deg, color-mix(in srgb, ${tint(zone.color)} 18%, var(--desk-window)), var(--desk-window) 75%)`
+                    : 'var(--desk-window)',
               }}
             >
-              <span className="flex h-[19px] min-w-0 shrink-0 items-center gap-1.5 bg-[var(--desk-bar)] px-1.5">
+              {tabs ? (
+                <span className="flex h-[15px] min-w-0 shrink-0 items-end gap-px px-1 pt-[2px]">
+                  {tabs.map((t, k) => (
+                    <span
+                      key={`${t.label}-${String(k)}`}
+                      className={`flex h-full min-w-0 items-center gap-1 rounded-t-[4px] px-1 ${
+                        t.shown ? 'bg-[var(--desk-bar)]' : 'opacity-60'
+                      }`}
+                    >
+                      <AppIcon icon={t.icon} size={9} />
+                      <span className="hidden min-w-0 truncate text-[8.5px] leading-none font-semibold text-[var(--desk-text)] @[160px]:block">
+                        {t.label}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+              <span
+                className={`flex h-[19px] min-w-0 shrink-0 items-center gap-1.5 px-1.5 ${
+                  w.starting ? '' : 'bg-[var(--desk-bar)]'
+                }`}
+              >
                 <AppIcon icon={w.icon} size={12} />
                 <span className="min-w-0 flex-1 truncate text-left text-[10.5px] leading-none font-semibold text-[var(--desk-text)]">
                   {w.label}
                 </span>
                 {zone ? (
                   <span
-                    className="zone-chip hidden shrink-0 truncate rounded-full px-1.5 text-[9.5px] leading-[13px] font-semibold @[150px]:block"
+                    className="zone-chip hidden min-w-[15px] shrink-0 rounded-full px-1 text-center text-[9.5px] leading-[13px] font-bold tabular-nums @[110px]:block"
                     style={
                       {
                         '--chip': tint(zone.color),
                         '--on-chip': zone.color === 'saffron' ? 'var(--on-zone-saffron)' : 'var(--on-zone)',
-                        maxWidth: '50%',
                       } as CSSProperties
                     }
                   >
@@ -359,6 +393,11 @@ export function Screen({
                   </span>
                 ) : null}
               </span>
+              {w.starting ? (
+                <span className="m-auto px-1 text-center text-[10px] leading-tight text-[var(--desk-label)]">
+                  Opens here
+                </span>
+              ) : null}
             </span>
           );
           return movable ? (
@@ -369,7 +408,7 @@ export function Screen({
                 else tiles.current.delete(w.window);
               }}
               type="button"
-              aria-label={zone ? `${w.label} in ${zone.name}` : w.label}
+              aria-label={said(preview, w)}
               aria-pressed={picked === w.window}
               aria-describedby={hint}
               className={`stage-window @container absolute touch-none p-[3px] text-left focus-visible:outline-none [&:focus-visible>span]:outline-2 [&:focus-visible>span]:outline-offset-1 [&:focus-visible>span]:outline-[var(--focus)] ${

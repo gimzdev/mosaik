@@ -13,6 +13,7 @@ import {
   lineRange,
   lines,
   moveLine,
+  numbered,
   percent,
   presetShape,
   problem,
@@ -23,13 +24,13 @@ import {
 
 const zone = (id: string, left: number, top: number, right: number, bottom: number, monitor = 'm1'): ZoneEdit => ({
   id,
-  name: id.toUpperCase(),
+  name: id.slice(1),
   color: 'lapis',
   monitor,
   area: { left, top, right, bottom },
 });
 
-// Code on the left, Browser over Terminal on the right; another monitor with one zone.
+// 1 on the left, 2 over 3 on the right; another monitor with one zone.
 const layout = () =>
   fromZones([
     zone('z1', 0, 0, 0.6, 1),
@@ -68,8 +69,8 @@ describe('the zone editor', () => {
     expect(l.before).toEqual(['z1']);
     expect(l.after).toEqual(['z2', 'z3']);
     expect(lines(layout(), 'm1')).toHaveLength(2);
-    expect(lineLabel(layout(), l)).toBe('Line right of Z1, left of Z2 and Z3');
-    expect(lineLabel(layout(), lineAt(layout(), 'y', 0.5, 'z2'))).toBe('Line between Z2 and Z3');
+    expect(lineLabel(layout(), l)).toBe('Line right of zone 1, left of zone 2 and zone 3');
+    expect(lineLabel(layout(), lineAt(layout(), 'y', 0.5, 'z2'))).toBe('Line between zone 2 and zone 3');
   });
 
   it('moves every zone along a line, on this monitor only', () => {
@@ -123,15 +124,26 @@ describe('the zone editor', () => {
     expect(area(moveLine(d, l, 'm1', 0.9), 'a')?.right).toBe(0.6);
   });
 
-  it('splits on the grid, with a new name and colour', () => {
+  it('splits on the grid, with a new colour', () => {
     const next = split(layout(), 'z1', 'columns');
     expect(next).toHaveLength(5);
     const added = next.find((d) => d.id === null);
     expect(added?.area).toEqual({ left: 14 / 48, top: 0, right: 0.6, bottom: 1 });
     expect((added?.area.left ?? 0) / GRID).toBeCloseTo(14);
-    expect(added?.name).toBe('Zone 1');
     expect(added?.color).not.toBe('lapis');
     expect(area(next, 'z1')?.right).toBe(14 / 48);
+  });
+
+  it('numbers the zones by place, as Mosaïk saves them', () => {
+    // The owner: zone names "should be 1 2 3 4 5 6", not "Code", "Browser", "Zone". The new half
+    // of the left zone reads second, so the zones right of it follow: 1, 2, then 3 over 4, then
+    // the other monitor's 5.
+    const next = numbered(split(layout(), 'z1', 'columns'), ['m1', 'm2']);
+    const names = Object.fromEntries(next.map((d) => [d.id ?? 'new', d.name]));
+    expect(names).toEqual({ z1: '1', new: '2', z2: '3', z3: '4', o1: '5' });
+    // Zones a few pixels apart in height still read across.
+    const rows = numbered(fromZones([zone('b', 0.5, 0.01, 1, 1), zone('a', 0, 0, 0.5, 1)]), ['m1']);
+    expect(rows.map((d) => d.name)).toEqual(['2', '1']);
   });
 
   it('refuses splits that would be too small once on the grid, or too many', () => {
@@ -171,11 +183,9 @@ describe('the zone editor', () => {
     }
   });
 
-  it('says why a draft cannot be saved', () => {
+  it('says why a draft cannot be saved, naming the zone by its number', () => {
     expect(problem(layout())).toBeNull();
-    const unnamed = layout().map((d) => (d.key === 'z1' ? { ...d, name: '  ' } : d));
-    expect(problem(unnamed)).toBe('Every zone needs a name.');
-    expect(problem(fromZones([zone('z1', 0, 0, 0.01, 1)]))).toContain('too small');
+    expect(problem(fromZones([zone('z1', 0, 0, 0.01, 1)]))).toBe('Zone 1 is too small.');
   });
 
   it('returns zones as the engine takes them', () => {

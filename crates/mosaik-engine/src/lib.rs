@@ -30,6 +30,7 @@ mod watch;
 pub mod watchdog;
 mod workspace;
 mod workspace_apps;
+mod workspace_preview;
 
 use std::path::PathBuf;
 use std::sync::Arc;

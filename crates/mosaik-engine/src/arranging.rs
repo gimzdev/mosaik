@@ -333,14 +333,8 @@ impl Engine {
             else {
                 continue;
             };
-            let h = windows[i].handle;
-            let banded = resolver
-                .zone_of(&place)
-                .and_then(|(zone, dpi)| self.banded_area(h, zone, dpi));
-            match (banded, resolver.target(&place)) {
-                (Some(area), _) => moves.push((h, To::Frame(area))),
-                (None, Some(Target::Frame(r))) => moves.push((h, To::Frame(r))),
-                _ => {}
+            if let Some(Target::Frame(r)) = resolver.target(&place) {
+                moves.push((windows[i].handle, To::Frame(r)));
             }
         }
         let on_monitor: Vec<usize> = units.iter().map(|u| u.monitor).collect();
@@ -536,6 +530,8 @@ impl Engine {
                 now: w.frame_rect,
                 then: then.map(|r| lands(w, r)),
                 minimized,
+                starting: false,
+                tabs: Vec::new(),
             });
         }
         Reply::Preview(Box::new(ArrangePreview {

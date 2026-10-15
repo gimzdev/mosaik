@@ -9,7 +9,7 @@ export interface Rect {
   bottom: number;
 }
 
-/** The longest workspace or zone name, in characters (`MAX_NAME` in crates/mosaik-core). */
+/** The longest workspace name, in characters (`MAX_NAME` in crates/mosaik-core). */
 export const MAX_NAME = 60;
 
 export type ZoneColor = 'lapis' | 'verdigris' | 'saffron' | 'madder' | 'slate';
@@ -33,6 +33,7 @@ export interface MiniZone {
 export interface ZoneEdit {
   /** null for a zone made in the editor. */
   id: string | null;
+  /** Its number by place ("1"); what is sent back is not kept, as zones are numbered when saved. */
   name: string;
   color: ZoneColor;
   /** One of the monitors connected now. */
@@ -77,6 +78,7 @@ export type Command =
   | { cmd: 'rescue' }
   | { cmd: 'arrange'; preset?: string; moves?: ArrangeMove[] }
   | { cmd: 'preview_arrange'; preset?: string; moves?: ArrangeMove[] }
+  | { cmd: 'preview_workspace'; workspace: string }
   | { cmd: 'undo_arrange' }
   | { cmd: 'show_switcher' }
   | { cmd: 'show_settings' }
@@ -137,16 +139,27 @@ export interface ArrangeMove {
   zone: number;
 }
 
-/** A zone of the main screen once arranged (`preview_arrange`). */
+/** A zone of the main screen once arranged (`preview_arrange`), or once a workspace opens
+ * (`preview_workspace`). */
 export interface PreviewZone {
+  /** Its number by place ("1"). */
   name: string;
   color: ZoneColor;
   rect: Rect;
 }
 
-/** A window of the main screen: where it is, and where Arrange would put it. */
+/** A tab of a tab group in a preview. */
+export interface PreviewTab {
+  label: string;
+  icon: string | null;
+  /** The tab that shows. */
+  shown: boolean;
+}
+
+/** A window of the main screen: where it is, and where Arrange, or opening a workspace, would
+ * put it. */
 export interface PreviewWindow {
-  /** The window, for a move (`ArrangeMove`). */
+  /** The window, for a move (`ArrangeMove`); 0 for an app not open. */
   window: number;
   /** The app's name. */
   label: string;
@@ -155,8 +168,12 @@ export interface PreviewWindow {
   now: Rect;
   /** null: it stays where it is, or is minimised. */
   then: Rect | null;
-  /** It would be minimised: every zone has a window. */
+  /** It would be minimised: every zone has a window, or it is not the workspace's. */
   minimized: boolean;
+  /** Its app is not open: opening the workspace starts it there. */
+  starting?: boolean;
+  /** The tabs of its tab group, in order, itself among them; none when it is not a tab. */
+  tabs?: PreviewTab[];
 }
 
 /** An app of a workspace. */
@@ -173,6 +190,7 @@ export interface WorkspaceApp {
 /** A zone an app can go in. */
 export interface AppZone {
   id: string;
+  /** Its number by place ("1"). */
   name: string;
   color: ZoneColor;
 }
@@ -383,6 +401,10 @@ function isPreviewZone(x: unknown): x is PreviewZone {
   return isObject(x) && isString(x.name) && isString(x.color) && COLORS.has(x.color) && isRect(x.rect);
 }
 
+function isPreviewTab(x: unknown): x is PreviewTab {
+  return isObject(x) && isString(x.label) && isNullableString(x.icon) && isBoolean(x.shown);
+}
+
 function isPreviewWindow(x: unknown): x is PreviewWindow {
   return (
     isObject(x) &&
@@ -391,7 +413,9 @@ function isPreviewWindow(x: unknown): x is PreviewWindow {
     isNullableString(x.icon) &&
     isRect(x.now) &&
     (x.then === null || isRect(x.then)) &&
-    isBoolean(x.minimized)
+    isBoolean(x.minimized) &&
+    (x.starting === undefined || isBoolean(x.starting)) &&
+    (x.tabs === undefined || (Array.isArray(x.tabs) && x.tabs.every(isPreviewTab)))
   );
 }
 

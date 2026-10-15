@@ -696,9 +696,6 @@ impl Engine {
             command,
             Command::Arrange { .. } | Command::UndoArrange | Command::SetWorkspaceHotkey { .. }
         );
-        if changes_workspaces {
-            self.acted();
-        }
         let reply = self.dispatch(command);
         if changes_workspaces && !matches!(reply, Reply::Error { .. }) {
             if !keeps_arrange {
@@ -724,6 +721,7 @@ impl Engine {
             Command::Save { workspace } => self.save(workspace),
             Command::Arrange { preset, moves } => self.arrange(preset.as_deref(), &moves),
             Command::PreviewArrange { preset, moves } => self.preview_arrange(preset.as_deref(), &moves),
+            Command::PreviewWorkspace { workspace } => self.preview_workspace(&workspace),
             Command::UndoArrange => self.undo_arrange(),
             Command::Rescue => self.rescue(),
             Command::ShowSwitcher => {

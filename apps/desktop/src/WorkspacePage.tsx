@@ -1,19 +1,22 @@
 // One workspace, to change: its name, its shortcut, its apps (each in the zone it goes in), its
-// zones, or to delete it. Opened from its card's ⋯ menu on Home.
+// zones, or to delete it. Opened from its card's ⋯ menu on Home. At the top, the picture of the
+// main screen as opening it would leave it, as on Home (the owner: "show visually the zones same
+// as homepage for that workspace specifically with arrangements aswell").
 
-import { type SyntheticEvent, useCallback, useEffect, useId, useState } from 'react';
+import { type CSSProperties, type SyntheticEvent, useCallback, useEffect, useId, useState } from 'react';
 
 import { onWorkspacesChanged, request } from './engine';
 import { AppIcon, Glyph } from './icons';
-import { MiniLayout } from './Layouts';
 import {
+  type AppZone,
+  type ArrangePreview,
   type Command,
   MAX_NAME,
-  type WorkspaceApp,
   type WorkspaceApps,
   type WorkspaceSummary,
   errorMessage,
 } from './protocol';
+import { Screen } from './Screen';
 import { ShortcutRecorder } from './shortcut';
 import { Button, Confirm, MenuButton, PageTitle, Section, Status, useAnnounce } from './ui';
 
@@ -84,9 +87,56 @@ function Rename({
   );
 }
 
-/** The workspace's apps: each with the zone it goes in (a list changes it), Remove, and the
- * windows on screen to add. In the open workspace a change moves the window at once. */
-function Apps({ workspace }: { workspace: string }) {
+/** A zone's dot: its number in its colour. The one an app is in is solid and ringed; the others
+ * are rings of their colour, and a click puts the app there. */
+function ZoneDot({
+  zone,
+  on,
+  label,
+  disabled,
+  onPick,
+}: {
+  zone: AppZone;
+  on: boolean;
+  label: string;
+  disabled: boolean;
+  onPick: () => void;
+}) {
+  const tint = `var(--zone-${zone.color})`;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={on}
+      disabled={disabled}
+      onClick={() => {
+        if (!on) onPick();
+      }}
+      className={`grid size-6 shrink-0 place-items-center rounded-full border-2 text-caption font-bold tabular-nums transition-[background-color,color] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)] disabled:cursor-progress forced-colors:border-[CanvasText] ${
+        on
+          ? 'zone-chip ring-2 ring-[var(--text)] ring-offset-2 ring-offset-[var(--bg)] forced-colors:ring-[Highlight]'
+          : 'cursor-pointer text-[var(--muted)] hover:text-[var(--text)]'
+      }`}
+      style={
+        on
+          ? ({
+              '--chip': tint,
+              '--on-chip': zone.color === 'saffron' ? 'var(--on-zone-saffron)' : 'var(--on-zone)',
+              borderColor: tint,
+            } as CSSProperties)
+          : { borderColor: tint }
+      }
+    >
+      {zone.name}
+    </button>
+  );
+}
+
+/** The workspace's apps, one compact row each: its icon and name, a dot for every zone with its
+ * own zone's lit (a click on another moves it there), and × to take it out (the owner: "show all
+ * dots and the selected one is highlighted", "the remove should be a cross"). Then the windows
+ * on screen to add. In the open workspace a change moves the window at once. */
+function Apps({ workspace, onChanged }: { workspace: string; onChanged: () => void }) {
   const [data, setData] = useState<WorkspaceApps | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -124,14 +174,13 @@ function Apps({ workspace }: { workspace: string }) {
         setData(reply);
         setOutcome({ text: done, error: false });
         announce(done);
+        onChanged();
       } else {
         setOutcome({ text: errorMessage(reply) ?? 'The workspace could not be changed.', error: true });
         load();
       }
     });
   };
-
-  const zoneOf = (a: WorkspaceApp) => data?.zones.find((z) => z.id === a.zone) ?? null;
 
   if (problem) return <Status text={problem} error />;
   if (data === null) {
@@ -141,71 +190,53 @@ function Apps({ workspace }: { workspace: string }) {
       </p>
     );
   }
+  // The dots in the zones' order on screen: 1, 2, 3…
+  const zones = [...data.zones].sort((a, b) => Number(a.name) - Number(b.name) || a.name.localeCompare(b.name));
   return (
     <div>
       {data.apps.length === 0 ? (
         <p className="py-3.5 text-small text-[var(--muted)]">No apps yet. Add a window that is open now.</p>
       ) : (
         <ul aria-label={`Apps of “${data.name}”`} className="divide-y divide-[var(--line)]">
-          {data.apps.map((a) => {
-            const zone = zoneOf(a);
-            return (
-              <li key={a.id} className="flex items-center gap-3 py-2.5">
-                <AppIcon icon={a.icon} size={22} keepSpace />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{a.label}</span>
-                  {a.tab ? <span className="text-caption text-[var(--muted)]">A tab</span> : null}
-                </span>
-                {data.zones.length ? (
-                  <span className="flex shrink-0 items-center gap-2">
-                    <span
-                      aria-hidden="true"
-                      className="size-2.5 shrink-0 rounded-full forced-colors:bg-[CanvasText]"
-                      style={{ background: zone ? `var(--zone-${zone.color})` : 'var(--control)' }}
-                    />
-                    <select
-                      aria-label={`Zone of ${a.label}`}
-                      value={a.zone ?? ''}
+          {data.apps.map((a) => (
+            <li key={a.id} className="flex items-center gap-3 py-2">
+              <AppIcon icon={a.icon} size={22} keepSpace />
+              <span className="min-w-0 flex-1 truncate font-semibold">{a.label}</span>
+              {zones.length ? (
+                <span role="group" aria-label={`Zone of ${a.label}`} className="flex shrink-0 flex-wrap gap-1.5">
+                  {zones.map((z) => (
+                    <ZoneDot
+                      key={z.id}
+                      zone={z}
+                      on={a.zone === z.id}
+                      label={a.zone === z.id ? `${a.label} is in zone ${z.name}` : `Put ${a.label} in zone ${z.name}`}
                       disabled={busy !== null}
-                      onChange={(e) => {
-                        const to = data.zones.find((z) => z.id === e.target.value);
-                        if (!to) return;
+                      onPick={() => {
                         change(
                           a.id,
-                          { cmd: 'move_app', workspace: data.workspace, app: a.id, zone: to.id },
-                          `${a.label} goes in ${to.name}.`,
+                          { cmd: 'move_app', workspace: data.workspace, app: a.id, zone: z.id },
+                          `${a.label} goes in zone ${z.name}.`,
                         );
                       }}
-                      className="field w-36 text-small"
-                    >
-                      {a.zone === null ? (
-                        <option value="" disabled>
-                          Its own place
-                        </option>
-                      ) : null}
-                      {data.zones.map((z) => (
-                        <option key={z.id} value={z.id}>
-                          {z.name}
-                        </option>
-                      ))}
-                    </select>
-                  </span>
-                ) : null}
-                <Button
-                  tone="quiet"
-                  size="sm"
-                  label={`Remove ${a.label}`}
-                  pending={busy === a.id}
-                  disabled={busy !== null && busy !== a.id}
-                  onClick={() => {
-                    change(a.id, { cmd: 'remove_app', workspace: data.workspace, app: a.id }, `${a.label} removed.`);
-                  }}
-                >
-                  Remove
-                </Button>
-              </li>
-            );
-          })}
+                    />
+                  ))}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                aria-label={`Remove ${a.label}`}
+                title={`Remove ${a.label}`}
+                aria-busy={busy === a.id || undefined}
+                disabled={busy !== null}
+                onClick={() => {
+                  change(a.id, { cmd: 'remove_app', workspace: data.workspace, app: a.id }, `${a.label} removed.`);
+                }}
+                className="grid size-7 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)] disabled:cursor-progress disabled:opacity-50"
+              >
+                <Glyph name="close" size={14} />
+              </button>
+            </li>
+          ))}
         </ul>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] py-3">
@@ -256,6 +287,14 @@ export function WorkspacePage({
   const [deleting, setDeleting] = useState(false);
   const [opening, setOpening] = useState(false);
   const [outcome, setOutcome] = useState<{ text: string; error: boolean } | null>(null);
+  /** The picture of it opened, and whether Mosaïk could not say. */
+  const [preview, setPreview] = useState<ArrangePreview | null>(null);
+  const [unread, setUnread] = useState(false);
+  /** Counts the times the picture is asked again: an app moved, windows on screen changed… */
+  const [reads, setReads] = useState(0);
+  const readAgain = useCallback(() => {
+    setReads((n) => n + 1);
+  }, []);
   const announce = useAnnounce();
 
   const load = useCallback(() => {
@@ -272,6 +311,27 @@ export function WorkspacePage({
     load();
     return onWorkspacesChanged(load);
   }, [load]);
+
+  // Its picture follows its apps and the windows on screen.
+  useEffect(() => {
+    window.addEventListener('focus', readAgain);
+    const stop = onWorkspacesChanged(readAgain);
+    return () => {
+      window.removeEventListener('focus', readAgain);
+      stop();
+    };
+  }, [readAgain]);
+  useEffect(() => {
+    let live = true;
+    void request({ cmd: 'preview_workspace', workspace }).then((reply) => {
+      if (!live) return;
+      setPreview(reply.reply === 'preview' ? reply : null);
+      setUnread(reply.reply !== 'preview');
+    });
+    return () => {
+      live = false;
+    };
+  }, [workspace, reads]);
 
   const say = (text: string, error = false) => {
     setOutcome({ text, error });
@@ -310,7 +370,6 @@ export function WorkspacePage({
       </button>
 
       <div className="mt-3 flex flex-wrap items-center gap-4">
-        <MiniLayout layout={summary.layout} width={112} height={66} />
         <div className="min-w-0 flex-1">
           {renaming ? (
             <Rename
@@ -369,8 +428,12 @@ export function WorkspacePage({
         <Status text={outcome?.text ?? null} error={outcome?.error ?? false} />
       </div>
 
+      <div className="mt-4">
+        <Screen preview={preview} unread={unread} tallest={38} />
+      </div>
+
       <Section title="Apps">
-        <Apps workspace={summary.id} />
+        <Apps workspace={summary.id} onChanged={readAgain} />
       </Section>
 
       <Section title="Shortcut">
@@ -399,7 +462,7 @@ export function WorkspacePage({
       <Section title="Zones">
         <div className="flex flex-wrap items-center justify-between gap-3 py-3.5">
           <p className="text-small text-[var(--muted)]">
-            Where its windows go. Resize, split, rename or recolour them.
+            Where its windows go, numbered by place. Resize, split or recolour them.
           </p>
           <Button
             onClick={() => {

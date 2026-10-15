@@ -18,7 +18,7 @@ use crate::thread::Engine;
 impl Engine {
     /// What to call an app of a workspace: its own label; for one saved before apps had one,
     /// its open window's app, or its program's description.
-    fn app_name(&mut self, slot: &Slot, window: Option<WindowHandle>) -> String {
+    pub(crate) fn app_name(&mut self, slot: &Slot, window: Option<WindowHandle>) -> String {
         if slot.label.is_some() {
             return slot.name();
         }

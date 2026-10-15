@@ -48,6 +48,10 @@
       "preset": "thirds"
     },
     {
+      "cmd": "preview_workspace",
+      "workspace": "ship"
+    },
+    {
       "cmd": "undo_arrange"
     },
     {
@@ -184,7 +188,7 @@
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 8,
+      "protocol": 9,
       "reply": "hello"
     },
     {
@@ -376,6 +380,18 @@
             "right": 1800,
             "top": 200
           },
+          "tabs": [
+            {
+              "icon": "exe:C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+              "label": "Google Chrome",
+              "shown": true
+            },
+            {
+              "icon": "app:Claude",
+              "label": "Claude",
+              "shown": false
+            }
+          ],
           "then": {
             "bottom": 1032,
             "left": 960,
@@ -383,6 +399,25 @@
             "top": 0
           },
           "window": 66296
+        },
+        {
+          "icon": "app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
+          "label": "Windows Terminal",
+          "minimized": false,
+          "now": {
+            "bottom": 1032,
+            "left": 0,
+            "right": 960,
+            "top": 516
+          },
+          "starting": true,
+          "then": {
+            "bottom": 1032,
+            "left": 0,
+            "right": 960,
+            "top": 516
+          },
+          "window": 0
         },
         {
           "icon": null,

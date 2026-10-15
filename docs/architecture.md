@@ -58,7 +58,7 @@ the engine gathers windows and applies the result.
   button (a splash screen, a menu) does not. A game or video in full screen is left alone until
   it leaves full screen (ADR 0012).
 - **Saving** (S in the switcher, then a name) turns the windows on screen into a workspace.
-  Windows that tile, side by side without overlapping, become zones named after their app;
+  Windows that tile, side by side without overlapping, become zones;
   windows stacked exactly on top of each other share a zone; maximised windows and windows
   floating over others keep their own place. Windows in zones then fill them, edge to edge, so no
   desktop shows between them (ADR 0020). Saving under an existing name updates that workspace
@@ -74,11 +74,16 @@ the engine gathers windows and applies the result.
 - **A layout changes only by the user's hand**: saving, dropping a window into a zone, moving or
   resizing one of the workspace's windows by mouse, Arrange, or the zone editor. Windows an app moved on its own, or a window
   maximised for a moment, go back to their places the next time the workspace opens.
+- **Zones are numbered** 1, 2, 3… in reading order, monitor by monitor, row by row from the
+  top, then from the left (`Layout::number_zones`, ADR 0028): a zone's name says where it is,
+  never what it holds. Every change of zones numbers them again; a file with names from before
+  is renumbered once on load.
 - **Opening** a workspace finds its windows (program, then window class and title to tell
   several windows of one app apart), moves them all at once, starts missing apps, minimises the
-  previous workspace's other windows that are on screen, brings its windows forward and gives
-  the front one the keyboard. 400 ms later, windows an app moved back are put in place once.
-- **Frames**: every window in a zone of the open workspace wears a tag with its zone's name and
+  other windows on screen on the monitors it is on (and the previous workspace's anywhere; not
+  a window in full screen; ADR 0028), brings its windows forward and gives the front one the
+  keyboard. 400 ms later, windows an app moved back are put in place once.
+- **Frames**: every window in a zone of the open workspace wears a tag with its zone's number and
   colour, and, when the user turns rings on, a ring in that colour (then windows sit two rings
   apart; ADR 0020). Both are drawn right above the window in the stacking order, so windows
   that cover it cover them too, and follow moves through window events, hooked per process.
@@ -86,10 +91,9 @@ the engine gathers windows and applies the result.
   buttons, found by asking the window what is under a row of points, as Windows does wherever
   the pointer goes (`WM_NCHITTEST`), on a thread of its own (`titles`). Every window fills its
   zone and starts at its top: a tag with little room is cut short, then to the zone's initial
-  (`zone::tag_cut`), and a window with no room even for that wears none. Only the tab
-  that shows of a group whose title bar has no room for the group's strip sits below a band
-  with the strip in it, once two readings a quarter of a second apart agree. A setting puts
-  every tag in a bar at the top of its zone instead, above every window. A band is solid and,
+  (`zone::tag_cut`), and a window with no room even for that wears none. A tab group's visible
+  tab sits below a band with the group's strip in it (ADR 0027). A setting puts every tag in a
+  bar at the top of its zone instead, above every window. A band is solid and,
   with rings on, inside the window's ring, so the two read as one window; the window can be
   dragged by it as by its title bar (Mosaïk moves it with the pointer).
 - **Drag to snap**: while a window is dragged by its title bar, the open workspace's zones show
@@ -120,20 +124,25 @@ the engine gathers windows and applies the result.
   the windows cannot all fit.
 - **Windows move only on the user's actions** (ADR 0017): Arrange, a layout, opening or saving
   a workspace, a drop, the zone editor, a resize by hand, a tab clicked, an app added or moved.
-  A title bar read again later (a window brought forward) changes no band and moves no window;
-  a tab group's strip always sits at the right end of its visible tab's title bar.
-- **A workspace's apps** (ADR 0018, 0023, 0024): Home shows them by their icons, and a
-  workspace's page lists them with their zones; adding a window on screen, moving an app to
-  another zone or removing it is a pure edit (`mosaik_core::editing`), saved, then applied at
-  once in the open workspace.
+  A title bar read again later (a window brought forward) moves no window; a tab group's strip
+  sits in the band above its visible tab (ADR 0027).
+- **A workspace's apps** (ADR 0018, 0023, 0024, 0028): Home shows them by their icons, and a
+  workspace's page shows how it opens (`preview_workspace`) above its apps, one row each: its
+  icon and name, a dot for every zone with its own lit, and × to take it out; a click on another
+  dot moves it there. Adding a window on screen, moving an app to another zone or removing it is
+  a pure edit (`mosaik_core::editing`), saved, then applied at once in the open workspace.
 - **Home** (ADR 0016, 0024): a picture of the main monitor as the layout chosen would leave it,
   drawn from `preview_arrange` (the same preparation as Arrange, changing nothing): Smart first
   (Arrange's own layout for the task it reads), or one of ten layouts; the windows it would
   minimise are named under it. A window dragged onto another in the picture trades places with
   it (a click or Enter picks one, a second puts it there); the moves go with the preview and with
-  Arrange (`mosaik_core::arrange::plan_moved`), each window keeping its zone's name and colour.
-  Arrange does it, and Undo brings everything back. Beside it,
-  every workspace with its apps' icons, opened in one click, a ⋯ menu for the rest, and the
+  Arrange (`mosaik_core::arrange::plan_moved`), each window keeping its colour, each zone its
+  number. Arrange does it, and Undo brings everything back. Beside it, every workspace with its
+  apps' icons: a click shows it in the picture as opening it would leave the screen
+  (`preview_workspace`, the plan opening it follows: its apps glide to their zones, the apps it
+  would start drawn dashed where they open, a tab group with its tabs, the windows it would
+  minimise named below), with Open in place of Arrange (ADR 0028); a layout chosen, or the
+  workspace clicked again, goes back to Arrange. A ⋯ menu has Open and the rest, then come the
   suggested sets. Mosaïk's window has two places, Home and Settings (with About at its end).
 - **Apps' icons** (ADR 0024): replies name each app's icon by a key (`app:<AppUserModelID>` or
   `exe:<path>`, `mosaik_core::icons`); the window asks for the ones it shows in one batch
@@ -175,9 +184,9 @@ the engine gathers windows and applies the result.
 ## How tabs behave
 
 A tab group is several windows of any apps sharing one place, one visible at a time, with a
-strip in the visible tab's title bar (or in a band above it, with no room there or with tags set
-to go above windows, ADR 0011): the zone's tag, then one chip per tab. Mosaïk never reparents another app's window; background tabs are hidden with the
-shell's cloak (ADR 0003).
+strip in a band above the visible tab (ADR 0027): the zone's tag, then one chip per tab, each
+with room to be dragged out. Mosaïk never reparents another app's window; background tabs are
+hidden with the shell's cloak (ADR 0003).
 
 - **Making a group**: drag a window by its title bar onto another window's tag, or onto a
   group's strip; a "Drop to add" slot shows where it will go. It takes the group's place and

@@ -24,7 +24,9 @@ use thiserror::Error;
 /// and whether Mosaïk runs as installed (`side_menu`, `read_only`, `packaged`).
 /// 8: windows moved on the home page's picture of the screen (`moves` on `arrange` and
 /// `preview_arrange`), and each preview window's handle (`window`).
-pub const PROTOCOL_VERSION: u32 = 8;
+/// 9: what opening a workspace would do (`preview_workspace`), with the apps it would start
+/// (`starting`) and each tab group's tabs (`tabs`); zones are numbered 1, 2, 3 by place.
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -79,6 +81,12 @@ pub enum Command {
         preset: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         moves: Vec<ArrangeMove>,
+    },
+    /// What `switch` to `workspace` would do now on the main monitor, without doing it: its
+    /// zones, its apps' windows from where they are to their places (apps not open start
+    /// there), and the other windows it would minimise. Home and the workspace's page show it.
+    PreviewWorkspace {
+        workspace: String,
     },
     /// Put back what the last `arrange` changed (for ten minutes, until a workspace is opened,
     /// saved or edited).
@@ -302,6 +310,7 @@ pub struct WorkspaceApp {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AppZone {
     pub id: ZoneId,
+    /// Its number in reading order ("1").
     pub name: String,
     pub color: ZoneColor,
 }
@@ -363,8 +372,27 @@ pub struct PreviewWindow {
     pub now: Rect,
     /// Where it would go (`None`: it stays where it is, or is minimised).
     pub then: Option<Rect>,
-    /// It would be minimised: every zone has a window.
+    /// It would be minimised: every zone has a window, or it is not the workspace's.
     pub minimized: bool,
+    /// Its app is not open: opening the workspace starts it there (`now` is `then`, and
+    /// `window` is 0).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub starting: bool,
+    /// The tabs of its tab group, in order, itself among them; empty when it is not a tab.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tabs: Vec<PreviewTab>,
+}
+
+/// A tab of a tab group in a preview.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewTab {
+    /// Its app's name.
+    pub label: String,
+    /// Its app's icon key (`mosaik_core::icons`).
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// It is the tab that shows.
+    pub shown: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -667,6 +695,9 @@ mod tests {
                     zone: 1,
                 }],
             },
+            Command::PreviewWorkspace {
+                workspace: "Ship the release".into(),
+            },
             Command::UndoArrange,
             Command::Settings,
             Command::SetSettings {
@@ -728,7 +759,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":8,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":9,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -737,7 +768,7 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":8,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":9,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
     }
 
     #[test]
@@ -766,12 +797,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(w.window, WindowHandle(0));
+        // Nor does it start, nor have tabs; a window that does neither says nothing of them.
+        assert!(!w.starting && w.tabs.is_empty());
+        let line = serde_json::to_string(&w).unwrap();
+        assert!(!line.contains("starting") && !line.contains("tabs"), "{line}");
     }
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":9,"id":1,"cmd":"state"}"#).unwrap_err();
-        assert_eq!(err, ProtocolError::UnsupportedVersion { client: 9, server: 8 });
+        let err = decode_request(br#"{"v":10,"id":1,"cmd":"state"}"#).unwrap_err();
+        assert_eq!(
+            err,
+            ProtocolError::UnsupportedVersion {
+                client: 10,
+                server: 9
+            }
+        );
         // Older clients are understood.
         assert!(decode_request(br#"{"v":1,"id":1,"cmd":"state"}"#).is_ok());
         assert!(err.to_string().contains("update Mosaïk"));
@@ -966,6 +1007,9 @@ mod wire {
                     zone: 0,
                 }],
             },
+            Command::PreviewWorkspace {
+                workspace: "ship".into(),
+            },
             Command::UndoArrange,
             Command::ShowSwitcher,
             Command::ShowSettings,
@@ -1124,6 +1168,8 @@ mod wire {
                         now: Rect::new(120, 80, 1100, 760),
                         then: Some(Rect::new(0, 0, 960, 1032)),
                         minimized: false,
+                        starting: false,
+                        tabs: Vec::new(),
                     },
                     PreviewWindow {
                         window: WindowHandle(0x0001_02f8),
@@ -1132,6 +1178,31 @@ mod wire {
                         now: Rect::new(700, 200, 1800, 980),
                         then: Some(Rect::new(960, 0, 1920, 1032)),
                         minimized: false,
+                        starting: false,
+                        tabs: vec![
+                            PreviewTab {
+                                label: "Google Chrome".into(),
+                                icon: Some(
+                                    r"exe:C:\Program Files\Google\Chrome\Application\chrome.exe".into(),
+                                ),
+                                shown: true,
+                            },
+                            PreviewTab {
+                                label: "Claude".into(),
+                                icon: Some("app:Claude".into()),
+                                shown: false,
+                            },
+                        ],
+                    },
+                    PreviewWindow {
+                        window: WindowHandle(0),
+                        label: "Windows Terminal".into(),
+                        icon: Some("app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App".into()),
+                        now: Rect::new(0, 516, 960, 1032),
+                        then: Some(Rect::new(0, 516, 960, 1032)),
+                        minimized: false,
+                        starting: true,
+                        tabs: Vec::new(),
                     },
                     PreviewWindow {
                         window: WindowHandle(0x0005_0c1e),
@@ -1140,6 +1211,8 @@ mod wire {
                         now: Rect::new(300, 300, 1200, 900),
                         then: None,
                         minimized: true,
+                        starting: false,
+                        tabs: Vec::new(),
                     },
                 ],
                 elsewhere: 1,
