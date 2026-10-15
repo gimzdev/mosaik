@@ -6,7 +6,7 @@ const FEATURES = [
   {
     id: 'zones',
     title: 'Zones give every window a home',
-    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it. Or pick one of ten layouts, or carve the screen into your own named areas, like Code, Terminal and Review. Before you click, Mosaïk shows where each window would go.',
+    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it. Or pick one of ten layouts, or carve the screen into zones of your own, numbered by place. Before you click, Mosaïk shows where each window would go.',
     points: ['Zones belong to the project, not the monitor', 'Every window wears its zone’s colour, so you can tell at a glance', 'Works across multiple displays'],
     Art: ZonesArt,
   },

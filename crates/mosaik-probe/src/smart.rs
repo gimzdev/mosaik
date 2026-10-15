@@ -1442,8 +1442,9 @@ fn zone_index(p: &ArrangePreview, x: &PreviewWindow) -> Option<usize> {
 
 /// 3e2. Windows put elsewhere on the home page's picture (the owner: "we should be able to drag
 /// drop apps to permute them"). In Halves, the window of one half dropped on the other: the
-/// picture shows the two traded, each zone's name and colour going with its window, and nothing
-/// moves; Arrange with that move puts them so; Undo puts everything back.
+/// picture shows the two traded, each zone's colour going with its window and each zone keeping
+/// its number (ADR 0028), and nothing moves; Arrange with that move puts them so; Undo puts
+/// everything back.
 fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
     let before = frames(w);
     let base = preview(engine, Some("halves"))?;
@@ -1469,14 +1470,19 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
     let (a2, b2) = (find(&shown, a.window), find(&shown, b.window));
     let traded = a2.as_ref().and_then(|x| zone_index(&shown, x)) == Some(zb)
         && b2.as_ref().and_then(|x| zone_index(&shown, x)) == Some(za);
-    let same = |x: usize, y: usize| {
+    let colour = |x: usize, y: usize| {
         shown
             .zones
             .get(x)
             .zip(base.zones.get(y))
-            .is_some_and(|(n, o)| n.name == o.name && n.color == o.color)
+            .is_some_and(|(n, o)| n.color == o.color)
     };
-    let with_windows = same(zb, za) && same(za, zb);
+    let numbers_stay = shown
+        .zones
+        .iter()
+        .map(|z| &z.name)
+        .eq(base.zones.iter().map(|z| &z.name));
+    let with_windows = colour(zb, za) && colour(za, zb) && numbers_stay;
     let untouched = most_moved(&frames(w), &before) <= SLACK;
 
     let (reply, ms) = ask(
@@ -1527,7 +1533,7 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
     Ok(json!({
         "preview_ms": preview_ms,
         "traded_in_picture": traded,
-        "names_and_colours_with_windows": with_windows,
+        "colours_with_windows_numbers_with_places": with_windows,
         "preview_changed_nothing": untouched,
         "message": message,
         "ms": ms,

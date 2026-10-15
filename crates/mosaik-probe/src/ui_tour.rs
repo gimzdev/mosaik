@@ -519,7 +519,15 @@ impl Tour {
         }
         pump_until(1000, || false);
         let after = tiles(self);
-        let at = |name: &str| after.iter().find(|c| c.name == name).map(|c| c.rect.center());
+        // A tile is named "<app> in zone <n>", its zone's number by place: the app goes with the
+        // tile, the number with the place.
+        let app = |name: &str| name.split(" in ").next().unwrap_or(name).to_owned();
+        let at = |name: &str| {
+            after
+                .iter()
+                .find(|c| app(&c.name) == app(name))
+                .map(|c| c.rect.center())
+        };
         let traded = at(&a.name).is_some_and(|p| b.rect.contains(p))
             && at(&b.name).is_some_and(|p| a.rect.contains(p));
         let file = self.shot(shot)?;
@@ -531,7 +539,7 @@ impl Tour {
         let back = tiles(self);
         let put_back = back
             .iter()
-            .find(|c| c.name == a.name)
+            .find(|c| app(&c.name) == app(&a.name))
             .is_some_and(|c| a.rect.contains(c.rect.center()));
         let page = json!({
             "page": shot,
@@ -667,6 +675,25 @@ impl Tour {
         self.choose_layout("Thirds", "home-thirds")?;
         self.choose_layout("Smart", "home-smart")?;
         self.drag_in_picture("home-dragged")?;
+
+        // The workspace picked: the picture shows it as it would open, with Open in place of
+        // Arrange (nothing opens); picked again, Home goes back to Arrange.
+        let row = self.reveal("button", WORKSPACE)?;
+        self.click(&row)?;
+        pump_until(1200, || false);
+        let open = self.find("button", &format!("Open “{WORKSPACE}”")).is_ok();
+        let picked_shot = self.shot("home-picked")?;
+        let row = self.reveal("button", WORKSPACE)?;
+        self.click(&row)?;
+        pump_until(800, || false);
+        let page = json!({
+            "page": "home-picked",
+            "shot": picked_shot,
+            "open_button": open,
+            "back_to_arrange": self.find("button", "Arrange").is_ok(),
+        });
+        println!("page home-picked: {page}");
+        self.pages.push(page);
 
         // The workspace's menu, then its page, with the windows on screen it could take: shown,
         // none added.

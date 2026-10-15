@@ -2,6 +2,20 @@
 
 ## 1.0.2
 
+- Click a workspace on Home and the picture shows it as it will open: its apps glide to their
+  zones, the apps it will start show where they open, a group of tabs shows its tabs, and the
+  windows it will minimise are named below. Open opens it; a layout, or a second click, goes back
+  to Arrange. Its ⋯ menu still opens it at once.
+- Zones are numbered 1, 2, 3 by place, top left first, instead of being named after the apps in
+  them ("Code", "Browser 2", "Zone"). Your workspaces' zones are numbered the first time 1.0.2
+  starts, once.
+- A workspace's page shows how it opens, as Home does, and lists its apps one row each: a dot
+  for every zone, the app's own lit (click another to move it there), and × to take it out.
+- A group of tabs wears its tab strip in a band above it, every tab with room to be dragged out on
+  its own (in a crowded title bar, only one tab and "+1" showed, and dragging took the whole
+  group). Its strip follows it into another zone at once.
+- Opening a workspace minimises the other windows on its screens, so nothing stays on top of it
+  (a game launcher did). Windows on its other screens, and a window in full screen, stay.
 - A workspace's page offers every open window to add, minimised ones too. Opening a workspace
   minimises the windows it does not use, so its page said "Open a window to add it here." with
   ten apps open. A minimised window added to a zone shows again there.

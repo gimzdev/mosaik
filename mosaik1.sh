@@ -58,7 +58,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.11.1"
+MK_VERSION="1.11.2"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -568,7 +568,7 @@ const FEATURES = [
   {
     id: 'zones',
     title: 'Zones give every window a home',
-    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it. Or pick one of ten layouts, or carve the screen into your own named areas, like Code, Terminal and Review. Before you click, Mosaïk shows where each window would go.',
+    body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it. Or pick one of ten layouts, or carve the screen into zones of your own, numbered by place. Before you click, Mosaïk shows where each window would go.',
     points: ['Zones belong to the project, not the monitor', 'Every window wears its zone’s colour, so you can tell at a glance', 'Works across multiple displays'],
     Art: ZonesArt,
   },
@@ -1837,21 +1837,21 @@ function Placed({ win, x, y, w, h, tilt, z }: { win: Pick<Win, 'kind' | 'variant
 
 const ART = 'rounded-[20px] bg-ink ring-1 ring-black/10';
 
-/** Zones: named areas. A window dragged near one is pulled into it. */
+/** Zones: numbered areas. A window dragged near one is pulled into it. */
 export function ZonesArt() {
   return (
-    <div role="img" aria-label="A desktop divided into three coloured zones. An editor and a terminal already sit in theirs, and a pull request window is being dragged toward the empty Review zone.">
+    <div role="img" aria-label="A desktop divided into three coloured zones, numbered 1 to 3. An editor and a terminal already sit in zones 1 and 2, and a pull request window is being dragged toward the empty zone 3.">
       <Scaled className={ART}>
         <Wallpaper />
         <ZoneBox x={40} y={52} w={720} h={700} zone="lapis" />
         <ZoneBox x={788} y={52} w={452} h={340} zone="verdigris" />
         <ZoneBox x={788} y={410} w={452} h={342} zone="saffron" filled />
-        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={96} w={688} h={640} />
-        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={96} w={420} h={280} />
+        <Placed win={{ kind: 'editor', tag: '1', zone: 'lapis' }} x={56} y={96} w={688} h={640} />
+        <Placed win={{ kind: 'terminal', tag: '2', zone: 'verdigris' }} x={804} y={96} w={420} h={280} />
         <p className="absolute text-center text-[18px] font-semibold text-[#F4B13A]" style={{ left: 788, top: 560, width: 452 }}>
-          Release to place in Review
+          Release to place in zone 3
         </p>
-        <Placed win={{ kind: 'browser', variant: 'pr', tag: 'Review', zone: 'saffron' }} x={836} y={318} w={420} h={300} tilt={-5} z={40} />
+        <Placed win={{ kind: 'browser', variant: 'pr', tag: '3', zone: 'saffron' }} x={836} y={318} w={420} h={300} tilt={-5} z={40} />
         <Cursor x={1070} y={330} />
       </Scaled>
     </div>
@@ -1867,7 +1867,7 @@ export function TabsArt() {
       <Scaled className={ART}>
         <Wallpaper />
         <div className="absolute" style={{ left: 36, top: 52, width: 1090, height: 710 }}>
-          <ZoneFrame tag="Code" zone="lapis">
+          <ZoneFrame tag="1" zone="lapis">
             <div className="flex h-full flex-col bg-[#16181D]">
               <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] px-3 text-[14px]">
                 {TABS.map(([name, c], i) => (
@@ -1886,7 +1886,7 @@ export function TabsArt() {
             </div>
           </ZoneFrame>
         </div>
-        <Placed win={{ kind: 'chat', variant: 'team', tag: 'Team', zone: 'madder' }} x={880} y={46} w={350} h={236} tilt={5} z={40} />
+        <Placed win={{ kind: 'chat', variant: 'team', tag: '2', zone: 'madder' }} x={880} y={46} w={350} h={236} tilt={5} z={40} />
         <Cursor x={1030} y={58} />
       </Scaled>
     </div>
@@ -2167,10 +2167,10 @@ export const WORKSPACES: Workspace[] = [
     name: 'Ship the release',
     summary: 'Editor, terminal, pull request and team chat, switched as one.',
     windows: [
-      w('ed', 'editor', 'Code', 'lapis', [0, 0, 7, 5]),
-      w('tm', 'terminal', 'Terminal', 'verdigris', [0, 5, 7, 3]),
-      w('pr', 'browser', 'Review', 'saffron', [7, 0, 5, 5], 'pr'),
-      w('ch', 'chat', 'Team', 'madder', [7, 5, 5, 3], 'team'),
+      w('ed', 'editor', '1', 'lapis', [0, 0, 7, 5]),
+      w('tm', 'terminal', '3', 'verdigris', [0, 5, 7, 3]),
+      w('pr', 'browser', '2', 'saffron', [7, 0, 5, 5], 'pr'),
+      w('ch', 'chat', '4', 'madder', [7, 5, 5, 3], 'team'),
     ],
   },
   {
@@ -2179,10 +2179,10 @@ export const WORKSPACES: Workspace[] = [
     name: 'Brand refresh',
     summary: 'Canvas, references, the brief and the client thread, side by side.',
     windows: [
-      w('cv', 'design', 'Canvas', 'lapis', [0, 0, 8, 8]),
-      w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 3], 'refs'),
-      w('br', 'notes', 'Brief', 'verdigris', [8, 3, 4, 2], 'brief'),
-      w('cl', 'chat', 'Client', 'madder', [8, 5, 4, 3], 'client'),
+      w('cv', 'design', '1', 'lapis', [0, 0, 8, 8]),
+      w('rf', 'browser', '2', 'saffron', [8, 0, 4, 3], 'refs'),
+      w('br', 'notes', '3', 'verdigris', [8, 3, 4, 2], 'brief'),
+      w('cl', 'chat', '4', 'madder', [8, 5, 4, 3], 'client'),
     ],
   },
   {
@@ -2191,10 +2191,10 @@ export const WORKSPACES: Workspace[] = [
     name: 'Thesis, chapter 3',
     summary: 'The paper you are reading, the draft you are writing and the data behind both.',
     windows: [
-      w('pp', 'paper', 'Reading', 'madder', [0, 0, 4, 8]),
-      w('dr', 'notes', 'Draft', 'verdigris', [4, 0, 4, 8], 'draft'),
-      w('dt', 'chart', 'Data', 'lapis', [8, 0, 4, 4], 'sst'),
-      w('sr', 'browser', 'Sources', 'saffron', [8, 4, 4, 4], 'sources'),
+      w('pp', 'paper', '1', 'madder', [0, 0, 4, 8]),
+      w('dr', 'notes', '2', 'verdigris', [4, 0, 4, 8], 'draft'),
+      w('dt', 'chart', '3', 'lapis', [8, 0, 4, 4], 'sst'),
+      w('sr', 'browser', '4', 'saffron', [8, 4, 4, 4], 'sources'),
     ],
   },
   {
@@ -2203,10 +2203,10 @@ export const WORKSPACES: Workspace[] = [
     name: 'Friday stream',
     summary: 'Broadcast software, live chat and your dashboards, ready before you go live.',
     windows: [
-      w('ob', 'stream', 'Broadcast', 'lapis', [0, 0, 8, 5]),
-      w('lc', 'chat', 'Chat', 'madder', [8, 0, 4, 8], 'live'),
-      w('st', 'chart', 'Stats', 'verdigris', [0, 5, 4, 3], 'viewers'),
-      w('db', 'browser', 'Dashboard', 'saffron', [4, 5, 4, 3], 'dash'),
+      w('ob', 'stream', '1', 'lapis', [0, 0, 8, 5]),
+      w('lc', 'chat', '2', 'madder', [8, 0, 4, 8], 'live'),
+      w('st', 'chart', '3', 'verdigris', [0, 5, 4, 3], 'viewers'),
+      w('db', 'browser', '4', 'saffron', [4, 5, 4, 3], 'dash'),
     ],
   },
 ];

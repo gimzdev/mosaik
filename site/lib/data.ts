@@ -23,10 +23,10 @@ export const WORKSPACES: Workspace[] = [
     name: 'Ship the release',
     summary: 'Editor, terminal, pull request and team chat, switched as one.',
     windows: [
-      w('ed', 'editor', 'Code', 'lapis', [0, 0, 7, 5]),
-      w('tm', 'terminal', 'Terminal', 'verdigris', [0, 5, 7, 3]),
-      w('pr', 'browser', 'Review', 'saffron', [7, 0, 5, 5], 'pr'),
-      w('ch', 'chat', 'Team', 'madder', [7, 5, 5, 3], 'team'),
+      w('ed', 'editor', '1', 'lapis', [0, 0, 7, 5]),
+      w('tm', 'terminal', '3', 'verdigris', [0, 5, 7, 3]),
+      w('pr', 'browser', '2', 'saffron', [7, 0, 5, 5], 'pr'),
+      w('ch', 'chat', '4', 'madder', [7, 5, 5, 3], 'team'),
     ],
   },
   {
@@ -35,10 +35,10 @@ export const WORKSPACES: Workspace[] = [
     name: 'Brand refresh',
     summary: 'Canvas, references, the brief and the client thread, side by side.',
     windows: [
-      w('cv', 'design', 'Canvas', 'lapis', [0, 0, 8, 8]),
-      w('rf', 'browser', 'References', 'saffron', [8, 0, 4, 3], 'refs'),
-      w('br', 'notes', 'Brief', 'verdigris', [8, 3, 4, 2], 'brief'),
-      w('cl', 'chat', 'Client', 'madder', [8, 5, 4, 3], 'client'),
+      w('cv', 'design', '1', 'lapis', [0, 0, 8, 8]),
+      w('rf', 'browser', '2', 'saffron', [8, 0, 4, 3], 'refs'),
+      w('br', 'notes', '3', 'verdigris', [8, 3, 4, 2], 'brief'),
+      w('cl', 'chat', '4', 'madder', [8, 5, 4, 3], 'client'),
     ],
   },
   {
@@ -47,10 +47,10 @@ export const WORKSPACES: Workspace[] = [
     name: 'Thesis, chapter 3',
     summary: 'The paper you are reading, the draft you are writing and the data behind both.',
     windows: [
-      w('pp', 'paper', 'Reading', 'madder', [0, 0, 4, 8]),
-      w('dr', 'notes', 'Draft', 'verdigris', [4, 0, 4, 8], 'draft'),
-      w('dt', 'chart', 'Data', 'lapis', [8, 0, 4, 4], 'sst'),
-      w('sr', 'browser', 'Sources', 'saffron', [8, 4, 4, 4], 'sources'),
+      w('pp', 'paper', '1', 'madder', [0, 0, 4, 8]),
+      w('dr', 'notes', '2', 'verdigris', [4, 0, 4, 8], 'draft'),
+      w('dt', 'chart', '3', 'lapis', [8, 0, 4, 4], 'sst'),
+      w('sr', 'browser', '4', 'saffron', [8, 4, 4, 4], 'sources'),
     ],
   },
   {
@@ -59,10 +59,10 @@ export const WORKSPACES: Workspace[] = [
     name: 'Friday stream',
     summary: 'Broadcast software, live chat and your dashboards, ready before you go live.',
     windows: [
-      w('ob', 'stream', 'Broadcast', 'lapis', [0, 0, 8, 5]),
-      w('lc', 'chat', 'Chat', 'madder', [8, 0, 4, 8], 'live'),
-      w('st', 'chart', 'Stats', 'verdigris', [0, 5, 4, 3], 'viewers'),
-      w('db', 'browser', 'Dashboard', 'saffron', [4, 5, 4, 3], 'dash'),
+      w('ob', 'stream', '1', 'lapis', [0, 0, 8, 5]),
+      w('lc', 'chat', '2', 'madder', [8, 0, 4, 8], 'live'),
+      w('st', 'chart', '3', 'verdigris', [0, 5, 4, 3], 'viewers'),
+      w('db', 'browser', '4', 'saffron', [4, 5, 4, 3], 'dash'),
     ],
   },
 ];

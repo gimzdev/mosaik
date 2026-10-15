@@ -271,21 +271,21 @@ function Placed({ win, x, y, w, h, tilt, z }: { win: Pick<Win, 'kind' | 'variant
 
 const ART = 'rounded-[20px] bg-ink ring-1 ring-black/10';
 
-/** Zones: named areas. A window dragged near one is pulled into it. */
+/** Zones: numbered areas. A window dragged near one is pulled into it. */
 export function ZonesArt() {
   return (
-    <div role="img" aria-label="A desktop divided into three coloured zones. An editor and a terminal already sit in theirs, and a pull request window is being dragged toward the empty Review zone.">
+    <div role="img" aria-label="A desktop divided into three coloured zones, numbered 1 to 3. An editor and a terminal already sit in zones 1 and 2, and a pull request window is being dragged toward the empty zone 3.">
       <Scaled className={ART}>
         <Wallpaper />
         <ZoneBox x={40} y={52} w={720} h={700} zone="lapis" />
         <ZoneBox x={788} y={52} w={452} h={340} zone="verdigris" />
         <ZoneBox x={788} y={410} w={452} h={342} zone="saffron" filled />
-        <Placed win={{ kind: 'editor', tag: 'Code', zone: 'lapis' }} x={56} y={96} w={688} h={640} />
-        <Placed win={{ kind: 'terminal', tag: 'Terminal', zone: 'verdigris' }} x={804} y={96} w={420} h={280} />
+        <Placed win={{ kind: 'editor', tag: '1', zone: 'lapis' }} x={56} y={96} w={688} h={640} />
+        <Placed win={{ kind: 'terminal', tag: '2', zone: 'verdigris' }} x={804} y={96} w={420} h={280} />
         <p className="absolute text-center text-[18px] font-semibold text-[#F4B13A]" style={{ left: 788, top: 560, width: 452 }}>
-          Release to place in Review
+          Release to place in zone 3
         </p>
-        <Placed win={{ kind: 'browser', variant: 'pr', tag: 'Review', zone: 'saffron' }} x={836} y={318} w={420} h={300} tilt={-5} z={40} />
+        <Placed win={{ kind: 'browser', variant: 'pr', tag: '3', zone: 'saffron' }} x={836} y={318} w={420} h={300} tilt={-5} z={40} />
         <Cursor x={1070} y={330} />
       </Scaled>
     </div>
@@ -301,7 +301,7 @@ export function TabsArt() {
       <Scaled className={ART}>
         <Wallpaper />
         <div className="absolute" style={{ left: 36, top: 52, width: 1090, height: 710 }}>
-          <ZoneFrame tag="Code" zone="lapis">
+          <ZoneFrame tag="1" zone="lapis">
             <div className="flex h-full flex-col bg-[#16181D]">
               <div className="flex h-[46px] shrink-0 items-end gap-1.5 bg-[#101216] px-3 text-[14px]">
                 {TABS.map(([name, c], i) => (
@@ -320,7 +320,7 @@ export function TabsArt() {
             </div>
           </ZoneFrame>
         </div>
-        <Placed win={{ kind: 'chat', variant: 'team', tag: 'Team', zone: 'madder' }} x={880} y={46} w={350} h={236} tilt={5} z={40} />
+        <Placed win={{ kind: 'chat', variant: 'team', tag: '2', zone: 'madder' }} x={880} y={46} w={350} h={236} tilt={5} z={40} />
         <Cursor x={1030} y={58} />
       </Scaled>
     </div>
