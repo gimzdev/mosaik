@@ -44,7 +44,7 @@ function load(key: string): Promise<string | null> {
 }
 
 /** The icon for `key`: a URL, null when there is none, undefined while it is being read. */
-export function useIcon(key: string | null): string | null | undefined {
+function useIcon(key: string | null): string | null | undefined {
   // Only the answer matters, not which one: it is in the cache once it has come.
   const [, setRead] = useState(0);
   useEffect(() => {
@@ -120,8 +120,9 @@ export function AppIcons({
   );
 }
 
-/** The window's own line drawings, 16 units square, in the text colour. */
-const GLYPHS: Record<string, ReactNode> = {
+/** The window's own line drawings, 16 units square, in the text colour. (`satisfies`, so a name
+ * that is not here does not type-check.) */
+const GLYPHS = {
   more: (
     <>
       <circle cx="3.5" cy="8" r="1.25" fill="currentColor" stroke="none" />
@@ -133,16 +134,14 @@ const GLYPHS: Record<string, ReactNode> = {
   back: <path d="M10 3.5L5.5 8 10 12.5" />,
   next: <path d="M6 3.5L10.5 8 6 12.5" />,
   down: <path d="M3.5 6l4.5 4.5L12.5 6" />,
-  check: <path d="M3 8.5l3.2 3.2L13 5" />,
   close: <path d="M4 4l8 8M12 4l-8 8" />,
   undo: <path d="M5.5 4L2.5 7l3 3M2.8 7h6.7a4 4 0 0 1 0 8H7" />,
   play: <path d="M5 3.5v9l7-4.5z" fill="currentColor" />,
   edit: <path d="M3 13l.8-3.2L10.5 3l2.5 2.5-6.8 6.8z" />,
   trash: <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" />,
   spark: <path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" fill="currentColor" stroke="none" />,
-  save: <path d="M3 3h8l2 2v8H3zM5.5 3v3.5h4V3M5.5 13v-3.5h5V13" />,
   bell: <path d="M4 11V7a4 4 0 0 1 8 0v4l1 1.5H3zM6.5 14h3" />,
-};
+} satisfies Record<string, ReactNode>;
 
 export function Glyph({
   name,

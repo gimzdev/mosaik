@@ -23,7 +23,7 @@ const engine = vi.hoisted(() => ({
   showSwitcher: vi.fn(),
   takeNotices: vi.fn<() => Promise<Notice[]>>(() => Promise.resolve([])),
   onNotices: vi.fn(() => () => undefined),
-  onWorkspacesChanged: vi.fn(() => () => undefined),
+  onWorkspacesChanged: vi.fn<(callback: () => void) => () => void>(() => () => undefined),
   openLink: vi.fn(() => Promise.resolve(null)),
   openLogs: vi.fn(() => Promise.resolve(null)),
   openLicences: vi.fn(() => Promise.resolve(null)),
@@ -35,6 +35,9 @@ const engine = vi.hoisted(() => ({
 }));
 vi.mock('./engine', () => engine);
 
+/** The engine's "workspaces changed" event, to every part of the window that listens for it. */
+let listeners: (() => void)[] = [];
+
 afterEach(cleanup);
 beforeEach(() => {
   engine.request.mockReset();
@@ -42,7 +45,21 @@ beforeEach(() => {
   engine.takeNotices.mockResolvedValue([]);
   engine.showSwitcher.mockReset();
   delete document.documentElement.dataset.theme;
+  localStorage.clear();
+  listeners = [];
+  engine.onWorkspacesChanged.mockImplementation((callback) => {
+    listeners.push(callback);
+    return () => {
+      listeners = listeners.filter((l) => l !== callback);
+    };
+  });
 });
+
+/** Commands after which the engine says the workspaces changed (crates/mosaik-engine/src/thread.rs). */
+const CHANGES: ReadonlySet<Command['cmd']> = new Set(['sort_windows', 'switch', 'save', 'set_zones', 'open_set']);
+
+const WELCOME =
+  'Mosaïk tidies your windows. Choose a layout, press Arrange, and Undo puts everything back. The thin line on the right edge of your screen opens the same choices.';
 
 const shipZones: Reply = {
   reply: 'zones',
@@ -69,29 +86,36 @@ const shipZones: Reply = {
 /** The engine for a Mosaïk set up already, with one workspace; `extra` answers first. */
 function answer(settings: Settings, extra: (c: Command) => Reply | null = () => null) {
   engine.request.mockImplementation((c) => {
-    const special = extra(c);
-    if (special) return Promise.resolve(special);
+    const reply = extra(c) ?? usual(c);
+    if (CHANGES.has(c.cmd) && reply.reply !== 'error') {
+      setTimeout(() => {
+        for (const l of listeners) l();
+      }, 0);
+    }
+    return Promise.resolve(reply);
+  });
+  function usual(c: Command): Reply {
     switch (c.cmd) {
       case 'settings':
-        return Promise.resolve(settingsReply(settings));
+        return settingsReply(settings);
       case 'set_settings':
-        return Promise.resolve(done('Settings saved.'));
+        return done('Settings saved.');
       case 'workspaces':
-        return Promise.resolve(workspacesReply([workspace({ id: 'ship', name: 'Ship' })]));
+        return workspacesReply([workspace({ id: 'ship', name: 'Ship' })]);
       case 'sets':
-        return Promise.resolve(setsReply([]));
+        return setsReply([]);
       case 'preview_arrange':
-        return Promise.resolve(preview(coding));
+        return preview(coding);
       case 'zones':
-        return Promise.resolve(shipZones);
+        return shipZones;
       case 'apps':
-        return Promise.resolve(appsOf());
+        return appsOf();
       case 'hello':
-        return Promise.resolve({ reply: 'hello', app_version: '1.2.0', protocol: 7 });
+        return { reply: 'hello', app_version: '1.2.0', protocol: 7 };
       default:
-        return Promise.resolve(done('Done.'));
+        return done('Done.');
     }
-  });
+  }
 }
 
 describe('Mosaïk’s window', () => {
@@ -127,6 +151,59 @@ describe('Mosaïk’s window', () => {
     expect(asked.findIndex((c) => c.cmd === 'sort_windows')).toBeLessThan(
       asked.findIndex((c) => c.cmd === 'set_settings'),
     );
+  });
+
+  it('welcomes the first time, says which workspaces it made of the windows open, and remembers the welcome read', async () => {
+    let sorted = false;
+    answer(freshSettings, (c) => {
+      if (c.cmd === 'sort_windows') {
+        sorted = true;
+        return done('Your open windows make 1 workspace: Coding.');
+      }
+      if (c.cmd === 'workspaces') {
+        return workspacesReply([
+          workspace({ id: 'ship', name: 'Ship' }),
+          ...(sorted ? [workspace({ id: 'coding', name: 'Coding' })] : []),
+        ]);
+      }
+      return null;
+    });
+    render(<App />);
+    expect(await screen.findByText(WELCOME)).toBeInTheDocument();
+    const workspaces = screen.getByRole('region', { name: 'Workspaces' });
+    expect(
+      await within(workspaces).findByText('Made from the windows you had open. Delete any you don’t need.'),
+    ).toBeInTheDocument();
+    const [first, second] = screen.getAllByRole('button', { name: 'Got it' });
+    if (!first || !second) throw new Error('two notes, each with its button');
+    await userEvent.click(first);
+    expect(screen.queryByText(WELCOME)).not.toBeInTheDocument();
+    await userEvent.click(second);
+    expect(screen.queryByRole('button', { name: 'Got it' })).not.toBeInTheDocument();
+    // Put away, it does not come back, even if the first run comes again.
+    cleanup();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Your screen' });
+    await waitFor(() => {
+      expect(sorted).toBe(true);
+    });
+    expect(screen.queryByText(WELCOME)).not.toBeInTheDocument();
+  });
+
+  it('keeps the welcome until it is put away, and none once set up', async () => {
+    answer(freshSettings);
+    render(<App />);
+    expect(await screen.findByText(WELCOME)).toBeInTheDocument();
+    // The window opens again later, the welcome not read yet.
+    cleanup();
+    answer(setUp);
+    render(<App />);
+    expect(await screen.findByText(WELCOME)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    cleanup();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Your screen' });
+    expect(screen.queryByText(WELCOME)).not.toBeInTheDocument();
   });
 
   it('starts with Windows by itself only when installed: a build run from a folder is left as it is', async () => {
@@ -197,7 +274,8 @@ describe('Mosaïk’s window', () => {
         : null,
     );
     render(<App />);
-    const button = await screen.findByRole('button', { name: 'Open the switcher (Win plus Alt plus S)' });
+    const button = await screen.findByRole('button', { name: 'Switch workspace (Win plus Alt plus S)' });
+    expect(button).toHaveTextContent(/^Switch workspace/);
     await userEvent.click(button);
     expect(engine.showSwitcher).toHaveBeenCalledTimes(1);
   });

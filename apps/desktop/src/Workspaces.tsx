@@ -1,17 +1,40 @@
 // The workspaces on Home, in a column beside the screen: each a row with its layout in small and
-// its apps' icons. A click picks one, and Home's picture shows it as opening it would leave the
-// screen, with Open; its ⋯ menu opens it at once, and has the rest. Below them, workspaces Mosaïk
-// suggests from the apps installed that go together (coding: an editor, a terminal, a browser...),
-// opened in one click: their apps start and are laid out for the task. "Save layout" keeps what
-// is on screen as a new one.
+// its apps' icons. A click shows it in Home's picture as opening it would leave the screen, with
+// Open; a double-click opens it at once; its ⋯ menu has the rest. Below them, workspaces Mosaïk
+// suggests from the apps installed that go together (coding: an editor, a terminal, a
+// browser...): a click shows what starting them does, and Home's button starts them. "Save as
+// workspace" keeps what is on screen as a new one. What all this did is said under Home's
+// picture, in one place.
 
-import { type SyntheticEvent, useCallback, useEffect, useId, useState } from 'react';
+import { type SyntheticEvent, useId, useRef, useState } from 'react';
 
-import { onWorkspacesChanged, request } from './engine';
+import { request } from './engine';
 import { AppIcon, AppIcons, Glyph, Spinner } from './icons';
 import { MiniLayout } from './Layouts';
 import { type AppSet, MAX_NAME, type WorkspaceSummary, errorMessage } from './protocol';
-import { Button, MenuButton, Status, useAnnounce } from './ui';
+import { useReads } from './reads';
+import { Button, MenuButton, OnScreen, Status, Tip } from './ui';
+
+/** A workspace, or a suggested set of apps (by its id). */
+export interface Target {
+  kind: 'workspace' | 'set';
+  id: string;
+}
+
+/** What Home shows in its picture instead of the screen: a workspace, or a suggested set. */
+export type Shown = { kind: 'workspace'; workspace: WorkspaceSummary } | { kind: 'set'; set: AppSet };
+
+/** The first run's sorting of the windows open into workspaces. */
+export interface Sorted {
+  /** The workspaces there were before, to tell the ones made (null: not known, all of them). */
+  before: ReadonlySet<string> | null;
+  /** Why the windows could not be sorted, if they could not. */
+  error: string | null;
+}
+
+/** The suggested sets change only as apps are installed: read again on coming back to the window
+ * at most this often (and whenever the workspaces change, as a set becomes one). */
+const SETS_EVERY_MS = 30_000;
 
 /** A free name for a new workspace: "Workspace 1", "Workspace 2"… */
 function freeName(taken: string[]): string {
@@ -25,12 +48,15 @@ function freeName(taken: string[]): string {
 function SaveForm({
   suggested,
   taken,
+  active,
   onSaved,
   onCancel,
 }: {
   suggested: string;
   /** The names in use: saving under one would replace that workspace. */
   taken: string[];
+  /** The name of the workspace on screen, whose menu can take what is on screen. */
+  active: string | null;
   onSaved: (message: string) => void;
   onCancel: () => void;
 }) {
@@ -43,14 +69,19 @@ function SaveForm({
     const wanted = name.trim();
     const same = taken.find((t) => t.trim().toLowerCase() === wanted.toLowerCase());
     if (same) {
-      setProblem(`“${same}” already exists. Pick another name, or use Save current layout here in its menu.`);
+      // Only the workspace on screen offers to take what is on screen.
+      setProblem(
+        same === active
+          ? `“${same}” already exists. Pick another name, or open its ⋯ menu and choose Replace with what’s on screen.`
+          : `“${same}” already exists. Pick another name.`,
+      );
       return;
     }
     setPending(true);
     void request({ cmd: 'save', workspace: wanted }).then((reply) => {
       setPending(false);
       if (reply.reply === 'done') onSaved(reply.message);
-      else setProblem(errorMessage(reply) ?? 'The layout could not be saved.');
+      else setProblem(errorMessage(reply) ?? 'The workspace could not be saved.');
     });
   };
   return (
@@ -98,19 +129,27 @@ function SaveForm({
  * up to four of its apps. */
 function IconCluster({ icons }: { icons: (string | null)[] }) {
   return (
-    <span className="grid h-[34px] w-[56px] shrink-0 grid-cols-2 place-items-center gap-px rounded-[9px] border border-dashed border-[var(--control)] p-0.5">
+    <span className="grid h-[30px] w-[48px] shrink-0 grid-cols-2 place-items-center gap-px rounded-[9px] border border-dashed border-[var(--control)] p-0.5">
       {icons
         .filter((i) => i !== null)
         .slice(0, 4)
         .map((icon) => (
-          <AppIcon key={icon} icon={icon} size={13} />
+          <AppIcon key={icon} icon={icon} size={12} />
         ))}
     </span>
   );
 }
 
 const ROW =
-  'flex w-full items-center gap-3 rounded-[14px] py-2 pr-11 pl-2 text-left transition-colors duration-150 disabled:cursor-progress';
+  'flex w-full items-center gap-2.5 rounded-[14px] py-2 pl-2 text-left transition-colors duration-150 disabled:cursor-progress';
+
+/** A row's look: ringed when Home shows it, raised when it is on screen or pointed at. */
+const look = (shown: boolean, raised: boolean) =>
+  shown
+    ? 'bg-[var(--raised)] ring-1 ring-[var(--accent)] forced-colors:ring-[Highlight]'
+    : raised
+      ? 'bg-[var(--raised)]'
+      : 'hover:bg-[var(--raised)]';
 
 /** A spinner over a row's picture while it opens. */
 const Opening = () => (
@@ -119,33 +158,51 @@ const Opening = () => (
   </span>
 );
 
+const same = (a: Target | null, kind: Target['kind'], id: string) => a?.kind === kind && a.id === id;
+
 export function Workspaces({
-  picked,
-  onPick,
+  shown,
+  launching,
+  sorted = null,
+  onSortedRead,
+  onShow,
+  onOpen,
+  onSay,
   onEdit,
   onEditZones,
-  onOpened,
 }: {
-  /** The workspace Home shows (its id). */
-  picked: string | null;
-  /** A workspace clicked: Home shows it (the one shown, clicked again, goes). */
-  onPick: (workspace: WorkspaceSummary) => void;
+  /** What Home's picture shows. */
+  shown: Target | null;
+  /** What is being opened. */
+  launching: Target | null;
+  /** The first run's sorting, until its note is put away. */
+  sorted?: Sorted | null;
+  onSortedRead?: () => void;
+  /** A row clicked: Home shows it (it stays shown when clicked again). */
+  onShow: (shown: Shown) => void;
+  /** Opens a workspace: a double-click on its row, or Open in its menu. */
+  onOpen: (workspace: WorkspaceSummary) => void;
+  /** Says what an action did, under Home's picture. */
+  onSay: (text: string, error?: boolean) => void;
   onEdit: (workspace: string) => void;
   onEditZones: (workspace: string) => void;
-  /** A workspace was opened: Home reads the screen again. */
-  onOpened?: () => void;
 }) {
   const [list, setList] = useState<WorkspaceSummary[] | null>(null);
   const [sets, setSets] = useState<AppSet[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<{ text: string; error: boolean } | null>(null);
-  const [opening, setOpening] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const announce = useAnnounce();
+  /** When the suggested sets were last read. */
+  const setsRead = useRef(0);
 
-  const load = useCallback(() => {
-    void request({ cmd: 'workspaces' }).then((reply) => {
+  // Read now, and again whenever Mosaïk says they changed: arranged, saved from the switcher,
+  // opened with a shortcut… Its own changes need no read of their own: Mosaïk says so for them
+  // too.
+  const poke = useReads(async (why, current) => {
+    const changed = why.has('start') || why.has('changed') || why.has('own');
+    if (changed) {
+      const reply = await request({ cmd: 'workspaces' });
+      if (!current()) return;
       if (reply.reply === 'workspaces') {
         setList(reply.workspaces);
         setActive(reply.active);
@@ -153,71 +210,35 @@ export function Workspaces({
       } else {
         setProblem(errorMessage(reply) ?? 'Your workspaces could not be read.');
       }
-    });
-    void request({ cmd: 'sets' }).then((reply) => {
-      if (reply.reply === 'sets') setSets(reply.sets);
-    });
-  }, []);
-
-  // Read now, and again whenever they change: arranged, saved from the switcher, opened with a
-  // shortcut…
-  useEffect(() => {
-    load();
-    return onWorkspacesChanged(load);
-  }, [load]);
-
-  const finish = (key: string, reply: Awaited<ReturnType<typeof request>>, failed: string) => {
-    setOpening((o) => (o === key ? null : o));
-    if (reply.reply === 'done') {
-      setOutcome({ text: reply.message, error: false });
-      announce(reply.message);
-    } else {
-      setOutcome({ text: errorMessage(reply) ?? failed, error: true });
     }
-    load();
-    onOpened?.();
-  };
-
-  const open = (w: WorkspaceSummary) => {
-    setOpening(w.id);
-    setOutcome(null);
-    void request({ cmd: 'switch', workspace: w.id }).then((reply) => {
-      finish(w.id, reply, `“${w.name}” could not be opened.`);
-    });
-  };
-
-  const openSet = (s: AppSet) => {
-    const key = `set:${s.id}`;
-    setOpening(key);
-    setOutcome(null);
-    void request({ cmd: 'open_set', set: s.id }).then((reply) => {
-      finish(key, reply, `The apps for ${s.name} could not be opened.`);
-    });
-  };
+    if (changed || Date.now() - setsRead.current >= SETS_EVERY_MS) {
+      setsRead.current = Date.now();
+      const reply = await request({ cmd: 'sets' });
+      if (!current()) return;
+      if (reply.reply === 'sets') setSets(reply.sets);
+    }
+  }, 'workspaces');
 
   const saveHere = (w: WorkspaceSummary) => {
-    setOutcome(null);
     void request({ cmd: 'save', workspace: null }).then((reply) => {
-      if (reply.reply === 'done') {
-        setOutcome({ text: reply.message, error: false });
-        announce(reply.message);
-      } else {
-        setOutcome({ text: errorMessage(reply) ?? `“${w.name}” could not be saved.`, error: true });
-      }
-      load();
+      if (reply.reply === 'done') onSay(reply.message);
+      else onSay(errorMessage(reply) ?? `“${w.name}” could not be saved.`, true);
     });
   };
 
   // Sets whose workspace exists are that workspace's row already.
   const suggested = sets.filter((s) => s.workspace === null);
   const names = (list ?? []).map((w) => w.name);
+  const activeName = list?.find((w) => w.id === active)?.name ?? null;
+  // The workspaces the first run made: the ones that were not there before.
+  const made = sorted && list ? list.filter((w) => !sorted.before?.has(w.id)) : [];
 
   return (
     <section
       aria-labelledby="workspaces-title"
-      className="flex min-w-0 flex-col self-start rounded-[22px] bg-[var(--panel)] p-3 pt-4"
+      className="flex min-w-0 flex-col self-start rounded-[22px] bg-[var(--panel)] p-2 pt-3.5"
     >
-      <div className="flex items-center justify-between gap-3 px-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 pl-2">
         <h2 id="workspaces-title" className="font-display text-heading font-bold tracking-tight">
           Workspaces
         </h2>
@@ -227,19 +248,31 @@ export function Workspaces({
             size="sm"
             onClick={() => {
               setSaving(true);
-              setOutcome(null);
             }}
           >
             <Glyph name="plus" size={14} />
-            Save layout
+            Save as workspace
           </Button>
         )}
       </div>
 
+      {sorted && (sorted.error !== null || made.length > 0) && onSortedRead ? (
+        <div className="mt-2">
+          <Tip error={sorted.error !== null} onDismiss={onSortedRead}>
+            {sorted.error ?? 'Made from the windows you had open. Delete any you don’t need.'}
+          </Tip>
+        </div>
+      ) : null}
+
       {problem ? (
         <div className="mt-2 flex flex-wrap items-center gap-3 px-2">
           <Status text={problem} error />
-          <Button size="sm" onClick={load}>
+          <Button
+            size="sm"
+            onClick={() => {
+              poke('changed');
+            }}
+          >
             Try again
           </Button>
         </div>
@@ -250,14 +283,13 @@ export function Workspaces({
           <SaveForm
             suggested={freeName(names)}
             taken={names}
+            active={activeName}
             onCancel={() => {
               setSaving(false);
             }}
             onSaved={(message) => {
               setSaving(false);
-              setOutcome({ text: message, error: false });
-              announce(message);
-              load();
+              onSay(message);
             }}
           />
         </div>
@@ -266,66 +298,54 @@ export function Workspaces({
       <ul aria-label="Workspaces" className="mt-2 flex flex-col gap-0.5">
         {(list ?? []).map((w) => {
           const isOpen = active === w.id;
-          const shown = picked === w.id;
+          const opening = same(launching, 'workspace', w.id);
           return (
             <li key={w.id} className="relative" data-workspace={w.id}>
               <button
                 type="button"
-                aria-label={`${w.name}${isOpen ? ' (open now)' : ''}`}
-                aria-pressed={shown}
-                aria-busy={opening === w.id || undefined}
-                disabled={opening !== null}
+                aria-label={`${w.name}${isOpen ? ' (on screen)' : ''}`}
+                aria-pressed={same(shown, 'workspace', w.id)}
+                aria-busy={opening || undefined}
+                disabled={launching !== null}
                 onClick={() => {
-                  onPick(w);
+                  onShow({ kind: 'workspace', workspace: w });
                 }}
-                className={`${ROW} ${
-                  shown
-                    ? 'bg-[var(--raised)] ring-1 ring-[var(--accent)] forced-colors:ring-[Highlight]'
-                    : isOpen
-                      ? 'bg-[var(--raised)]'
-                      : 'hover:bg-[var(--raised)]'
-                }`}
+                onDoubleClick={() => {
+                  onOpen(w);
+                }}
+                className={`${ROW} pr-12 ${look(same(shown, 'workspace', w.id), isOpen)}`}
               >
                 <span className="relative">
-                  <MiniLayout layout={w.layout} width={56} height={34} />
-                  {opening === w.id ? <Opening /> : null}
+                  <MiniLayout layout={w.layout} width={48} height={30} />
+                  {opening ? <Opening /> : null}
                 </span>
-                <span className="flex min-w-0 flex-1 flex-col gap-1">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-semibold">{w.name}</span>
-                    {isOpen ? (
-                      <span className="shrink-0 text-caption font-semibold text-[var(--accent)]">Open now</span>
-                    ) : null}
-                  </span>
-                  <span className="flex min-w-0 items-center gap-2">
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="line-clamp-2 font-semibold break-words">{w.name}</span>
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-[var(--muted)]">
+                    {isOpen ? <OnScreen /> : null}
                     {w.apps.length ? (
                       <AppIcons names={w.apps} icons={w.icons} size={15} most={4} />
                     ) : (
-                      <span className="text-caption text-[var(--muted)]">No apps yet</span>
+                      <span>No apps yet</span>
                     )}
-                    {w.hotkey ? (
-                      <span className="shrink-0 text-caption text-[var(--muted)]">
-                        {w.hotkey.replaceAll('+', ' + ')}
-                      </span>
-                    ) : null}
                   </span>
                 </span>
               </button>
               {/* Centred without a transform: one would hold the open menu under the next row. */}
-              <div className="absolute inset-y-0 right-1.5 flex items-center">
+              <div className="absolute inset-y-0 right-1 flex items-center">
                 <MenuButton
                   label={`More for “${w.name}”`}
                   items={[
                     {
                       label: isOpen ? 'Open again' : 'Open',
                       onSelect: () => {
-                        open(w);
+                        onOpen(w);
                       },
                     },
                     ...(isOpen
                       ? [
                           {
-                            label: 'Save current layout here',
+                            label: 'Replace with what’s on screen',
                             onSelect: () => {
                               saveHere(w);
                             },
@@ -356,7 +376,7 @@ export function Workspaces({
 
       {list !== null && list.length === 0 && !saving ? (
         <p className="px-2 py-2 text-small text-[var(--muted)]">
-          Arrange your windows, then save the layout: it opens again in one click.
+          Arrange your windows, then save them as a workspace to bring them back later.
         </p>
       ) : null}
 
@@ -364,42 +384,36 @@ export function Workspaces({
         <>
           <h3 className="mt-4 px-2 text-small font-semibold text-[var(--muted)]">Suggested</h3>
           <ul aria-label="Suggested workspaces" className="mt-1 flex flex-col gap-0.5">
-            {suggested.map((s) => {
-              const key = `set:${s.id}`;
-              return (
-                <li key={key} data-set={s.id}>
-                  <button
-                    type="button"
-                    aria-label={`Open the suggested workspace “${s.name}”: ${s.apps.join(', ')}`}
-                    title={s.apps.join(', ')}
-                    aria-busy={opening === key || undefined}
-                    disabled={opening !== null}
-                    onClick={() => {
-                      openSet(s);
-                    }}
-                    className={`${ROW} pr-2 hover:bg-[var(--raised)]`}
-                  >
-                    <span className="relative">
-                      <IconCluster icons={s.icons} />
-                      {opening === key ? <Opening /> : null}
+            {suggested.map((s) => (
+              <li key={s.id} data-set={s.id}>
+                <button
+                  type="button"
+                  aria-label={`${s.name} (suggested): ${s.apps.join(', ')}`}
+                  aria-pressed={same(shown, 'set', s.id)}
+                  aria-busy={same(launching, 'set', s.id) || undefined}
+                  title={s.apps.join(', ')}
+                  disabled={launching !== null}
+                  onClick={() => {
+                    onShow({ kind: 'set', set: s });
+                  }}
+                  className={`${ROW} pr-2 ${look(same(shown, 'set', s.id), false)}`}
+                >
+                  <span className="relative">
+                    <IconCluster icons={s.icons} />
+                    {same(launching, 'set', s.id) ? <Opening /> : null}
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="line-clamp-2 font-semibold break-words">{s.name}</span>
+                    <span className="text-caption text-[var(--muted)]">
+                      {s.apps.length} {s.apps.length === 1 ? 'app' : 'apps'} that go together
                     </span>
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="truncate font-semibold">{s.name}</span>
-                      <span className="truncate text-caption text-[var(--muted)]">
-                        {s.apps.length} {s.apps.length === 1 ? 'app' : 'apps'} that go together
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
+                  </span>
+                </button>
+              </li>
+            ))}
           </ul>
         </>
       ) : null}
-
-      <div className="px-2 pt-1">
-        <Status text={outcome?.text ?? null} error={outcome?.error ?? false} />
-      </div>
     </section>
   );
 }

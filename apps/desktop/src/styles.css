@@ -17,16 +17,16 @@
   --font-display: 'Bricolage Grotesque Variable', system-ui, sans-serif;
   --font-sans: 'Instrument Sans Variable', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
-  /* Page title, section title, body, small print, captions. */
+  /* Page title, section title, body (16 pixels, for reading at a glance), small print, captions. */
   --text-title: 1.5rem;
   --text-title--line-height: 1.2;
-  --text-heading: 1rem;
-  --text-heading--line-height: 1.35;
-  --text-body: 0.875rem;
+  --text-heading: 1.125rem;
+  --text-heading--line-height: 1.3;
+  --text-body: 1rem;
   --text-body--line-height: 1.5;
-  --text-small: 0.8125rem;
+  --text-small: 0.9375rem;
   --text-small--line-height: 1.45;
-  --text-caption: 0.75rem;
+  --text-caption: 0.8125rem;
   --text-caption--line-height: 1.4;
 }
 

@@ -14,6 +14,9 @@ export const MAX_NAME = 60;
 
 export type ZoneColor = 'lapis' | 'verdigris' | 'saffron' | 'madder' | 'slate';
 
+/** Every zone colour, in the order new zones take them. */
+export const ZONE_COLORS: readonly ZoneColor[] = ['lapis', 'verdigris', 'saffron', 'madder', 'slate'];
+
 /** A rectangle as fractions (0 to 1) of a monitor's work area. */
 export interface RatioRect {
   left: number;
@@ -322,11 +325,12 @@ const isNumber = (x: unknown): x is number => typeof x === 'number';
 const isBoolean = (x: unknown): x is boolean => typeof x === 'boolean';
 const isNullableString = (x: unknown): x is string | null => x === null || isString(x);
 
-const COLORS = new Set<string>(['lapis', 'verdigris', 'saffron', 'madder', 'slate']);
+const COLORS = new Set<string>(ZONE_COLORS);
 const THEMES = new Set<string>(['system', 'light', 'dark']);
 const HIDE_METHODS = new Set<string>(['shell_cloak', 'minimize', 'park']);
 const EDGE_SIDES = new Set<string>(['left', 'right']);
 
+/** A rectangle in pixels, or as fractions of a monitor (a `RatioRect`): the same four numbers. */
 function isRect(x: unknown): x is Rect {
   return isObject(x) && isNumber(x.left) && isNumber(x.top) && isNumber(x.right) && isNumber(x.bottom);
 }
@@ -344,12 +348,8 @@ function isMonitor(x: unknown): x is MonitorState {
   );
 }
 
-function isRatio(x: unknown): x is RatioRect {
-  return isObject(x) && isNumber(x.left) && isNumber(x.top) && isNumber(x.right) && isNumber(x.bottom);
-}
-
 function isMiniZone(x: unknown): x is MiniZone {
-  return isObject(x) && isRatio(x.area) && isString(x.color) && COLORS.has(x.color);
+  return isObject(x) && isRect(x.area) && isString(x.color) && COLORS.has(x.color);
 }
 
 const isIcons = (x: unknown): x is (string | null)[] => Array.isArray(x) && x.every(isNullableString);
@@ -366,7 +366,7 @@ function isZone(x: unknown): x is ZoneEdit {
   );
 }
 
-export function isSettings(x: unknown): x is Settings {
+function isSettings(x: unknown): x is Settings {
   if (!isObject(x)) return false;
   const { snap, frames, switching, edge } = x;
   return (

@@ -29,7 +29,7 @@ import {
   type Task,
   type WorkspaceApp,
   type WorkspaceSummary,
-  type ZoneColor,
+  ZONE_COLORS,
   type ZoneEdit,
 } from './protocol';
 
@@ -171,6 +171,32 @@ const SETS: { id: string; name: string; apps: string[] }[] =
         { id: 'playing', name: 'Games', apps: ['Steam', 'Battle.net', 'Discord'] },
       ];
 
+/** A new workspace for these apps, with a zone for each, side by side. */
+function madeFor(id: string, name: string, apps: string[]): Workspace {
+  const n = apps.length;
+  return {
+    id,
+    name,
+    windows: n,
+    zones: n,
+    hotkey: null,
+    appList: apps.map((label, i) => ({
+      id: `s${String(i + 1)}`,
+      label,
+      icon: null,
+      zone: `z${String(i + 1)}`,
+      tab: false,
+    })),
+    zoneList: apps.map((_, i) => ({
+      id: `z${String(i + 1)}`,
+      name: String(i + 1),
+      color: ZONE_COLORS[i % ZONE_COLORS.length] ?? 'slate',
+      monitor: 'm1',
+      area: { left: i / n, top: 0, right: (i + 1) / n, bottom: 1 },
+    })),
+  };
+}
+
 /** Opens a set: its workspace, made the first time with a zone per app. */
 function openSet(id: string): Reply {
   const set = SETS.find((s) => s.id === id);
@@ -184,32 +210,21 @@ function openSet(id: string): Reply {
   }
   let w = find(set.name);
   if (!w) {
-    const n = set.apps.length;
-    w = {
-      id: set.id,
-      name: set.name,
-      windows: n,
-      zones: n,
-      hotkey: null,
-      appList: set.apps.map((label, i) => ({
-        id: `s${String(i + 1)}`,
-        label,
-        icon: null,
-        zone: `z${String(i + 1)}`,
-        tab: false,
-      })),
-      zoneList: set.apps.map((_, i) => ({
-        id: `z${String(i + 1)}`,
-        name: String(i + 1),
-        color: ZONE_COLORS[i % ZONE_COLORS.length] ?? 'slate',
-        monitor: 'm1',
-        area: { left: i / n, top: 0, right: (i + 1) / n, bottom: 1 },
-      })),
-    };
+    w = madeFor(set.id, set.name, set.apps);
     workspaces.push(w);
   }
   active = w.id;
+  arrangedWith = null;
   return done(`Opened “${w.name}”.`);
+}
+
+/** Sorts the windows on screen into workspaces, as the engine's first run does: here the ones for
+ * coding (an editor, a terminal, a browser), unless "Coding" exists already. None moves. */
+function sortWindows(): Reply {
+  const coding = onScreen.filter((s) => s.kind !== 'chat').map((s) => s.label);
+  if (find('Coding') || coding.length < 2) return done('No windows open now go together as a workspace.');
+  workspaces.push(madeFor('coding', 'Coding', coding));
+  return done('Your open windows make 1 workspace: Coding.');
 }
 
 /** Tells the page the workspaces changed, as Mosaïk does with its own event, once the reply
@@ -260,8 +275,10 @@ let onScreen: OnScreen[] =
       ];
 /** Where the windows were before the last Arrange, for Undo. */
 let beforeArrange: OnScreen[] | null = null;
-
-const ZONE_COLORS: ZoneColor[] = ['lapis', 'verdigris', 'saffron', 'madder', 'slate'];
+/** The last Arrange, with the windows the user moved: as in the engine, where what Arrange did
+ * becomes the open workspace's, arranging the same way again moves nothing (`arrange::steady`),
+ * so the picture keeps the windows where they were put. Forgotten once anything else moves them. */
+let arrangedWith: { preset: Preset | undefined; moves: ArrangeMove[] } | null = null;
 
 /** The layout Arrange gives a screen of windows of no particular task (`task::layout`): the
  * window used last takes the most room, up to three sit beside it. */
@@ -316,7 +333,9 @@ function autoLayout(): { task: Task; shape: RatioRect[]; takes: (number | undefi
 /** What Arrange would do with `preset` (or its own choice), with the windows the user moved, as
  * the engine reports it (`arrange::plan_moved`): a window moved trades places with the window in
  * the zone it was put in, and keeps its zone's name and colour. */
-function preview(preset: Preset | undefined, moves: ArrangeMove[] = []): ArrangePreview {
+function preview(preset: Preset | undefined, asked: ArrangeMove[] = []): ArrangePreview {
+  // The same layout as the last Arrange starts from where it put the windows.
+  const moves = arrangedWith && arrangedWith.preset === preset ? [...arrangedWith.moves, ...asked] : asked;
   const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
   const w = work.right - work.left;
   const h = work.bottom - work.top;
@@ -454,6 +473,10 @@ function arrange(preset: string | undefined, moves: ArrangeMove[] = []): Reply {
     };
   }
   const p = preview(known?.id, moves);
+  arrangedWith = {
+    preset: known?.id,
+    moves: arrangedWith && arrangedWith.preset === known?.id ? [...arrangedWith.moves, ...moves] : moves,
+  };
   beforeArrange = onScreen;
   // Minimised windows leave the screen, as they leave the picture.
   onScreen = onScreen.flatMap((s, i) => {
@@ -602,6 +625,7 @@ function answer(command: Command): Reply {
       const w = find(command.workspace);
       if (!w) return missing(command.workspace);
       active = w.id;
+      arrangedWith = null;
       return done(`Opened “${w.name}”.`);
     }
     case 'zones': {
@@ -735,6 +759,7 @@ function answer(command: Command): Reply {
       }
       onScreen = beforeArrange;
       beforeArrange = null;
+      arrangedWith = null;
       return done('Windows are back where they were.');
     case 'state':
       return {
@@ -759,7 +784,7 @@ function answer(command: Command): Reply {
     case 'open_set':
       return openSet(command.set);
     case 'sort_windows':
-      return done('No windows open now go together as a workspace.');
+      return sortWindows();
     case 'save': {
       const name = command.workspace;
       if (name === null) {

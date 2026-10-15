@@ -2,7 +2,7 @@
 // workspaces) and Settings (with About at the end), and Mosaïk's notes; under it, the page. A
 // workspace's own page and the zone editor open from Home. The first time Mosaïk opens, it sorts
 // the windows open into workspaces: there is no tour to sit through, Home shows what Arrange will
-// do.
+// do, with a word of welcome until it is put away.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -23,7 +23,28 @@ import { type HotkeyState, type Settings, type SideMenuState, errorMessage } fro
 import { SettingsPage } from './SettingsPage';
 import { Announcer, Button, Confirm, Keys, Mark } from './ui';
 import { WorkspacePage } from './WorkspacePage';
+import type { Sorted } from './Workspaces';
 import { ZoneEditor } from './ZoneEditor';
+
+/** Whether the first run's welcome is still to be read (`show`) or was put away (`read`): kept by
+ * the browser as a convenience, so it may come back empty (or refuse), and then the welcome shows
+ * only during the first run. */
+const WELCOME = 'mosaik.welcome';
+function welcomeState(): 'show' | 'read' | null {
+  try {
+    const v = localStorage.getItem(WELCOME);
+    return v === 'show' || v === 'read' ? v : null;
+  } catch {
+    return null;
+  }
+}
+function keepWelcome(state: 'show' | 'read') {
+  try {
+    localStorage.setItem(WELCOME, state);
+  } catch {
+    // Not kept: the welcome may show again, or not after the first run.
+  }
+}
 
 type View =
   | { page: 'home' }
@@ -82,6 +103,10 @@ export function App() {
   const [editorDirty, setEditorDirty] = useState(false);
   /** The first run's work is under way (once per window). */
   const firstRunStarted = useRef(false);
+  /** Home's word of welcome, until it is put away. */
+  const [welcome, setWelcome] = useState(() => welcomeState() === 'show');
+  /** The first run's sorting of the windows into workspaces, until its note is put away. */
+  const [sorted, setSorted] = useState<Sorted | null>(null);
   /** Where the user asked to go while the zone editor has unsaved changes. */
   const [leavingTo, setLeavingTo] = useState<View | null>(null);
   /** The window is closing with unsaved zone edits: resolves the question. */
@@ -190,12 +215,25 @@ export function App() {
 
   // The first run: the windows open now are sorted into a workspace per task (none moves), and
   // Mosaïk as installed starts with Windows from now on (Settings turns that off; a build run
-  // from a folder is left as it is).
+  // from a folder is left as it is). Home welcomes, and says which workspaces were made.
   useEffect(() => {
     if (!settings || settings.onboarding_done || readOnly || firstRunStarted.current) return;
     firstRunStarted.current = true;
     void (async () => {
-      await request({ cmd: 'sort_windows' });
+      if (welcomeState() !== 'read') {
+        keepWelcome('show');
+        setWelcome(true);
+      }
+      // The workspaces there are now, to tell the ones the sorting makes.
+      const before = await request({ cmd: 'workspaces' });
+      const reply = await request({ cmd: 'sort_windows' });
+      setSorted({
+        before: before.reply === 'workspaces' ? new Set(before.workspaces.map((w) => w.id)) : null,
+        error:
+          reply.reply === 'done'
+            ? null
+            : (errorMessage(reply) ?? 'Your open windows could not be sorted into workspaces.'),
+      });
       await saveSettings({
         ...settings,
         onboarding_done: true,
@@ -261,6 +299,16 @@ export function App() {
               onEditZones={(workspace) => {
                 setView({ page: 'zones', workspace, from: 'home' });
               }}
+              welcome={welcome ? { sideMenu: sideMenu?.side ?? null } : null}
+              onWelcomeRead={() => {
+                keepWelcome('read');
+                setWelcome(false);
+              }}
+              sorted={sorted}
+              onSortedRead={() => {
+                setSorted(null);
+              }}
+              startsApps={settings.switching.launch_missing}
             />
           );
         case 'workspace':
@@ -319,7 +367,7 @@ export function App() {
                 onClick={() => {
                   go({ page: p.page });
                 }}
-                className={`rounded-lg px-3 py-1.5 text-small font-semibold transition-colors duration-150 ${
+                className={`inline-flex min-h-10 items-center rounded-lg px-3 text-small font-semibold transition-colors duration-150 ${
                   current === p.page
                     ? 'bg-[var(--raised)] text-[var(--text)] forced-colors:underline forced-colors:underline-offset-4'
                     : 'text-[var(--muted)] hover:text-[var(--text)]'
@@ -342,11 +390,10 @@ export function App() {
             <button
               type="button"
               onClick={showSwitcher}
-              aria-label={`Open the switcher (${hotkey.shortcut.split('+').join(' plus ')})`}
-              title="Open the switcher"
-              className="inline-flex min-h-8 items-center gap-2 rounded-lg px-2 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              aria-label={`Switch workspace (${hotkey.shortcut.split('+').join(' plus ')})`}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg px-2.5 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
             >
-              Switcher
+              Switch workspace
               <Keys shortcut={hotkey.shortcut} quiet />
             </button>
           </div>

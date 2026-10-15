@@ -3,9 +3,9 @@
 // main screen as opening it would leave it, as on Home (the owner: "show visually the zones same
 // as homepage for that workspace specifically with arrangements aswell").
 
-import { type CSSProperties, type SyntheticEvent, useCallback, useEffect, useId, useState } from 'react';
+import { type SyntheticEvent, useId, useState } from 'react';
 
-import { onWorkspacesChanged, request } from './engine';
+import { request } from './engine';
 import { AppIcon, Glyph } from './icons';
 import {
   type AppZone,
@@ -16,9 +16,21 @@ import {
   type WorkspaceSummary,
   errorMessage,
 } from './protocol';
+import { useReads } from './reads';
 import { Screen } from './Screen';
 import { ShortcutRecorder } from './shortcut';
-import { Button, Confirm, MenuButton, PageTitle, Section, Status, useAnnounce } from './ui';
+import {
+  Button,
+  Confirm,
+  MenuButton,
+  OnScreen,
+  PageTitle,
+  Section,
+  Status,
+  useAnnounce,
+  zoneChip,
+  zoneTint,
+} from './ui';
 
 /** Whether a window's title says no more than its app's name ("Battle.net" and "Battle․net"). */
 const same = (title: string, label: string) =>
@@ -87,8 +99,9 @@ function Rename({
   );
 }
 
-/** A zone's dot: its number in its colour. The one an app is in is solid and ringed; the others
- * are rings of their colour, and a click puts the app there. */
+/** A zone's dot: its number in its colour, 40 pixels across so it is easy to hit. The one an app
+ * is in is solid and ringed; the others are rings of their colour, and a click puts the app
+ * there. */
 function ZoneDot({
   zone,
   on,
@@ -102,7 +115,6 @@ function ZoneDot({
   disabled: boolean;
   onPick: () => void;
 }) {
-  const tint = `var(--zone-${zone.color})`;
   return (
     <button
       type="button"
@@ -112,19 +124,13 @@ function ZoneDot({
       onClick={() => {
         if (!on) onPick();
       }}
-      className={`grid size-6 shrink-0 place-items-center rounded-full border-2 text-caption font-bold tabular-nums transition-[background-color,color] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)] disabled:cursor-progress forced-colors:border-[CanvasText] ${
+      className={`grid size-10 shrink-0 place-items-center rounded-full border-2 text-small font-bold tabular-nums transition-[background-color,color] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)] disabled:cursor-progress forced-colors:border-[CanvasText] ${
         on
           ? 'zone-chip ring-2 ring-[var(--text)] ring-offset-2 ring-offset-[var(--bg)] forced-colors:ring-[Highlight]'
           : 'cursor-pointer text-[var(--muted)] hover:text-[var(--text)]'
       }`}
       style={
-        on
-          ? ({
-              '--chip': tint,
-              '--on-chip': zone.color === 'saffron' ? 'var(--on-zone-saffron)' : 'var(--on-zone)',
-              borderColor: tint,
-            } as CSSProperties)
-          : { borderColor: tint }
+        on ? { ...zoneChip(zone.color), borderColor: zoneTint(zone.color) } : { borderColor: zoneTint(zone.color) }
       }
     >
       {zone.name}
@@ -133,37 +139,29 @@ function ZoneDot({
 }
 
 /** The workspace's apps, one compact row each: its icon and name, a dot for every zone with its
- * own zone's lit (a click on another moves it there), and × to take it out (the owner: "show all
- * dots and the selected one is highlighted", "the remove should be a cross"). Then the windows
- * on screen to add. In the open workspace a change moves the window at once. */
-function Apps({ workspace, onChanged }: { workspace: string; onChanged: () => void }) {
-  const [data, setData] = useState<WorkspaceApps | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+ * own zone's lit (a click on another moves it there), and × at the end of the row, apart from the
+ * dots, to take it out (the owner: "show all dots and the selected one is highlighted", "the
+ * remove should be a cross"). Then the windows on screen to add. In the open workspace a change
+ * moves the window at once. Each change answers with the apps as they are now. */
+function Apps({
+  name,
+  data,
+  problem,
+  onApps,
+  onStale,
+}: {
+  /** The workspace's name, as its page says it. */
+  name: string;
+  data: WorkspaceApps | null;
+  problem: string | null;
+  /** A change made, with the apps as they are now. */
+  onApps: (apps: WorkspaceApps) => void;
+  /** A change refused: the apps may have changed meanwhile. */
+  onStale: () => void;
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<{ text: string; error: boolean } | null>(null);
   const announce = useAnnounce();
-
-  const load = useCallback(() => {
-    void request({ cmd: 'apps', workspace }).then((reply) => {
-      if (reply.reply === 'apps') {
-        setData(reply);
-        setProblem(null);
-      } else {
-        setProblem(errorMessage(reply) ?? 'Its apps could not be read.');
-      }
-    });
-  }, [workspace]);
-
-  // Windows open and close meanwhile: the list follows when Mosaïk's window comes back.
-  useEffect(() => {
-    load();
-    window.addEventListener('focus', load);
-    const stop = onWorkspacesChanged(load);
-    return () => {
-      window.removeEventListener('focus', load);
-      stop();
-    };
-  }, [load]);
 
   const change = (key: string, command: Command, done: string) => {
     setBusy(key);
@@ -171,13 +169,12 @@ function Apps({ workspace, onChanged }: { workspace: string; onChanged: () => vo
     void request(command).then((reply) => {
       setBusy(null);
       if (reply.reply === 'apps') {
-        setData(reply);
+        onApps(reply);
         setOutcome({ text: done, error: false });
         announce(done);
-        onChanged();
       } else {
         setOutcome({ text: errorMessage(reply) ?? 'The workspace could not be changed.', error: true });
-        load();
+        onStale();
       }
     });
   };
@@ -197,13 +194,13 @@ function Apps({ workspace, onChanged }: { workspace: string; onChanged: () => vo
       {data.apps.length === 0 ? (
         <p className="py-3.5 text-small text-[var(--muted)]">No apps yet. Add a window that is open now.</p>
       ) : (
-        <ul aria-label={`Apps of “${data.name}”`} className="divide-y divide-[var(--line)]">
+        <ul aria-label={`Apps of “${name}”`} className="divide-y divide-[var(--line)]">
           {data.apps.map((a) => (
             <li key={a.id} className="flex items-center gap-3 py-2">
               <AppIcon icon={a.icon} size={22} keepSpace />
               <span className="min-w-0 flex-1 truncate font-semibold">{a.label}</span>
               {zones.length ? (
-                <span role="group" aria-label={`Zone of ${a.label}`} className="flex shrink-0 flex-wrap gap-1.5">
+                <span role="group" aria-label={`Zone of ${a.label}`} className="flex shrink-0 flex-wrap gap-2">
                   {zones.map((z) => (
                     <ZoneDot
                       key={z.id}
@@ -231,9 +228,10 @@ function Apps({ workspace, onChanged }: { workspace: string; onChanged: () => vo
                 onClick={() => {
                   change(a.id, { cmd: 'remove_app', workspace: data.workspace, app: a.id }, `${a.label} removed.`);
                 }}
-                className="grid size-7 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)] disabled:cursor-progress disabled:opacity-50"
+                // Apart from the dots, so a click meant for a zone never takes the app out.
+                className="ml-3 grid size-10 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)] disabled:cursor-progress disabled:opacity-50"
               >
-                <Glyph name="close" size={14} />
+                <Glyph name="close" size={16} />
               </button>
             </li>
           ))}
@@ -242,9 +240,9 @@ function Apps({ workspace, onChanged }: { workspace: string; onChanged: () => vo
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] py-3">
         {data.windows.length ? (
           <MenuButton
-            label={`Add a window to “${data.name}”`}
+            label={`Add a window to “${name}”`}
             align="left"
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 text-small font-semibold text-[var(--accent)] hover:bg-[var(--hover)]"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-small font-semibold text-[var(--accent)] hover:bg-[var(--hover)]"
             items={data.windows.map((w) => ({
               key: String(w.window),
               label: w.label,
@@ -283,6 +281,8 @@ export function WorkspacePage({
   const [summary, setSummary] = useState<WorkspaceSummary | null>(null);
   const [active, setActive] = useState(false);
   const [gone, setGone] = useState(false);
+  const [apps, setApps] = useState<WorkspaceApps | null>(null);
+  const [appsProblem, setAppsProblem] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [opening, setOpening] = useState(false);
@@ -290,48 +290,38 @@ export function WorkspacePage({
   /** The picture of it opened, and whether Mosaïk could not say. */
   const [preview, setPreview] = useState<ArrangePreview | null>(null);
   const [unread, setUnread] = useState(false);
-  /** Counts the times the picture is asked again: an app moved, windows on screen changed… */
-  const [reads, setReads] = useState(0);
-  const readAgain = useCallback(() => {
-    setReads((n) => n + 1);
-  }, []);
   const announce = useAnnounce();
 
-  const load = useCallback(() => {
-    void request({ cmd: 'workspaces' }).then((reply) => {
-      if (reply.reply !== 'workspaces') return;
-      const w = reply.workspaces.find((x) => x.id === workspace) ?? null;
-      setSummary(w);
-      setGone(w === null);
-      setActive(reply.active === workspace);
-    });
-  }, [workspace]);
-
-  useEffect(() => {
-    load();
-    return onWorkspacesChanged(load);
-  }, [load]);
-
-  // Its picture follows its apps and the windows on screen.
-  useEffect(() => {
-    window.addEventListener('focus', readAgain);
-    const stop = onWorkspacesChanged(readAgain);
-    return () => {
-      window.removeEventListener('focus', readAgain);
-      stop();
-    };
-  }, [readAgain]);
-  useEffect(() => {
-    let live = true;
-    void request({ cmd: 'preview_workspace', workspace }).then((reply) => {
-      if (!live) return;
-      setPreview(reply.reply === 'preview' ? reply : null);
-      setUnread(reply.reply !== 'preview');
-    });
-    return () => {
-      live = false;
-    };
-  }, [workspace, reads]);
+  // What it is (its name, shortcut, whether it is on screen) changes only by Mosaïk's say-so;
+  // its apps also as windows open and close, which the window coming back into focus catches;
+  // its picture with both. A change of its apps answers with them: they are not read again.
+  const poke = useReads(async (why, current) => {
+    if (why.has('start') || why.has('changed') || why.has('own')) {
+      const reply = await request({ cmd: 'workspaces' });
+      if (!current()) return;
+      if (reply.reply === 'workspaces') {
+        const w = reply.workspaces.find((x) => x.id === workspace) ?? null;
+        setSummary(w);
+        setGone(w === null);
+        setActive(reply.active === workspace);
+        if (!w) return;
+      }
+    }
+    if (why.has('start') || why.has('focus') || (why.has('changed') && !why.has('own'))) {
+      const reply = await request({ cmd: 'apps', workspace });
+      if (!current()) return;
+      if (reply.reply === 'apps') {
+        setApps(reply);
+        setAppsProblem(null);
+      } else {
+        setAppsProblem(errorMessage(reply) ?? 'Its apps could not be read.');
+      }
+    }
+    const reply = await request({ cmd: 'preview_workspace', workspace });
+    if (!current()) return;
+    setPreview(reply.reply === 'preview' ? reply : null);
+    setUnread(reply.reply !== 'preview');
+  }, workspace);
 
   const say = (text: string, error = false) => {
     setOutcome({ text, error });
@@ -342,7 +332,7 @@ export function WorkspacePage({
     return (
       <article aria-labelledby="workspace-title">
         <PageTitle id="workspace-title">This workspace is gone</PageTitle>
-        <p className="mt-2 text-[var(--muted)]">It was deleted or renamed meanwhile.</p>
+        <p className="mt-2 text-[var(--muted)]">It was deleted.</p>
         <div className="mt-4">
           <Button onClick={onBack}>Back to Home</Button>
         </div>
@@ -363,13 +353,13 @@ export function WorkspacePage({
         type="button"
         onClick={onBack}
         aria-label="Back to Home"
-        className="-ml-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+        className="-ml-2 inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
       >
         <Glyph name="back" size={14} />
         Home
       </button>
 
-      <div className="mt-3 flex flex-wrap items-center gap-4">
+      <div className="mt-2 flex flex-wrap items-center gap-4">
         <div className="min-w-0 flex-1">
           {renaming ? (
             <Rename
@@ -380,12 +370,11 @@ export function WorkspacePage({
               onDone={(m) => {
                 setRenaming(false);
                 say(m);
-                load();
               }}
             />
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <PageTitle id="workspace-title" className="truncate">
+              <PageTitle id="workspace-title" className="min-w-0 break-words">
                 {summary.name}
               </PageTitle>
               <Button
@@ -401,10 +390,17 @@ export function WorkspacePage({
               </Button>
             </div>
           )}
-          <p className="mt-0.5 text-small text-[var(--muted)]">
-            {active ? 'Open now · ' : ''}
-            {summary.apps.length} {summary.apps.length === 1 ? 'app' : 'apps'} · {summary.zones}{' '}
-            {summary.zones === 1 ? 'zone' : 'zones'}
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-small text-[var(--muted)]">
+            {active ? (
+              <>
+                <OnScreen />
+                <span aria-hidden="true">·</span>
+              </>
+            ) : null}
+            <span>
+              {summary.apps.length} {summary.apps.length === 1 ? 'app' : 'apps'} · {summary.zones}{' '}
+              {summary.zones === 1 ? 'zone' : 'zones'}
+            </span>
           </p>
         </div>
         <Button
@@ -414,9 +410,12 @@ export function WorkspacePage({
             setOpening(true);
             void request({ cmd: 'switch', workspace: summary.id }).then((reply) => {
               setOpening(false);
-              if (reply.reply === 'done') say(reply.message);
-              else say(errorMessage(reply) ?? 'It could not be opened.', true);
-              load();
+              if (reply.reply === 'done') {
+                say(reply.message);
+              } else {
+                say(errorMessage(reply) ?? 'It could not be opened.', true);
+                poke('changed');
+              }
             });
           }}
         >
@@ -433,25 +432,34 @@ export function WorkspacePage({
       </div>
 
       <Section title="Apps">
-        <Apps workspace={summary.id} onChanged={readAgain} />
+        <Apps
+          name={summary.name}
+          data={apps}
+          problem={appsProblem}
+          onApps={(next) => {
+            setApps(next);
+            poke('own');
+          }}
+          onStale={() => {
+            poke('changed');
+          }}
+        />
       </Section>
 
       <Section title="Shortcut">
         <ShortcutRecorder
           label={`Open “${summary.name}”`}
-          description="From anywhere, without the switcher."
+          description="Opens it from any app."
           value={summary.hotkey}
           workspace={summary.id}
           onSave={async (hotkey) => {
             const reply = await request({ cmd: 'set_workspace_hotkey', workspace: summary.id, hotkey });
-            load();
             if (reply.reply !== 'done') return errorMessage(reply) ?? 'The shortcut could not be saved.';
             announce(reply.message);
             return null;
           }}
           onRemove={async () => {
             const reply = await request({ cmd: 'set_workspace_hotkey', workspace: summary.id, hotkey: null });
-            load();
             if (reply.reply !== 'done') return errorMessage(reply) ?? 'The shortcut could not be removed.';
             announce(reply.message);
             return null;

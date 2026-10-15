@@ -2,7 +2,7 @@
   "name": "mosaik-desktop",
   "private": true,
   "version": "1.0.2",
-  "description": "Mosaïk's interface: switcher, settings, zone editor, onboarding.",
+  "description": "Mosaïk's window: Home, a workspace's page, the zone editor and Settings.",
   "license": "CC0-1.0",
   "type": "module",
   "engines": {

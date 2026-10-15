@@ -1,6 +1,7 @@
-// Settings: what most people change first (the switcher's shortcut, starting with Windows, the
-// theme, the side menu, how windows snap and look), the rest under Advanced, then About. Each
-// change is saved at once; a change Mosaïk could not make is said at the top of the page.
+// Settings, in the order a beginner meets them: starting with Windows and the theme, the shortcut
+// that switches workspace, how windows snap and look, the side menu; the rest under More
+// settings, then About. Each change is saved at once; a change Mosaïk could not make is said at
+// the top of the page.
 
 import { useEffect, useId, useState } from 'react';
 
@@ -17,17 +18,16 @@ const THEMES: readonly { value: Theme; label: string }[] = [
   { value: 'system', label: 'Like Windows' },
 ];
 
-type TagPlace = 'title' | 'above' | 'off';
-const TAG_PLACES: readonly { value: TagPlace; label: string }[] = [
+/** Where a window shows its zone's number, when it shows it. */
+const TAG_PLACES: readonly { value: 'title' | 'above'; label: string }[] = [
   { value: 'title', label: 'Title bar' },
   { value: 'above', label: 'Above' },
-  { value: 'off', label: 'Off' },
 ];
 
 type SideMenu = EdgeSide | 'off';
 const SIDE_MENU: readonly { value: SideMenu; label: string }[] = [
-  { value: 'left', label: 'Left' },
   { value: 'right', label: 'Right' },
+  { value: 'left', label: 'Left' },
   { value: 'off', label: 'Off' },
 ];
 
@@ -81,9 +81,7 @@ function About() {
             on this PC.
           </p>
         </div>
-        <Button tone="primary" onClick={link('patreon')}>
-          Support on Patreon
-        </Button>
+        <Button onClick={link('patreon')}>Support on Patreon</Button>
       </div>
       <div className="flex flex-wrap gap-1 py-3">
         <Button tone="quiet" size="sm" onClick={link('site')}>
@@ -157,8 +155,8 @@ export function SettingsPage({
 }) {
   const announce = useAnnounce();
   const [problem, setProblem] = useState<string | null>(null);
-  const [advanced, setAdvanced] = useState(false);
-  const advancedId = useId();
+  const [more, setMore] = useState(false);
+  const moreId = useId();
 
   const save = (next: Settings) => {
     setProblem(null);
@@ -171,7 +169,6 @@ export function SettingsPage({
     });
   };
 
-  const tags: TagPlace = settings.frames.show_tags ? (settings.frames.tags_in_title_bar ? 'title' : 'above') : 'off';
   const side: SideMenu = settings.edge.enabled ? settings.edge.side : 'off';
   const moved = sideNote(sideMenu);
 
@@ -190,22 +187,6 @@ export function SettingsPage({
 
       <div className="mt-4">
         <Section title="General">
-          <ShortcutRecorder
-            label="Open the switcher"
-            description="Pick a workspace from anywhere."
-            value={hotkey.registered ? hotkey.shortcut : null}
-            onSave={async (shortcut) => {
-              const saved = await saveSettings({ ...settings, switcher_hotkey: shortcut });
-              if (!saved.ok) return saved.message;
-              announce(saved.message);
-              return null;
-            }}
-          />
-          {hotkey.problem ? (
-            <div className="py-3">
-              <Status text={hotkey.problem} error />
-            </div>
-          ) : null}
           <Toggle
             label="Start with Windows"
             description="Mosaïk waits in the tray, so the side menu and shortcuts are always there."
@@ -226,6 +207,53 @@ export function SettingsPage({
               }}
             />
           </Row>
+          <ShortcutRecorder
+            label="Shortcut to switch workspace"
+            description="Shows your workspaces over any app."
+            value={hotkey.registered ? hotkey.shortcut : null}
+            onSave={async (shortcut) => {
+              const saved = await saveSettings({ ...settings, switcher_hotkey: shortcut });
+              if (!saved.ok) return saved.message;
+              announce(saved.message);
+              return null;
+            }}
+          />
+          {hotkey.problem ? (
+            <div className="py-3">
+              <Status text={hotkey.problem} error />
+            </div>
+          ) : null}
+        </Section>
+
+        <Section title="Windows">
+          <Toggle
+            label="Snap windows to zones"
+            description="Drag a window over a zone and let go."
+            checked={settings.snap.enabled}
+            disabled={readOnly}
+            onChange={(on) => {
+              save({ ...settings, snap: { ...settings.snap, enabled: on } });
+            }}
+          />
+          <Toggle
+            label="Show zone numbers on windows"
+            description="Each window shows its zone’s number. Drop a window on a number to make tabs."
+            checked={settings.frames.show_tags}
+            disabled={readOnly}
+            onChange={(on) => {
+              // Off hides the numbers only: tabs stay where they were.
+              save({ ...settings, frames: { ...settings.frames, show_tags: on } });
+            }}
+          />
+          <Toggle
+            label="Coloured borders"
+            description="Each window wears its zone’s colour."
+            checked={settings.frames.show_frames}
+            disabled={readOnly}
+            onChange={(on) => {
+              save({ ...settings, frames: { ...settings.frames, show_frames: on } });
+            }}
+          />
         </Section>
 
         <Section title="Side menu">
@@ -252,62 +280,32 @@ export function SettingsPage({
           </Row>
         </Section>
 
-        <Section title="Windows">
-          <Toggle
-            label="Snap to zones"
-            description="Drag a window over a zone and let go."
-            checked={settings.snap.enabled}
-            disabled={readOnly}
-            onChange={(on) => {
-              save({ ...settings, snap: { ...settings.snap, enabled: on } });
-            }}
-          />
-          <Row label="Zone tags" description="A window’s zone name. Drop a window on a tag to make tabs.">
-            <Segmented
-              label="Zone tags"
-              value={tags}
-              options={TAG_PLACES}
-              disabled={readOnly}
-              onChange={(v) => {
-                // Off hides the names only: tabs stay where tags were.
-                const frames =
-                  v === 'off'
-                    ? { ...settings.frames, show_tags: false }
-                    : { ...settings.frames, show_tags: true, tags_in_title_bar: v === 'title' };
-                save({ ...settings, frames });
-              }}
-            />
-          </Row>
-          <Toggle
-            label="Coloured borders"
-            description="Each window wears its zone’s colour."
-            checked={settings.frames.show_frames}
-            disabled={readOnly}
-            onChange={(on) => {
-              save({ ...settings, frames: { ...settings.frames, show_frames: on } });
-            }}
-          />
-        </Section>
-
         <div className="mt-7">
           <button
             type="button"
-            aria-expanded={advanced}
-            aria-controls={advancedId}
+            aria-expanded={more}
+            aria-controls={moreId}
             onClick={() => {
-              setAdvanced((a) => !a);
+              setMore((m) => !m);
             }}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-1 font-display text-heading font-semibold tracking-tight hover:text-[var(--accent)]"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-1 font-display text-heading font-semibold tracking-tight hover:text-[var(--accent)]"
           >
-            <Glyph
-              name="next"
-              size={14}
-              className={`transition-transform duration-150 ${advanced ? 'rotate-90' : ''}`}
-            />
-            Advanced
+            <Glyph name="next" size={14} className={`transition-transform duration-150 ${more ? 'rotate-90' : ''}`} />
+            More settings
           </button>
-          <div id={advancedId} hidden={!advanced} className="mt-2">
+          <div id={moreId} hidden={!more} className="mt-2">
             <div className="tile divide-y divide-[var(--line)] px-5">
+              <Row label="Zone tags" description="Where each window shows its zone’s number.">
+                <Segmented
+                  label="Zone tags"
+                  value={settings.frames.tags_in_title_bar ? 'title' : 'above'}
+                  options={TAG_PLACES}
+                  disabled={readOnly}
+                  onChange={(v) => {
+                    save({ ...settings, frames: { ...settings.frames, tags_in_title_bar: v === 'title' } });
+                  }}
+                />
+              </Row>
               <Toggle
                 label="Zones follow a resized window"
                 description="Neighbouring zones move with its edge. Shift resizes the window alone."

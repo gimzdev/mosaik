@@ -1,11 +1,11 @@
 // The picked zone: its number, its colour, splitting it in two, removing it. Zones are numbered
 // by place (1 at the top left), so they have no name to type.
 
-import { type CSSProperties, useId } from 'react';
+import { useId } from 'react';
 
-import type { ZoneColor } from '../protocol';
-import { Button } from '../ui';
-import { COLORS, type Draft } from './model';
+import { ZONE_COLORS, type ZoneColor } from '../protocol';
+import { Button, zoneChip } from '../ui';
+import type { Draft } from './model';
 
 const COLOR_NAMES: Record<ZoneColor, string> = {
   lapis: 'Lapis',
@@ -36,12 +36,7 @@ export function ZonePanel({
         Zone{' '}
         <span
           className="zone-chip grid min-w-7 place-items-center rounded-full px-2 text-small font-bold tabular-nums"
-          style={
-            {
-              '--chip': `var(--zone-${zone.color})`,
-              '--on-chip': zone.color === 'saffron' ? 'var(--on-zone-saffron)' : 'var(--on-zone)',
-            } as CSSProperties
-          }
+          style={zoneChip(zone.color)}
         >
           {zone.name}
         </span>
@@ -49,7 +44,7 @@ export function ZonePanel({
       <fieldset>
         <legend className="text-small font-semibold">Colour</legend>
         <div className="mt-1 flex gap-1.5">
-          {COLORS.map((c) => (
+          {ZONE_COLORS.map((c) => (
             <label key={c} className="cursor-pointer rounded-full">
               <input
                 type="radio"

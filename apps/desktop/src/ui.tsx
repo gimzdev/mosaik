@@ -1,8 +1,10 @@
 // The window's building blocks: buttons, switches, choices, keys, menus, dialogs, and a voice for
-// screen readers. Every one works with the keyboard alone and says what it is to screen readers.
-// Nothing here floats over the page to say something: what happened is said where it happened.
+// screen readers. Every one works with the keyboard alone and says what it is to screen readers,
+// and every one that is clicked is at least 40 pixels high. Nothing here floats over the page to
+// say something: what happened is said where it happened.
 
 import {
+  type CSSProperties,
   type ReactNode,
   createContext,
   useCallback,
@@ -14,7 +16,19 @@ import {
   useState,
 } from 'react';
 
-import { Glyph, Spinner } from './icons';
+import { Spinner } from './icons';
+import type { ZoneColor } from './protocol';
+
+/** A zone's colour, as the theme draws it. */
+export const zoneTint = (color: ZoneColor) => `var(--zone-${color})`;
+
+/** The style of a zone's number on its colour (`.zone-chip`): saffron, light, takes dark text. */
+export function zoneChip(color: ZoneColor): CSSProperties {
+  return {
+    '--chip': zoneTint(color),
+    '--on-chip': color === 'saffron' ? 'var(--on-zone-saffron)' : 'var(--on-zone)',
+  } as CSSProperties;
+}
 
 /** Mosaïk's mark: four tiles of the palette. */
 export function Mark({ size = 22 }: { size?: number }) {
@@ -39,9 +53,9 @@ const TONES: Record<Tone, string> = {
 };
 
 const SIZES = {
-  sm: 'min-h-8 gap-1.5 rounded-lg px-2.5 text-small',
-  md: 'min-h-9 gap-2 rounded-[10px] px-3.5 text-small',
-  lg: 'min-h-11 gap-2 rounded-xl px-5 text-body',
+  sm: 'min-h-10 gap-1.5 rounded-lg px-3 text-small',
+  md: 'min-h-10 gap-2 rounded-[10px] px-4 text-small',
+  lg: 'min-h-12 gap-2 rounded-xl px-5 text-body',
 } as const;
 
 export function Button({
@@ -56,6 +70,7 @@ export function Button({
   type = 'button',
   expanded,
   controls,
+  describedBy,
   wide = false,
 }: {
   tone?: Tone;
@@ -73,6 +88,8 @@ export function Button({
   /** For a button that shows or hides something. */
   expanded?: boolean;
   controls?: string;
+  /** The element whose words say more about it, to screen readers. */
+  describedBy?: string;
   /** As wide as its box. */
   wide?: boolean;
 }) {
@@ -85,6 +102,7 @@ export function Button({
       title={hint}
       aria-expanded={expanded}
       aria-controls={controls}
+      aria-describedby={describedBy}
       onClick={onClick}
       className={`inline-flex items-center justify-center font-semibold whitespace-nowrap transition-[background-color,opacity] duration-150 disabled:opacity-50 forced-colors:disabled:border forced-colors:disabled:border-[GrayText] forced-colors:disabled:text-[GrayText] forced-colors:disabled:opacity-100 ${
         pending ? 'cursor-progress' : 'disabled:cursor-not-allowed'
@@ -159,7 +177,8 @@ export function Toggle({
         onClick={() => {
           onChange(!checked);
         }}
-        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors duration-150 disabled:opacity-50 ${
+        // Drawn small, as switches are, but 60 by 40 pixels to the pointer.
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors duration-150 after:absolute after:-inset-x-2 after:-inset-y-2 disabled:opacity-50 ${
           checked ? 'border-[var(--accent-fill)] bg-[var(--accent-fill)]' : 'border-[var(--control)] bg-transparent'
         }`}
       >
@@ -201,7 +220,7 @@ export function Segmented<T extends string>({
         return (
           <label
             key={o.value}
-            className={`relative flex cursor-pointer items-center rounded-lg px-3 py-1.5 text-small font-semibold transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-[var(--focus)] ${
+            className={`relative flex min-h-10 cursor-pointer items-center rounded-lg px-3 text-small font-semibold transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-[var(--focus)] ${
               on
                 ? 'bg-[var(--raised)] text-[var(--text)] shadow-[0_1px_0_rgb(255_255_255/0.04),0_1px_6px_-2px_rgb(0_0_0/0.5)] forced-colors:border forced-colors:border-[Highlight]'
                 : 'text-[var(--muted)] hover:text-[var(--text)]'
@@ -248,6 +267,45 @@ export function Keys({ shortcut, quiet = false }: { shortcut: string; quiet?: bo
         </span>
       ))}
     </span>
+  );
+}
+
+/** Says the workspace is the one on screen: quiet words with a small dot, not the accent colour of
+ * what can be clicked. */
+export function OnScreen() {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--ok)] forced-colors:bg-[CanvasText]" />
+      On screen
+    </span>
+  );
+}
+
+/** A tip shown until it is put away, with what it says read with its button. An error says why
+ * something did not happen, and is read out as it appears. */
+export function Tip({
+  children,
+  onDismiss,
+  error = false,
+}: {
+  children: ReactNode;
+  onDismiss: () => void;
+  error?: boolean;
+}) {
+  const id = useId();
+  return (
+    <div
+      role={error ? 'alert' : undefined}
+      // Its button beside the words where there is room, under them where there is not.
+      className="flex flex-wrap items-start justify-end gap-x-2 rounded-[14px] border border-[var(--line)] bg-[var(--raised)] py-1 pr-1 pl-3.5"
+    >
+      <p id={id} className={`min-w-0 flex-1 basis-56 py-2 text-small ${error ? 'text-[var(--danger)]' : ''}`}>
+        {children}
+      </p>
+      <Button tone="quiet" size="sm" describedBy={id} onClick={onDismiss}>
+        Got it
+      </Button>
+    </div>
   );
 }
 
@@ -379,28 +437,16 @@ export interface MenuItem {
   icon?: ReactNode;
 }
 
-/** A button that shows a short list of actions under it, or above it near the bottom of the
- * window, so its items are always in view. Esc or a click elsewhere closes it, and focus goes
- * back to the button. */
-export function MenuButton({
-  label,
-  children,
-  items,
-  align = 'right',
-  className = '',
-}: {
-  /** The button's full name for screen readers ("More for “Brand”"). */
-  label: string;
-  children: ReactNode;
-  items: readonly MenuItem[];
-  /** Which edge of the button the list lines up with. */
-  align?: 'left' | 'right';
-  className?: string;
-}) {
+/**
+ * A list that opens from a button: under it, or above it near the bottom of the window, so the
+ * list is always in view. When it opens, focus goes to the first element `first` finds in it;
+ * Esc, a click elsewhere, or focus leaving it closes it, and `close` puts focus back on the
+ * button.
+ */
+export function usePopup(first: string) {
   const [open, setOpen] = useState(false);
   /** Where the list opens: under the button, or above it when only there is it in view. */
   const [side, setSide] = useState<'bottom' | 'top'>('bottom');
-  const id = useId();
   const box = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -426,7 +472,7 @@ export function MenuButton({
 
   useEffect(() => {
     if (!open) return;
-    box.current?.querySelector<HTMLButtonElement>('[data-item]')?.focus();
+    box.current?.querySelector<HTMLElement>(first)?.focus();
     const away = (e: MouseEvent) => {
       if (!box.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -434,12 +480,41 @@ export function MenuButton({
     return () => {
       document.removeEventListener('mousedown', away);
     };
-  }, [open]);
+  }, [open, first]);
 
-  const close = () => {
+  const close = useCallback(() => {
     setOpen(false);
     trigger.current?.focus();
-  };
+  }, []);
+
+  return { open, setOpen, side, box, trigger, list, close };
+}
+
+/** The box of an open popup's list, by the edge of its button it lines up with. */
+export function popupClass(side: 'bottom' | 'top', align: 'left' | 'right') {
+  return `absolute z-30 flex max-h-80 w-max max-w-80 min-w-48 flex-col overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--raised)] p-1 shadow-[var(--shadow)] ${
+    align === 'left' ? 'left-0' : 'right-0'
+  } ${side === 'top' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'}`;
+}
+
+/** A button that shows a short list of actions (see `usePopup`). */
+export function MenuButton({
+  label,
+  children,
+  items,
+  align = 'right',
+  className = '',
+}: {
+  /** The button's full name for screen readers ("More for “Brand”"). */
+  label: string;
+  children: ReactNode;
+  items: readonly MenuItem[];
+  /** Which edge of the button the list lines up with. */
+  align?: 'left' | 'right';
+  className?: string;
+}) {
+  const id = useId();
+  const { open, setOpen, side, box, trigger, list, close } = usePopup('[data-item]');
 
   return (
     <div
@@ -475,20 +550,13 @@ export function MenuButton({
         }}
         className={
           className ||
-          'inline-flex min-h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg px-2 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]'
+          'inline-flex min-h-10 min-w-10 items-center justify-center gap-1.5 rounded-lg px-2 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]'
         }
       >
         {children}
       </button>
       {open ? (
-        <div
-          ref={list}
-          id={id}
-          data-side={side}
-          className={`absolute z-30 flex max-h-80 w-max max-w-80 min-w-48 flex-col overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--raised)] p-1 shadow-[var(--shadow)] ${
-            align === 'left' ? 'left-0' : 'right-0'
-          } ${side === 'top' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'}`}
-        >
+        <div ref={list} id={id} data-side={side} className={popupClass(side, align)}>
           {items.map((item) => (
             <button
               key={item.key ?? item.label}
@@ -499,7 +567,7 @@ export function MenuButton({
                 setOpen(false);
                 item.onSelect();
               }}
-              className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-small font-semibold hover:bg-[var(--hover)] focus-visible:-outline-offset-2 ${
+              className={`flex min-h-10 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-small font-semibold hover:bg-[var(--hover)] focus-visible:-outline-offset-2 ${
                 item.danger ? 'text-[var(--danger)]' : ''
               }`}
             >
@@ -518,11 +586,6 @@ export function MenuButton({
       ) : null}
     </div>
   );
-}
-
-/** The ⋯ of a menu button. */
-export function MoreGlyph() {
-  return <Glyph name="more" />;
 }
 
 /** Says something to screen readers only: what happened is shown where it happened, and this

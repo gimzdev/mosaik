@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,14 +10,45 @@ import { WorkspacePage } from './WorkspacePage';
 const engine = vi.hoisted(() => ({
   request: vi.fn<(c: Command) => Promise<Reply>>(),
   appIcons: vi.fn((keys: string[]) => Promise.resolve(Object.fromEntries(keys.map((k) => [k, null])))),
-  onWorkspacesChanged: vi.fn(() => () => undefined),
+  onWorkspacesChanged: vi.fn<(callback: () => void) => () => void>(() => () => undefined),
 }));
 vi.mock('./engine', () => engine);
+
+/** The engine's "workspaces changed" event, to every part of the page that listens for it. */
+let listeners: (() => void)[] = [];
+const changed = () => {
+  for (const l of listeners) l();
+};
 
 afterEach(cleanup);
 beforeEach(() => {
   engine.request.mockReset();
+  listeners = [];
+  engine.onWorkspacesChanged.mockImplementation((callback) => {
+    listeners.push(callback);
+    return () => {
+      listeners = listeners.filter((l) => l !== callback);
+    };
+  });
 });
+
+const wait = (ms: number) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const count = (asked: Command[], cmd: Command['cmd']) => asked.filter((c) => c.cmd === cmd).length;
+
+/** Commands after which the engine says the workspaces changed (crates/mosaik-engine/src/thread.rs). */
+const CHANGES: ReadonlySet<Command['cmd']> = new Set([
+  'switch',
+  'rename_workspace',
+  'delete_workspace',
+  'set_workspace_hotkey',
+  'add_app',
+  'move_app',
+  'remove_app',
+]);
 
 function answer(extra: (c: Command) => Reply | null = () => null, exists = true) {
   const asked: Command[] = [];
@@ -25,50 +56,47 @@ function answer(extra: (c: Command) => Reply | null = () => null, exists = true)
   let hotkey: string | null = null;
   engine.request.mockImplementation((c) => {
     asked.push(c);
-    const special = extra(c);
-    if (special) return Promise.resolve(special);
+    const reply = extra(c) ?? usual(c);
+    if (CHANGES.has(c.cmd) && reply.reply !== 'error') setTimeout(changed, 0);
+    return Promise.resolve(reply);
+  });
+  function usual(c: Command): Reply {
     switch (c.cmd) {
       case 'workspaces':
-        return Promise.resolve(workspacesReply(exists ? [workspace({ id: 'ship', name, hotkey })] : [], 'ship'));
+        return workspacesReply(exists ? [workspace({ id: 'ship', name, hotkey })] : [], 'ship');
       case 'apps':
-        return Promise.resolve(appsOf({ name }));
+        return appsOf({ name });
       case 'preview_workspace':
-        return Promise.resolve(preview(opening));
+        return preview(opening);
       case 'rename_workspace':
         name = c.name;
-        return Promise.resolve(done(`Renamed to “${c.name}”.`));
+        return done(`Renamed to “${c.name}”.`);
       case 'set_workspace_hotkey':
         hotkey = c.hotkey;
-        return Promise.resolve(done('Saved.'));
+        return done('Saved.');
       case 'check_hotkey':
-        return Promise.resolve({ reply: 'hotkey', hotkey: c.hotkey, problem: null, warnings: [] });
+        return { reply: 'hotkey', hotkey: c.hotkey, problem: null, warnings: [] };
       case 'move_app':
-        return Promise.resolve(
-          appsOf({
-            apps: [
-              { id: 's1', label: 'Visual Studio Code', icon: null, zone: 'z2', tab: false },
-              { id: 's2', label: 'Google Chrome', icon: null, zone: 'z2', tab: false },
-            ],
-          }),
-        );
+        return appsOf({
+          apps: [
+            { id: 's1', label: 'Visual Studio Code', icon: null, zone: 'z2', tab: false },
+            { id: 's2', label: 'Google Chrome', icon: null, zone: 'z2', tab: false },
+          ],
+        });
       case 'remove_app':
-        return Promise.resolve(
-          appsOf({ apps: [{ id: 's2', label: 'Google Chrome', icon: null, zone: 'z2', tab: false }] }),
-        );
+        return appsOf({ apps: [{ id: 's2', label: 'Google Chrome', icon: null, zone: 'z2', tab: false }] });
       case 'add_app':
-        return Promise.resolve(
-          appsOf({
-            apps: [
-              ...(appsOf() as Extract<Reply, { reply: 'apps' }>).apps,
-              { id: 's3', label: 'Slack', icon: null, zone: null, tab: false },
-            ],
-            windows: [],
-          }),
-        );
+        return appsOf({
+          apps: [
+            ...(appsOf() as Extract<Reply, { reply: 'apps' }>).apps,
+            { id: 's3', label: 'Slack', icon: null, zone: null, tab: false },
+          ],
+          windows: [],
+        });
       default:
-        return Promise.resolve(done('Done.'));
+        return done('Done.');
     }
-  });
+  }
   return asked;
 }
 
@@ -93,6 +121,9 @@ describe('a workspace’s page', () => {
       }),
     ).toBeInTheDocument();
     expect(asked).toContainEqual({ cmd: 'preview_workspace', workspace: 'ship' });
+    // It is the one on screen, in quiet words.
+    expect(screen.getByText('On screen')).toBeInTheDocument();
+    expect(screen.getByText('2 apps · 2 zones')).toBeInTheDocument();
   });
 
   it('shows each app with a dot for every zone, its own lit, and moves, removes and adds them', async () => {
@@ -114,13 +145,42 @@ describe('a workspace’s page', () => {
     expect(asked).toContainEqual({ cmd: 'move_app', workspace: 'ship', app: 's1', zone: 'z2' });
     expect(await shown('Visual Studio Code goes in zone 2.')).toBeInTheDocument();
     // The picture follows.
-    expect(asked.filter((c) => c.cmd === 'preview_workspace').length).toBeGreaterThan(1);
+    await waitFor(() => {
+      expect(asked.filter((c) => c.cmd === 'preview_workspace').length).toBeGreaterThan(1);
+    });
     await userEvent.click(screen.getByRole('button', { name: 'Remove Visual Studio Code' }));
     expect(asked).toContainEqual({ cmd: 'remove_app', workspace: 'ship', app: 's1' });
     expect(await shown('Visual Studio Code removed.')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Add a window to “Ship”' }));
     await userEvent.click(screen.getByRole('button', { name: /^Slack/ }));
     expect(asked).toContainEqual({ cmd: 'add_app', workspace: 'ship', window: 0x2_04f2, zone: null });
+  });
+
+  it('reads again once for a burst of focus events, and uses what a change of its apps answers', async () => {
+    const asked = answer();
+    page();
+    await screen.findByRole('list', { name: 'Apps of “Ship”' });
+    await wait(300);
+    const before = { apps: count(asked, 'apps'), preview: count(asked, 'preview_workspace') };
+    for (let i = 0; i < 3; i += 1) {
+      window.dispatchEvent(new Event('focus'));
+      await wait(40);
+    }
+    await wait(400);
+    expect(count(asked, 'apps') - before.apps).toBe(1);
+    expect(count(asked, 'preview_workspace') - before.preview).toBe(1);
+    const then = {
+      apps: count(asked, 'apps'),
+      preview: count(asked, 'preview_workspace'),
+      workspaces: count(asked, 'workspaces'),
+    };
+    await userEvent.click(screen.getByRole('button', { name: 'Put Visual Studio Code in zone 2' }));
+    expect(await shown('Visual Studio Code goes in zone 2.')).toBeInTheDocument();
+    await wait(400);
+    // The apps came with the answer; the picture and the summary are read once more.
+    expect(count(asked, 'apps') - then.apps).toBe(0);
+    expect(count(asked, 'preview_workspace') - then.preview).toBe(1);
+    expect(count(asked, 'workspaces') - then.workspaces).toBe(1);
   });
 
   it('says why an app could not be changed', async () => {
@@ -149,12 +209,15 @@ describe('a workspace’s page', () => {
   it('records a shortcut of its own, with Mosaïk’s shortcuts held meanwhile', async () => {
     const asked = answer();
     page();
+    expect(await screen.findByText('Opens it from any app.')).toBeInTheDocument();
     await userEvent.click(await screen.findByRole('button', { name: 'Add a shortcut: Open “Ship”' }));
     expect(asked).toContainEqual({ cmd: 'hold_hotkeys', hold: true });
     await userEvent.keyboard('{Meta>}{Alt>}j{/Alt}{/Meta}');
     await userEvent.click(await screen.findByRole('button', { name: 'Save shortcut' }));
     expect(asked).toContainEqual({ cmd: 'set_workspace_hotkey', workspace: 'ship', hotkey: 'Win+Alt+J' });
     expect(asked).toContainEqual({ cmd: 'hold_hotkeys', hold: false });
+    // Mosaïk says the workspace changed: the page shows the shortcut saved.
+    expect(await screen.findByRole('button', { name: 'Change: Open “Ship”' })).toBeInTheDocument();
   });
 
   it('opens its zones', async () => {
@@ -188,6 +251,7 @@ describe('a workspace’s page', () => {
     answer(() => null, false);
     const { onBack } = page();
     expect(await screen.findByRole('heading', { name: 'This workspace is gone' })).toBeInTheDocument();
+    expect(screen.getByText('It was deleted.')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
     expect(onBack).toHaveBeenCalled();
   });

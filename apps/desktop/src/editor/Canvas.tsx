@@ -1,9 +1,11 @@
-// One monitor's work area with its zones: pick a zone, drag the lines between zones (or focus a
-// line and use the arrow keys). Lines snap to a grid of 48ths.
+// One monitor's work area with its zones: pick a zone, drag the bars between zones (or focus a
+// bar and use the arrow keys). Bars snap to a grid of 48ths. They show at rest, a little faded,
+// so they can be found without pointing at them first.
 
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, type RefObject, useRef } from 'react';
+import { type KeyboardEvent, type PointerEvent, type RefObject, useRef } from 'react';
 
 import type { MonitorState } from '../protocol';
+import { zoneChip, zoneTint } from '../ui';
 import { type Draft, GRID, type Line, lineLabel, lineRange, lines, moveLine, percent, snap } from './model';
 
 function LineHandle({
@@ -61,17 +63,18 @@ function LineHandle({
     onChange(moveLine(drafts, line, monitor, e.key === 'Home' || e.key === 'End' ? to : snap(to)));
   };
 
+  // 16 pixels to grab, over the gap between the zones and a little of each.
   const style = vertical
     ? {
-        left: `calc(${String(line.at * 100)}% - 6px)`,
+        left: `calc(${String(line.at * 100)}% - 8px)`,
         top: `${String(line.from * 100)}%`,
-        width: '12px',
+        width: '16px',
         height: `${String((line.to - line.from) * 100)}%`,
       }
     : {
-        top: `calc(${String(line.at * 100)}% - 6px)`,
+        top: `calc(${String(line.at * 100)}% - 8px)`,
         left: `${String(line.from * 100)}%`,
-        height: '12px',
+        height: '16px',
         width: `${String((line.to - line.from) * 100)}%`,
       };
 
@@ -110,8 +113,8 @@ function LineHandle({
     >
       <span
         aria-hidden="true"
-        className={`rounded-full bg-[var(--muted)] opacity-0 transition-opacity duration-150 group-hover:opacity-70 group-focus-visible:bg-[var(--focus)] group-focus-visible:opacity-100 forced-colors:bg-[CanvasText] ${
-          vertical ? 'h-full max-h-16 w-1' : 'h-1 w-full max-w-16'
+        className={`rounded-full bg-[var(--desk-label)] opacity-60 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:bg-[var(--focus)] group-focus-visible:opacity-100 forced-colors:bg-[CanvasText] forced-colors:opacity-100 ${
+          vertical ? 'h-full max-h-20 w-1.5' : 'h-1.5 w-full max-w-20'
         }`}
       />
     </div>
@@ -171,18 +174,13 @@ export function Canvas({
                 top: `calc(${String(a.top * 100)}% + 3px)`,
                 width: `calc(${String((a.right - a.left) * 100)}% - 6px)`,
                 height: `calc(${String((a.bottom - a.top) * 100)}% - 6px)`,
-                border: `${on ? '3px' : '2px'} solid var(--zone-${z.color})`,
-                background: `color-mix(in srgb, var(--zone-${z.color}) ${on ? '24%' : '12%'}, transparent)`,
+                border: `${on ? '3px' : '2px'} solid ${zoneTint(z.color)}`,
+                background: `color-mix(in srgb, ${zoneTint(z.color)} ${on ? '24%' : '12%'}, transparent)`,
               }}
             >
               <span
                 className="zone-chip grid min-w-6 place-items-center rounded-full px-2 py-0.5 text-caption font-bold tabular-nums"
-                style={
-                  {
-                    '--chip': `var(--zone-${z.color})`,
-                    '--on-chip': z.color === 'saffron' ? 'var(--on-zone-saffron)' : 'var(--on-zone)',
-                  } as CSSProperties
-                }
+                style={zoneChip(z.color)}
               >
                 {z.name}
               </span>

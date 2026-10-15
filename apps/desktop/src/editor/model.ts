@@ -2,7 +2,7 @@
 // them, splitting, removing, presets. The engine checks the result again when it is saved
 // (crates/mosaik-core/src/editing.rs); the limits here match it.
 
-import type { RatioRect, ZoneColor, ZoneEdit } from '../protocol';
+import { type RatioRect, ZONE_COLORS, type ZoneColor, type ZoneEdit } from '../protocol';
 
 /** The smallest a zone may be, as a fraction of its monitor's work area on each side. */
 export const MIN_ZONE = 0.05;
@@ -11,8 +11,6 @@ export const MAX_ZONES = 16;
 /** Lines land on a grid of 48ths of the work area. */
 const STEPS = 48;
 export const GRID = 1 / STEPS;
-
-export const COLORS: readonly ZoneColor[] = ['lapis', 'verdigris', 'saffron', 'madder', 'slate'];
 
 /** A zone being edited: `key` names it in the editor, `id` in the workspace (null when new). */
 export interface Draft extends ZoneEdit {
@@ -71,11 +69,11 @@ export function numbered(drafts: Draft[], monitors: readonly string[]): Draft[] 
 
 /** The colour least used on the monitor, so neighbours differ. */
 function freeColor(drafts: Draft[], monitor: string): ZoneColor {
-  const counts = new Map<ZoneColor, number>(COLORS.map((c) => [c, 0]));
+  const counts = new Map<ZoneColor, number>(ZONE_COLORS.map((c) => [c, 0]));
   for (const d of drafts) if (d.monitor === monitor) counts.set(d.color, (counts.get(d.color) ?? 0) + 1);
   let best: ZoneColor = 'lapis';
   let fewest = Number.POSITIVE_INFINITY;
-  for (const c of COLORS) {
+  for (const c of ZONE_COLORS) {
     const n = counts.get(c) ?? 0;
     if (n < fewest) {
       best = c;

@@ -10,6 +10,8 @@
 // to permute them"). Without a mouse, Enter (or a click) picks a window and Enter on another
 // window, or on an empty zone, puts it there; Escape lets go. Each window keeps its colour when
 // it moves, as a tile moved in a mosaic; each zone keeps its number, which says where it is.
+//
+// A suggested workspace has no zones until it opens: its picture shows the apps it starts.
 
 import {
   type CSSProperties,
@@ -21,7 +23,18 @@ import {
 } from 'react';
 
 import { AppIcon } from './icons';
-import type { ArrangePreview, PreviewWindow, PreviewZone, Rect, ZoneColor } from './protocol';
+import type { ArrangePreview, PreviewWindow, PreviewZone, Rect } from './protocol';
+import { zoneChip, zoneTint } from './ui';
+
+/** The main screen's work area when Mosaïk has not said yet: a common one. */
+const SOME_SCREEN: Rect = { left: 0, top: 0, right: 1920, bottom: 1032 };
+
+/** The picture's size: as wide as there is room for, and never so tall that what is below it is
+ * out of sight in a small window (`tallest`, in percent of the window's height). */
+function deskSize(area: Rect, tallest: number): CSSProperties {
+  const ratio = (area.right - area.left) / Math.max(1, area.bottom - area.top);
+  return { aspectRatio: String(ratio), width: `min(100%, calc(${String(tallest)}vh * ${String(ratio)}))` };
+}
 
 /** Where `r` sits in `area`, as percentages for CSS. */
 function place(r: Rect, area: Rect) {
@@ -97,8 +110,6 @@ export function moved(preview: ArrangePreview, window: number, zone: number): Ar
   };
 }
 
-const tint = (color: ZoneColor) => `var(--zone-${color})`;
-
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** A window being dragged: how far the pointer went, and the zone it is over (not its own). */
@@ -113,7 +124,7 @@ export function Screen({
   preview,
   unread = false,
   className = '',
-  tallest = 52,
+  tallest = 44,
   onMove,
   onPick,
 }: {
@@ -130,8 +141,7 @@ export function Screen({
   /** The window picked to be put elsewhere (its app's name), or none any more. */
   onPick?: (label: string | null) => void;
 }) {
-  const area = preview?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
-  const ratio = (area.right - area.left) / Math.max(1, area.bottom - area.top);
+  const area = preview?.work_area ?? SOME_SCREEN;
   const shown = (preview?.windows ?? []).map((w, i) => ({ w, i })).filter(({ w }) => !w.minimized && w.then);
   const empty = preview !== null && preview.windows.length === 0;
   const movable = onMove !== undefined && preview !== null;
@@ -257,9 +267,7 @@ export function Screen({
   return (
     <div
       className={`desk relative overflow-hidden rounded-[18px] forced-colors:border forced-colors:border-[CanvasText] ${className}`}
-      // As wide as there is room for, and never so tall that the layouts below it are out of
-      // sight in a small window.
-      style={{ aspectRatio: String(ratio), width: `min(100%, calc(${String(tallest)}vh * ${String(ratio)}))` }}
+      style={deskSize(area, tallest)}
       role="group"
       aria-label={label}
       aria-busy={(preview === null && !unread) || undefined}
@@ -345,16 +353,16 @@ export function Screen({
               }`}
               style={{
                 // Each window a tile lit by its zone's colour, as in a mosaic.
-                borderColor: zone ? `color-mix(in srgb, ${tint(zone.color)} 70%, transparent)` : 'var(--desk-line)',
+                borderColor: zone ? `color-mix(in srgb, ${zoneTint(zone.color)} 70%, transparent)` : 'var(--desk-line)',
                 background: w.starting
                   ? 'transparent'
                   : zone
-                    ? `linear-gradient(180deg, color-mix(in srgb, ${tint(zone.color)} 18%, var(--desk-window)), var(--desk-window) 75%)`
+                    ? `linear-gradient(180deg, color-mix(in srgb, ${zoneTint(zone.color)} 18%, var(--desk-window)), var(--desk-window) 75%)`
                     : 'var(--desk-window)',
               }}
             >
               {tabs ? (
-                <span className="flex h-[15px] min-w-0 shrink-0 items-end gap-px px-1 pt-[2px]">
+                <span className="flex h-[19px] min-w-0 shrink-0 items-end gap-px px-1 pt-[2px]">
                   {tabs.map((t, k) => (
                     <span
                       key={`${t.label}-${String(k)}`}
@@ -362,8 +370,8 @@ export function Screen({
                         t.shown ? 'bg-[var(--desk-bar)]' : 'opacity-60'
                       }`}
                     >
-                      <AppIcon icon={t.icon} size={9} />
-                      <span className="hidden min-w-0 truncate text-[8.5px] leading-none font-semibold text-[var(--desk-text)] @[160px]:block">
+                      <AppIcon icon={t.icon} size={11} />
+                      <span className="hidden min-w-0 truncate text-[11px] leading-none font-semibold text-[var(--desk-text)] @[180px]:block">
                         {t.label}
                       </span>
                     </span>
@@ -371,30 +379,25 @@ export function Screen({
                 </span>
               ) : null}
               <span
-                className={`flex h-[19px] min-w-0 shrink-0 items-center gap-1.5 px-1.5 ${
+                className={`flex h-[23px] min-w-0 shrink-0 items-center gap-1.5 px-1.5 ${
                   w.starting ? '' : 'bg-[var(--desk-bar)]'
                 }`}
               >
-                <AppIcon icon={w.icon} size={12} />
-                <span className="min-w-0 flex-1 truncate text-left text-[10.5px] leading-none font-semibold text-[var(--desk-text)]">
+                <AppIcon icon={w.icon} size={13} />
+                <span className="min-w-0 flex-1 truncate text-left text-[12px] leading-none font-semibold text-[var(--desk-text)]">
                   {w.label}
                 </span>
                 {zone ? (
                   <span
-                    className="zone-chip hidden min-w-[15px] shrink-0 rounded-full px-1 text-center text-[9.5px] leading-[13px] font-bold tabular-nums @[110px]:block"
-                    style={
-                      {
-                        '--chip': tint(zone.color),
-                        '--on-chip': zone.color === 'saffron' ? 'var(--on-zone-saffron)' : 'var(--on-zone)',
-                      } as CSSProperties
-                    }
+                    className="zone-chip hidden min-w-[17px] shrink-0 rounded-full px-1 text-center text-[11px] leading-[16px] font-bold tabular-nums @[110px]:block"
+                    style={zoneChip(zone.color)}
                   >
                     {zone.name}
                   </span>
                 ) : null}
               </span>
               {w.starting ? (
-                <span className="m-auto px-1 text-center text-[10px] leading-tight text-[var(--desk-label)]">
+                <span className="m-auto truncate px-1 text-center text-[11px] leading-tight text-[var(--desk-label)]">
                   Opens here
                 </span>
               ) : null}
@@ -454,6 +457,42 @@ export function Screen({
           Mosaïk could not read your screen.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** A suggested workspace's apps on the desk: dashed, as apps that will start are drawn, and not in
+ * zones yet, since Mosaïk lays them out for their task once they are open. */
+export function AppsToStart({
+  name,
+  apps,
+  icons,
+  area,
+  tallest = 44,
+}: {
+  name: string;
+  apps: string[];
+  icons: (string | null)[];
+  /** The main screen's work area, for the picture's shape; null while Mosaïk has not said. */
+  area: Rect | null;
+  tallest?: number;
+}) {
+  return (
+    <div
+      className="desk relative grid place-items-center overflow-hidden rounded-[18px] p-6 forced-colors:border forced-colors:border-[CanvasText]"
+      style={deskSize(area ?? SOME_SCREEN, tallest)}
+    >
+      <ul aria-label={`Apps of “${name}”`} className="flex max-w-[34rem] flex-wrap justify-center gap-2">
+        {apps.map((app, i) => (
+          <li
+            key={`${app}-${String(i)}`}
+            className="flex min-h-10 items-center gap-2 rounded-[9px] border border-dashed border-[var(--desk-label)] px-3 text-small font-semibold text-[var(--desk-text)]"
+          >
+            <AppIcon icon={icons[i] ?? null} size={18} />
+            {app}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

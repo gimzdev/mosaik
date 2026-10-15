@@ -17,8 +17,8 @@ async function windowDoesNotScroll(page: Page) {
 /** Words shown on the page (the announcer says the same words to screen readers, outside it). */
 const shown = (page: Page, text: string) => page.locator('main').getByText(text, { exact: true });
 
-/** The stand-in's screen as the smart layout would leave it. */
-const SMART = 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 4, Slack in zone 3.';
+/** The stand-in's screen as the automatic layout would leave it. */
+const AUTO = 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 4, Slack in zone 3.';
 const arrange = (page: Page) => page.getByRole('button', { name: 'Arrange', exact: true });
 
 /** Opens a workspace's page from its card's menu on Home. */
@@ -36,21 +36,47 @@ async function editZones(page: Page) {
 }
 
 test.describe('Home', () => {
-  test('shows the smart layout for the screen, Arrange and the ten layouts, and is accessible', async ({ page }) => {
+  test('shows the automatic layout for the screen, Arrange and the layouts, and is accessible', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
-    await expect(shown(page, 'Smart layout for coding')).toBeVisible();
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
+    await expect(shown(page, 'Automatic layout for coding. Nothing moves until you press Arrange.')).toBeVisible();
+    await expect(shown(page, 'Drag a window onto another to swap them.')).toBeVisible();
     const layouts = page.getByRole('region', { name: 'Your screen' }).getByRole('radio');
-    await expect(layouts).toHaveCount(11);
-    await expect(page.getByRole('radio', { name: 'Smart' })).toBeChecked();
+    await expect(layouts).toHaveCount(6);
+    await expect(page.getByRole('radio', { name: 'Automatic' })).toBeChecked();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await accessible(page);
     await windowDoesNotScroll(page);
   });
 
+  test('the other five layouts are under More layouts, and the one chosen there shows in its place', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
+    await page.getByRole('button', { name: 'More layouts' }).click();
+    const more = page.getByRole('group', { name: 'More layouts' });
+    await expect(more.getByRole('radio')).toHaveCount(5);
+    await expect(more.getByRole('radio', { name: 'Side + main' })).toBeFocused();
+    await accessible(page);
+    // The arrow keys choose, and the picture follows; Enter closes the list.
+    await page.keyboard.press('ArrowDown');
+    await expect(more.getByRole('radio', { name: 'Stack + half' })).toBeChecked();
+    await expect(shown(page, 'Stack + half. Nothing moves until you press Arrange.')).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(more).toBeHidden();
+    const button = page.getByRole('button', { name: 'More layouts: Stack + half' });
+    await expect(button).toBeFocused();
+    await button.click();
+    // The radio button covers the whole line: a click anywhere on it lands on the radio.
+    await page.getByRole('group', { name: 'More layouts' }).getByRole('radio', { name: 'Three rows' }).click();
+    await expect(page.getByRole('button', { name: 'More layouts: Three rows' })).toBeVisible();
+    await expect(shown(page, 'Three rows. Nothing moves until you press Arrange.')).toBeVisible();
+  });
+
   test('a layout shows where the windows would go; Arrange puts them there; Undo puts them back', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
     await page.getByRole('radio', { name: 'Thirds' }).check();
     await expect(shown(page, 'Slack will be minimized.')).toBeVisible();
     await expect(
@@ -67,7 +93,7 @@ test.describe('Home', () => {
 
   test('Arrange lays the screen out for its task, and can be undone', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
     await arrange(page).click();
     await expect(shown(page, 'Arranged 4 windows for coding.')).toBeVisible();
     await expect(shown(page, 'Your windows are already like this.')).toBeHidden();
@@ -78,7 +104,7 @@ test.describe('Home', () => {
   test('a window dragged onto another trades places with it, and Arrange puts them so', async ({ page }) => {
     // The owner: "we should be able to drag drop apps to permute them".
     await page.goto('/');
-    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
     // Picked by where they start: the names say their zones, which change as they move.
     const code = page.getByRole('button', { name: /^Visual Studio Code in zone/ });
     const browser = page.getByRole('button', { name: /^Google Chrome in zone/ });
@@ -96,11 +122,11 @@ test.describe('Home', () => {
         return c && d ? Math.abs(c.x - b.x) < 3 && Math.abs(d.x - a.x) < 3 && Math.abs(c.y - b.y) < 3 : false;
       })
       .toBe(true);
-    await expect(page.getByRole('button', { name: 'Reset' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Undo swaps' })).toBeVisible();
     await accessible(page);
     await arrange(page).click();
     await expect(shown(page, 'Arranged 4 windows for coding.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Reset' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Undo swaps' })).toBeHidden();
     // Arranged as they were put: the picture shows them there now.
     const [c, d] = [await code.boundingBox(), await browser.boundingBox()];
     expect(c && Math.abs(c.x - b.x) < 3).toBe(true);
@@ -109,8 +135,8 @@ test.describe('Home', () => {
 
   test('the arrow keys go through the layouts, and the picture follows', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
-    await page.getByRole('radio', { name: 'Smart' }).focus();
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
+    await page.getByRole('radio', { name: 'Automatic' }).focus();
     await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('radio', { name: 'Halves' })).toBeChecked();
     await expect(page.getByRole('radio', { name: 'Halves' })).toBeFocused();
@@ -122,44 +148,84 @@ test.describe('Home', () => {
     // anim as preview and show an open button".
     await page.goto('/');
     const list = page.getByRole('list', { name: 'Workspaces' });
-    await expect(list.getByRole('button', { name: 'Ship the release (open now)', exact: true })).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Ship the release (on screen)', exact: true })).toBeVisible();
     await list.getByRole('button', { name: 'Brand refresh', exact: true }).click();
     await expect(
       page.getByRole('group', {
         name: 'Figma starts in zone 1, Notepad starts in zone 2, Visual Studio Code minimized, Google Chrome minimized, Windows Terminal minimized, Slack minimized.',
       }),
     ).toBeVisible();
-    await expect(shown(page, 'As “Brand refresh” opens')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Preview of “Brand refresh”' })).toBeVisible();
+    await expect(shown(page, 'Nothing moves until you press Open.')).toBeVisible();
     await accessible(page);
+    // Clicked again, it stays; Esc, or Back, shows the screen again.
+    await list.getByRole('button', { name: 'Brand refresh', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Open “Brand refresh”' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
+    await list.getByRole('button', { name: 'Brand refresh', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to my screen' }).click();
+    await expect(arrange(page)).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Brand refresh', exact: true })).toBeFocused();
+    await list.getByRole('button', { name: 'Brand refresh', exact: true }).click();
     await page.getByRole('button', { name: 'Open “Brand refresh”' }).click();
     await expect(shown(page, 'Opened “Brand refresh”.')).toBeVisible();
-    await expect(list.getByRole('button', { name: 'Brand refresh (open now)', exact: true })).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Brand refresh (on screen)', exact: true })).toBeVisible();
     await expect(arrange(page)).toBeVisible();
   });
 
-  test('a suggested workspace opens its apps in one click, and stays as a workspace', async ({ page }) => {
+  test('a double-click on a workspace opens it at once', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: /^Open the suggested workspace “Coding”/ }).click();
+    const list = page.getByRole('list', { name: 'Workspaces' });
+    await list.getByRole('button', { name: 'Brand refresh', exact: true }).dblclick();
+    await expect(shown(page, 'Opened “Brand refresh”.')).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Brand refresh (on screen)', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
+  });
+
+  test('a suggested workspace shows what it starts, and starts it with Start these apps', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /^Coding \(suggested\)/ }).click();
+    await expect(page.getByRole('heading', { name: 'Preview of “Coding”' })).toBeVisible();
+    await expect(
+      shown(
+        page,
+        'Coding starts Visual Studio Code, Terminal, Google Chrome, Claude and File Explorer, and puts them in their zones.',
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Apps of “Coding”' }).getByRole('listitem')).toHaveCount(5);
+    await accessible(page);
+    await page.getByRole('button', { name: 'Start these apps' }).click();
     await expect(shown(page, 'Opened “Coding”.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Coding (open now)', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Open the suggested workspace “Coding”/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Coding (on screen)', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Coding \(suggested\)/ })).toHaveCount(0);
   });
 
   test('what is on screen is kept as a new workspace, under a free name', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Save layout' }).click();
+    await page.getByRole('button', { name: 'Save as workspace' }).click();
     const name = page.getByRole('textbox', { name: 'Name the new workspace' });
     await expect(name).toHaveValue('Workspace 1');
     await expect(name).toBeFocused();
-    await name.fill('Brand refresh');
+    await name.fill('Ship the release');
     await page.keyboard.press('Enter');
     await expect(
-      shown(page, '“Brand refresh” already exists. Pick another name, or use Save current layout here in its menu.'),
+      shown(
+        page,
+        '“Ship the release” already exists. Pick another name, or open its ⋯ menu and choose Replace with what’s on screen.',
+      ),
     ).toBeVisible();
+    await name.fill('Brand refresh');
+    await page.keyboard.press('Enter');
+    await expect(shown(page, '“Brand refresh” already exists. Pick another name.')).toBeVisible();
     await name.fill('Review');
     await page.keyboard.press('Enter');
-    await expect(shown(page, 'Saved “Review”.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Review (open now)', exact: true })).toBeVisible();
+    // Said under the picture, as everything done on Home is.
+    await expect(
+      page.getByRole('region', { name: 'Your screen' }).getByText('Saved “Review”.', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Review (on screen)', exact: true })).toBeVisible();
     await accessible(page);
   });
 
@@ -223,7 +289,7 @@ test.describe('a workspace’s page', () => {
 });
 
 test.describe('Settings', () => {
-  test('shows what most people change, the rest under Advanced, and About last', async ({ page }) => {
+  test('shows what most people change, the rest under More settings, and About last', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Settings' }).click();
     await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeFocused();
@@ -231,8 +297,10 @@ test.describe('Settings', () => {
       await expect(page.getByRole('region', { name })).toBeVisible();
     }
     await expect(page.getByRole('switch', { name: 'Start a workspace’s closed apps' })).toBeHidden();
-    await page.getByRole('button', { name: 'Advanced' }).click();
+    await expect(page.getByRole('radiogroup', { name: 'Zone tags' })).toBeHidden();
+    await page.getByRole('button', { name: 'More settings' }).click();
     await expect(page.getByRole('switch', { name: 'Start a workspace’s closed apps' })).toBeVisible();
+    await expect(page.getByRole('radiogroup', { name: 'Zone tags' })).toBeVisible();
     await accessible(page);
     await windowDoesNotScroll(page);
   });
@@ -246,7 +314,7 @@ test.describe('Settings', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await accessible(page);
     await page.getByRole('button', { name: 'Home' }).click();
-    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
     await accessible(page);
   });
 
@@ -277,7 +345,7 @@ test.describe('the keyboard', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeFocused();
     await page.keyboard.press('Shift+Tab');
-    await expect(page.getByRole('button', { name: /^Open the switcher/ })).toBeFocused();
+    await expect(page.getByRole('button', { name: /^Switch workspace/ })).toBeFocused();
     await page.keyboard.press('Shift+Tab');
     await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();
     await page.keyboard.press('Enter');
@@ -364,10 +432,24 @@ test.describe('the zone editor', () => {
 
 test('the first run has no tour: Home shows what Arrange will do, and Mosaïk starts with Windows', async ({ page }) => {
   await page.goto('/?first=1');
-  await expect(page.getByRole('group', { name: SMART })).toBeVisible();
+  await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  // A word of welcome, and the workspaces made of the windows open, each until put away.
+  const welcome = shown(
+    page,
+    'Mosaïk tidies your windows. Choose a layout, press Arrange, and Undo puts everything back. The thin line on the right edge of your screen opens the same choices.',
+  );
+  await expect(welcome).toBeVisible();
+  await expect(shown(page, 'Made from the windows you had open. Delete any you don’t need.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Coding', exact: true })).toBeVisible();
+  await accessible(page);
+  await page.getByRole('region', { name: 'Your screen' }).getByRole('button', { name: 'Got it' }).click();
+  await expect(welcome).toBeHidden();
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('switch', { name: 'Start with Windows' })).toBeChecked();
+  await page.getByRole('button', { name: 'Home' }).click();
+  await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
+  await expect(welcome).toBeHidden();
 });
 
 test('Mosaïk’s notes wait behind a button, never over the page', async ({ page }) => {
@@ -385,9 +467,11 @@ test('Mosaïk’s notes wait behind a button, never over the page', async ({ pag
 
 test('with nothing open and nothing saved, Home says what to do', async ({ page }) => {
   await page.goto('/?empty=1&nowindows=1');
-  await expect(shown(page, 'Open some apps first')).toBeVisible();
+  await expect(shown(page, 'Open some apps first.')).toBeVisible();
   await expect(arrange(page)).toBeDisabled();
-  await expect(shown(page, 'Arrange your windows, then save the layout: it opens again in one click.')).toBeVisible();
+  await expect(
+    shown(page, 'Arrange your windows, then save them as a workspace to bring them back later.'),
+  ).toBeVisible();
   await accessible(page);
 });
 
@@ -396,12 +480,18 @@ test.describe('at the smallest window size', () => {
 
   test('every page is usable and accessible', async ({ page }) => {
     await page.goto('/?second=1');
-    await expect(page.getByRole('group', { name: SMART })).toBeVisible();
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
     await expect(page.getByRole('radio', { name: 'Halves' })).toBeInViewport();
+    // The workspaces beside the picture, not under it.
+    const picture = await page.getByRole('group', { name: AUTO }).boundingBox();
+    const column = await page.getByRole('region', { name: 'Workspaces' }).boundingBox();
+    expect(picture && column && column.x >= picture.x + picture.width && column.y < picture.y + picture.height).toBe(
+      true,
+    );
     await accessible(page);
     await windowDoesNotScroll(page);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await page.getByRole('button', { name: 'Advanced' }).click();
+    await page.getByRole('button', { name: 'More settings' }).click();
     await accessible(page);
     await windowDoesNotScroll(page);
     await page.getByRole('button', { name: 'Home', exact: true }).click();

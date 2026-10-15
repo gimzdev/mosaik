@@ -62,10 +62,33 @@ function page(
 const saved = (save: ReturnType<typeof saver>) => save.mock.calls.map(([s]) => s);
 
 describe('Settings', () => {
+  it('starts with what a beginner changes first, in that order', () => {
+    page(saver());
+    const names = screen
+      .getAllByRole('switch')
+      .map((s) => s.getAttribute('id'))
+      .map((id) => document.querySelector(`label[for="${id ?? ''}"]`)?.textContent);
+    expect(names).toEqual([
+      'Start with Windows',
+      'Snap windows to zones',
+      'Show zone numbers on windows',
+      'Coloured borders',
+    ]);
+    const general = screen.getByRole('region', { name: 'General' });
+    expect(within(general).getByRole('radiogroup', { name: 'Theme' })).toBeInTheDocument();
+    expect(within(general).getByText('Shortcut to switch workspace')).toBeInTheDocument();
+    expect(within(general).getByText('Shows your workspaces over any app.')).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'Side menu' }))
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('value')),
+    ).toEqual(['right', 'left', 'off']);
+  });
+
   it('saves a switch at once, and says so to screen readers', async () => {
     const save = saver();
     page(save);
-    await userEvent.click(screen.getByRole('switch', { name: 'Snap to zones' }));
+    await userEvent.click(screen.getByRole('switch', { name: 'Snap windows to zones' }));
     expect(saved(save)).toContainEqual({ ...setUp, snap: { ...setUp.snap, enabled: !setUp.snap.enabled } });
     await waitFor(() => {
       expect(said()).toBe('Settings saved.');
@@ -127,48 +150,67 @@ describe('Settings', () => {
     ).toBeInTheDocument();
   });
 
-  it('puts zone tags in the title bar, above it, or nowhere', async () => {
+  it('shows zone numbers on windows or not, in the title bar or above it as chosen under More settings', async () => {
     const save = saver();
-    page(save, { settings: { ...setUp, frames: { ...setUp.frames, show_tags: true, tags_in_title_bar: true } } });
+    const settings = { ...setUp, frames: { ...setUp.frames, show_tags: true, tags_in_title_bar: true } };
+    page(save, { settings });
+    const numbers = screen.getByRole('switch', { name: 'Show zone numbers on windows' });
+    expect(numbers).toBeChecked();
+    expect(numbers).toHaveAccessibleDescription(
+      'Each window shows its zone’s number. Drop a window on a number to make tabs.',
+    );
+    await userEvent.click(numbers);
+    expect(saved(save)[0]?.frames).toMatchObject({ show_tags: false, tags_in_title_bar: true });
+    await userEvent.click(screen.getByRole('button', { name: 'More settings' }));
     const tags = screen.getByRole('radiogroup', { name: 'Zone tags' });
+    expect(
+      within(tags)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('value')),
+    ).toEqual(['title', 'above']);
     expect(within(tags).getByRole('radio', { name: 'Title bar' })).toBeChecked();
     await userEvent.click(within(tags).getByRole('radio', { name: 'Above' }));
-    expect(saved(save)[0]?.frames).toMatchObject({ show_tags: true, tags_in_title_bar: false });
-    await userEvent.click(within(tags).getByRole('radio', { name: 'Off' }));
-    expect(saved(save)[1]?.frames).toMatchObject({ show_tags: false });
+    expect(saved(save)[1]?.frames).toMatchObject({ show_tags: true, tags_in_title_bar: false });
   });
 
-  it('shows the switcher’s shortcut, and why it could not be used', () => {
+  it('shows the shortcut that switches workspace, and why it could not be used', () => {
     page(saver(), {
       hotkey: { shortcut: 'Win+Alt+Space', registered: false, problem: 'Another app uses Win+Alt+Space.' },
     });
-    expect(screen.getByRole('button', { name: 'Add a shortcut: Open the switcher' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a shortcut: Shortcut to switch workspace' })).toBeInTheDocument();
     expect(screen.getAllByRole('alert').map((a) => a.textContent)).toContain('Another app uses Win+Alt+Space.');
   });
 
-  it('saves a new switcher shortcut', async () => {
+  it('saves a new shortcut to switch workspace', async () => {
     const save = saver();
     page(save);
-    await userEvent.click(screen.getByRole('button', { name: 'Change: Open the switcher' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Change: Shortcut to switch workspace' }));
     await userEvent.keyboard('{Meta>}{Alt>}m{/Alt}{/Meta}');
     await userEvent.click(await screen.findByRole('button', { name: 'Save shortcut' }));
     expect(saved(save)).toContainEqual({ ...setUp, switcher_hotkey: 'Win+Alt+M' });
   });
 
-  it('keeps the rest under Advanced, closed until asked', async () => {
+  it('keeps the rest under More settings, closed until asked', async () => {
     const save = saver();
     page(save);
-    const advanced = screen.getByRole('button', { name: 'Advanced' });
-    expect(advanced).toHaveAttribute('aria-expanded', 'false');
+    const more = screen.getByRole('button', { name: 'More settings' });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('switch', { name: 'Start a workspace’s closed apps' })).not.toBeInTheDocument();
-    await userEvent.click(advanced);
-    expect(advanced).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryByRole('radiogroup', { name: 'Holding Shift while dragging' })).not.toBeInTheDocument();
+    await userEvent.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
     await userEvent.click(screen.getByRole('switch', { name: 'Start a workspace’s closed apps' }));
     expect(saved(save)[0]?.switching.launch_missing).toBe(!setUp.switching.launch_missing);
     await userEvent.click(
       within(screen.getByRole('radiogroup', { name: 'Tabs not shown' })).getByRole('radio', { name: 'Minimized' }),
     );
     expect(saved(save)[1]?.tab_hiding).toBe('minimize');
+    await userEvent.click(
+      within(screen.getByRole('radiogroup', { name: 'Holding Shift while dragging' })).getByRole('radio', {
+        name: 'Snaps',
+      }),
+    );
+    expect(saved(save)[2]?.snap.invert_shift).toBe(true);
   });
 
   it('shows settings from a newer Mosaïk without letting them change', () => {

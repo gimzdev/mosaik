@@ -65,7 +65,7 @@ export function Notes({
         onClick={() => {
           setOpen((o) => !o);
         }}
-        className="inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+        className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2.5 text-small font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
       >
         <Glyph name="bell" size={15} />
         <span className="grid min-w-[1.15rem] place-items-center rounded-full bg-[var(--accent-fill)] px-1 text-caption leading-[1.15rem] text-[var(--on-accent)]">
@@ -78,7 +78,7 @@ export function Notes({
           aria-label="Notes"
           className="absolute top-full right-0 z-40 mt-2 flex max-h-[70vh] w-[22rem] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--raised)] shadow-[var(--shadow)]"
         >
-          <div className="flex items-center justify-between border-b border-[var(--line)] px-4 py-2.5">
+          <div className="flex items-center justify-between border-b border-[var(--line)] py-1 pr-1 pl-4">
             <h2 className="font-display text-heading font-semibold">Notes</h2>
             <button
               type="button"
@@ -86,7 +86,7 @@ export function Notes({
                 closeAll();
                 onClear();
               }}
-              className="rounded-md px-2 py-0.5 text-small font-semibold text-[var(--accent)] hover:bg-[var(--hover)]"
+              className="min-h-10 rounded-md px-3 text-small font-semibold text-[var(--accent)] hover:bg-[var(--hover)]"
             >
               Clear all
             </button>
@@ -105,7 +105,7 @@ export function Notes({
                     if (notes.length === 1) closeAll();
                     onDismiss(n.id);
                   }}
-                  className="grid size-7 shrink-0 place-items-center rounded-md text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                  className="-my-1.5 grid size-10 shrink-0 place-items-center rounded-md text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
                 >
                   <Glyph name="close" size={13} />
                 </button>

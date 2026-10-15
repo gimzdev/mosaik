@@ -3,9 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppSet, Command, Reply, WorkspaceSummary } from './protocol';
-import { done, failed, set, setsReply, shown, workspace, workspacesReply } from './test-fixtures';
+import { done, failed, set, setsReply, workspace, workspacesReply } from './test-fixtures';
 import { Announcer } from './ui';
-import { Workspaces } from './Workspaces';
+import { type Shown, type Sorted, type Target, Workspaces } from './Workspaces';
 
 const engine = vi.hoisted(() => ({
   request: vi.fn<(c: Command) => Promise<Reply>>(),
@@ -16,9 +16,17 @@ const engine = vi.hoisted(() => ({
 }));
 vi.mock('./engine', () => engine);
 
+/** The engine's "workspaces changed" event. */
+let changed: () => void = () => undefined;
+
 afterEach(cleanup);
 beforeEach(() => {
   engine.request.mockReset();
+  changed = () => undefined;
+  engine.onWorkspacesChanged.mockImplementation((callback) => {
+    changed = callback;
+    return () => undefined;
+  });
 });
 
 const ship = workspace({ id: 'ship', name: 'Ship', hotkey: 'Win+Alt+J' });
@@ -29,6 +37,9 @@ const coding = set({
   apps: ['Visual Studio Code', 'Terminal', 'Google Chrome'],
 });
 
+/** Commands after which the engine says the workspaces changed (crates/mosaik-engine/src/thread.rs). */
+const CHANGES: ReadonlySet<Command['cmd']> = new Set(['save', 'switch', 'open_set']);
+
 function answer(
   list: WorkspaceSummary[] = [ship, brand],
   sets: AppSet[] = [coding],
@@ -38,45 +49,64 @@ function answer(
   const asked: Command[] = [];
   engine.request.mockImplementation((c) => {
     asked.push(c);
-    const special = extra(c);
-    if (special) return Promise.resolve(special);
+    const reply = extra(c) ?? reply_(c);
+    if (CHANGES.has(c.cmd) && reply.reply !== 'error') setTimeout(changed, 0);
+    return Promise.resolve(reply);
+  });
+  function reply_(c: Command): Reply {
     switch (c.cmd) {
       case 'workspaces':
-        return Promise.resolve(workspacesReply(list, active));
+        return workspacesReply(list, active);
       case 'sets':
-        return Promise.resolve(setsReply(sets));
-      case 'switch':
-        return Promise.resolve(done(`Opened “${c.workspace}”.`));
-      case 'open_set':
-        return Promise.resolve(done('Opened “Coding”: 2 apps started.'));
+        return setsReply(sets);
       case 'save':
-        return Promise.resolve(done(`Saved “${c.workspace ?? 'Ship'}”.`));
+        return done(`Saved “${c.workspace ?? 'Ship'}”.`);
       default:
-        return Promise.resolve(done('Done.'));
+        return done('Done.');
     }
-  });
+  }
   return asked;
 }
 
-function render_(onEdit = vi.fn(), onEditZones = vi.fn(), onOpened = vi.fn(), picked: string | null = null) {
-  const onPick = vi.fn<(w: WorkspaceSummary) => void>();
+function render_(options: { shown?: Target | null; launching?: Target | null; sorted?: Sorted | null } = {}) {
+  const props = {
+    onEdit: vi.fn(),
+    onEditZones: vi.fn(),
+    onShow: vi.fn<(s: Shown) => void>(),
+    onOpen: vi.fn<(w: WorkspaceSummary) => void>(),
+    onSay: vi.fn<(text: string, error?: boolean) => void>(),
+    onSortedRead: vi.fn(),
+  };
   render(
     <Announcer>
-      <Workspaces picked={picked} onPick={onPick} onEdit={onEdit} onEditZones={onEditZones} onOpened={onOpened} />
+      <Workspaces
+        shown={options.shown ?? null}
+        launching={options.launching ?? null}
+        sorted={options.sorted ?? null}
+        {...props}
+      />
     </Announcer>,
   );
-  return { onEdit, onEditZones, onOpened, onPick };
+  return props;
 }
 
 const list = () => screen.getByRole('list', { name: 'Workspaces' });
 
+const wait = (ms: number) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const count = (asked: Command[], cmd: Command['cmd']) => asked.filter((c) => c.cmd === cmd).length;
+
 describe('the workspaces', () => {
-  it('shows each with its apps and shortcut, the one open marked', async () => {
+  it('shows each with its apps, the one on screen marked in quiet words', async () => {
     answer();
     render_();
-    const open = await screen.findByRole('button', { name: 'Ship (open now)' });
-    expect(within(open).getByText('Open now')).toBeInTheDocument();
-    expect(within(open).getByText('Win + Alt + J')).toBeInTheDocument();
+    const open = await screen.findByRole('button', { name: 'Ship (on screen)' });
+    expect(within(open).getByText('On screen')).toBeInTheDocument();
+    // The shortcut is on its page, not in the row.
+    expect(within(open).queryByText('Win + Alt + J')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Brand' })).toBeInTheDocument();
     // Apps show by their icons, read once for every app on the page.
     await waitFor(() => {
@@ -85,110 +115,144 @@ describe('the workspaces', () => {
     expect(engine.appIcons).toHaveBeenCalled();
   });
 
-  it('picks one in a click, for Home to show, without opening it', async () => {
+  it('shows one in a click, without opening it, and opens it in a double-click', async () => {
     // The owner: "we shouldnt open the workspace when clicking on it it should show it in the
     // anim as preview and show an open button".
     const asked = answer();
-    const { onPick } = render_();
+    const { onShow, onOpen } = render_();
     await userEvent.click(await screen.findByRole('button', { name: 'Brand' }));
-    expect(onPick).toHaveBeenCalledWith(brand);
+    expect(onShow).toHaveBeenCalledWith({ kind: 'workspace', workspace: brand });
+    expect(onOpen).not.toHaveBeenCalled();
     expect(asked.some((c) => c.cmd === 'switch')).toBe(false);
+    await userEvent.dblClick(screen.getByRole('button', { name: 'Brand' }));
+    expect(onOpen).toHaveBeenCalledWith(brand);
   });
 
-  it('marks the one Home shows', async () => {
+  it('marks the one Home shows, and the one being opened', async () => {
     answer();
-    render_(vi.fn(), vi.fn(), vi.fn(), 'brand');
-    expect(await screen.findByRole('button', { name: 'Brand' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Ship (open now)' })).toHaveAttribute('aria-pressed', 'false');
+    render_({ shown: { kind: 'workspace', id: 'brand' }, launching: { kind: 'workspace', id: 'brand' } });
+    const row = await screen.findByRole('button', { name: 'Brand' });
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+    expect(row).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('button', { name: 'Ship (on screen)' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('opens one from its menu, and says so where it was opened', async () => {
-    const asked = answer();
-    const { onOpened } = render_();
+  it('opens one from its menu', async () => {
+    answer();
+    const { onOpen } = render_();
     await userEvent.click(await screen.findByRole('button', { name: 'More for “Brand”' }));
     await userEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(asked).toContainEqual({ cmd: 'switch', workspace: 'brand' });
-    expect(await shown('Opened “brand”.')).toBeInTheDocument();
-    expect(onOpened).toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledWith(brand);
   });
 
-  it('says why one could not be opened', async () => {
-    answer([ship, brand], [], (c) => (c.cmd === 'switch' ? failed('Its monitor is gone.', 'Edit its zones.') : null));
-    render_();
-    await userEvent.click(await screen.findByRole('button', { name: 'More for “Brand”' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Its monitor is gone. Edit its zones.');
-  });
-
-  it('suggests workspaces from the apps installed, and opens one in a click', async () => {
+  it('suggests workspaces from the apps installed, and shows one in a click without starting it', async () => {
     const asked = answer();
-    render_();
+    const { onShow } = render_();
     const suggested = await screen.findByRole('button', {
-      name: 'Open the suggested workspace “Coding”: Visual Studio Code, Terminal, Google Chrome',
+      name: 'Coding (suggested): Visual Studio Code, Terminal, Google Chrome',
     });
     expect(within(suggested).getByText('3 apps that go together')).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Suggested workspaces' })).toContainElement(suggested);
     await userEvent.click(suggested);
-    expect(asked).toContainEqual({ cmd: 'open_set', set: 'coding' });
-    expect(await shown('Opened “Coding”: 2 apps started.')).toBeInTheDocument();
+    expect(onShow).toHaveBeenCalledWith({ kind: 'set', set: coding });
+    expect(asked.some((c) => c.cmd === 'open_set')).toBe(false);
   });
 
   it('does not suggest a set that is a workspace already', async () => {
     answer([ship], [{ ...coding, workspace: 'ship' }]);
     render_();
-    await screen.findByRole('button', { name: 'Ship (open now)' });
-    expect(screen.queryByRole('button', { name: /suggested workspace/ })).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: 'Ship (on screen)' });
+    expect(screen.queryByRole('button', { name: /\(suggested\)/ })).not.toBeInTheDocument();
   });
 
   it('keeps what is on screen as a new workspace, under a name that is free', async () => {
     const asked = answer();
-    render_();
-    await userEvent.click(await screen.findByRole('button', { name: 'Save layout' }));
+    const { onSay } = render_();
+    await userEvent.click(await screen.findByRole('button', { name: 'Save as workspace' }));
     const name = screen.getByRole('textbox', { name: 'Name the new workspace' });
     expect(name).toHaveValue('Workspace 1');
     await userEvent.clear(name);
     await userEvent.type(name, 'Ship');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-    // A name in use would replace that workspace: refused, nothing sent.
-    expect(screen.getByRole('alert')).toHaveTextContent('“Ship” already exists.');
+    // A name in use would replace that workspace: refused, nothing sent. Ship is on screen: its
+    // menu can take what is on screen.
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '“Ship” already exists. Pick another name, or open its ⋯ menu and choose Replace with what’s on screen.',
+    );
     expect(asked.some((c) => c.cmd === 'save')).toBe(false);
+    await userEvent.clear(name);
+    await userEvent.type(name, 'Brand');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    // Brand is not on screen: its menu has nothing to replace it with.
+    expect(screen.getByRole('alert')).toHaveTextContent(/^“Brand” already exists\. Pick another name\.$/);
     await userEvent.clear(name);
     await userEvent.type(name, 'Review{Enter}');
     expect(asked).toContainEqual({ cmd: 'save', workspace: 'Review' });
-    expect(await shown('Saved “Review”.')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(onSay).toHaveBeenCalledWith('Saved “Review”.');
+    });
     expect(screen.queryByRole('textbox', { name: 'Name the new workspace' })).not.toBeInTheDocument();
   });
 
   it('leaves saving with Escape', async () => {
     answer();
     render_();
-    await userEvent.click(await screen.findByRole('button', { name: 'Save layout' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Save as workspace' }));
     await userEvent.keyboard('{Escape}');
     expect(screen.queryByRole('textbox', { name: 'Name the new workspace' })).not.toBeInTheDocument();
   });
 
-  it('has the rest in each one’s menu: saving the open one again, its page, its zones', async () => {
+  it('has the rest in each one’s menu: replacing the one on screen, its page, its zones', async () => {
     const asked = answer();
-    const { onEdit, onEditZones } = render_();
+    const { onEdit, onEditZones, onSay } = render_();
     await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Save current layout here' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Replace with what’s on screen' }));
     expect(asked).toContainEqual({ cmd: 'save', workspace: null });
+    await waitFor(() => {
+      expect(onSay).toHaveBeenCalledWith('Saved “Ship”.');
+    });
     await userEvent.click(screen.getByRole('button', { name: 'More for “Ship”' }));
     await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(onEdit).toHaveBeenCalledWith('ship');
     await userEvent.click(screen.getByRole('button', { name: 'More for “Brand”' }));
-    // Only the open workspace can take what is on screen.
-    expect(screen.queryByRole('button', { name: 'Save current layout here' })).not.toBeInTheDocument();
+    // Only the workspace on screen can take what is on screen.
+    expect(screen.queryByRole('button', { name: 'Replace with what’s on screen' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Edit zones' }));
     expect(onEditZones).toHaveBeenCalledWith('brand');
   });
 
-  it('reads them again when they change elsewhere', async () => {
-    let changed: () => void = () => undefined;
-    engine.onWorkspacesChanged.mockImplementation((callback) => {
-      changed = callback;
-      return () => undefined;
+  it('says why the one on screen could not take what is on screen', async () => {
+    answer([ship, brand], [], (c) => (c.cmd === 'save' ? failed('There are no windows on screen to save.') : null));
+    const { onSay } = render_();
+    await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Replace with what’s on screen' }));
+    await waitFor(() => {
+      expect(onSay).toHaveBeenCalledWith('There are no windows on screen to save.', true);
     });
+  });
+
+  it('reads them once after its own change, and not for a burst of focus events', async () => {
+    const asked = answer();
+    render_();
+    await screen.findByRole('button', { name: 'Ship (on screen)' });
+    await wait(300);
+    const before = { workspaces: count(asked, 'workspaces'), sets: count(asked, 'sets') };
+    for (let i = 0; i < 3; i += 1) {
+      window.dispatchEvent(new Event('focus'));
+      await wait(40);
+    }
+    await wait(400);
+    // The workspaces change only by Mosaïk's say-so; the apps installed, rarely.
+    expect(count(asked, 'workspaces') - before.workspaces).toBe(0);
+    expect(count(asked, 'sets') - before.sets).toBe(0);
+    await userEvent.click(screen.getByRole('button', { name: 'More for “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Replace with what’s on screen' }));
+    await wait(400);
+    expect(count(asked, 'workspaces') - before.workspaces).toBe(1);
+    expect(count(asked, 'sets') - before.sets).toBe(1);
+  });
+
+  it('reads them again when they change elsewhere', async () => {
     let names = [ship];
     engine.request.mockImplementation((c) => {
       if (c.cmd === 'workspaces') return Promise.resolve(workspacesReply(names));
@@ -206,8 +270,28 @@ describe('the workspaces', () => {
     answer([], []);
     render_();
     expect(
-      await screen.findByText('Arrange your windows, then save the layout: it opens again in one click.'),
+      await screen.findByText('Arrange your windows, then save them as a workspace to bring them back later.'),
     ).toBeInTheDocument();
     expect(list()).toBeInTheDocument();
+  });
+
+  it('says the first run made workspaces of the windows open, until put away', async () => {
+    answer([ship, brand]);
+    const { onSortedRead } = render_({ sorted: { before: new Set(['brand']), error: null } });
+    const note = await screen.findByText('Made from the windows you had open. Delete any you don’t need.');
+    await userEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    expect(onSortedRead).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Got it' })).toHaveAccessibleDescription(note.textContent);
+  });
+
+  it('says nothing of the first run when it made no workspace, and why when it could not', async () => {
+    answer([ship]);
+    render_({ sorted: { before: new Set(['ship']), error: null } });
+    await screen.findByRole('button', { name: 'Ship (on screen)' });
+    expect(screen.queryByRole('button', { name: 'Got it' })).not.toBeInTheDocument();
+    cleanup();
+    answer([ship]);
+    render_({ sorted: { before: null, error: 'Workspaces cannot be saved: the disk is full.' } });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Workspaces cannot be saved: the disk is full.');
   });
 });
