@@ -30,6 +30,9 @@ const PRIVACY: &str = "https://xn--mosak-fta.com/conditions";
 const SOURCE: &str = "https://github.com/gimzdev/mosaik";
 /// How long the interface waits for the engine before showing "busy".
 const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long Mosaïk, asked to quit, waits for its interface to end it before it quits from its
+/// engine: longer than the engine takes to stop (3 s), so the two never run together.
+const EXIT_FALLBACK: Duration = Duration::from_secs(8);
 /// Exit code after Mosaïk has told the user why it could not start (the watchdog stays quiet).
 const STARTUP_FAILURE_REPORTED: i32 = 2;
 /// The tray icon, and its menu items that open a workspace: this prefix, then the workspace's id.
@@ -486,19 +489,25 @@ fn on_ui_event(handle: &AppHandle, event: UiEvent) {
         }
         UiEvent::Exit => h.exit(0),
     });
+    let reached = ran.is_ok();
     if let Err(e) = ran {
         tracing::error!(error = %e, "the interface thread is gone");
-        // Asked to close through every window it has (`taskkill` without /F, an installer), the
-        // window the interface's events go through closed too, so the interface cannot quit:
-        // Mosaïk quits from here, its engine putting back every window it hid first. Off the
-        // engine's thread, which this is called on and which has to stop.
-        if exit {
-            let h = handle.clone();
-            std::thread::spawn(move || {
-                shut_down(&h);
-                std::process::exit(0);
-            });
-        }
+    }
+    // Asked to close through every window it has (`taskkill` without /F, an installer), the
+    // window the interface's events go through may close first, and the request to quit with it
+    // (job 0150: the Store's 1.0.1 never quit). Unless the interface has ended the process by
+    // then, Mosaïk quits from here, its engine putting back every window it hid first. Off the
+    // engine's thread, which this is called on and which has to stop.
+    if exit {
+        let h = handle.clone();
+        std::thread::spawn(move || {
+            if reached {
+                std::thread::sleep(EXIT_FALLBACK);
+                tracing::warn!("the interface did not quit: Mosaïk quits from its engine");
+            }
+            shut_down(&h);
+            std::process::exit(0);
+        });
     }
 }
 
