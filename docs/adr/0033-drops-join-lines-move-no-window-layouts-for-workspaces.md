@@ -41,6 +41,14 @@ or it fits none, the drop changes nothing. Dropped onto another window, the two 
 places (ADR 0032), as on a workspace's picture. Hints: "Drag a window into a zone to add it
 there, onto another window to swap them, or drag a line to resize zones."
 
+**A zone keeps its colour through the user's moves** (job 0171: on the owner's PC, the half a
+window left took the colour of the window then in front of it, as each zone took the colour its
+own window wears). The colours of a picture with moves are those of the picture without them
+(`Plan::unmoved`), as the moves left them (`NewZone::color`): only two zones whose own windows
+trade places, or a zone and the empty zone its own window takes, trade colours (ADR 0032's tiles
+in a mosaic); a window joining a zone or leaving it, or a stacked window brought in front,
+changes none.
+
 **A line dragged changes where the zones are, never which windows are in them.** The plan finds
 the windows in the zones as the layout made them (or as they are on an arranged screen), then
 the zones take the places drawn, made to hold every window in them, those stacked behind too
@@ -83,7 +91,9 @@ window's bar (ADR 0024), with what to do instead: Save as workspace.
 
 - Protocol 12. An older engine sends no `installed`, and the page offers its open windows.
 - Core tests, each failing first on the code before: a drop onto a zone joins it behind its
-  windows (Thirds, several drops) and only where it moves no other window; on 6000 random
+  windows (Thirds, several drops) and only where it moves no other window; on windows wearing
+  colours, joins and trades leave every zone its colour but where two own windows trade (on 3987
+  random drops, 1164 changed a zone's colour before, none now); on 6000 random
   screens a line dragged moves no window out of its zone nor changes its place front to back; a
   line dragged on an arranged screen keeps the room a window stacked there needs; a layout picked
   keeps its windows' zones as the line moves; the owner's Coding on every layout, with and
@@ -91,7 +101,8 @@ window's bar (ADR 0024), with what to do instead: Save as workspace.
   Start menu app can be added, uninstallers and folders cannot. ADR 0032's tests that dropped
   onto a zone to trade now drop onto the window.
 - Interface tests: the first run makes its workspaces with nothing to read or put away, and a
-  sorting that failed waits in the notes; the picture before Mosaïk answers for a drop onto a zone; Home lays out a
+  sorting that failed waits in the notes; the stand-in keeps every zone's colour as windows join
+  others; the picture before Mosaïk answers for a drop onto a zone; Home lays out a
   workspace shown and undoes it; Like Windows leaves the window's theme to Windows; Add an app
   lists open and not open apps as one list, found by name, with the arrow keys; what each drop of
   the list asks. Playwright: a window dragged into another zone joins it and Move windows keeps

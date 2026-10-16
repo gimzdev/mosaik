@@ -433,8 +433,10 @@ pub struct NewZone {
     pub area: RatioRect,
     /// Its number, in reading order: "1" at the top left. It goes with the place.
     pub name: String,
-    /// Its colour: the n-th of the plan's zones. A window the user moved keeps the colour of the
-    /// zone it was in, as a tile moved in a mosaic keeps its own.
+    /// Its colour: the colour of the n-th zone of the plan without the user's moves
+    /// ([`Plan::unmoved`], [`zone_colors`]). A zone keeps its colour as windows join it or leave
+    /// it (ADR 0033); two zones whose own windows trade places trade colours, as tiles moved in
+    /// a mosaic keep theirs (ADR 0032).
     pub color: usize,
     /// The zone on screen it is again (step 0 of [`plan_moved`]), by index into the zones
     /// given: the colour it has there is the colour of the n-th zone ([`zone_colors`]).
@@ -443,8 +445,8 @@ pub struct NewZone {
 
 /// A window the user moved on the picture of the screen: unit `unit` into the `zone`-th of the
 /// zones the plan makes on `monitor` (in the plan's order, as the picture lists them), dropped
-/// `onto` the unit there it was put on. The two trade places; dropped onto the zone itself, the
-/// zone's own window takes its place (ADR 0032).
+/// `onto` the unit there it was put on. The two trade places (ADR 0032); dropped onto the zone
+/// itself, it joins the zone, behind its windows (ADR 0033).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Move {
     pub unit: usize,
@@ -482,6 +484,9 @@ pub struct Plan {
     /// own window first, then the windows stacked behind it, those used last first, as the
     /// user's trades left them. Only the order of the windows of one zone counts.
     pub order: Vec<usize>,
+    /// The plan without the user's moves, when they change it: the picture before them, whose
+    /// zones' colours the zones keep ([`zone_colors`]).
+    pub unmoved: Option<Box<Plan>>,
 }
 
 /// A zone of a picked layout, as the planner sees it.
@@ -1169,23 +1174,46 @@ pub fn plan_moved(
             .count();
         new_zones[i].name = (kept_before + n + 1).to_string();
     }
-    Plan {
+    let mut plan = Plan {
         new_zones,
         goes,
         gone,
         tasks,
         again,
         order,
+        unmoved: None,
+    };
+    // The picture before the moves, for the colours its zones keep, when the moves changed it.
+    if !moves.is_empty() {
+        let unmoved = plan_moved(units, zones, monitors, chosen, &[], stretched);
+        if unmoved != plan {
+            plan.unmoved = Some(Box::new(unmoved));
+        }
     }
+    plan
 }
 
 /// The colour of each of the plan's new zones: the colour its own window wears on screen (a
 /// window keeps its colour wherever it goes, as a tile moved in a mosaic keeps its own), else one
 /// a window stacked in it wears; else the colour it has on screen (a zone that is the screen's
-/// again, [`NewZone::kept`], its colour gone where the user's moves took it); else the plan's,
-/// after the `first` colours (the zones kept before them). Each colour once while there are
-/// colours left, the zones kept on screen beside the new ones counted.
+/// again, [`NewZone::kept`]); else the plan's, after the `first` colours (the zones kept before
+/// them). Each colour once while there are colours left, the zones kept on screen beside the new
+/// ones counted. With the user's moves, the colours the zones had without them, as the moves left
+/// them ([`NewZone::color`]): a zone a window joins or leaves keeps its colour (ADR 0033).
 pub fn zone_colors(plan: &Plan, units: &[Unit], zones: &[KeptZone], first: usize) -> Vec<ZoneColor> {
+    if let Some(unmoved) = &plan.unmoved {
+        let before = zone_colors(unmoved, units, zones, first);
+        return plan
+            .new_zones
+            .iter()
+            .map(|z| {
+                before
+                    .get(z.color)
+                    .copied()
+                    .unwrap_or_else(|| ZoneColor::nth(first + z.color))
+            })
+            .collect();
+    }
     let count = plan.new_zones.len();
     let staying: Vec<ZoneColor> = (0..zones.len())
         .filter(|i| !plan.gone.contains(i))
@@ -1401,8 +1429,8 @@ impl Placed<'_> {
 
     /// Units `a` and `b` (in a zone) trade places: their zones, own window or stacked, and their
     /// places front to back. When both are their zones' own windows, each zone's colour goes
-    /// with its window, as a tile moved in a mosaic. A window that was in no zone sends `b` to
-    /// the taskbar, to be stacked again.
+    /// with its window, as a tile moved in a mosaic; otherwise every zone keeps its colour. A
+    /// window that was in no zone sends `b` to the taskbar, to be stacked again.
     fn trade(&mut self, a: usize, b: usize) {
         let (qa, qb) = (self.own_zone(a), self.own_zone(b));
         let was = self.goes[a];
@@ -1436,7 +1464,8 @@ impl Placed<'_> {
     /// Unit `a` joins zone `r`, dropped onto the zone itself (ADR 0033: the owner, "it permutes
     /// with the app of welcoming zone instead of just adding it"): behind the windows there, or
     /// as its own window when it has none ([`Placed::take_empty`]). The zone it leaves keeps its
-    /// other windows, the one in front its own ([`own_the_lone`]), and both keep their colours.
+    /// other windows, the one in front its own ([`own_the_lone`]), and both keep their colours
+    /// ([`NewZone::color`]).
     fn join(&mut self, a: usize, r: usize) {
         if self.own.get(r).copied().flatten().is_none() {
             self.take_empty(a, r);
@@ -4166,6 +4195,231 @@ mod tests {
         assert_eq!(in_zone(&p, l), vec![claude]);
         assert_eq!(in_zone(&p, r), vec![terminal]);
         assert_eq!(colours(&p), colours(&base));
+    }
+
+    #[test]
+    fn a_window_joining_another_zone_leaves_every_zone_its_colour() {
+        // ADR 0033, job 0171 on the owner's PC: on a screen whose windows wear colours (an open
+        // workspace's), a window dropped onto the other half itself joined it, and the half it
+        // left took another colour: once without its own window, a zone showed the colour of
+        // the window now in front of it, or the plan's. Every zone keeps the colour it shows.
+        let area = |l: f64, t: f64, r: f64, b: f64| RatioRect::new(l, t, r, b).unwrap();
+        let zones = [
+            (area(0.0, 0.0, 0.5, 1.0), ZoneColor::Saffron),
+            (area(0.5, 0.0, 1.0, 0.5), ZoneColor::Verdigris),
+            (area(0.5, 0.5, 1.0, 1.0), ZoneColor::Madder),
+        ]
+        .map(|(area, color)| KeptZone {
+            monitor: 0,
+            area,
+            color,
+            arranged: false,
+            filled: true,
+        });
+        let at = |k: usize, exe: &str, label: &str| {
+            let mut u = unit(exe, label, zones[k].area.to_rect(WORK));
+            u.zone = Some(k);
+            u
+        };
+        let units = [
+            at(0, "claude.exe", "Claude"),
+            at(1, "chrome.exe", "Google Chrome"),
+            at(2, "windowsterminal.exe", "Windows Terminal"),
+        ];
+        let (claude, chrome, terminal) = (0, 1, 2);
+        let halves = Some(Chosen {
+            monitor: 0,
+            preset: Preset::Halves,
+        });
+        // Halves: Claude with Terminal behind it, in saffron; Chrome in green.
+        let base = plan_with(&units, &zones, &[WORK], halves);
+        let (left, right) = (zone_of(&base, claude), zone_of(&base, chrome));
+        assert_eq!(in_zone(&base, left), vec![claude, terminal]);
+        assert_eq!(in_zone(&base, right), vec![chrome]);
+        let shown = zone_colors(&base, &units, &zones, 0);
+        assert_eq!(
+            (shown[left], shown[right]),
+            (ZoneColor::Saffron, ZoneColor::Verdigris)
+        );
+        let k = |z: usize| on_main(&base).iter().position(|&x| x == z).unwrap();
+        let drop = |unit: usize, zone: usize| {
+            plan_moved(
+                &units,
+                &zones,
+                &[WORK],
+                halves,
+                &[Move {
+                    unit,
+                    monitor: 0,
+                    zone: k(zone),
+                    onto: None,
+                }],
+                None,
+            )
+        };
+        // Claude onto the right half, behind Chrome: Terminal, in red on screen, is the left
+        // half's own now, and the half stays saffron.
+        let p = drop(claude, right);
+        assert_eq!(in_zone(&p, right), vec![chrome, claude]);
+        assert_eq!(in_zone(&p, left), vec![terminal]);
+        assert_eq!(
+            zone_colors(&p, &units, &zones, 0),
+            shown,
+            "Claude joined the right half"
+        );
+        // Chrome onto the left half: the right half, empty, stays green.
+        let p = drop(chrome, left);
+        assert_eq!(in_zone(&p, left), vec![claude, terminal, chrome]);
+        assert!(in_zone(&p, right).is_empty());
+        assert_eq!(
+            zone_colors(&p, &units, &zones, 0),
+            shown,
+            "Chrome joined the left half"
+        );
+        // Terminal, stacked behind Claude, onto the right half.
+        let p = drop(terminal, right);
+        assert_eq!(in_zone(&p, right), vec![chrome, terminal]);
+        assert_eq!(in_zone(&p, left), vec![claude]);
+        assert_eq!(
+            zone_colors(&p, &units, &zones, 0),
+            shown,
+            "Terminal joined the right half"
+        );
+        // Trades too, unless both windows are their zones' own (then the colours go with them,
+        // ADR 0032): Terminal brought in front of Claude, and Chrome traded with Terminal.
+        let onto = |unit: usize, other: usize| {
+            plan_moved(
+                &units,
+                &zones,
+                &[WORK],
+                halves,
+                &[Move {
+                    unit,
+                    monitor: 0,
+                    zone: k(zone_of(&base, other)),
+                    onto: Some(other),
+                }],
+                None,
+            )
+        };
+        let p = onto(terminal, claude);
+        assert_eq!(in_zone(&p, left), vec![terminal, claude]);
+        assert_eq!(
+            zone_colors(&p, &units, &zones, 0),
+            shown,
+            "Terminal in front of Claude"
+        );
+        let p = onto(chrome, terminal);
+        assert_eq!(in_zone(&p, left), vec![claude, chrome]);
+        assert_eq!(in_zone(&p, right), vec![terminal]);
+        assert_eq!(
+            zone_colors(&p, &units, &zones, 0),
+            shown,
+            "Chrome traded with Terminal"
+        );
+        let p = onto(chrome, claude);
+        assert_eq!(in_zone(&p, left), vec![chrome, terminal]);
+        assert_eq!(in_zone(&p, right), vec![claude]);
+        let traded = zone_colors(&p, &units, &zones, 0);
+        assert_eq!(
+            (traded[left], traded[right]),
+            (shown[right], shown[left]),
+            "Chrome traded with Claude"
+        );
+    }
+
+    #[test]
+    fn random_drops_leave_the_zones_their_colours() {
+        // ADR 0033: on random screens whose windows wear colours (an open workspace's zones),
+        // with a layout picked or the task's, a window dropped onto a zone joins it and no zone
+        // changes colour; dropped onto another window, the two trade places, and only two zones
+        // whose own windows trade places trade colours (ADR 0032), as do a zone and the empty
+        // zone its own window takes.
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let (mut joins, mut trades) = (0, 0);
+        for case in 0..6000 {
+            let preset = Preset::ALL[rng.below(Preset::ALL.len())];
+            let first = rng.below(ZoneColor::ALL.len());
+            let zones: Vec<KeptZone> = preset
+                .zones()
+                .iter()
+                .enumerate()
+                .map(|(k, &area)| KeptZone {
+                    monitor: 0,
+                    area,
+                    color: ZoneColor::nth(first + k),
+                    arranged: false,
+                    filled: true,
+                })
+                .collect();
+            let units: Vec<Unit> = (0..2 + rng.below(6))
+                .map(|i| {
+                    let k = rng.below(zones.len());
+                    let mut u = unit(
+                        EXES[rng.below(EXES.len())],
+                        &format!("w{i}"),
+                        zones[k].area.to_rect(WORK),
+                    );
+                    u.zone = rng.chance(85).then_some(k);
+                    u
+                })
+                .collect();
+            let chosen = rng.chance(70).then(|| Chosen {
+                monitor: 0,
+                preset: Preset::ALL[rng.below(Preset::ALL.len())],
+            });
+            let base = plan_with(&units, &zones, &[WORK], chosen);
+            let on = on_main(&base);
+            let placed: Vec<usize> = (0..units.len())
+                .filter(|&u| matches!(base.goes[u], Goes::Zone(_)))
+                .collect();
+            if on.len() < 2 || placed.is_empty() {
+                continue;
+            }
+            let a = placed[rng.below(placed.len())];
+            let to = rng.below(on.len());
+            let (q, r) = (zone_of(&base, a), on[to]);
+            let there: Vec<usize> = in_zone(&base, r).into_iter().filter(|&x| x != a).collect();
+            let onto = (rng.chance(50) && !there.is_empty()).then(|| there[rng.below(there.len())]);
+            let p = plan_moved(
+                &units,
+                &zones,
+                &[WORK],
+                chosen,
+                &[Move {
+                    unit: a,
+                    monitor: 0,
+                    zone: to,
+                    onto,
+                }],
+                None,
+            );
+            let shown = zone_colors(&base, &units, &zones, 0);
+            let colours = zone_colors(&p, &units, &zones, 0);
+            let own = |z: usize| in_zone(&base, z).first().copied();
+            let mut wanted = shown.clone();
+            let changed = (p.goes.clone(), p.order.clone()) != (base.goes.clone(), base.order.clone());
+            let swap = match onto {
+                None => own(r).is_none() && own(q) == Some(a),
+                Some(b) => q != r && own(q) == Some(a) && own(r) == Some(b),
+            };
+            if changed && swap {
+                wanted.swap(q, r);
+            }
+            if changed {
+                if onto.is_some() {
+                    trades += 1;
+                } else {
+                    joins += 1;
+                }
+            }
+            assert_eq!(
+                colours, wanted,
+                "case {case}: unit {a} of zone {q} onto zone {r} (window {onto:?}); before {:?} {:?}, after {:?} {:?}",
+                base.goes, base.order, p.goes, p.order
+            );
+        }
+        assert!(joins > 1500 && trades > 1500, "{joins} joins, {trades} trades");
     }
 
     #[test]

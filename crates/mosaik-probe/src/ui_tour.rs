@@ -365,10 +365,29 @@ impl Tour {
         self.click(&more)
     }
 
-    /// Picks `item` in the menu open now.
+    /// Picks `item` in the menu open now. A click the page does not take (the item still there
+    /// after it: job 0171, once in four tours) is said, with where the item was and is now and
+    /// what has the focus, and made once more, as a person would.
     fn choose(&self, item: &str) -> Result<(), String> {
         let c = self.find("button", item)?;
-        self.click(&c)
+        self.click(&c)?;
+        let still = self
+            .uia
+            .controls(self.hwnd)
+            .into_iter()
+            .find(|x| x.role == "button" && x.name == item);
+        if let Some(again) = still {
+            let focus = self
+                .uia
+                .focused()
+                .map_or_else(|| "nothing".to_owned(), |f| f.label());
+            println!(
+                "note: the click on “{item}” at {:?} did not take; it is at {:?} now, the focus on {focus}",
+                c.rect, again.rect
+            );
+            self.click(&again)?;
+        }
+        Ok(())
     }
 
     /// Clicks `c` in its middle, as a person does, once sure the point is on Mosaïk's window.

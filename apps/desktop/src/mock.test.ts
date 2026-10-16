@@ -53,6 +53,28 @@ describe('the stand-in engine', () => {
     expect(moved.zones.map((z) => z.color)).toEqual(base.zones.map((z) => z.color));
   });
 
+  it('leaves every zone its colour when a window joins another, as Mosaïk does', async () => {
+    // ADR 0033, job 0171 (`a_window_joining_another_zone_leaves_every_zone_its_colour`): on a
+    // screen whose windows wear colours, the half a window left took the colour of the window
+    // then in front of it.
+    expect((await mock.request({ cmd: 'arrange', preset: 'quarters' })).reply).toBe('done');
+    const base = pictured(await mock.request({ cmd: 'preview_arrange', preset: 'halves' }));
+    const colours = base.zones.map((z) => z.color);
+    for (const [k, zone] of base.zones.entries()) {
+      for (const w of base.windows.filter((x) => x.zone === zone.id)) {
+        const other = base.zones.findIndex((z) => z.id !== zone.id);
+        const moved = pictured(
+          await mock.request({ cmd: 'preview_arrange', preset: 'halves', moves: [{ window: w.window, zone: other }] }),
+        );
+        expect(moved.windows.find((x) => x.window === w.window)?.zone, w.label).toBe(base.zones[other]?.id);
+        expect(
+          moved.zones.map((z) => z.color),
+          `${w.label} from zone ${String(k + 1)}`,
+        ).toEqual(colours);
+      }
+    }
+  });
+
   it('keeps every window in its zone when a line between zones is dragged, as Mosaïk does', async () => {
     // ADR 0033 (`random_lines_dragged_move_no_window_to_another_zone`): the stand-in found the
     // windows in the zones as stretched, so a window filling one of them took it.

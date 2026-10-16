@@ -13,7 +13,8 @@
   keeps its number and colour and says it is empty.
 - On the picture, drag a window into another zone to add it there, behind the windows there, or
   onto another window to swap them, and drag the line between two zones to resize them, every
-  window staying in its zone; "Undo changes" puts the layout back. The lines show only when you
+  window staying in its zone and every zone keeping its colour; "Undo changes" puts the layout
+  back. The lines show only when you
   point at them. "Move windows" (with Mosaïk's tiles) then puts your windows there.
 - A layout with fewer zones than windows stacks the rest in its zones, behind a window of their
   kind, instead of minimising them. Drag a window onto another of its zone to bring it to the
@@ -35,8 +36,8 @@
   main, Half + stack, Stack + half, Quarters and Full screen. Top + bottom and Three rows are gone
   (split a zone into rows in the zone editor instead), and so is More layouts.
 - Home says what it shows ("Nothing moves yet.", how to change the picture). Smart is now
-  Automatic. What an action did shows in one place, under the picture. No more first-run tip to
-  put away.
+  Automatic. What an action did shows in one place, under the picture. The first run says
+  nothing: the workspaces it makes of your windows are simply there, with no note to put away.
 - The workspace on screen is marked "On screen" (it read as a button), in Mosaïk's window, the side
   menu and the switcher. "Save layout" is "Save as workspace".
 - Arrange arranges, Save saves: Arrange no longer makes a workspace ("Workspace 1") or changes the

@@ -425,8 +425,8 @@ function screenAgain(preset: Preset | undefined, work: Rect): Arranged | null {
  * engine reports it (`arrange::plan_moved`, its `Stretched` zones): a window dropped onto another
  * trades places with it, and one dropped onto a zone joins it, behind its windows (ADR 0033); the
  * windows are found in the zones as the layout made them, so a line dragged moves none; a screen
- * Move windows arranged stays as it is, and each zone wears the colour its window wears
- * (`arrange::zone_colors`). */
+ * Move windows arranged stays as it is, and each zone wears the colour its window wears, which it
+ * keeps as windows join or leave it (`arrange::zone_colors`). */
 function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: RatioRect[] = []): ArrangePreview {
   const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
   const again = screenAgain(preset, work);
@@ -620,13 +620,16 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
     ];
   });
   const numbers = readingNumbers(shape);
+  // With the user's moves, each zone keeps the colour it had before them, as the moves left the
+  // colours: two zones whose own windows traded places traded theirs (`arrange::zone_colors`).
+  const before = moves.length > 0 ? preview(preset, [], areas).zones : null;
   return {
     work_area: work,
     zones: rects.map((rect, i) => ({
       id: `a${String(i + 1)}`,
       ...(shape[i] ? { area: shape[i] } : {}),
       name: numbers[i] ?? String(i + 1),
-      color: colours[i] ?? 'slate',
+      color: (before ? before[colorOf[i] ?? i]?.color : colours[i]) ?? 'slate',
       rect,
     })),
     windows,

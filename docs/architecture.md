@@ -177,7 +177,9 @@ the engine gathers windows and applies the result.
   between zones resize them (`LineHandle`, hidden until pointed at). The moves and the areas go
   with the preview and with Arrange (`mosaik_core::arrange::plan_moved`, the areas as its
   `Stretched` zones, taken after the windows are found in the zones so that a line moves no
-  window to another zone, ADR 0033), each window keeping its colour, each zone its number. Move windows does it (ADR 0032),
+  window to another zone, ADR 0033), each zone keeping its number and its colour (the colours of
+  the picture without the moves, but for two zones whose own windows trade places, which trade
+  theirs: `Plan::unmoved`). Move windows does it (ADR 0032),
   changing no workspace, and Undo brings everything back; what was changed stays chosen until
   Move windows makes it (then the screen holds it, and the picture shows the screen as it is),
   and Undo changes puts the layout's own back. Beside it, every workspace with its apps' icons: a
