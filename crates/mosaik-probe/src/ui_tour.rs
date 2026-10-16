@@ -845,6 +845,8 @@ impl Tour {
         self.page("workspace", true)?;
         if let Ok(add) = self.reveal("button", &format!("Add an app to “{WORKSPACE}”")) {
             self.click(&add)?;
+            // Their icons, read a part at a time (`icons.tsx`), the first ones on the list first.
+            pump_until(1500, || false);
             self.page("workspace-add", false)?;
             Self::press(VK_ESCAPE.0);
         }
