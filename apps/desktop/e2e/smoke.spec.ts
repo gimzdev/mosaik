@@ -45,6 +45,13 @@ async function dragOnto(page: Page, from: Locator, to: Locator) {
   await page.mouse.up();
 }
 
+/** The colour of the zone a window's bar is in, as the chip with the zone's number shows it. */
+const zoneColour = (bar: Locator) =>
+  bar.evaluate((el) => {
+    const chip = el.closest('.stage-window')?.querySelector('.zone-chip');
+    return chip ? getComputedStyle(chip).backgroundColor : null;
+  });
+
 /** Opens a workspace's page from its card's menu on Home. */
 async function editWorkspace(page: Page, name: string) {
   await page.getByRole('button', { name: `More for “${name}”` }).click();
@@ -143,6 +150,8 @@ test.describe('Home', () => {
     const browser = page.getByRole('button', { name: /^Google Chrome in zone/ });
     const [a, b] = [await code.boundingBox(), await browser.boundingBox()];
     if (!a || !b) throw new Error('the windows are not drawn');
+    const colours = [await zoneColour(code), await zoneColour(browser)];
+    expect(colours[0]).not.toEqual(colours[1]);
     await page.mouse.move(a.x + a.width / 2, a.y + 10);
     await page.mouse.down();
     await page.mouse.move(a.x + a.width / 2 + 20, a.y + 20, { steps: 4 });
@@ -156,14 +165,22 @@ test.describe('Home', () => {
       })
       .toBe(true);
     await expect(page.getByRole('button', { name: 'Undo changes' })).toBeVisible();
+    expect([await zoneColour(code), await zoneColour(browser)]).toEqual(colours);
     await accessible(page);
     await arrange(page).click();
     await expect(shown(page, 'Moved 4 windows.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Undo changes' })).toBeHidden();
-    // Arranged as they were put: the picture shows them there now.
+    // Arranged as they were put: the picture shows them there now, each in the colour it wears
+    // on screen (ADR 0032), and Move windows again moves nothing.
     const [c, d] = [await code.boundingBox(), await browser.boundingBox()];
     expect(c && Math.abs(c.x - b.x) < 3).toBe(true);
     expect(d && Math.abs(d.x - a.x) < 3).toBe(true);
+    await expect.poll(async () => [await zoneColour(code), await zoneColour(browser)]).toEqual(colours);
+    await arrange(page).click();
+    await expect(
+      page.getByRole('group', { name: /^Google Chrome in zone 1, Visual Studio Code in zone 2/ }),
+    ).toBeVisible();
+    expect([await zoneColour(code), await zoneColour(browser)]).toEqual(colours);
   });
 
   test('two windows of one zone trade places front to back, and Move windows puts them so', async ({ page }) => {

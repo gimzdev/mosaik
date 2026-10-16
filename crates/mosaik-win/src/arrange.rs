@@ -73,6 +73,25 @@ pub fn put_below(hwnd: HWND, above: HWND) -> Result<bool> {
     Ok(true)
 }
 
+/// Puts `hwnd` above the other windows of its band (always on top or not), without activating
+/// it. Synchronous, as [`put_below`]: Undo puts a window stacked down back on top when it was the
+/// first of its band (ADR 0032).
+pub fn put_on_top(hwnd: HWND) -> Result<()> {
+    // SAFETY: z-order only (no move, no size, no activation) of another app's window.
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(HWND_TOP),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+        )
+    }
+    .ctx("SetWindowPos")
+}
+
 /// Minimises a window without activating another one in its place.
 pub fn minimize(hwnd: HWND) -> bool {
     // SAFETY: asynchronous show command on another app's window.

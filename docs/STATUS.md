@@ -1602,6 +1602,25 @@ simetric and appealing". ADR 0032.
   every window in a half). The tour: 32 pictures. Mosaïk left in the tray (1.0.2, protocol 11,
   watchdog, Win+Alt+Space); packed (288 files); both files beside the repository brought up to
   date (the key line kept).
+- **A third review** (of 5b6280a, ADR 0032, Third review): a move that made the zones make room
+  was undone by the next plan; a window that keeps its size was never found in its zone; zones
+  stretched in a task's layout were not fitted to their windows; a task's layout could leave a
+  zone empty; a drop onto a zone whose window had just left took it as empty; Undo put windows
+  back under Mosaïk's own frames and tags, and so left them in front; the probe's check of a
+  second picture passed for windows it would minimise; the stand-in kept no window filling its
+  zone there. And a trade in a zone of a task's layout made the next plan lay the screen out
+  anew one time in ten: the windows, stacked anew by Move windows, said another task. Now the
+  zones Move windows made with the layout asked for are the layout again while every window is
+  still in its zone (step 0 of the plan), each zone takes the colour its window wears, Home lets
+  the moves and the zones stretched go once made, and Undo puts a window back under the nearest
+  window shown and alike, none of Mosaïk's own, or on top. On 80000 random screens (2 to 9
+  windows, one in five of a minimum size or one they keep, half with one or two moves), a second
+  Move windows moves no window, where it moved one on 77 to 849 of 20000 before. Tests first:
+  core 284, interface 133, Playwright 35 (two windows traded across zones keep their colours
+  after Move windows, and Move windows again moves nothing). The `smart` probe: after Halves, a
+  trade in a half, a window put elsewhere and Halves stretched, the picture read again finds each
+  of its windows where it is, first in its zone where it was, in its colour; Undo puts them back
+  in their order front to back too.
 
 ## Owner decisions
 

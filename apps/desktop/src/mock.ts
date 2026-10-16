@@ -28,6 +28,7 @@ import {
   type WorkspaceApp,
   type WorkspaceSummary,
   ZONE_COLORS,
+  type ZoneColor,
   type ZoneEdit,
 } from './protocol';
 
@@ -277,7 +278,21 @@ interface OnScreen {
   /** What it is, as `arrange::Kind` says. */
   kind: 'code' | 'browser' | 'terminal' | 'chat';
   now: Rect;
+  /** The zone of the last Move windows it is in (in `arranged.zones`), by its place there. */
+  zone?: number;
 }
+
+/** What the last Move windows put on the main screen, while it is on screen (ADR 0032): the layout
+ * it used (a picked one, or the layout of the task), and its zones, each with the colour its
+ * windows wear and whether it put a window in it. */
+interface Arranged {
+  preset: Preset | undefined;
+  task: Task | null;
+  zones: { area: RatioRect; color: ZoneColor; filled: boolean }[];
+}
+let arranged: Arranged | null = null;
+/** What was on screen before the last Move windows or workspace opened, for Undo. */
+let arrangedBefore: Arranged | null = null;
 let onScreen: OnScreen[] =
   params.get('nowindows') === '1'
     ? []
@@ -372,15 +387,44 @@ function autoLayout(): { task: Task; shape: RatioRect[]; takes: (number | undefi
   return { task: 'coding', shape, takes };
 }
 
+/** How much of `zone` the frame `frame` covers, from 0 to 1. */
+function covering(frame: Rect, zone: Rect): number {
+  const w = Math.min(frame.right, zone.right) - Math.max(frame.left, zone.left);
+  const h = Math.min(frame.bottom, zone.bottom) - Math.max(frame.top, zone.top);
+  const area = (zone.right - zone.left) * (zone.bottom - zone.top);
+  return w > 0 && h > 0 && area > 0 ? (w * h) / area : 0;
+}
+
+/** A window is in a zone already when it covers most of it, as the engine finds it (`FILLS`). */
+const fills = (frame: Rect, zone: Rect) => covering(frame, zone) >= 0.9;
+
+/** The zones of the last Move windows, when they are the layout again (the engine's step 0, ADR
+ * 0032): the same layout asked for, every window still in the zone it was put in, and, for the
+ * layout of a task, none of the zones it filled empty. */
+function screenAgain(preset: Preset | undefined, work: Rect): Arranged | null {
+  const a = arranged;
+  if (!a || a.preset !== preset || onScreen.length === 0) return null;
+  const inItsZone = onScreen.every((s) => {
+    const z = s.zone === undefined ? undefined : a.zones[s.zone];
+    return z !== undefined && fills(s.now, px(z.area, work));
+  });
+  const held = (i: number) => onScreen.some((s) => s.zone === i);
+  const kept = preset !== undefined || a.zones.every((z, i) => !z.filled || held(i));
+  return inItsZone && kept ? a : null;
+}
+
 /** What Arrange would do with `preset` (or its own choice), with the windows the user moved and
  * the zones as resized on the picture (`areas`, taken when there is one for each zone), as the
  * engine reports it (`arrange::plan_moved`, its `Stretched` zones): a window moved trades
- * places with the window in the zone it was put in, and keeps its zone's colour. */
+ * places with the window in the zone it was put in, and keeps its zone's colour; a screen Move
+ * windows arranged stays as it is, and each zone wears the colour its window wears
+ * (`arrange::zone_colors`). */
 function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: RatioRect[] = []): ArrangePreview {
   const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
+  const again = screenAgain(preset, work);
   // Arrange makes no zones on a screen without windows; a picked layout always has its own.
-  const auto = preset || onScreen.length === 0 ? null : autoLayout();
-  const made = preset ? presetShape(preset) : (auto?.shape ?? []);
+  const auto = again || preset || onScreen.length === 0 ? null : autoLayout();
+  const made = again ? again.zones.map((z) => z.area) : preset ? presetShape(preset) : (auto?.shape ?? []);
   const shape = areas.length > 0 && areas.length === made.length ? areas : made;
   const rects = shape.map((a) => px(a, work));
   // A picked layout: the windows used last take the largest zones (as the layout made them); the
@@ -390,23 +434,23 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
     .map((r, i) => ({ i, area: (r.right - r.left) * (r.bottom - r.top) }))
     .sort((a, b) => b.area - a.area || a.i - b.i)
     .map((x) => x.i);
-  const zoneOf: (number | undefined)[] = onScreen.map((_, n) => (auto ? auto.takes[n] : order[n]));
+  const zoneOf: (number | undefined)[] = onScreen.map((s, n) => (again ? s.zone : auto ? auto.takes[n] : order[n]));
   const colorOf = rects.map((_, i) => i);
-  // Each zone's own window; the windows left over stack behind them (ADR 0032, the engine's step
-  // 3): with their kind, else where there are fewest, the larger zone first.
+  // Each zone's own window: the first of its windows; the windows left over stack behind them
+  // (ADR 0032, the engine's step 4).
   const own: (number | undefined)[] = rects.map((_, i) => {
     const n = zoneOf.indexOf(i);
     return n >= 0 ? n : undefined;
   });
+  const stacked = onScreen.map((_, n) => {
+    const z = zoneOf[n];
+    return again !== null && z !== undefined && own[z] !== n;
+  });
   // Windows already in a zone stay as they are on screen (the engine's step 3): of the windows
   // filling a zone, the one in front is its own window.
-  const filling = (a: Rect, b: Rect) =>
-    Math.abs(a.left - b.left) <= 2 &&
-    Math.abs(a.top - b.top) <= 2 &&
-    Math.abs(a.right - b.right) <= 2 &&
-    Math.abs(a.bottom - b.bottom) <= 2;
   rects.forEach((r, i) => {
-    const f = onScreen.findIndex((s) => filling(s.now, r));
+    if (again) return;
+    const f = onScreen.findIndex((s) => fills(s.now, r));
     if (f < 0 || own[i] === f) return;
     const given = own[i];
     const was = zoneOf[f];
@@ -419,19 +463,31 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
       if (left !== undefined) own[left] = given;
     }
   });
-  const stacked = onScreen.map(() => false);
   const area = (i: number) => {
     const r = rects[i];
     return r ? (r.right - r.left) * (r.bottom - r.top) : 0;
   };
+  // The windows left over: each in the zone it fills, else with its kind, else where there are
+  // fewest, the larger zone first.
   const stack = () => {
     onScreen.forEach((s, n) => {
       if (zoneOf[n] !== undefined || rects.length === 0) return;
       const count = (i: number) => zoneOf.filter((z) => z === i).length;
       const kin = (i: number) => onScreen.some((o, m) => zoneOf[m] === i && o.kind === s.kind);
+      const filled = (i: number) => {
+        const r = rects[i];
+        return r !== undefined && fills(s.now, r);
+      };
       const [best] = rects
         .map((_, i) => i)
-        .sort((a, b) => Number(kin(b)) - Number(kin(a)) || count(a) - count(b) || area(b) - area(a) || a - b);
+        .sort(
+          (a, b) =>
+            Number(filled(b)) - Number(filled(a)) ||
+            Number(kin(b)) - Number(kin(a)) ||
+            count(a) - count(b) ||
+            area(b) - area(a) ||
+            a - b,
+        );
       zoneOf[n] = best;
       stacked[n] = best !== undefined;
     });
@@ -459,7 +515,7 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
     seq[i] = b;
     seq[j] = a;
   };
-  // The windows the user moved (the engine's step 4): dropped onto a window, the two trade
+  // The windows the user moved (the engine's step 5): dropped onto a window, the two trade
   // places; onto a zone, its own window takes the moved one's place, or the moved one takes the
   // zone left empty.
   for (const m of moves) {
@@ -487,6 +543,34 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
   }
   stack();
   seq.sort((a, b) => Number(stacked[a]) - Number(stacked[b]));
+  // Each zone in the colour its own window wears (then a window stacked in it), which it keeps;
+  // else in the plan's, each colour once (`arrange::zone_colors`).
+  const worn = (n: number) => {
+    const z = onScreen[n]?.zone;
+    return z === undefined ? undefined : arranged?.zones[z]?.color;
+  };
+  const colours: (ZoneColor | undefined)[] = rects.map(() => undefined);
+  for (const depth of [0, 1]) {
+    const wearing = rects.flatMap((_, i) => {
+      const list = seq.filter((n) => zoneOf[n] === i);
+      const candidates = depth === 0 ? list.slice(0, 1) : list.slice(1);
+      const n = candidates.find((x) => worn(x) !== undefined);
+      const c = n === undefined ? undefined : worn(n);
+      return n === undefined || c === undefined ? [] : [{ n, i, c }];
+    });
+    wearing.sort((x, y) => x.n - y.n || x.i - y.i);
+    for (const { i, c } of wearing) {
+      if (colours[i] === undefined && !colours.includes(c)) colours[i] = c;
+    }
+  }
+  rects.forEach((_, i) => {
+    if (colours[i] !== undefined) return;
+    const start = colorOf[i] ?? i;
+    const free = ZONE_COLORS.map((_, k) => ZONE_COLORS[(start + k) % ZONE_COLORS.length]).find(
+      (c) => c !== undefined && !colours.includes(c),
+    );
+    colours[i] = free ?? ZONE_COLORS[start % ZONE_COLORS.length];
+  });
   const windows: PreviewWindow[] = seq.flatMap((n): PreviewWindow[] => {
     const s = onScreen[n];
     if (!s) return [];
@@ -513,12 +597,12 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
       id: `a${String(i + 1)}`,
       ...(shape[i] ? { area: shape[i] } : {}),
       name: numbers[i] ?? String(i + 1),
-      color: ZONE_COLORS[(colorOf[i] ?? i) % ZONE_COLORS.length] ?? 'slate',
+      color: colours[i] ?? 'slate',
       rect,
     })),
     windows,
     elsewhere: 0,
-    task: auto?.task ?? null,
+    task: again ? again.task : (auto?.task ?? null),
   };
 }
 
@@ -638,12 +722,28 @@ function arrange(preset: string | undefined, moves: ArrangeMove[] = [], areas: R
   const p = preview(known?.id, moves, areas);
   beforeArrange = onScreen;
   activeBefore = active;
+  arrangedBefore = arranged;
+  // What Move windows put on screen, which stays as it is (ADR 0032): its layout and zones, each
+  // in its colour.
+  arranged = {
+    preset: known?.id,
+    task: p.task ?? null,
+    zones: p.zones.map((z) => ({
+      area: z.area ?? { left: 0, top: 0, right: 1, bottom: 1 },
+      color: z.color,
+      filled: p.windows.some((w) => w.zone === z.id && !w.minimized),
+    })),
+  };
   // Minimised windows leave the screen, as they leave the picture; the others are front to back
-  // as the picture had them (traded in a zone, ADR 0032).
+  // as the picture had them (traded in a zone, ADR 0032), each in its zone.
   const before = onScreen;
   onScreen = p.windows.flatMap((w) => {
     const s = before.find((o) => o.window === w.window);
-    return !s || w.minimized ? [] : [{ ...s, now: w.then ?? s.now }];
+    if (!s || w.minimized) return [];
+    const zone = p.zones.findIndex((z) => z.id === w.zone);
+    const next: OnScreen = { window: s.window, label: s.label, kind: s.kind, now: w.then ?? s.now };
+    if (zone >= 0) next.zone = zone;
+    return [next];
   });
   const gone = p.windows.length - onScreen.length;
   const n = onScreen.length;
@@ -785,9 +885,12 @@ function answer(command: Command): Reply {
     case 'switch': {
       const w = find(command.workspace);
       if (!w) return missing(command.workspace);
-      // Undone as the engine undoes it: the screen and the workspace open as they were.
+      // Undone as the engine undoes it: the screen and the workspace open as they were. The
+      // workspace's zones are on screen now, not Move windows' ones.
       beforeArrange = onScreen;
       activeBefore = active;
+      arrangedBefore = arranged;
+      arranged = null;
       active = w.id;
       return done(`Opened “${w.name}”.`);
     }
@@ -961,7 +1064,9 @@ function answer(command: Command): Reply {
       }
       onScreen = beforeArrange;
       active = activeBefore;
+      arranged = arrangedBefore;
       beforeArrange = null;
+      arrangedBefore = null;
       return done('Windows are back where they were.');
     case 'state':
       return {

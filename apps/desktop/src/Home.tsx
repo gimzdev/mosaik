@@ -270,15 +270,13 @@ export function Home({
     void request(command).then((reply) => {
       setArranging(false);
       if (reply.reply === 'done') {
-        // The windows and zones as put on the picture stay chosen: the picture now shows the
-        // screen as it is, and Undo changes waits for another change. The trades in a zone are
-        // done: sent again, they would trade the windows back.
         say(reply.message);
         setUndoable(true);
-        // Done: Mosaïk keeps the windows as they now are on screen (the window in front of a
-        // zone stays its own), so the moves are let go; sent again, each would trade the windows
-        // back. The zones as stretched stay chosen.
+        // Done: the screen holds the moves and the zones as stretched now, and Mosaïk keeps it
+        // as it is while every window stays in its zone (ADR 0032), so they are let go: sent
+        // again, each move would trade the windows back. The picture shows the screen as it is.
         setPuts(NO_PUTS);
+        setAreas(NO_AREAS);
       } else {
         say(errorMessage(reply) ?? 'Your windows could not be arranged.', true);
         // Some windows may have moved all the same.

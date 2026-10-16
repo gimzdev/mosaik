@@ -16,7 +16,9 @@ use mosaik_core::geometry::{Rect, scale_for_dpi};
 use mosaik_core::layout::{Place, SlotId, TabGroupId, Workspace, WorkspaceId};
 use mosaik_core::matching::AppMatch;
 use mosaik_core::place::{Resolver, Target};
+use mosaik_core::presets::Preset;
 use mosaik_core::store::StoreError;
+use mosaik_core::task::Task;
 use mosaik_core::topology::Topology;
 use mosaik_core::window::{Cloak, WindowFacts, WindowHandle};
 use mosaik_core::workspace::{
@@ -75,6 +77,13 @@ pub(crate) struct Arranged {
     pub ws: Workspace,
     /// The saved workspace it was arranged from: still the one in use, which Save updates.
     pub from: Option<WorkspaceId>,
+    /// The layout Move windows gave the main monitor: the one picked, or none for the layout of
+    /// its task, `task`.
+    pub preset: Option<Preset>,
+    pub task: Option<Task>,
+    /// The zones Move windows made, each with whether it put a window in it: while every window
+    /// is still in the zone it was put in, they are the layout again (ADR 0032).
+    pub made: HashMap<ZoneId, bool>,
 }
 
 impl Active {

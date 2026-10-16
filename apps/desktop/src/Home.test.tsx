@@ -154,10 +154,13 @@ function answer(auto: ArrangePreview = coding, extra: (c: Command) => Reply | nu
         return preview(now(resized(c.moves?.length ? traded : (arrangedAs ?? auto), c)));
       case 'preview_workspace':
         return preview(opening);
-      case 'arrange':
+      case 'arrange': {
         arrangedNow = true;
-        arrangedAs = c.moves?.length ? traded : null;
+        // Mosaïk keeps the screen as Move windows left it (ADR 0032): its zones, as stretched too.
+        const was = c.moves?.length ? traded : (arrangedAs ?? auto);
+        arrangedAs = c.areas ? stretched(was, c.areas) : was;
         return done('Moved 2 windows.');
+      }
       case 'undo_arrange':
         arrangedNow = false;
         arrangedAs = null;
@@ -502,6 +505,15 @@ describe('Home', () => {
     await userEvent.click(arrange());
     expect(asked).toContainEqual({ cmd: 'arrange', areas });
     expect(await shown('Moved 2 windows.')).toBeInTheDocument();
+    // Done: the screen holds them now, and the picture is read as it is, stretched.
+    await waitFor(() => {
+      expect(asked.filter((c) => c.cmd === 'preview_arrange').at(-1)).toEqual({ cmd: 'preview_arrange' });
+    });
+    expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' })).toHaveAttribute(
+      'aria-valuenow',
+      '58',
+    );
   });
 
   it('lets go of zones resized once the screen has other zones', async () => {

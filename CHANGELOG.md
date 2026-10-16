@@ -17,6 +17,9 @@
 - A layout with fewer zones than windows stacks the rest in its zones, behind a window of their
   kind, instead of minimising them. Drag a window onto another of its zone to bring it to the
   front.
+- Once your windows are moved, they stay as they are: Move windows again moves nothing while each
+  window is still in its zone, even when the windows now in front would suggest another layout,
+  and every window keeps its colour, on screen and in the picture.
 - The same on a workspace's picture, on Home and on its page: drag its apps to other zones, or
   onto each other to trade places (in one zone: which is in front, or the order of its tabs), and
   resize its zones; each change is saved in the workspace at once.

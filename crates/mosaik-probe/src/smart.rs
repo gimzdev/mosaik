@@ -1519,6 +1519,47 @@ fn zone_index(p: &ArrangePreview, x: &PreviewWindow) -> Option<usize> {
     p.zones.iter().position(|z| z.rect.contains(c))
 }
 
+/// The picture of `preset` read again once Arrange has put the windows `w` as `planned` showed
+/// them: Mosaïk keeps the screen as it is (ADR 0032). Each window where it is, first in its zone
+/// where it was first there, in the colour it was arranged in (the third review of ADR 0032: the
+/// next plan took the windows stacked anew for another task, and the colours went back to the
+/// places). Only the probe's windows count: the owner's may be anywhere.
+fn kept_as_arranged(
+    engine: &Engine,
+    preset: Option<&str>,
+    w: &[HWND],
+    planned: &ArrangePreview,
+) -> Result<Value, String> {
+    let again = preview(engine, preset)?;
+    let find = |p: &ArrangePreview, h: HWND| p.windows.iter().find(|x| x.window == handle(h)).cloned();
+    let where_they_are = w.iter().all(|&h| {
+        find(&again, h).is_some_and(|x| !x.minimized && x.then.is_some_and(|t| edge_error(x.now, t) <= SLACK))
+    });
+    let colour = |p: &ArrangePreview, h: HWND| {
+        let x = find(p, h)?;
+        p.zones.get(zone_index(p, &x)?).map(|z| z.color)
+    };
+    let first = |p: &ArrangePreview, h: HWND| {
+        let x = find(p, h)?;
+        let z = zone_index(p, &x)?;
+        let front = p
+            .windows
+            .iter()
+            .find(|y| !y.minimized && zone_index(p, y) == Some(z))?;
+        Some(front.window == x.window)
+    };
+    let colours_kept = w
+        .iter()
+        .all(|&h| colour(&again, h).is_some() && colour(&again, h) == colour(planned, h));
+    let fronts_kept = w.iter().all(|&h| first(&again, h) == first(planned, h));
+    Ok(json!({
+        "where_they_are": where_they_are,
+        "colours_kept": colours_kept,
+        "fronts_kept": fronts_kept,
+        "ok": where_they_are && colours_kept && fronts_kept,
+    }))
+}
+
 /// 3e2. Windows put elsewhere on the home page's picture (the owner: "we should be able to drag
 /// drop apps to permute them"). In Halves, the window of one half dropped on the other: the
 /// picture shows the two traded, each zone's colour going with its window and each zone keeping
@@ -1615,6 +1656,7 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
             })
         })
         .collect();
+    let again = kept_as_arranged(engine, Some("halves"), w, &shown)?;
     let undo = done(&ask(engine, Command::UndoArrange).0)?;
     let _ = settled(engine)?;
     let back = most_moved(&frames(w), &before);
@@ -1626,11 +1668,13 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
         "message": message,
         "ms": ms,
         "windows": landed,
+        "again": again,
         "undo": undo,
         "back_px": back,
         "ok": traded && with_windows && untouched
             && message.contains("into Halves.")
             && landed.iter().all(|x| x["ok"] == json!(true))
+            && again["ok"] == json!(true)
             && back <= SLACK,
     }))
 }
@@ -1725,9 +1769,14 @@ fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Re
             Some(edge_error(f, wanted))
         })
         .collect();
+    let again = kept_as_arranged(engine, Some("halves"), w, &shown)?;
     let undo = done(&ask(engine, Command::UndoArrange).0)?;
     let _ = settled(engine)?;
     let back_px = most_moved(&frames(w), &before);
+    // Undo stacks them as they were too: the one brought to the front behind again (the third
+    // review of ADR 0032: Undo put the window moved down back under Mosaïk's own tag, or under
+    // a window it could not go under, and it stayed).
+    let behind_again = behind(back, front);
     Ok(json!({
         "preview_ms": preview_ms,
         "pair": { "zone": zone, "front": front.0, "behind": back.0 },
@@ -1740,10 +1789,13 @@ fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Re
         "behind_now_in_front": back_in_front,
         "one_zone": one_zone,
         "fit_px": fits,
+        "again": again,
         "undo": undo,
         "back_px": back_px,
+        "behind_again_after_undo": behind_again,
         "ok": traded && untouched && message.contains("into Halves.") && behind_before
-            && back_in_front && one_zone && all_fit(&fits) && back_px <= SLACK,
+            && back_in_front && one_zone && all_fit(&fits) && again["ok"] == json!(true)
+            && back_px <= SLACK && behind_again,
     }))
 }
 
@@ -1820,6 +1872,14 @@ fn stretched(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<
             json!({ "frame": corners(f), "then": corners(*then), "off_px": off, "ok": off <= SLACK })
         })
         .collect();
+    // The picture read again as Home reads it after Move windows, the zones let go: the screen
+    // holds them, and Mosaïk keeps it as it is (ADR 0032).
+    let again_zones: Vec<Rect> = preview(engine, Some("halves"))?
+        .zones
+        .iter()
+        .map(|z| z.rect)
+        .collect();
+    let again = kept_as_arranged(engine, Some("halves"), w, &shown)?;
     let undo = done(&ask(engine, Command::UndoArrange).0)?;
     let _ = settled(engine)?;
     let back = most_moved(&frames(w), &before);
@@ -1834,10 +1894,14 @@ fn stretched(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<
         "ms": ms,
         "zones_on_screen": zones_taken,
         "windows": landed,
+        "zones_again": again_zones.iter().map(|r| corners(*r)).collect::<Vec<_>>(),
+        "again": again,
         "undo": undo,
         "back_px": back,
         "ok": shown_zones == wanted && numbered && in_zones && untouched && zones_taken
             && landed.iter().all(|x| x["ok"] == json!(true))
+            && again_zones == wanted
+            && again["ok"] == json!(true)
             && back <= SLACK,
     }))
 }
@@ -2096,6 +2160,14 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     let minimized_shown = planned.iter().flatten().filter(|x| x.minimized).count();
     let untouched =
         most_moved(&frames(w), &before) <= SLACK && rects(&zones(engine, &ws.0, work)?) == zones_before;
+    // The probe's windows front to back, which Undo stacks as they were.
+    let stacking = || {
+        let z = mosaik_win::window::top_level();
+        let mut ours: Vec<HWND> = w.to_vec();
+        ours.sort_by_key(|h| z.iter().position(|x| x == h));
+        ours
+    };
+    let stacked_before = stacking();
     // The half with two windows: the picture lists its own window first, the other stacked
     // behind it (ADR 0032), and Arrange keeps the own window in front. (Putting it behind first
     // would change the plan: the windows used last count most. The trade in 3e4 shows a window
@@ -2124,26 +2196,8 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     let own_in_front = pair.is_some_and(|(own, other)| z_at(own) < z_at(other));
     // The picture again: every window where it is, each zone's own window still first (the
     // review of 414b014: stacking them read as which windows were used last, and the next plan
-    // moved windows).
-    let again = preview(engine, Some("halves"))?;
-    let again_settled = again
-        .windows
-        .iter()
-        .all(|x| x.minimized || x.then.is_some_and(|t| edge_error(x.now, t) <= SLACK));
-    let again_front = pair.is_none_or(|(own, _)| {
-        again
-            .windows
-            .iter()
-            .find(|x| x.window == handle(own))
-            .and_then(|x| zone_index(&again, x))
-            .and_then(|z| {
-                again
-                    .windows
-                    .iter()
-                    .find(|y| !y.minimized && zone_index(&again, y) == Some(z))
-            })
-            .is_some_and(|first| first.window == handle(own))
-    });
+    // moved windows), and in its colour.
+    let again = kept_as_arranged(engine, Some("halves"), w, &shown)?;
     let zs = zones(engine, &ws.0, work)?;
     let got = sorted(rects(&zs));
     // Each window against where the picture said it would go. One that wears its group's strip
@@ -2183,6 +2237,7 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     let undo = done(&ask(engine, Command::UndoArrange).0)?;
     let st = settled(engine)?;
     let back = most_moved(&frames(w), &before);
+    let restacked = stacking() == stacked_before;
     let zones_back = rects(&zones(engine, &ws.0, work)?) == zones_before;
     // Every window on screen again, none minimised, hidden or in a group.
     let all_shown = w.iter().all(|h| {
@@ -2209,12 +2264,12 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         "zones_back": zones_back,
         "all_shown": all_shown,
         "own_window_in_front": own_in_front,
-        "again_where_they_are": again_settled,
-        "again_own_window_first": again_front,
+        "again": again,
+        "stacked_as_before_after_undo": restacked,
         "ok": shown_zones == halves
             && own_in_front
-            && again_settled
-            && again_front
+            && again["ok"] == json!(true)
+            && restacked
             && planned.iter().all(Option::is_some)
             && minimized_shown == 0
             && untouched

@@ -127,8 +127,11 @@ the engine gathers windows and applies the result.
   others stack in the zones, behind a window of their kind or where there are fewest (ADR 0032;
   before, they were minimised, ADR 0017). Its zones replace the open workspace's on that monitor; with
   no workspace open, a new one is made. No window gets a zone smaller than its app lets it go
-  (`window::least_frame`, from `WM_GETMINMAXINFO`). Arranging twice moves nothing. Undo puts
-  everything back, for ten minutes.
+  (`window::least_frame`, from `WM_GETMINMAXINFO`). Arranging twice moves nothing: the zones
+  Move windows made are the layout again while every window is still in its zone, whatever task
+  the windows say then (step 0 of the plan, `KeptZone::arranged`, ADR 0032), and each zone takes
+  the colour its window wears (`arrange::zone_colors`). Undo puts everything back, for ten
+  minutes.
 - **Zones make room** (ADR 0021): a zone too small for its window grows just enough, and the
   zones beside it give up the room, each keeping what its own windows need and at least
   320 x 200 (`mosaik_core::fit`, which reads zones that tile a monitor as a tree of cuts and
@@ -162,13 +165,15 @@ the engine gathers windows and applies the result.
   a second puts it there): exactly the two dropped one onto the other (`onto`), zones and places
   front to back, own window or stacked; Arrange lists and stacks each zone's windows front to
   back (`Plan::order`, its own window first; `mover::stack` moves a window down only when it is
-  in front of the one before it, and Undo puts it back), and keeps windows already in a zone as
-  they are on screen (of those filling a zone, the one in front is its own); the lines
+  in front of the one before it, and Undo puts it back), and keeps an arranged screen as it is
+  and windows already in a zone as they are on screen (of those filling a zone, the one in front
+  is its own); the lines
   between zones resize them (`LineHandle`, hidden until pointed at). The moves and the areas go
   with the preview and with Arrange (`mosaik_core::arrange::plan_moved`, the areas as its
   `Stretched` zones), each window keeping its colour, each zone its number. Move windows does it (ADR 0032),
-  changing no workspace, and Undo brings everything back; what was changed stays chosen, and
-  Undo changes puts the layout's own back. Beside it, every workspace with its apps' icons: a
+  changing no workspace, and Undo brings everything back; what was changed stays chosen until
+  Move windows makes it (then the screen holds it, and the picture shows the screen as it is),
+  and Undo changes puts the layout's own back. Beside it, every workspace with its apps' icons: a
   click shows it in the picture as opening it would leave the screen (`preview_workspace`, the
   plan opening it follows: the apps it would start drawn dashed, a tab group as one bar of its
   tabs, the windows it would minimise named below), with Open in place of Move windows (ADR

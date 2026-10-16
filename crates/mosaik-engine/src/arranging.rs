@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use mosaik_core::arrange::{Chosen, Goes, KeptZone, Kind, Move, Stretched, Unit, plan_moved};
+use mosaik_core::arrange::{Chosen, Goes, KeptZone, Kind, Move, Stretched, Unit, plan_moved, zone_colors};
 use mosaik_core::editing::without_zones;
 use mosaik_core::geometry::{RatioRect, Rect};
 use mosaik_core::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
@@ -23,7 +23,7 @@ use mosaik_core::task::Task;
 use mosaik_core::topology::Topology;
 use mosaik_core::window::{WindowFacts, WindowHandle};
 use mosaik_core::workspace::app_match;
-use mosaik_core::zone::{Zone, ZoneColor, ZoneId};
+use mosaik_core::zone::{Zone, ZoneId};
 use mosaik_ipc::protocol::{ArrangeMove, ArrangePreview, ErrorCode, PreviewWindow, PreviewZone, Reply};
 use mosaik_win::{apps, window};
 
@@ -83,6 +83,8 @@ struct Prepared {
     minimize: Vec<WindowHandle>,
     zoned: usize,
     made: usize,
+    /// The zones made, each with whether a window goes in it.
+    filled: HashMap<ZoneId, bool>,
 }
 
 fn error(code: ErrorCode, message: impl Into<String>, hint: Option<&str>) -> Reply {
@@ -192,12 +194,52 @@ impl Engine {
             .position(|m| m.id == topology.primary().id)
             .unwrap_or(0);
         let live = self.active.as_ref().map(|a| a.zones.clone()).unwrap_or_default();
-        let spots: Vec<KeptZone> = live
-            .iter()
-            .map(|z| KeptZone {
-                monitor: monitor_of(z.rect),
-            })
-            .collect();
+        // The zones on screen as the plan sees them: where they are, the colour their windows
+        // wear, and whether the last Move windows made them with the layout asked for now; and
+        // the zone each window is in. An arranged screen stays as it is (ADR 0032).
+        let (spots, zone_of_window): (Vec<KeptZone>, HashMap<WindowHandle, usize>) = {
+            let shown = self.on_screen();
+            let arranged = self
+                .active
+                .as_ref()
+                .filter(|a| a.id.is_arranged())
+                .and(self.arranged.as_ref());
+            let spots = live
+                .iter()
+                .map(|z| {
+                    let monitor = monitor_of(z.rect);
+                    let area = shown
+                        .and_then(|w| w.layout.zones.iter().find(|x| x.id == z.id))
+                        .map(|x| x.area)
+                        .or_else(|| {
+                            let work = topology.monitors().get(monitor)?.work_area;
+                            RatioRect::from_rect(z.rect, work).ok()
+                        })
+                        .unwrap_or(RatioRect::FULL);
+                    let made = arranged.and_then(|a| a.made.get(&z.id).copied());
+                    let same_layout = monitor != main || arranged.is_some_and(|a| a.preset == preset);
+                    KeptZone {
+                        monitor,
+                        area,
+                        color: z.color,
+                        arranged: made.is_some() && same_layout,
+                        filled: made.unwrap_or(true),
+                    }
+                })
+                .collect();
+            let mut zone_of_window = HashMap::new();
+            if let (Some(active), Some(ws)) = (self.active.as_ref(), shown) {
+                for (slot, &h) in &active.windows {
+                    if let Some(Place::Zone { zone }) =
+                        ws.layout.slot(slot).and_then(|s| ws.layout.effective_place(s))
+                        && let Some(i) = live.iter().position(|z| &z.id == zone)
+                    {
+                        zone_of_window.insert(h, i);
+                    }
+                }
+            }
+            (spots, zone_of_window)
+        };
         let units: Vec<Unit> = windows
             .iter()
             .map(|w| {
@@ -216,6 +258,7 @@ impl Engine {
                     resizable: w.resizable,
                     least,
                     monitor: monitor_of(w.frame_rect),
+                    zone: zone_of_window.get(&w.handle).copied(),
                 }
             })
             .collect();
@@ -279,9 +322,11 @@ impl Engine {
         // The plan's zones, in its order, in the colours that follow on from the zones kept (a
         // window the user moved keeps its colour: `NewZone::color`).
         let mut zone_ids: HashSet<String> = ws.layout.zones.iter().map(|z| z.id.0.clone()).collect();
-        let first_color = ws.layout.zones.len();
+        // Each zone in the colour its window wears, which it keeps (ADR 0032), else in the plan's
+        // colours, after the zones kept.
+        let colors = zone_colors(&plan, &units, &spots, ws.layout.zones.len());
         let mut made: Vec<Option<ZoneId>> = Vec::with_capacity(plan.new_zones.len());
-        for z in &plan.new_zones {
+        for (z, &color) in plan.new_zones.iter().zip(&colors) {
             let Some(monitor) = topology.monitors().get(z.monitor) else {
                 made.push(None);
                 continue;
@@ -291,7 +336,7 @@ impl Engine {
             ws.layout.zones.push(Zone {
                 id: id.clone(),
                 name: z.name.clone(),
-                color: ZoneColor::nth(first_color + z.color),
+                color,
                 monitor,
                 area: z.area,
             });
@@ -378,7 +423,19 @@ impl Engine {
         }
         let on_monitor: Vec<usize> = units.iter().map(|u| u.monitor).collect();
         let labels: Vec<String> = units.into_iter().map(|u| u.label).collect();
-        let task = plan.tasks.get(main).copied().flatten();
+        // The main monitor's layout again is the one made for its task then, whatever task its
+        // windows say now.
+        let task = if plan.again.get(main).copied().unwrap_or(false) {
+            self.arranged.as_ref().and_then(|a| a.task)
+        } else {
+            plan.tasks.get(main).copied().flatten()
+        };
+        // The zones made, each with whether a window goes in it.
+        let filled: HashMap<ZoneId, bool> = made
+            .iter()
+            .enumerate()
+            .filter_map(|(r, id)| Some((id.clone()?, plan.goes.contains(&Goes::Zone(r)))))
+            .collect();
         Ok(Prepared {
             preset,
             topology,
@@ -396,6 +453,7 @@ impl Engine {
             minimize,
             zoned,
             made: made.iter().flatten().count(),
+            filled,
         })
     }
 
@@ -437,6 +495,9 @@ impl Engine {
         self.arranged = Some(Arranged {
             ws: p.ws,
             from: p.from,
+            preset: p.preset,
+            task: p.task,
+            made: p.filled,
         });
         self.hide_frames();
         let placed: Vec<(WindowHandle, Rect)> = mover::move_all(&p.moves, mover::WAIT)

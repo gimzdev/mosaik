@@ -30,13 +30,27 @@ those used last first); the picture lists them so, and Move windows stacks them 
 it takes: a window in front of the one that should come before it is put just below that one
 (`put_below`, on a thread of its own), the others stay, so the order the windows were used in
 changes no more than that and none comes up over Mosaïk's window. Undo puts each window moved
-down back under the window that was above it.
+down back under the nearest window above it that was shown and alike, Mosaïk's frames, tags and
+strips aside, or on top of the others when none was.
 
-**As the screen is.** Windows already in a zone of the layout stay as they are on screen: of the
-windows filling a zone, the one in front is its own window (step 3 of the plan). So arranging
-again moves nothing, a window brought to the front of its zone stays there, and once Move windows
-has made the user's moves, Home lets them go. The zones as stretched on the picture are the
-plan's own (`Stretched`), so that the windows are fitted to them and found filling them.
+**As the screen is.** Zones that Move windows made with the layout asked for now (the same layout
+picked, or the layout of the task both times) are that layout again while every window there is
+still in the zone it was put in, filling it (a window that keeps its size where `place::fit_size`
+puts it), and, for the layout of a task, no zone it put a window in is empty (step 0 of the plan,
+`KeptZone::arranged`): each window stays in its zone, the one in front its own, whatever task
+the windows, stacked anew, say now, and the zones keep the room they made for the user's moves.
+A window opened since, closed or taken out of its zone lays the screen out anew; then too,
+windows already in a zone of the new layout stay as they are on screen: of the windows filling a
+zone, the one in front is its own window (step 3). So arranging again moves nothing, and a window
+brought to the front of its zone stays there. Once Move windows has made the user's moves and
+stretched zones, Home lets them go: the screen holds them. The zones as stretched on the picture
+are the plan's own (`Stretched`), so that the windows are fitted to them; on an arranged screen,
+they stretch its zones.
+
+**Colours go with the windows.** Each zone takes the colour its own window wears on screen, else
+one that a window stacked in it wears, else the plan's, each colour once (`arrange::zone_colors`):
+a trade takes the colours along with the windows, and once Move windows has made it, the picture
+and the screen agree.
 
 **A window dropped onto another trades places with exactly it**, wherever the two are: their
 zones, and their places in them, own window or stacked; when both are their zones' own windows,
@@ -89,13 +103,27 @@ does (`pictureWidth`).
   says, for each kind of drop. Playwright: Slack stacked behind Visual Studio Code in Thirds,
   dragged onto it, comes first, and stays so after Move windows; Slack dragged onto Chrome takes
   its zone, Chrome its place; Claude dragged onto Chrome in Backend's strip.
+- Core tests for the third review, each failing first: Outlook with Steam brought to the front
+  of its zone stays as arranged (the next plan laid it out in halves); a move that made room
+  stays made; a window opened since lays the screen out anew, one closed too for a task's layout
+  (a layout picked keeps its zones); on 6000 random screens with moves, the next plan finds every
+  window where it is, and a line dragged on the arranged screen's picture stretches its zones
+  within the plan's rules; zones take the colours their windows wear, after a trade and laid out
+  anew, each colour once; a window that keeps its size stays in front once arranged; zones
+  stretched in a task's layout make room for their windows; a task's layout leaves no zone
+  empty; a drop onto a zone whose window left trades with the one now in front. Interface: Home
+  lets the zones stretched go once Move windows has made them. Playwright: two windows traded
+  across zones keep their colours after Move windows, and Move windows again moves nothing.
 - The `smart` probe: the arranged screen's windows all in zones (none minimised) for a new fifth
   window, for Halves and from the side menu; Halves puts the zone's own window in front of the
   one stacked behind it; two windows of a half traded on the picture, then arranged (the one
   behind now in front, both in the half, Undo); two apps of the open workspace's zone traded
   (listed the other way round, the picture too, the first one's window in front, both filling
   the zone, all put back). Each check of the order first puts the windows the other way round.
-  The windows put elsewhere are taken from two zones, now that one zone can hold two.
+  The windows put elsewhere are taken from two zones, now that one zone can hold two. After
+  Halves, a trade in a half, a window put elsewhere and Halves stretched, the picture read again
+  finds each of the probe's windows where it is, first in its zone where it was, in its colour
+  (`kept_as_arranged`); Undo puts the windows back in their order front to back too.
 
 ## Review (2026-10-16)
 
@@ -125,3 +153,22 @@ windows back among the others. Measured on 20000 random screens of 2 to 9 window
 windows moves a window on 13 (no window with a minimum size) and 156 (one in five with one), where
 the plan before ADR 0032 moved one on 204 and 357: the remaining ones lay out the screen anew for
 a task the windows now say otherwise, or make room in other zones for a window that needs more.
+
+## Third review (2026-10-16)
+
+A third agent reviewed 5b6280a and found, each now caught by a test written first: a move that
+made the zones make room was undone by the next plan, which made the layout's zones anew without
+the move (Home had let it go) and found the moved window in none of them; a window that keeps
+its size was never found in its zone, where Move windows puts it, so a window stacked behind it
+took its place; zones stretched in a task's layout were not fitted to their windows; a task's
+layout could leave a zone empty when the window filling a zone was not the one it had given it;
+a window dropped onto a zone whose own window had just left took it as empty; Undo put windows
+back under Mosaïk's own frames and tags, which had moved since, or under a window always on top,
+and so left them in front; the probe's check of a second picture passed for windows it would
+minimise, and counted the owner's windows; the stand-in kept no window filling its zone there.
+Measured on random screens, a trade in a zone of a task's layout made the next plan lay the
+screen out anew one time in ten: the windows, stacked anew by Move windows, said another task.
+Hence the screen as arranged (step 0) and colours that go with the windows, above. On 80000
+random screens of 2 to 9 windows (one in five of a minimum size or one they keep, half with one
+or two moves), a second Move windows moves no window, where it moved one on 220 to 849 of 20000
+after the second review.

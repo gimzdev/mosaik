@@ -146,9 +146,19 @@ pub(crate) fn move_all(moves: &[(WindowHandle, To)], wait: Duration) -> Vec<Outc
     done
 }
 
-/// A window [`stack`] moved down, and the window that was just above it before: Undo puts it
-/// back under that one.
+/// A window [`stack`] moved down, and the window it was just under before: Undo puts it back
+/// under that one, or on top when there was none.
 pub(crate) type Lowered = (WindowHandle, Option<WindowHandle>);
+
+/// Whether Undo can put a window of `on_top` (always on top or not) back under `x`: a window
+/// shown, alike, and not one of Mosaïk's frames, tags, strips and lines, which follow the
+/// windows they mark or are hidden while windows move (the third review of ADR 0032: Undo put
+/// windows back under their own tags, where Arrange's frames had gone since).
+fn anchors(x: HWND, on_top: bool) -> bool {
+    window::is_visible(x)
+        && arrange::topmost(x) == on_top
+        && !(window::pid(x) == std::process::id() && window::class_name(x).starts_with("Mosaik"))
+}
 
 /// Runs `job` on a thread of its own and waits at most `wait` for it, handling this thread's
 /// messages meanwhile: calls into other apps that land in order, without holding up the engine.
@@ -203,7 +213,7 @@ pub(crate) fn stack(order: &[WindowHandle], wait: Duration) -> Vec<Lowered> {
                 && let (Some(i), Some(j)) = (at(&z, h), at(&z, b))
                 && i < j
             {
-                let above = i.checked_sub(1).and_then(|k| z.get(k)).copied();
+                let above = z[..i].iter().rev().copied().find(|&x| anchors(x, on_top));
                 match arrange::put_below(h, b) {
                     Ok(true) => {
                         z.remove(i);
@@ -226,18 +236,24 @@ pub(crate) fn stack(order: &[WindowHandle], wait: Duration) -> Vec<Lowered> {
     .unwrap_or_default()
 }
 
-/// Puts the windows [`stack`] moved down back under the windows that were above them, the last
-/// moved first (Undo), on a thread of its own, waiting at most `wait`.
+/// Puts the windows [`stack`] moved down back under the windows that were above them, or on top
+/// of their band when none was, the last moved first (Undo), on a thread of its own, waiting at
+/// most `wait`.
 pub(crate) fn unstack(lowered: &[Lowered], wait: Duration) {
     let lowered = lowered.to_vec();
     let done = on_a_thread(wait, move || {
         for (h, above) in lowered.iter().rev() {
-            let Some(above) = above else { continue };
-            let (h, above) = (window::hwnd(*h), window::hwnd(*above));
-            if window::exists(h)
-                && window::exists(above)
-                && let Err(e) = arrange::put_below(h, above)
-            {
+            let h = window::hwnd(*h);
+            if !window::exists(h) {
+                continue;
+            }
+            let put = match above.map(window::hwnd) {
+                None => arrange::put_on_top(h),
+                Some(a) if window::exists(a) => arrange::put_below(h, a).map(|_| ()),
+                // The window it was under has gone: it stays.
+                Some(_) => Ok(()),
+            };
+            if let Err(e) = put {
                 tracing::debug!(error = %e, "window not put back in its place");
             }
         }
