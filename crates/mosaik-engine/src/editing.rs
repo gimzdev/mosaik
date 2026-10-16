@@ -2,9 +2,10 @@
 //! workspace. Each change is checked (with the reason when refused) and saved, then applied at
 //! once; when it cannot be saved, nothing changes and the reply says why.
 
-use mosaik_core::editing::{ZoneEdit, apply_zones, rename, revision, zones_for_editor};
+use mosaik_core::editing::{ZoneEdit, apply_zones, rename, revision, with_layout, zones_for_editor};
 use mosaik_core::hotkey::{Hotkey, LayoutTyping, check};
-use mosaik_core::layout::WorkspaceId;
+use mosaik_core::layout::{Workspace, WorkspaceId};
+use mosaik_core::presets::Preset;
 use mosaik_core::settings::{SETTINGS_VERSION, Settings};
 use mosaik_ipc::protocol::{ErrorCode, Reply};
 use mosaik_win::hotkey::{Registration, register};
@@ -31,6 +32,24 @@ pub(crate) fn failed(message: impl Into<String>) -> Reply {
         message: message.into(),
         hint: None,
     }
+}
+
+/// A workspace as it was before a layout was picked for it, and as that left it: put back while
+/// it is still so.
+pub(crate) struct LayoutUndo {
+    pub(crate) before: Workspace,
+    pub(crate) after: Workspace,
+}
+
+/// The layout called `id`, or the reply that says there is none.
+pub(crate) fn preset_named(id: &str) -> Result<Preset, Reply> {
+    Preset::from_id(id.trim()).ok_or_else(|| {
+        let known: Vec<&str> = Preset::ALL.iter().map(|p| p.id()).collect();
+        refused(
+            format!("There is no layout called \u{201c}{}\u{201d}.", id.trim()),
+            Some(&format!("The layouts are {}.", known.join(", "))),
+        )
+    })
 }
 
 pub(crate) fn not_found(which: &str) -> Reply {
@@ -276,6 +295,87 @@ impl Engine {
             self.refit_open_workspace(&topology);
         }
         self.zones_reply(&id.0)
+    }
+
+    /// Lays workspace `which`'s zones on the main monitor out as `preset`, every app kept in a
+    /// zone (`editing::with_layout`, ADR 0033), and saves it; in the open workspace its windows
+    /// move at once. What it was can be put back (`undo_workspace_layout`).
+    pub(crate) fn set_workspace_layout(&mut self, which: &str, preset: &str) -> Reply {
+        let Some(index) = self.find_workspace(which) else {
+            return not_found(which);
+        };
+        let preset = match preset_named(preset) {
+            Ok(p) => p,
+            Err(reply) => return reply,
+        };
+        let Some(topology) = self.read_topology() else {
+            return no_monitors();
+        };
+        let before = self.file.workspaces[index].clone();
+        let mut ws = before.clone();
+        let main = ws.layout.monitor_index(topology.primary(), &topology);
+        let updated = with_layout(&ws, main, &preset.zones());
+        let message = format!(
+            "\u{201c}{}\u{201d} is laid out in {}.",
+            before.name,
+            preset.label()
+        );
+        if updated == before {
+            return Reply::Done { message };
+        }
+        let id = updated.id.clone();
+        self.file.workspaces[index] = updated.clone();
+        if let Err(e) = self.save_file() {
+            self.file.workspaces[index] = before;
+            return failed(e);
+        }
+        tracing::info!(preset = preset.id(), "workspace laid out");
+        self.layout_undo = Some(LayoutUndo {
+            before,
+            after: updated,
+        });
+        if self.active.as_ref().is_some_and(|a| a.id == id) {
+            self.refit_open_workspace(&topology);
+        }
+        Reply::Done { message }
+    }
+
+    /// Puts workspace `which` back as it was before the last layout picked for it, while it has
+    /// not changed since.
+    pub(crate) fn undo_workspace_layout(&mut self, which: &str) -> Reply {
+        let Some(index) = self.find_workspace(which) else {
+            return not_found(which);
+        };
+        let Some(undo) = self.layout_undo.take() else {
+            return Reply::Error {
+                code: ErrorCode::NotFound,
+                message: "There is nothing to undo.".into(),
+                hint: None,
+            };
+        };
+        if self.file.workspaces[index] != undo.after {
+            return refused(
+                format!(
+                    "\u{201c}{}\u{201d} changed since its layout was picked, so it stays as it is.",
+                    self.file.workspaces[index].name
+                ),
+                None,
+            );
+        }
+        let id = undo.before.id.clone();
+        let message = format!("\u{201c}{}\u{201d} is back as it was.", undo.before.name);
+        self.file.workspaces[index] = undo.before;
+        if let Err(e) = self.save_file() {
+            self.file.workspaces[index] = undo.after;
+            return failed(e);
+        }
+        tracing::info!("workspace layout undone");
+        if self.active.as_ref().is_some_and(|a| a.id == id)
+            && let Some(topology) = self.read_topology()
+        {
+            self.refit_open_workspace(&topology);
+        }
+        Reply::Done { message }
     }
 
     pub(crate) fn rename_workspace(&mut self, which: &str, name: &str) -> Reply {

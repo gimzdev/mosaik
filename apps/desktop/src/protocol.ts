@@ -81,7 +81,9 @@ export type Command =
   | { cmd: 'rescue' }
   | { cmd: 'arrange'; preset?: string; moves?: ArrangeMove[]; areas?: RatioRect[] }
   | { cmd: 'preview_arrange'; preset?: string; moves?: ArrangeMove[]; areas?: RatioRect[] }
-  | { cmd: 'preview_workspace'; workspace: string }
+  | { cmd: 'preview_workspace'; workspace: string; preset?: string }
+  | { cmd: 'set_workspace_layout'; workspace: string; preset: string }
+  | { cmd: 'undo_workspace_layout'; workspace: string }
   | { cmd: 'undo_arrange' }
   | { cmd: 'show_switcher' }
   | { cmd: 'show_settings' }

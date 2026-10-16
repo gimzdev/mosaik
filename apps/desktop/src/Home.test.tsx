@@ -127,7 +127,15 @@ const codingSet = set({
 });
 
 /** Commands after which the engine says the workspaces changed (crates/mosaik-engine/src/thread.rs). */
-const CHANGES: ReadonlySet<Command['cmd']> = new Set(['arrange', 'undo_arrange', 'switch', 'open_set', 'save']);
+const CHANGES: ReadonlySet<Command['cmd']> = new Set([
+  'arrange',
+  'undo_arrange',
+  'switch',
+  'open_set',
+  'save',
+  'set_workspace_layout',
+  'undo_workspace_layout',
+]);
 
 function answer(auto: ArrangePreview = coding, extra: (c: Command) => Reply | null = () => null) {
   const asked: Command[] = [];
@@ -602,6 +610,42 @@ describe('Home', () => {
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('lays out a workspace picked in the layout chosen, keeping its apps, and undoes it', async () => {
+    // The owner: "try coding for example theres 6 apps normally and going to quarter get rid of
+    // some". A layout chosen while a workspace was shown went back to the screen, which has
+    // fewer windows. It lays out that workspace, saved at once (ADR 0033), and Undo puts it back.
+    const asked = answer(coding, (c) =>
+      c.cmd === 'set_workspace_layout'
+        ? done('“Ship” is laid out in Quarters.')
+        : c.cmd === 'undo_workspace_layout'
+          ? done('“Ship” is back as it was.')
+          : null,
+    );
+    home();
+    await userEvent.click(await screen.findByRole('button', { name: 'Ship' }));
+    await waitFor(() => {
+      expect(picture()).toHaveAttribute(
+        'aria-label',
+        'Visual Studio Code in zone 1, Windows Terminal starts in zone 2 with Claude as tabs, Google Chrome minimized.',
+      );
+    });
+    // Automatic lays out the screen's windows; it is no layout of a workspace.
+    expect(screen.getByRole('radio', { name: 'Automatic' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('radio', { name: 'Quarters' }));
+    expect(asked).toContainEqual({ cmd: 'set_workspace_layout', workspace: 'ship', preset: 'quarters' });
+    expect(await shown('“Ship” is laid out in Quarters.')).toBeInTheDocument();
+    // Still the workspace's preview, read again; not the screen's.
+    expect(title()).toHaveTextContent('Preview of “Ship”');
+    expect(asked.some((c) => c.cmd === 'preview_arrange' && c.preset === 'quarters')).toBe(false);
+    await waitFor(() => {
+      expect(count(asked, 'preview_workspace')).toBeGreaterThan(1);
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(asked).toContainEqual({ cmd: 'undo_workspace_layout', workspace: 'ship' });
+    expect(await shown('“Ship” is back as it was.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+  });
+
   it('changes a workspace picked on its picture, saving it there at once', async () => {
     // The owner: "when clicking on a workspace the anim must have those options too (drag drop
     // and stretch zones)".
@@ -789,7 +833,7 @@ describe('Home', () => {
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
   });
 
-  it('keeps a workspace shown when its row is clicked again; Back, Esc or a layout show the screen again', async () => {
+  it('keeps a workspace shown when its row is clicked again, and when a layout is chosen; Back or Esc show the screen again', async () => {
     const asked = answer();
     home();
     await userEvent.click(await screen.findByRole('button', { name: 'Ship' }));
@@ -811,9 +855,10 @@ describe('Home', () => {
     expect(arrange()).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Ship' }));
     expect(await screen.findByRole('button', { name: 'Open “Ship”' })).toBeInTheDocument();
+    // A layout chosen is the workspace's own now (ADR 0033): it stays shown.
     await userEvent.click(screen.getByRole('radio', { name: 'Halves' }));
-    expect(arrange()).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Halves' })).toBeChecked();
+    expect(asked).toContainEqual({ cmd: 'set_workspace_layout', workspace: 'ship', preset: 'halves' });
+    expect(screen.getByRole('button', { name: 'Open “Ship”' })).toBeInTheDocument();
     expect(asked.some((c) => c.cmd === 'switch')).toBe(false);
   });
 

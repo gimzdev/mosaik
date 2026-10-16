@@ -49,7 +49,10 @@ mod windows_main {
                                  stack-half, rows, three-rows
   preview [<layout>]             what arrange would do on the main screen, without doing it
                                  (as JSON)
-  preview-workspace <workspace>  what opening a workspace would do there (as JSON)
+  preview-workspace <workspace> [<layout>]  what opening a workspace would do there (as JSON);
+                                 with a layout, laid out so (nothing is saved)
+  layout <workspace> <layout>    lay a workspace out as a layout, keeping every app in a zone
+  undo-layout <workspace>        put back the workspace as it was before `layout`
   undo-arrange                   put back what the last arrange, or workspace opened, changed
   rename <workspace> <name>      rename a workspace
   delete <workspace>             delete a workspace (its windows stay)
@@ -163,6 +166,18 @@ A <workspace> is its name or its id.";
             },
             ("preview-workspace", [w]) => Command::PreviewWorkspace {
                 workspace: (*w).to_owned(),
+                preset: None,
+            },
+            ("preview-workspace", [w, layout]) => Command::PreviewWorkspace {
+                workspace: (*w).to_owned(),
+                preset: Some((*layout).to_owned()),
+            },
+            ("layout", [w, layout]) => Command::SetWorkspaceLayout {
+                workspace: (*w).to_owned(),
+                preset: (*layout).to_owned(),
+            },
+            ("undo-layout", [w]) => Command::UndoWorkspaceLayout {
+                workspace: (*w).to_owned(),
             },
             ("undo-arrange", []) => Command::UndoArrange,
             ("sets", []) => Command::Sets,
@@ -233,7 +248,9 @@ A <workspace> is its name or its id.";
     fn workspace_of(cmd: &mut Command) -> Option<&mut String> {
         match cmd {
             Command::Switch { workspace }
-            | Command::PreviewWorkspace { workspace }
+            | Command::PreviewWorkspace { workspace, .. }
+            | Command::SetWorkspaceLayout { workspace, .. }
+            | Command::UndoWorkspaceLayout { workspace }
             | Command::Zones { workspace }
             | Command::Apps { workspace }
             | Command::AddApp { workspace, .. }

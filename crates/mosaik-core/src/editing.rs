@@ -6,6 +6,7 @@
 //! one standing in for it (as it does on screen) and, unless the editor moves it to another
 //! monitor, keeps belonging to its own monitor when saved.
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
@@ -359,6 +360,189 @@ pub fn add_installed_app(
         place,
     });
     Ok((out, id))
+}
+
+/// An app of a zone as it moves: a window of its own, or a tab group, which moves as one.
+#[derive(Clone)]
+enum Unit {
+    Slot(SlotId),
+    Group(crate::layout::TabGroupId),
+}
+
+/// How much of the work area `a` and `b` share.
+fn shared(a: RatioRect, b: RatioRect) -> f64 {
+    let w = (a.right().min(b.right()) - a.left().max(b.left())).max(0.0);
+    let h = (a.bottom().min(b.bottom()) - a.top().max(b.top())).max(0.0);
+    w * h
+}
+
+/// The workspace with its zones on the monitor at `monitor` (an index into its layout's
+/// monitors) laid out anew as `areas`, a layout picked on its picture (ADR 0033; the owner, of
+/// Coding's six apps: "going to quarter get rid of some"). Every app stays in a zone: each new
+/// zone takes the old zone over most of it, with its id, colour and apps; the apps of an old zone
+/// left over go to the new zone over most of it; then a zone left empty takes the app at the back
+/// of the zone with the most apps, while one has two or more (a tab group moves as one). Zones
+/// on other monitors, and apps in no zone, stay as they are.
+pub fn with_layout(ws: &Workspace, monitor: usize, areas: &[RatioRect]) -> Workspace {
+    let mut out = ws.clone();
+    if areas.is_empty() {
+        return out;
+    }
+    let layout = &mut out.layout;
+    let old: Vec<Zone> = layout
+        .zones
+        .iter()
+        .filter(|z| z.monitor == monitor)
+        .cloned()
+        .collect();
+    // Each new area takes the old zone over most of it, the largest shares first.
+    let mut pairs: Vec<(f64, usize, usize)> = Vec::new();
+    for (k, &area) in areas.iter().enumerate() {
+        for (i, z) in old.iter().enumerate() {
+            let s = shared(area, z.area);
+            if s > 0.0 {
+                pairs.push((s, k, i));
+            }
+        }
+    }
+    pairs.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    let mut took: Vec<Option<usize>> = vec![None; areas.len()];
+    let mut used = vec![false; old.len()];
+    for (_, k, i) in pairs {
+        if took[k].is_none() && !used[i] {
+            took[k] = Some(i);
+            used[i] = true;
+        }
+    }
+    let mut ids: HashSet<String> = layout.zones.iter().map(|z| z.id.0.clone()).collect();
+    let mut colours: Vec<ZoneColor> = took.iter().flatten().map(|&i| old[i].color).collect();
+    let made: Vec<Zone> = areas
+        .iter()
+        .zip(&took)
+        .map(|(&area, t)| match t {
+            Some(i) => Zone {
+                area,
+                ..old[*i].clone()
+            },
+            None => {
+                let id = ZoneId(next_id("z", &ids));
+                ids.insert(id.0.clone());
+                let color = ZoneColor::ALL
+                    .into_iter()
+                    .find(|c| !colours.contains(c))
+                    .unwrap_or_else(|| ZoneColor::nth(colours.len()));
+                colours.push(color);
+                Zone {
+                    id,
+                    name: String::new(),
+                    color,
+                    monitor,
+                    area,
+                }
+            }
+        })
+        .collect();
+    // The apps of an old zone left over go to the new zone over most of it.
+    let mut moved: HashMap<ZoneId, ZoneId> = HashMap::new();
+    for (i, z) in old.iter().enumerate().filter(|(i, _)| !used[*i]) {
+        let to = (0..made.len())
+            .max_by(|&a, &b| {
+                shared(z.area, made[a].area)
+                    .total_cmp(&shared(z.area, made[b].area))
+                    .then(b.cmp(&a))
+            })
+            .unwrap_or(0);
+        moved.insert(old[i].id.clone(), made[to].id.clone());
+    }
+    let at = layout
+        .zones
+        .iter()
+        .position(|z| z.monitor == monitor)
+        .unwrap_or(layout.zones.len());
+    layout.zones.retain(|z| z.monitor != monitor);
+    let at = at.min(layout.zones.len());
+    layout.zones.splice(at..at, made.iter().cloned());
+    let rehome = |place: &mut Place| {
+        if let Place::Zone { zone } = place
+            && let Some(to) = moved.get(zone)
+        {
+            *zone = to.clone();
+        }
+    };
+    for s in &mut layout.slots {
+        rehome(&mut s.place);
+    }
+    for g in &mut layout.tab_groups {
+        rehome(&mut g.place);
+    }
+    // A zone left empty takes the app at the back of the zone with the most apps.
+    loop {
+        let ranks = layout.ranks();
+        // Each zone's apps, with their places front to back: a window of its own, or a tab group
+        // as one.
+        let mut units: HashMap<ZoneId, Vec<(usize, Unit)>> = HashMap::new();
+        for s in &layout.slots {
+            if let Place::Zone { zone } = &s.place {
+                let rank = ranks.get(&s.id).copied().unwrap_or(usize::MAX);
+                units
+                    .entry(zone.clone())
+                    .or_default()
+                    .push((rank, Unit::Slot(s.id.clone())));
+            }
+        }
+        for g in &layout.tab_groups {
+            if let Place::Zone { zone } = &g.place {
+                let rank = g
+                    .tabs
+                    .iter()
+                    .filter_map(|t| ranks.get(t))
+                    .min()
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                units
+                    .entry(zone.clone())
+                    .or_default()
+                    .push((rank, Unit::Group(g.id.clone())));
+            }
+        }
+        let count = |z: &ZoneId| units.get(z).map_or(0, Vec::len);
+        let empty = made.iter().find(|z| count(&z.id) == 0);
+        let crowded = made
+            .iter()
+            .filter(|z| count(&z.id) >= 2)
+            .max_by(|a, b| count(&a.id).cmp(&count(&b.id)).then(Ordering::Greater));
+        let (Some(empty), Some(crowded)) = (empty, crowded) else {
+            break;
+        };
+        let Some((_, back)) = units
+            .get(&crowded.id)
+            .and_then(|list| list.iter().max_by_key(|(rank, _)| *rank))
+            .cloned()
+        else {
+            break;
+        };
+        let to = Place::Zone {
+            zone: empty.id.clone(),
+        };
+        let place = match &back {
+            Unit::Slot(id) => layout
+                .slots
+                .iter_mut()
+                .find(|s| &s.id == id)
+                .map(|s| &mut s.place),
+            Unit::Group(id) => layout
+                .tab_groups
+                .iter_mut()
+                .find(|g| &g.id == id)
+                .map(|g| &mut g.place),
+        };
+        match place {
+            Some(p) => *p = to,
+            None => break,
+        }
+    }
+    layout.number_zones();
+    out
 }
 
 /// The workspace with its app `slot` in the zone `zone`. A tab leaves its group for it, unless
@@ -919,6 +1103,155 @@ mod tests {
         assert!(matches!(place(&alone, &c), Place::Maximized { .. }));
         assert_eq!(alone.layout.problems(), vec![]);
         assert_eq!(add(&ws, Some("gone")), Err(EditError::GoneZone));
+    }
+
+    /// The owner's Coding (image of 2026-10-16): Visual Studio Code in the left half; Claude, File
+    /// Explorer and Chrome at the top right; MSYS2 and Terminal at the bottom right; and a zone
+    /// on the other monitor. With `tabs`, Claude and Chrome are tabs of one group.
+    fn coding(t: &Topology, tabs: bool) -> Workspace {
+        let monitors: Vec<_> = t.monitors().iter().map(Monitor::to_ref).collect();
+        let zone = |id: &str, monitor: usize, area: RatioRect, color: ZoneColor| Zone {
+            id: ZoneId::new(id),
+            name: String::new(),
+            color,
+            monitor,
+            area,
+        };
+        let slot = |id: &str, exe: &str, place: Place| Slot {
+            id: SlotId(id.into()),
+            label: None,
+            app: AppMatch::exe(exe),
+            launch: None,
+            place,
+        };
+        let z = |id: &str| Place::Zone {
+            zone: ZoneId::new(id),
+        };
+        let g = || Place::Tab {
+            group: TabGroupId("g1".into()),
+        };
+        let mut layout = Layout {
+            monitors,
+            zones: vec![
+                zone("z1", 0, ratio(0.0, 0.0, 0.5, 1.0), ZoneColor::Lapis),
+                zone("z2", 0, ratio(0.5, 0.0, 1.0, 0.5), ZoneColor::Saffron),
+                zone("z3", 0, ratio(0.5, 0.5, 1.0, 1.0), ZoneColor::Verdigris),
+                zone("z9", 1, RatioRect::FULL, ZoneColor::Slate),
+            ],
+            slots: vec![
+                slot("s1", "code.exe", z("z1")),
+                slot("s2", "claude.exe", if tabs { g() } else { z("z2") }),
+                slot("s3", "explorer.exe", z("z2")),
+                slot("s4", "chrome.exe", if tabs { g() } else { z("z2") }),
+                slot("s5", "mintty.exe", z("z3")),
+                slot("s6", "windowsterminal.exe", z("z3")),
+            ],
+            tab_groups: Vec::new(),
+        };
+        if tabs {
+            layout.tab_groups.push(TabGroup {
+                id: TabGroupId("g1".into()),
+                tabs: vec![sid("s2"), sid("s4")],
+                active: sid("s2"),
+                place: z("z2"),
+            });
+        }
+        layout.number_zones();
+        Workspace {
+            id: WorkspaceId("coding".into()),
+            name: "Coding".into(),
+            hotkey: None,
+            layout,
+        }
+    }
+
+    #[test]
+    fn a_layout_picked_for_a_workspace_keeps_every_app_in_a_zone() {
+        // ADR 0033 (the owner: "try coding for example theres 6 apps normally and going to
+        // quarter get rid of some"; "lets try workspace with most apps, on all layouts"). On
+        // every layout, with and without a tab group: every app is in a zone of the main
+        // monitor, the layout's zones are where it puts them, no zone is empty while another
+        // holds two apps, and the other monitor's zone stays.
+        let t = fixtures::uhd_200_plus_1080p_100();
+        for tabs in [false, true] {
+            let ws = coding(&t, tabs);
+            for preset in crate::presets::Preset::ALL {
+                let areas = preset.zones();
+                let out = with_layout(&ws, 0, &areas);
+                let why = format!("{preset:?}, tabs {tabs}");
+                assert_eq!(out.layout.problems(), vec![], "{why}");
+                let main: Vec<&Zone> = out.layout.zones.iter().filter(|z| z.monitor == 0).collect();
+                let got: Vec<RatioRect> = main.iter().map(|z| z.area).collect();
+                assert_eq!(got, areas, "{why}");
+                let units = |z: &ZoneId| {
+                    out.layout
+                        .slots
+                        .iter()
+                        .filter(|s| matches!(&s.place, Place::Zone { zone } if zone == z))
+                        .count()
+                        + out
+                            .layout
+                            .tab_groups
+                            .iter()
+                            .filter(|g| matches!(&g.place, Place::Zone { zone } if zone == z))
+                            .count()
+                };
+                for s in &out.layout.slots {
+                    let place = out.layout.effective_place(s);
+                    assert!(
+                        matches!(place, Some(Place::Zone { zone }) if main.iter().any(|z| &z.id == zone)),
+                        "{why}: {} at {place:?}",
+                        s.id.0
+                    );
+                }
+                let counts: Vec<usize> = main.iter().map(|z| units(&z.id)).collect();
+                assert!(
+                    !counts.contains(&0) || counts.iter().all(|&c| c <= 1),
+                    "{why}: {counts:?}"
+                );
+                let other = out.layout.zone(&ZoneId::new("z9")).unwrap();
+                assert_eq!((other.monitor, other.area), (1, RatioRect::FULL), "{why}");
+                // Each zone a colour of its own.
+                let mut colours: Vec<ZoneColor> = main.iter().map(|z| z.color).collect();
+                colours.sort_by_key(|c| ZoneColor::ALL.iter().position(|x| x == c));
+                colours.dedup();
+                assert_eq!(colours.len(), main.len().min(ZoneColor::ALL.len()), "{why}");
+            }
+        }
+        // Quarters: each app keeps its corner, with its zone's colour; the quarter left empty
+        // takes the app at the back of the most crowded one: Chrome.
+        let ws = coding(&t, false);
+        let q = with_layout(&ws, 0, &crate::presets::Preset::Quarters.zones());
+        let area_of = |id: &str| {
+            let s = q.layout.slot(&sid(id)).unwrap();
+            match &s.place {
+                Place::Zone { zone } => q.layout.zone(zone).unwrap().area,
+                other => panic!("{id} at {other:?}"),
+            }
+        };
+        let quarter = |l: f64, t: f64| ratio(l, t, l + 0.5, t + 0.5);
+        assert_eq!(area_of("s1"), quarter(0.0, 0.0));
+        assert_eq!(area_of("s2"), quarter(0.5, 0.0));
+        assert_eq!(area_of("s3"), quarter(0.5, 0.0));
+        assert_eq!(area_of("s4"), quarter(0.0, 0.5));
+        assert_eq!(area_of("s5"), quarter(0.5, 0.5));
+        assert_eq!(area_of("s6"), quarter(0.5, 0.5));
+        let zone_of = |id: &str| match &q.layout.slot(&sid(id)).unwrap().place {
+            Place::Zone { zone } => zone.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(zone_of("s2"), ZoneId::new("z2"), "the top right keeps its id");
+        assert_eq!(zone_of("s5"), ZoneId::new("z3"));
+        // Halves: the two zones on the right are one half; the left half keeps Code.
+        let h = with_layout(&ws, 0, &crate::presets::Preset::Halves.zones());
+        let right: Vec<&str> = h
+            .layout
+            .slots
+            .iter()
+            .filter(|s| matches!(&s.place, Place::Zone { zone } if h.layout.zone(zone).is_some_and(|z| z.area.left() > 0.4)))
+            .map(|s| s.id.0.as_str())
+            .collect();
+        assert_eq!(right, ["s2", "s3", "s4", "s5", "s6"]);
     }
 
     #[test]

@@ -359,6 +359,52 @@ test.describe('Home', () => {
     await expect(arrange(page)).toBeVisible();
   });
 
+  test('the workspace with the most apps keeps every app on every layout chosen for it, and Undo puts it back', async ({
+    page,
+  }) => {
+    // The owner: "try coding for example theres 6 apps normally and going to quarter get rid of
+    // some"; "lets try workspace with most apps, on all layouts" (ADR 0033).
+    await page.goto('/');
+    const list = page.getByRole('list', { name: 'Workspaces' });
+    await list.getByRole('button', { name: 'Backend', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Preview of “Backend”' })).toBeVisible();
+    const picture = page.getByRole('group', { name: /^Visual Studio Code/ });
+    await expect(picture).toBeVisible();
+    const before = await picture.getAttribute('aria-label');
+    await expect(page.getByRole('radio', { name: 'Automatic' })).toBeDisabled();
+    const apps = ['Visual Studio Code', 'Windows Terminal', 'File Explorer', 'MSYS2', 'Google Chrome', 'Claude'];
+    for (const layout of [
+      'Halves',
+      'Thirds',
+      'Main + side',
+      'Side + main',
+      'Half + stack',
+      'Stack + half',
+      'Quarters',
+      'Full screen',
+    ]) {
+      const radio = page.getByRole('radio', { name: layout });
+      // Its own layout already (Half + stack): nothing to do.
+      const own = await radio.isChecked();
+      if (!own) {
+        // Checked once Mosaïk has laid it out, as its picture then shows.
+        await radio.click();
+        await expect(shown(page, `“Backend” is laid out in ${layout}.`)).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Preview of “Backend”' })).toBeVisible();
+        await expect(radio).toBeChecked();
+      }
+      const label = (await picture.getAttribute('aria-label')) ?? '';
+      for (const app of apps) {
+        expect(label, layout).toContain(app);
+        expect(label, layout).not.toContain(`${app} minimized`);
+      }
+      if (own) continue;
+      await page.getByRole('button', { name: 'Undo', exact: true }).click();
+      await expect(shown(page, '“Backend” is back as it was.')).toBeVisible();
+      await expect(picture).toHaveAttribute('aria-label', before ?? '');
+    }
+  });
+
   test('a double-click on a workspace opens it at once', async ({ page }) => {
     await page.goto('/');
     const list = page.getByRole('list', { name: 'Workspaces' });
@@ -445,7 +491,7 @@ test.describe('a workspace’s page', () => {
     await page.getByRole('button', { name: 'Remove Slack' }).click();
     await expect(apps.getByRole('listitem')).toHaveCount(3);
     await page.getByRole('button', { name: 'Add an app to “Website”' }).click();
-    const slack = page.getByRole('group', { name: 'Open now' }).getByRole('button', { name: 'Slack Slack window' });
+    const slack = page.getByRole('group', { name: 'Apps to add' }).getByRole('button', { name: 'Slack', exact: true });
     await expect(slack).toBeInViewport({ ratio: 1 });
     await accessible(page);
     await slack.click();
@@ -454,8 +500,8 @@ test.describe('a workspace’s page', () => {
     // An app that is not open, found by its name (ADR 0033): it starts when the workspace opens.
     await page.getByRole('button', { name: 'Add an app to “Website”' }).click();
     await page.getByRole('searchbox', { name: 'Find an app' }).fill('spot');
-    await page.getByRole('group', { name: 'Not open' }).getByRole('button', { name: 'Spotify' }).click();
-    await expect(shown(page, 'Spotify added. It starts when the workspace opens.')).toBeVisible();
+    await page.getByRole('group', { name: 'Apps to add' }).getByRole('button', { name: 'Spotify' }).click();
+    await expect(shown(page, 'Spotify added.')).toBeVisible();
     await expect(apps.getByRole('listitem')).toHaveCount(5);
     await accessible(page);
     await windowDoesNotScroll(page);

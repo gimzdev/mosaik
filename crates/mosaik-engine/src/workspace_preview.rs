@@ -18,8 +18,9 @@ use crate::thread::Engine;
 impl Engine {
     /// What `switch` to `which` would do now on the main monitor: its zones, its apps' windows
     /// from where they are to their places (apps not open start there; a tab group shows as
-    /// the tab that would show, with its tabs), and the other windows it would minimise.
-    pub(crate) fn preview_workspace(&mut self, which: &str) -> Reply {
+    /// the tab that would show, with its tabs), and the other windows it would minimise. With
+    /// `preset`, laid out as that layout first (`set_workspace_layout`), saving nothing.
+    pub(crate) fn preview_workspace(&mut self, which: &str, preset: Option<&str>) -> Reply {
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
@@ -30,7 +31,15 @@ impl Engine {
                 hint: None,
             };
         };
-        let ws = self.file.workspaces[index].clone();
+        let mut ws = self.file.workspaces[index].clone();
+        if let Some(preset) = preset {
+            let preset = match crate::editing::preset_named(preset) {
+                Ok(p) => p,
+                Err(reply) => return reply,
+            };
+            let main = ws.layout.monitor_index(topology.primary(), &topology);
+            ws = mosaik_core::editing::with_layout(&ws, main, &preset.zones());
+        }
         let previous: Vec<WindowHandle> = self
             .active
             .as_ref()

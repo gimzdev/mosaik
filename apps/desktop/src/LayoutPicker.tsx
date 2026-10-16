@@ -41,18 +41,21 @@ function Option({
   choice,
   on,
   disabled,
+  title,
   onChoose,
 }: {
   group: string;
   choice: Choice;
   on: boolean;
   disabled: boolean;
+  /** What it says when pointed at: its name, or why it cannot be chosen. */
+  title?: string | undefined;
   onChoose: (choice: Choice) => void;
 }) {
   const auto = choice === 'auto';
   return (
     <label
-      title={choiceName(choice)}
+      title={title ?? choiceName(choice)}
       className={`relative flex min-h-[54px] min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-1.5 text-caption font-semibold transition-colors duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus)] has-[:disabled]:opacity-50 ${
         auto ? 'row-span-2 px-3' : ''
       } ${on ? CHOSEN : OTHER}`}
@@ -81,12 +84,16 @@ function Option({
 export function LayoutPicker({
   value,
   disabled,
+  noAuto = false,
   onChoose,
 }: {
-  /** The layout chosen; none while a workspace is shown instead. */
+  /** The layout chosen; none when the picture is in no layout. */
   value: Choice | null;
   /** Nothing to arrange. */
   disabled: boolean;
+  /** For a workspace's layout: Automatic, which lays out the windows on screen, cannot be chosen
+   * (ADR 0033). */
+  noAuto?: boolean;
   onChoose: (choice: Choice) => void;
 }) {
   const group = useId();
@@ -100,7 +107,8 @@ export function LayoutPicker({
             group={group}
             choice={choice}
             on={value === choice}
-            disabled={disabled}
+            disabled={disabled || (noAuto && choice === 'auto')}
+            title={noAuto && choice === 'auto' ? 'Automatic lays out the windows on your screen' : undefined}
             onChoose={onChoose}
           />
         ))}

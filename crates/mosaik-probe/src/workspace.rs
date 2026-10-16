@@ -459,6 +459,7 @@ fn scenario(
     let preview = match engine.request(
         Command::PreviewWorkspace {
             workspace: "Probe workspace".into(),
+            preset: None,
         },
         TIMEOUT,
     ) {

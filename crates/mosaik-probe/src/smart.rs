@@ -2077,6 +2077,7 @@ fn reordered(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<
     let picture: Vec<SlotId> = match engine.request(
         Command::PreviewWorkspace {
             workspace: ws.0.clone(),
+            preset: None,
         },
         TIMEOUT,
     ) {

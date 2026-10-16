@@ -1,34 +1,22 @@
 // "Add an app", on a workspace's page (ADR 0033; the owner: "add an open window" becomes "add an
-// app" and proposes even apps that are not open): the windows open now that the workspace does
-// not have, then the apps of the Start menu that are not open, with a box to find one by its
-// name. An open window's app joins with its window; an app not open starts when the workspace
-// opens. The arrow keys go from the box to the apps and back; Esc closes the list.
+// app" and proposes even apps that are not open; "why even specify "not open"": one list): the
+// apps it could take, by name, with a box to find one. An app open now joins with its window
+// (two windows of one app are told apart by their titles); one that is not starts when the
+// workspace opens. The arrow keys go from the box to the apps and back; Esc closes the list.
 
-import { type ReactNode, useId, useState } from 'react';
+import { useId, useState } from 'react';
 
 import { AppIcon, Glyph } from './icons';
 import type { InstalledApp, OpenWindow } from './protocol';
 import { usePopup } from './ui';
 
-/** Whether a window's title says no more than its app's name ("Battle.net" and "Battle․net"). */
-export const sameName = (title: string, label: string) =>
-  !title.trim() || title.normalize('NFKC').trim().toLowerCase() === label.normalize('NFKC').trim().toLowerCase();
-
 const ITEM =
   'flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-small font-semibold hover:bg-[var(--hover)] focus-visible:-outline-offset-2';
 
-/** One group of the list: its heading, then its apps. */
-function Group({ title, children }: { title: string; children: ReactNode }) {
-  const id = useId();
-  return (
-    <div role="group" aria-labelledby={id} className="flex flex-col">
-      <p id={id} className="px-3 pt-2 pb-1 text-caption font-semibold text-[var(--muted)]">
-        {title}
-      </p>
-      {children}
-    </div>
-  );
-}
+/** An app of the list: a window open now, or an app of the Start menu. */
+type Choice = { key: string; label: string; detail: string | null; icon: string | null } & (
+  { window: OpenWindow } | { app: InstalledApp }
+);
 
 export function AddApp({
   name,
@@ -48,9 +36,19 @@ export function AddApp({
   const [query, setQuery] = useState('');
   const { open, setOpen, side, box, trigger, list, close } = usePopup('input');
   const q = query.trim().toLowerCase();
-  const hits = (...words: string[]) => !q || words.some((w) => w.toLowerCase().includes(q));
-  const openNow = windows.filter((w) => hits(w.label, w.title));
-  const notOpen = installed.filter((a) => hits(a.label));
+  const twice = (label: string) => windows.filter((w) => w.label === label).length > 1;
+  const choices: Choice[] = [
+    ...windows.map((w) => ({
+      key: `w${String(w.window)}`,
+      label: w.label,
+      detail: twice(w.label) && w.title ? w.title : null,
+      icon: w.icon,
+      window: w,
+    })),
+    ...installed.map((a) => ({ key: `a${a.app}`, label: a.label, detail: null, icon: a.icon, app: a })),
+  ]
+    .filter((c) => !q || c.label.toLowerCase().includes(q) || (c.detail ?? '').toLowerCase().includes(q))
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
 
   const shut = () => {
     setQuery('');
@@ -125,55 +123,32 @@ export function AddApp({
               className="min-w-0 flex-1 bg-transparent py-2 text-small outline-none placeholder:text-[var(--muted)]"
             />
           </label>
-          <div className="mt-1 flex min-h-0 flex-col overflow-y-auto">
-            {openNow.length ? (
-              <Group title="Open now">
-                {openNow.map((w) => (
-                  <button
-                    key={`w${String(w.window)}`}
-                    type="button"
-                    data-item
-                    className={ITEM}
-                    onClick={() => {
-                      pick(() => {
-                        onWindow(w);
-                      });
-                    }}
-                  >
-                    <AppIcon icon={w.icon} size={18} keepSpace />
-                    {sameName(w.title, w.label) ? (
-                      w.label
-                    ) : (
-                      <span className="flex min-w-0 flex-col">
-                        <span>{w.label}</span>
-                        <span className="truncate text-caption font-normal text-[var(--muted)]">{w.title}</span>
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </Group>
-            ) : null}
-            {notOpen.length ? (
-              <Group title="Not open">
-                {notOpen.map((a) => (
-                  <button
-                    key={`a${a.app}`}
-                    type="button"
-                    data-item
-                    className={ITEM}
-                    onClick={() => {
-                      pick(() => {
-                        onInstalled(a);
-                      });
-                    }}
-                  >
-                    <AppIcon icon={a.icon} size={18} keepSpace />
-                    {a.label}
-                  </button>
-                ))}
-              </Group>
-            ) : null}
-            {!openNow.length && !notOpen.length ? (
+          <div role="group" aria-label="Apps to add" className="mt-1 flex min-h-0 flex-col overflow-y-auto">
+            {choices.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                data-item
+                className={ITEM}
+                onClick={() => {
+                  pick(() => {
+                    if ('window' in c) onWindow(c.window);
+                    else onInstalled(c.app);
+                  });
+                }}
+              >
+                <AppIcon icon={c.icon} size={18} keepSpace />
+                {c.detail === null ? (
+                  c.label
+                ) : (
+                  <span className="flex min-w-0 flex-col">
+                    <span>{c.label}</span>
+                    <span className="truncate text-caption font-normal text-[var(--muted)]">{c.detail}</span>
+                  </span>
+                )}
+              </button>
+            ))}
+            {choices.length === 0 ? (
               <p className="px-3 py-3 text-small text-[var(--muted)]">
                 {q ? `No app called “${query.trim()}”.` : 'Every app is in it already.'}
               </p>

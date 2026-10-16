@@ -207,6 +207,8 @@ pub(crate) struct Engine {
     pub(crate) told: HashSet<&'static str>,
     /// What the last Arrange, or the workspace last opened, changed, to undo it.
     pub(crate) undo: Option<crate::arranging::Undo>,
+    /// The workspace as it was before the last layout picked for it, and as that left it.
+    pub(crate) layout_undo: Option<crate::editing::LayoutUndo>,
     /// The quick menu at the screen's edge.
     pub(crate) quick: crate::quick::Quick,
     pub(crate) toasts: crate::toasts::Toasts,
@@ -336,6 +338,7 @@ pub(crate) fn run(
         titles: Titles::new(),
         told: HashSet::new(),
         undo: None,
+        layout_undo: None,
         quick: crate::quick::Quick::default(),
         toasts: crate::toasts::Toasts::default(),
         start_apps: crate::sets::StartApps::new(window.0 as isize),
@@ -744,6 +747,8 @@ impl Engine {
                 | Command::UndoArrange
                 | Command::AddApp { .. }
                 | Command::AddInstalledApp { .. }
+                | Command::SetWorkspaceLayout { .. }
+                | Command::UndoWorkspaceLayout { .. }
                 | Command::MoveApp { .. }
                 | Command::RemoveApp { .. }
                 | Command::OpenSet { .. }
@@ -785,7 +790,13 @@ impl Engine {
             Command::PreviewArrange { preset, moves, areas } => {
                 self.preview_arrange(preset.as_deref(), &moves, &areas)
             }
-            Command::PreviewWorkspace { workspace } => self.preview_workspace(&workspace),
+            Command::PreviewWorkspace { workspace, preset } => {
+                self.preview_workspace(&workspace, preset.as_deref())
+            }
+            Command::SetWorkspaceLayout { workspace, preset } => {
+                self.set_workspace_layout(&workspace, &preset)
+            }
+            Command::UndoWorkspaceLayout { workspace } => self.undo_workspace_layout(&workspace),
             Command::UndoArrange => self.undo_arrange(),
             Command::Rescue => self.rescue(),
             Command::ShowSwitcher => {

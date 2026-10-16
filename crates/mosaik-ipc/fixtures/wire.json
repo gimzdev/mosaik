@@ -77,6 +77,20 @@
       "workspace": "ship"
     },
     {
+      "cmd": "preview_workspace",
+      "preset": "quarters",
+      "workspace": "ship"
+    },
+    {
+      "cmd": "set_workspace_layout",
+      "preset": "quarters",
+      "workspace": "ship"
+    },
+    {
+      "cmd": "undo_workspace_layout",
+      "workspace": "ship"
+    },
+    {
       "cmd": "undo_arrange"
     },
     {

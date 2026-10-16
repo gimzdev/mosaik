@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { request } from './engine';
 import { Glyph } from './icons';
+import { PRESETS, type Preset, presetShape } from './editor/model';
 import { type Choice, LayoutPicker, choiceName } from './LayoutPicker';
 import {
   type AppSet,
@@ -132,6 +133,26 @@ interface Outcome {
   error: boolean;
 }
 
+/** What Undo puts back: what Arrange or opening a workspace did, or a workspace's layout. */
+type Undoable = { kind: 'arrange' } | { kind: 'layout'; workspace: string } | null;
+
+/** The layout whose zones these are, in any order, if any: a workspace's, on its picture. */
+function layoutOf(preview: ArrangePreview | null): Preset | null {
+  if (!preview?.zones.length) return null;
+  const areas = preview.zones.map((z) => z.area);
+  const same = (a: RatioRect, b: RatioRect | undefined) =>
+    b !== undefined &&
+    Math.abs(a.left - b.left) < 1e-6 &&
+    Math.abs(a.top - b.top) < 1e-6 &&
+    Math.abs(a.right - b.right) < 1e-6 &&
+    Math.abs(a.bottom - b.bottom) < 1e-6;
+  return (
+    PRESETS.find(
+      (p) => presetShape(p.id).length === areas.length && presetShape(p.id).every((a) => areas.some((b) => same(a, b))),
+    )?.id ?? null
+  );
+}
+
 export function Home({
   onEditWorkspace,
   onEditZones,
@@ -167,7 +188,7 @@ export function Home({
   const [launching, setLaunching] = useState<Target | null>(null);
   /** What the last action did, said under the picture. */
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [undoable, setUndoable] = useState(false);
+  const [undoable, setUndoable] = useState<Undoable>(null);
   /** The picture right after a window is put elsewhere or a zone resized, until Mosaïk's answer
    * comes. */
   const [early, setEarly] = useState<ArrangePreview | null>(null);
@@ -273,7 +294,7 @@ export function Home({
       setArranging(false);
       if (reply.reply === 'done') {
         say(reply.message);
-        setUndoable(true);
+        setUndoable({ kind: 'arrange' });
         // Done: the screen holds the moves and the zones as stretched now, and Mosaïk keeps it
         // as it is while every window stays in its zone (ADR 0032), so they are let go: sent
         // again, each move would trade the windows back. The picture shows the screen as it is.
@@ -288,7 +309,18 @@ export function Home({
   };
 
   const undo = () => {
-    setUndoable(false);
+    const what = undoable;
+    setUndoable(null);
+    if (what?.kind === 'layout') {
+      edited(
+        request({ cmd: 'undo_workspace_layout', workspace: what.workspace }).then((reply) => ({
+          reply,
+          text: reply.reply === 'done' ? reply.message : (errorMessage(reply) ?? 'This could not be undone.'),
+          done: reply.reply === 'done',
+        })),
+      );
+      return;
+    }
     void request({ cmd: 'undo_arrange' }).then((reply) => {
       if (reply.reply === 'done') {
         say(reply.message);
@@ -312,7 +344,7 @@ export function Home({
         reset();
         // Opening a workspace can be undone, as Arrange can: it minimised the other windows on
         // its screens (ADR 0029). A set started is not: its apps would stay open.
-        setUndoable(it.kind === 'workspace');
+        setUndoable(it.kind === 'workspace' ? { kind: 'arrange' } : null);
       } else {
         say(errorMessage(reply) ?? failed, true);
         poke('changed');
@@ -344,6 +376,21 @@ export function Home({
   };
 
   const choose = (next: Choice) => {
+    // A workspace shown: the layout is its own, saved in it at once, every app kept in a zone
+    // (ADR 0033; the owner: "try coding for example theres 6 apps normally and going to quarter
+    // get rid of some", when the layout showed the screen's windows instead). Undo puts it back.
+    if (shown?.kind === 'workspace') {
+      if (next === 'auto') return;
+      const { id, name } = shown.workspace;
+      setOutcome(null);
+      void request({ cmd: 'set_workspace_layout', workspace: id, preset: next }).then((reply) => {
+        const ok = reply.reply === 'done';
+        say(ok ? reply.message : (errorMessage(reply) ?? `“${name}” could not be laid out.`), !ok);
+        setUndoable(ok ? { kind: 'layout', workspace: id } : null);
+        poke(ok ? 'own' : 'changed');
+      });
+      return;
+    }
     setChoice(next);
     reset();
     setOutcome(null);
@@ -356,7 +403,7 @@ export function Home({
     setOutcome(null);
     void change.then(({ text, done }) => {
       say(text, !done);
-      if (done) setUndoable(false);
+      if (done) setUndoable(null);
       poke(done ? 'own' : 'changed');
     });
   };
@@ -518,7 +565,16 @@ export function Home({
             </div>
 
             <div className="mt-3">
-              <LayoutPicker value={shown ? null : choice} disabled={!hasWindows} onChoose={choose} />
+              {shown?.kind === 'workspace' ? (
+                <LayoutPicker
+                  value={opening?.id === shown.workspace.id ? layoutOf(opening.preview) : null}
+                  disabled={launching !== null || opening?.id !== shown.workspace.id}
+                  noAuto
+                  onChoose={choose}
+                />
+              ) : (
+                <LayoutPicker value={shown ? null : choice} disabled={!hasWindows} onChoose={choose} />
+              )}
             </div>
 
             <div className="mt-2 flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">

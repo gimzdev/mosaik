@@ -15,6 +15,8 @@ const COMMANDS = [
   'arrange',
   'preview_arrange',
   'preview_workspace',
+  'set_workspace_layout',
+  'undo_workspace_layout',
   'undo_arrange',
   'show_switcher',
   'show_settings',

@@ -34,7 +34,9 @@ use thiserror::Error;
 /// on a move); two apps of one zone of a workspace trade places in it (`move_app` with
 /// `swap_with`), and its preview lists them front to back.
 /// 12: apps of the Start menu that are not open, offered to a workspace (`installed` in `apps`)
-/// and added to it (`add_installed_app`); a move onto a zone itself joins it (ADR 0033).
+/// and added to it (`add_installed_app`); a workspace laid out as a layout, every app kept
+/// (`set_workspace_layout`, `undo_workspace_layout`, `preset` on `preview_workspace`); a move
+/// onto a zone itself joins it (ADR 0033).
 pub const PROTOCOL_VERSION: u32 = 12;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
@@ -100,7 +102,22 @@ pub enum Command {
     /// What `switch` to `workspace` would do now on the main monitor, without doing it: its
     /// zones, its apps' windows from where they are to their places (apps not open start
     /// there), and the other windows it would minimise. Home and the workspace's page show it.
+    /// With `preset` (a layout's id), as `set_workspace_layout` would lay it out, saving nothing.
     PreviewWorkspace {
+        workspace: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preset: Option<String>,
+    },
+    /// Lays a workspace's zones on the main monitor out as a layout (`preset`, its id), keeping
+    /// every app in a zone (ADR 0033), and saves it; in the open workspace its windows move at
+    /// once. `undo_workspace_layout` puts it back. Answers with `done`.
+    SetWorkspaceLayout {
+        workspace: String,
+        preset: String,
+    },
+    /// Puts back the workspace as it was before the last `set_workspace_layout`, while it has not
+    /// changed since. Answers with `done`.
+    UndoWorkspaceLayout {
         workspace: String,
     },
     /// Put back what the last `arrange`, or the last workspace opened (`switch`), changed: for
@@ -773,6 +790,18 @@ mod tests {
             },
             Command::PreviewWorkspace {
                 workspace: "Ship the release".into(),
+                preset: None,
+            },
+            Command::PreviewWorkspace {
+                workspace: "Ship the release".into(),
+                preset: Some("quarters".into()),
+            },
+            Command::SetWorkspaceLayout {
+                workspace: "Ship the release".into(),
+                preset: "quarters".into(),
+            },
+            Command::UndoWorkspaceLayout {
+                workspace: "Ship the release".into(),
             },
             Command::UndoArrange,
             Command::Settings,
@@ -1125,6 +1154,18 @@ mod wire {
                 ],
             },
             Command::PreviewWorkspace {
+                workspace: "ship".into(),
+                preset: None,
+            },
+            Command::PreviewWorkspace {
+                workspace: "ship".into(),
+                preset: Some("quarters".into()),
+            },
+            Command::SetWorkspaceLayout {
+                workspace: "ship".into(),
+                preset: "quarters".into(),
+            },
+            Command::UndoWorkspaceLayout {
                 workspace: "ship".into(),
             },
             Command::UndoArrange,

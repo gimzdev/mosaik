@@ -284,7 +284,7 @@ function Apps({
               change(
                 'add',
                 { cmd: 'add_installed_app', workspace: data.workspace, app: a.app, zone: null },
-                `${a.label} added. It starts when the workspace opens.`,
+                `${a.label} added.`,
               );
             }}
           />

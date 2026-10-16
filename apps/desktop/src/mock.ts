@@ -730,6 +730,87 @@ function previewWorkspace(w: Workspace): ArrangePreview {
   return { work_area: work, zones, windows, elsewhere: 0, task: null };
 }
 
+/** How much of the work area `a` and `b` share. */
+function shared(a: RatioRect, b: RatioRect): number {
+  const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+  const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** `w` with its main monitor's zones laid out as `preset`, every app kept in a zone, as the engine
+ * does it (`editing::with_layout`, ADR 0033): each new zone takes the old zone over most of it,
+ * with its id, colour and apps; the apps of an old zone left over go to the new zone over most of
+ * it; a zone left empty takes the app at the back of the zone with the most apps (a zone's tabs
+ * move as one group). */
+function withLayout(w: Workspace, preset: Preset): Workspace {
+  const areas = presetShape(preset);
+  const old = w.zoneList.filter((z) => z.monitor === 'm1');
+  const pairs = areas
+    .flatMap((a, k) => old.map((z, i) => ({ s: shared(a, z.area), k, i })))
+    .filter((p) => p.s > 0)
+    .sort((x, y) => y.s - x.s || x.k - y.k || x.i - y.i);
+  const took: (number | undefined)[] = areas.map(() => undefined);
+  const used = new Set<number>();
+  for (const { k, i } of pairs) {
+    if (took[k] === undefined && !used.has(i)) {
+      took[k] = i;
+      used.add(i);
+    }
+  }
+  const ids = new Set(w.zoneList.map((z) => z.id));
+  const colours = took.flatMap((i) => (i === undefined ? [] : [old[i]?.color]));
+  const made: ZoneEdit[] = areas.map((area, k) => {
+    const i = took[k];
+    const was = i === undefined ? undefined : old[i];
+    if (was) return { ...was, area };
+    let n = 1;
+    while (ids.has(`z${String(n)}`)) n += 1;
+    const id = `z${String(n)}`;
+    ids.add(id);
+    const color = ZONE_COLORS.find((c) => !colours.includes(c)) ?? ZONE_COLORS[colours.length % ZONE_COLORS.length];
+    colours.push(color);
+    return { id, name: '', color: color ?? 'slate', monitor: 'm1', area };
+  });
+  const moved = new Map<string, string>();
+  old.forEach((z, i) => {
+    if (used.has(i) || z.id === null) return;
+    const to = made.reduce(
+      (best, m, k) => (shared(z.area, m.area) > shared(z.area, made[best]?.area ?? m.area) ? k : best),
+      0,
+    );
+    const target = made[to]?.id;
+    if (target) moved.set(z.id, target);
+  });
+  const appList = w.appList.map((a) => ({ ...a, zone: a.zone === null ? null : (moved.get(a.zone) ?? a.zone) }));
+  // A zone left empty takes the app at the back of the zone with the most apps.
+  for (;;) {
+    const units = (zone: string | null) => {
+      const list = appList.filter((a) => a.zone === zone);
+      const own = list.filter((a) => !a.tab).map((a) => [a]);
+      const tabs = list.filter((a) => a.tab);
+      return tabs.length ? [...own, tabs] : own;
+    };
+    const empty = made.find((z) => units(z.id).length === 0);
+    const crowded = made.reduce<ZoneEdit | undefined>(
+      (best, z) => (units(z.id).length >= 2 && units(z.id).length > (best ? units(best.id).length : 1) ? z : best),
+      undefined,
+    );
+    if (!empty || !crowded) break;
+    const rank = (unit: WorkspaceApp[]) => Math.min(...unit.map((a) => appList.indexOf(a)));
+    const back = units(crowded.id).reduce((x, y) => (rank(y) > rank(x) ? y : x));
+    for (const a of back) a.zone = empty.id;
+  }
+  return {
+    ...w,
+    zones: made.length + w.zoneList.filter((z) => z.monitor !== 'm1').length,
+    zoneList: numberZones([...w.zoneList.filter((z) => z.monitor !== 'm1'), ...made]),
+    appList,
+  };
+}
+
+/** The workspace as it was before the last layout picked for it, and as that left it. */
+let layoutUndo: { id: string; before: Workspace; after: Workspace } | null = null;
+
 function arrange(preset: string | undefined, moves: ArrangeMove[] = [], areas: RatioRect[] = []): Reply {
   const known = PRESETS.find((p) => p.id === preset);
   if (preset !== undefined && !known) {
@@ -918,6 +999,8 @@ const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
   'undo_arrange',
   'add_app',
   'add_installed_app',
+  'set_workspace_layout',
+  'undo_workspace_layout',
   'move_app',
   'remove_app',
   'open_set',
@@ -1120,7 +1203,30 @@ function answer(command: Command): Reply {
       return arrange(command.preset, command.moves, command.areas);
     case 'preview_workspace': {
       const w = find(command.workspace);
-      return w ? { reply: 'preview', ...previewWorkspace(w) } : missing(command.workspace);
+      if (!w) return missing(command.workspace);
+      const known = PRESETS.find((p) => p.id === command.preset);
+      if (command.preset !== undefined && !known) return arrange(command.preset);
+      return { reply: 'preview', ...previewWorkspace(known ? withLayout(w, known.id) : w) };
+    }
+    case 'set_workspace_layout': {
+      const w = find(command.workspace);
+      if (!w) return missing(command.workspace);
+      const known = PRESETS.find((p) => p.id === command.preset);
+      if (!known) return arrange(command.preset);
+      const before = structuredClone(w);
+      Object.assign(w, withLayout(w, known.id));
+      layoutUndo = { id: w.id, before, after: structuredClone(w) };
+      return done(`“${w.name}” is laid out in ${known.label}.`);
+    }
+    case 'undo_workspace_layout': {
+      const w = find(command.workspace);
+      if (!w) return missing(command.workspace);
+      if (layoutUndo?.id !== w.id || JSON.stringify(w) !== JSON.stringify(layoutUndo.after)) {
+        return { reply: 'error', code: 'not_found', message: 'There is nothing to undo.', hint: null };
+      }
+      Object.assign(w, layoutUndo.before);
+      layoutUndo = null;
+      return done(`“${w.name}” is back as it was.`);
     }
     case 'preview_arrange': {
       const known = PRESETS.find((p) => p.id === command.preset);
