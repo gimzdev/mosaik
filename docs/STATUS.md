@@ -1641,6 +1641,12 @@ simetric and appealing". ADR 0032.
   first: core 290 (a tab group below its strip at 125%; Half and stack; empty quarters' colours;
   a zone kept on another monitor; 6000 random screens with bands, gaps and tab groups at 100% to
   150%; Quarters after Halves), interface 134 (the stand-in's measure), Playwright 35.
+- **On the owner's PC** (job 0165, at 5d4705f): build and every test passing (interface 134);
+  the engine's arrange test ok; the scan 0.4 ms (302 windows); `smart`, every check passing, each
+  picture read again after Move windows finding every window where it is, first where it was, in
+  its colour, and Undo stacking them as they were; the side menu; the tour: 32 pictures. Mosaïk
+  left in the tray (1.0.2, protocol 11, watchdog, Win+Alt+Space); packed (289 files); both files
+  beside the repository brought up to date (the key line kept).
 
 ## Owner decisions
 
