@@ -1673,6 +1673,13 @@ simetric and appealing". ADR 0032.
   picture so far). Two older faults fixed, tests first (core 297): a later move could act on an
   order front to back the picture did not show (113 of 29970 runs of several moves); a line
   dragged on a task's layout could leave a zone empty (2 of 31055).
+- **On the owner's PC** (job 0167, at 72603b4): build and every test passing (interface 134);
+  the engine's arrange test ok; the scan 0.5 ms (302 windows); `smart`, every check passing (each
+  picture read again after Move windows finding every window where it is, first where it was, in
+  its colour; Undo stacking the windows as they were); the side menu; the tour: 32 pictures.
+  Mosaïk left in the tray (1.0.2, protocol 11, watchdog, Win+Alt+Space); packed (289 files); both
+  files beside the repository brought up to date (the key line kept), and again by job 0168 at
+  the commit recording this.
 
 ## Owner decisions
 
