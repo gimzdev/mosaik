@@ -276,9 +276,9 @@ let onScreen: OnScreen[] =
 let beforeArrange: OnScreen[] | null = null;
 /** The workspace open before the last Arrange or workspace opened, for Undo. */
 let activeBefore: string | null = null;
-/** The last Arrange, with the windows the user moved: as in the engine, where what Arrange did
- * becomes the open workspace's, arranging the same way again moves nothing (`arrange::steady`),
- * so the picture keeps the windows where they were put. Forgotten once anything else moves them. */
+/** The last Arrange, with the windows the user moved: as in the engine, where the zones Arrange
+ * put on screen stay there, arranging the same way again moves nothing (`arrange::steady`), so
+ * the picture keeps the windows where they were put. Forgotten once anything else moves them. */
 let arrangedWith: { preset: Preset | undefined; moves: ArrangeMove[] } | null = null;
 
 /** The layout Arrange gives a screen of windows of no particular task (`task::layout`): the
@@ -487,14 +487,12 @@ function arrange(preset: string | undefined, moves: ArrangeMove[] = []): Reply {
   });
   const gone = p.windows.length - onScreen.length;
   const n = onScreen.length;
-  // As the engine says it: what moved, what went to the taskbar, and the workspace on screen,
-  // which now opens this way (the engine also makes one when none is open; this stand-in does not).
-  const open = workspaces.find((w) => w.id === active);
+  // As the engine says it: what moved, and what went to the taskbar. Arrange arranges and Save
+  // saves (ADR 0030): no workspace is made or changed, and the one in use stays so.
   return done(
     [
       `Arranged ${String(n)} ${n === 1 ? 'window' : 'windows'}${known ? ` in ${known.label}` : ''}.`,
       gone ? `${gone === 1 ? '1 window' : `${String(gone)} windows`} minimized.` : '',
-      open ? `“${open.name}” now opens this way.` : '',
     ]
       .filter(Boolean)
       .join(' '),

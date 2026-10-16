@@ -69,3 +69,10 @@ kinds of the windows and the task they suggest (ADR 0019).
 
 Arrange says what it did in short sentences, and which workspace now opens this way, or the new
 one it was saved as.
+
+## Amended by ADR 0030 (2026-10-15)
+
+Arrange makes no workspace and changes none ("arrange should arrange, save should save"): the
+zones it puts on screen are kept apart for tags, snapping and tabs until a workspace is opened
+or saved, and the workspace in use stays the one Save updates. Undo puts back what was on
+screen before.

@@ -281,11 +281,13 @@ impl Engine {
     /// The menu's rows, with what each does: first Mosaïk (which opens its window), then Arrange
     /// and a strip of layouts, the workspaces with the one open marked, and the rest.
     fn quick_rows(&self) -> Vec<(Action, Row)> {
+        // The workspace in use, which Save updates (after Arrange too); its zones are the ones
+        // the editor shows only while they are on screen.
         let workspace = self
-            .active
-            .as_ref()
-            .and_then(|a| self.file.workspaces.iter().find(|w| w.id == a.id))
+            .in_use()
+            .and_then(|id| self.file.workspaces.iter().find(|w| &w.id == id))
             .map(|w| w.name.clone());
+        let zones_shown = self.open_saved().is_some();
         let row = |label: &str| Row {
             label: label.to_owned(),
             enabled: true,
@@ -341,7 +343,7 @@ impl Engine {
                 },
             ),
         ];
-        let active = self.active.as_ref().map(|a| &a.id);
+        let active = self.in_use();
         let listed = &self.file.workspaces[..self.file.workspaces.len().min(MOST_WORKSPACES)];
         if !listed.is_empty() {
             rows.push((
@@ -404,7 +406,7 @@ impl Engine {
         rows.push((
             Action::EditZones,
             Row {
-                enabled: workspace.is_some(),
+                enabled: zones_shown,
                 ..row("Edit zones")
             },
         ));
@@ -883,9 +885,9 @@ impl Engine {
                 reply
             }
             Action::EditZones => {
-                if let Some(a) = &self.active {
+                if let Some(ws) = self.open_saved() {
                     (self.ui)(UiEvent::EditZones {
-                        workspace: a.id.0.clone(),
+                        workspace: ws.id.0.clone(),
                     });
                 }
                 return;

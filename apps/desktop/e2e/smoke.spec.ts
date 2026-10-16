@@ -85,9 +85,7 @@ test.describe('Home', () => {
       }),
     ).toBeVisible();
     await arrange(page).click();
-    await expect(
-      shown(page, 'Arranged 3 windows in Thirds. 1 window minimized. “Ship the release” now opens this way.'),
-    ).toBeVisible();
+    await expect(shown(page, 'Arranged 3 windows in Thirds. 1 window minimized.')).toBeVisible();
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(shown(page, 'Windows are back where they were.')).toBeVisible();
     await accessible(page);
@@ -97,7 +95,7 @@ test.describe('Home', () => {
     await page.goto('/');
     await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
     await arrange(page).click();
-    await expect(shown(page, 'Arranged 4 windows. “Ship the release” now opens this way.')).toBeVisible();
+    await expect(shown(page, 'Arranged 4 windows.')).toBeVisible();
     await expect(shown(page, 'Your windows are already like this.')).toBeHidden();
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(shown(page, 'Windows are back where they were.')).toBeVisible();
@@ -127,7 +125,7 @@ test.describe('Home', () => {
     await expect(page.getByRole('button', { name: 'Undo swaps' })).toBeVisible();
     await accessible(page);
     await arrange(page).click();
-    await expect(shown(page, 'Arranged 4 windows. “Ship the release” now opens this way.')).toBeVisible();
+    await expect(shown(page, 'Arranged 4 windows.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Undo swaps' })).toBeHidden();
     // Arranged as they were put: the picture shows them there now.
     const [c, d] = [await code.boundingBox(), await browser.boundingBox()];

@@ -212,6 +212,22 @@ impl Saved for WorkspacesFile {
                 ));
             }
         }
+        // The id kept for what Arrange puts on screen, given by hand: another, from the name.
+        for i in 0..self.workspaces.len() {
+            if !self.workspaces[i].id.is_arranged() {
+                continue;
+            }
+            let ids: Vec<WorkspaceId> = self.workspaces.iter().map(|w| w.id.clone()).collect();
+            let id = crate::workspace::workspace_id(&self.workspaces[i].name, &ids);
+            if self.active.as_ref().is_some_and(WorkspaceId::is_arranged) {
+                self.active = Some(id.clone());
+            }
+            notes.push(format!(
+                "Workspace \u{201c}{}\u{201d} had an id Mosaïk keeps for itself; it has another now.",
+                self.workspaces[i].name
+            ));
+            self.workspaces[i].id = id;
+        }
         if let Some(active) = &self.active
             && !self.workspaces.iter().any(|w| &w.id == active)
         {
@@ -771,6 +787,27 @@ mod tests {
             "{said}"
         );
         assert!(!said.contains("SlotZoneMissing"), "{said}");
+    }
+
+    #[test]
+    fn a_workspace_with_the_id_kept_for_arrange_gets_another() {
+        // ADR 0030: what Arrange puts on screen is not saved, under an id no saved workspace has.
+        // A file edited by hand could still give one that id: it gets another, the open one too.
+        let d = TempDir::new("arranged-id");
+        fs::write(
+            d.0.join("workspaces.json"),
+            br#"{"version":1,"workspaces":[{"id":"~arranged","name":"Arranged","layout":{
+                "monitors":[],"zones":[],"slots":[],"tab_groups":[]}}],"active":"~arranged"}"#,
+        )
+        .unwrap();
+        let loaded = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
+        let id = loaded.value.workspaces[0].id.clone();
+        assert!(!id.is_arranged(), "{id:?}");
+        assert_eq!(id.0, "arranged");
+        assert_eq!(loaded.value.active, Some(id));
+        assert_eq!(loaded.notes.len(), 1, "{:?}", loaded.notes);
+        let again = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
+        assert!(again.notes.is_empty(), "{:?}", again.notes);
     }
 
     #[test]

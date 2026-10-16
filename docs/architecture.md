@@ -68,8 +68,8 @@ the engine gathers windows and applies the result.
   Windows that tile, side by side without overlapping, become zones;
   windows stacked exactly on top of each other share a zone; maximised windows and windows
   floating over others keep their own place. Windows in zones then fill them, edge to edge, so no
-  desktop shows between them (ADR 0020). Saving under an existing name updates that workspace
-  and keeps the zones its windows sit in.
+  desktop shows between them (ADR 0020). Saving under an existing name updates that workspace;
+  the zones on screen are kept, the ones its windows sit in among them (ADR 0030).
 - **Being in a zone** has one rule everywhere (`holds`): the window's centre is in the zone and
   the window and the zone's window area cover at least 70% of each other. A browser that will
   not shrink to a narrow zone still counts; a small window floating over a zone does not. A
@@ -79,8 +79,14 @@ the engine gathers windows and applies the result.
   70% of as much as its size allows (`holds_fixed`). A window that covers two zones stays in the
   one it was put in; with zones that overlap, the nearest middle wins.
 - **A layout changes only by the user's hand**: saving, dropping a window into a zone, moving or
-  resizing one of the workspace's windows by mouse, Arrange, or the zone editor. Windows an app moved on its own, or a window
-  maximised for a moment, go back to their places the next time the workspace opens.
+  resizing one of the workspace's windows by mouse, or the zone editor. Windows an app moved on
+  its own, or a window maximised for a moment, go back to their places the next time the
+  workspace opens.
+- **Arrange arranges, Save saves** (ADR 0030): Arrange makes and changes no workspace. The zones
+  it puts on screen are kept apart (`Arranged`, id `~arranged`), and tags, snapping, tabs and the
+  changes above go to them, never to the disk, until a workspace is opened or saved; the
+  workspace in use stays the one Save updates. A save keeps the zones on screen with the windows
+  (`mosaik_core::workspace::saved_over`).
 - **Zones are numbered** 1, 2, 3… in reading order, monitor by monitor, row by row from the
   top, then from the left (`Layout::number_zones`, ADR 0028): a zone's name says where it is,
   never what it holds. Every change of zones numbers them again; a file with names from before
@@ -145,7 +151,7 @@ the engine gathers windows and applies the result.
   minimise are named under it. A window dragged onto another in the picture trades places with
   it (a click or Enter picks one, a second puts it there); the moves go with the preview and with
   Arrange (`mosaik_core::arrange::plan_moved`), each window keeping its colour, each zone its
-  number. Arrange does it, and Undo brings everything back. Beside it, every workspace with its
+  number. Arrange does it, changing no workspace, and Undo brings everything back. Beside it, every workspace with its
   apps' icons: a click shows it in the picture as opening it would leave the screen
   (`preview_workspace`, the plan opening it follows: its apps glide to their zones, the apps it
   would start drawn dashed where they open, a tab group with its tabs, the windows it would

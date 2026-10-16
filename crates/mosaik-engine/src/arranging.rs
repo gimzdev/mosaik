@@ -1,13 +1,14 @@
 //! Arrange: every screen laid out for what its windows say the user is doing, and Undo.
 //!
 //! The plan is `mosaik_core::arrange::plan`; this applies it. Every monitor with windows gets
-//! the layout of its task, in place of the open workspace's zones there (a layout picked on the
-//! home page does the same on the main monitor); no window gets a zone smaller than its app lets
-//! it go. The open workspace takes the windows put in zones (they join it if they were not part
-//! of it); with no workspace open, a new one is made from them. The other windows are minimised.
-//! What Arrange changed can be undone for ten minutes, until a workspace is opened, saved or
-//! edited: the workspace goes back to what it was, and every window it moved or minimised goes
-//! back where it was.
+//! the layout of its task, in place of the zones on screen there (a layout picked on the home
+//! page does the same on the main monitor); no window gets a zone smaller than its app lets it
+//! go. The other windows are minimised. Arrange arranges and Save saves (ADR 0030): no workspace
+//! is made or changed. The zones it puts on screen, with the windows in them, are kept apart
+//! (`Arranged`) for tags, snapping and tabs, until a workspace is opened or saved; the workspace
+//! in use stays the one Save updates. What Arrange did can be undone for ten minutes, until a
+//! workspace is saved or edited: every window it moved or minimised goes back where it was, and
+//! what was on screen before is again.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -21,14 +22,14 @@ use mosaik_core::presets::Preset;
 use mosaik_core::task::Task;
 use mosaik_core::topology::Topology;
 use mosaik_core::window::{WindowFacts, WindowHandle};
-use mosaik_core::workspace::{app_match, suggested_name, workspace_id};
+use mosaik_core::workspace::app_match;
 use mosaik_core::zone::{Zone, ZoneColor, ZoneId};
 use mosaik_ipc::protocol::{ArrangeMove, ArrangePreview, ErrorCode, PreviewWindow, PreviewZone, Reply};
 use mosaik_win::{apps, window};
 
 use crate::mover::{self, To};
 use crate::thread::{Engine, timer};
-use crate::workspace::live_zones;
+use crate::workspace::{Arranged, live_zones};
 
 /// How long Arrange, or opening a workspace, can be undone.
 const UNDO_FOR: Duration = Duration::from_secs(10 * 60);
@@ -36,10 +37,12 @@ const UNDO_FOR: Duration = Duration::from_secs(10 * 60);
 /// What Arrange, or opening a workspace, changed, to put it back.
 pub(crate) struct Undo {
     pub(crate) at: Instant,
-    /// The workspace as it was (`None`: Arrange made it).
+    /// The workspace opened, as it was (opening it can make room in its zones); Arrange changes
+    /// none.
     pub(crate) workspace: Option<Workspace>,
-    pub(crate) workspace_id: WorkspaceId,
-    /// The workspace open before, with the windows in its slots.
+    /// What Arrange had put on screen before.
+    pub(crate) arranged: Option<Arranged>,
+    /// What was open before (a workspace, or `arranged`), with the windows in its slots.
     pub(crate) active: Option<(WorkspaceId, HashMap<SlotId, WindowHandle>)>,
     /// Where each window moved or minimised was, and whether it was maximised.
     pub(crate) windows: Vec<(WindowHandle, Rect, bool)>,
@@ -62,10 +65,9 @@ struct Prepared {
     goes: Vec<Goes>,
     /// What the main monitor's windows say the user is doing, when it is laid out for that.
     task: Option<Task>,
-    /// The workspace as it will be, where it goes in the list (`None`: a new one), and as it was.
+    /// What will be on screen, and the saved workspace in use (which stays so).
     ws: Workspace,
-    index: Option<usize>,
-    before: Option<Workspace>,
+    from: Option<WorkspaceId>,
     /// Which window fills which slot.
     assigned: HashMap<SlotId, WindowHandle>,
     /// Where the windows that fill zones go.
@@ -105,8 +107,8 @@ impl Engine {
         self.undo = None;
     }
 
-    /// Works out what Arrange would do now, changing nothing: the plan, the workspace as it
-    /// would be, and where each window would go. Arrange applies it; the home page shows it.
+    /// Works out what Arrange would do now, changing nothing: the plan, the zones as they would
+    /// be, and where each window would go. Arrange applies it; the home page shows it.
     /// `moves` are the windows the user moved on the home page's picture of the main screen.
     fn prepare_arrange(&mut self, preset: Option<&str>, moves: &[ArrangeMove]) -> Result<Prepared, Reply> {
         let preset = match preset.map(|id| Preset::from_id(id).ok_or(id)) {
@@ -207,26 +209,24 @@ impl Engine {
             .collect();
         let plan = plan_moved(&units, &spots, &monitors, chosen, &moves);
 
-        // The workspace that takes them: the open one, or a new one.
-        let index = self
-            .active
-            .as_ref()
-            .and_then(|a| self.file.workspaces.iter().position(|w| w.id == a.id));
-        let before = index.map(|i| self.file.workspaces[i].clone());
-        let mut ws = before.clone().unwrap_or_else(|| {
-            let name = suggested_name(&self.file.workspaces);
-            let ids: Vec<WorkspaceId> = self.file.workspaces.iter().map(|w| w.id.clone()).collect();
-            let mut layout = Layout::default();
-            for m in topology.monitors() {
-                layout.monitor_index(m, &topology);
-            }
-            Workspace {
-                id: workspace_id(&name, &ids),
-                name,
-                hotkey: None,
-                layout,
-            }
-        });
+        // What will be on screen: the zones there now, or none; no saved workspace changes.
+        let on_screen = self.on_screen();
+        let mut ws = Workspace {
+            id: WorkspaceId::arranged(),
+            name: "Arranged".to_owned(),
+            hotkey: None,
+            layout: on_screen.map_or_else(
+                || {
+                    let mut layout = Layout::default();
+                    for m in topology.monitors() {
+                        layout.monitor_index(m, &topology);
+                    }
+                    layout
+                },
+                |w| w.layout.clone(),
+            ),
+        };
+        let from = self.in_use().cloned();
 
         // The open workspace's zones on the monitors laid out anew make way; windows in them
         // keep their places until the plan moves them.
@@ -269,7 +269,7 @@ impl Engine {
         let mut assigned: HashMap<SlotId, WindowHandle> = self
             .active
             .as_ref()
-            .filter(|_| index.is_some())
+            .filter(|_| on_screen.is_some())
             .map(|a| a.windows.clone())
             .unwrap_or_default();
         let mut slot_ids: HashSet<String> = ws.layout.slots.iter().map(|s| s.id.0.clone()).collect();
@@ -352,8 +352,7 @@ impl Engine {
             goes: plan.goes,
             task,
             ws,
-            index,
-            before,
+            from,
             assigned,
             moves,
             minimize,
@@ -379,8 +378,8 @@ impl Engine {
         }
         self.undo = Some(Undo {
             at: Instant::now(),
-            workspace: p.before,
-            workspace_id: p.ws.id.clone(),
+            workspace: None,
+            arranged: self.arranged.clone(),
             active: self.active.as_ref().map(|a| (a.id.clone(), a.windows.clone())),
             windows: p
                 .windows
@@ -389,11 +388,11 @@ impl Engine {
                 .collect(),
             minimized: Vec::new(),
         });
-        let (id, name) = (p.ws.id.clone(), p.ws.name.clone());
-        match p.index {
-            Some(i) => self.file.workspaces[i] = p.ws,
-            None => self.file.workspaces.push(p.ws),
-        }
+        let id = p.ws.id.clone();
+        self.arranged = Some(Arranged {
+            ws: p.ws,
+            from: p.from,
+        });
         self.hide_frames();
         let placed: Vec<(WindowHandle, Rect)> = mover::move_all(&p.moves, mover::WAIT)
             .into_iter()
@@ -427,7 +426,6 @@ impl Engine {
         self.make_room(&p.topology, &kept);
         self.refresh_frames();
         self.set_timer(timer::SETTLE, 400);
-        self.persist();
         tracing::info!(
             windows = p.windows.len(),
             zoned = p.zoned,
@@ -436,8 +434,7 @@ impl Engine {
             preset = p.preset.map(Preset::id),
             "windows arranged"
         );
-        // In short sentences: what moved, what went to the taskbar, and the workspace that now
-        // opens this way (Arrange keeps its zones in one, so tags, snapping and tabs work).
+        // In short sentences: what moved, and what went to the taskbar. No workspace changed.
         let placed_n = p.windows.len().saturating_sub(p.minimize.len());
         let mut message = match p.preset {
             Some(preset) => format!(
@@ -451,11 +448,6 @@ impl Engine {
             0 => {}
             1 => message.push_str(" 1 window minimized."),
             n => message.push_str(&format!(" {n} windows minimized.")),
-        }
-        if p.index.is_none() {
-            message.push_str(&format!(" Saved as a new workspace, \u{201c}{name}\u{201d}."));
-        } else {
-            message.push_str(&format!(" \u{201c}{name}\u{201d} now opens this way."));
         }
         Reply::Done { message }
     }
@@ -541,8 +533,8 @@ impl Engine {
         }))
     }
 
-    /// Puts back what Arrange, or opening a workspace, changed: the workspace as it was, the
-    /// one open before, and every window it moved or minimised where it was.
+    /// Puts back what Arrange, or opening a workspace, changed: the workspace opened as it was,
+    /// what was on screen before, and every window it moved or minimised where it was.
     pub(crate) fn undo_arrange(&mut self) -> Reply {
         let Some(undo) = self.undo.take().filter(|u| u.at.elapsed() < UNDO_FOR) else {
             return error(
@@ -553,19 +545,15 @@ impl Engine {
                 ),
             );
         };
-        let at = self
-            .file
-            .workspaces
-            .iter()
-            .position(|w| w.id == undo.workspace_id);
-        match (undo.workspace, at) {
-            (Some(before), Some(i)) => self.file.workspaces[i] = before,
-            (Some(before), None) => self.file.workspaces.push(before),
-            (None, Some(i)) => {
-                self.file.workspaces.remove(i);
-            }
-            (None, None) => {}
+        // A workspace deleted since is not brought back (deleting one forgets the undo anyway).
+        let mut put_back = false;
+        if let Some(before) = undo.workspace
+            && let Some(w) = self.file.workspaces.iter_mut().find(|w| w.id == before.id)
+        {
+            *w = before;
+            put_back = true;
         }
+        self.arranged = undo.arranged;
         self.hide_frames();
         match undo.active {
             Some((id, windows)) => self.activate(id, windows, Vec::new()),
@@ -598,16 +586,16 @@ impl Engine {
                 mosaik_win::arrange::minimize(hwnd);
             }
         }
-        if let (Some(t), Some(a)) = (&topology, &self.active)
-            && let Some(ws) = self.file.workspaces.iter().find(|w| w.id == a.id)
-        {
+        if let (Some(t), Some(ws)) = (&topology, self.on_screen()) {
             let zones = live_zones(ws, t, self.style());
             if let Some(a) = &mut self.active {
                 a.zones = zones;
             }
         }
         self.refresh_frames();
-        self.persist();
+        if put_back {
+            self.persist();
+        }
         tracing::info!(windows = moves.len(), "arrange undone");
         Reply::Done {
             message: "Windows are back where they were.".into(),

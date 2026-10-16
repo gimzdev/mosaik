@@ -57,6 +57,8 @@ use crate::workspace::{Styles, ask, done, drag_path, settled, state, wears_above
 const TIMEOUT: Duration = Duration::from_secs(15);
 /// The workspace the first two parts save.
 const WORKSPACE: &str = "Probe smart";
+/// The workspace what Arrange put on screen is saved as.
+const SAVED: &str = "Probe arranged";
 /// Windows' virtual-key code for Shift.
 const VK_SHIFT: u16 = 0x10;
 /// How far off a window may be and still count as where it should be.
@@ -711,7 +713,8 @@ fn workspaces(engine: &Engine) -> Value {
     }
 }
 
-/// Part 3: Arrange and Undo, with no workspace open at first. Leaves the four windows arranged,
+/// Part 3: Arrange and Undo, with no workspace open at first. Arrange makes no workspace (ADR
+/// 0030); its windows are then saved as one, whose apps are edited. Leaves the windows arranged,
 /// in `arranged`, for the quick menu's part.
 fn arrange(
     engine: &Engine,
@@ -751,9 +754,10 @@ fn arrange(
     let before = frames(&w);
     let mut out = serde_json::Map::new();
 
-    // 3a. No workspace open: a new one, laid out for the task its windows say. The probe's
-    // windows are of no known kind: the one used last (a window that can be resized) takes the
-    // most room, the others sit beside it, as `mosaik_core::task::layout` says for them.
+    // 3a. No workspace open: the screen laid out for the task its windows say, and no workspace
+    // made (ADR 0030: Arrange arranges, Save saves). The probe's windows are of no known kind:
+    // the one used last (a window that can be resized) takes the most room, the others sit
+    // beside it, as `mosaik_core::task::layout` says for them.
     let order: Vec<HWND> = mosaik_win::window::top_level()
         .into_iter()
         .filter(|h| w.contains(h))
@@ -787,7 +791,11 @@ fn arrange(
     );
     let message = done(&reply)?;
     let st = settled(engine)?;
-    let ws = st.active_workspace.clone().ok_or("Arrange opened no workspace")?;
+    let listed = workspaces(engine);
+    let ws = st
+        .active_workspace
+        .clone()
+        .ok_or("Arrange left no zones on screen")?;
     let zs = zones(engine, &ws.0, work)?;
     let mut wanted: Vec<[i32; 4]> = expected
         .placed
@@ -835,11 +843,15 @@ fn arrange(
         .map(|f| f.top)
         .collect();
     let one_line = top_row.len() == 2 && top_row.iter().all(|t| *t == top_row[0]);
+    let none_made = listed["workspaces"] == json!(0) && listed["open"] == json!(false) && ws.is_arranged();
     out.insert(
-        "new_workspace".into(),
+        "arranged".into(),
         json!({
             "message": message,
             "ms": ms,
+            "workspaces": listed,
+            "on_screen": ws.0,
+            "no_workspace_made": none_made,
             "task": format!("{:?}", expected.task),
             "laid_out_for_the_task": shaped,
             "main_window_in_the_largest_zone": main_in_place,
@@ -850,11 +862,12 @@ fn arrange(
             "fixed": fixed_place,
             "top_row_tops": top_row,
             "ok": shaped && in_zones == 3 && ids.len() == 3 && all_fit(&fits)
-                && fixed_place.as_ref().is_some_and(|f| f["ok"] == json!(true)) && one_line,
+                && fixed_place.as_ref().is_some_and(|f| f["ok"] == json!(true)) && one_line
+                && none_made && !message.contains("workspace"),
         }),
     );
 
-    // 3b. Undo: every window back where it was, and the workspace Arrange made is gone.
+    // 3b. Undo: every window back where it was, and still no workspace.
     let (reply, ms) = ask(engine, Command::UndoArrange);
     let undone = done(&reply)?;
     pump_until(800, || false);
@@ -992,6 +1005,7 @@ fn arrange(
     out.insert("layout".into(), layout(engine, styles, work, &w)?);
     out.insert("moved".into(), put_elsewhere(engine, styles, work, &w)?);
     out.insert("to_front".into(), to_front(engine, &w)?);
+    out.insert("saved".into(), save_arranged(engine, work, &w)?);
     out.insert("apps".into(), apps(engine, styles, work, opened, &w)?);
     out.insert("least".into(), least(engine, styles, work, opened, &w)?);
     *arranged = w;
@@ -1219,6 +1233,44 @@ fn drop_tall(
 }
 
 /// A workspace's apps (`apps`), as the Workspaces page asks for them.
+/// 3f2. What Arrange put on screen, saved as a workspace (ADR 0030: only Save makes one): it
+/// takes the zones on screen, no window moves, and it is the one in use.
+fn save_arranged(engine: &Engine, work: Rect, w: &[HWND]) -> Result<Value, String> {
+    let st = settled(engine)?;
+    let on_screen = st.active_workspace.clone().ok_or("nothing on screen to save")?;
+    let zones_before = zones(engine, &on_screen.0, work)?;
+    let before = frames(w);
+    let (reply, ms) = ask(
+        engine,
+        Command::Save {
+            workspace: Some(SAVED.into()),
+        },
+    );
+    let saved = done(&reply)?;
+    let st = settled(engine)?;
+    let id = st
+        .active_workspace
+        .clone()
+        .ok_or("the saved workspace is not open")?;
+    let zones_after = zones(engine, &id.0, work)?;
+    let (mut a, mut b) = (rects(&zones_before), rects(&zones_after));
+    a.sort_unstable();
+    b.sort_unstable();
+    let moved = most_moved(&before, &frames(w));
+    let listed = workspaces(engine);
+    Ok(json!({
+        "message": saved,
+        "ms": ms,
+        "was_arranged": on_screen.is_arranged(),
+        "zones_kept": a == b,
+        "zones": b,
+        "most_moved_px": moved,
+        "workspaces": listed,
+        "ok": on_screen.is_arranged() && !id.is_arranged() && a == b && moved <= SLACK
+            && listed["workspaces"] == json!(1) && listed["open"] == json!(true),
+    }))
+}
+
 fn apps_of(engine: &Engine, command: Command) -> Result<WorkspaceApps, String> {
     match engine.request(command, TIMEOUT) {
         Reply::Apps(a) => Ok(*a),

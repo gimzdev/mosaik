@@ -193,8 +193,10 @@ pub(crate) struct Engine {
     pub(crate) file_problem: Option<String>,
     /// A failed save was reported; later failures only go to the log.
     pub(crate) save_failed_told: bool,
-    /// The workspace in use and the windows filling its slots.
+    /// The workspace in use and the windows filling its slots: a saved one, or `arranged`.
     pub(crate) active: Option<Active>,
+    /// What Arrange put on screen, not saved (ADR 0030).
+    pub(crate) arranged: Option<crate::workspace::Arranged>,
     /// Window events, frames and the drag preview.
     pub(crate) watch: Watch,
     /// Background tabs Mosaïk has hidden, and the journal the watchdog reads.
@@ -324,6 +326,7 @@ pub(crate) fn run(
         file_problem: None,
         save_failed_told: false,
         active: None,
+        arranged: None,
         watch: Watch::new(),
         hiding: Hiding::new(
             mosaik_win::process::own_pid(),
@@ -701,7 +704,7 @@ impl Engine {
 
     pub(crate) fn show_switcher(&mut self, asked: Instant) {
         let entries = self.file.workspaces.iter().map(Entry::from_workspace).collect();
-        let active = self.active.as_ref().map(|a| a.id.clone());
+        let active = self.in_use().cloned();
         switcher::open(entries, active, self.hotkey_state().shortcut, asked);
     }
 
@@ -927,7 +930,7 @@ impl Engine {
                         .collect(),
                 })
                 .collect(),
-            active: self.active.as_ref().map(|a| a.id.clone()),
+            active: self.in_use().cloned(),
         }
     }
 

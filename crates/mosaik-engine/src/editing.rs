@@ -222,14 +222,21 @@ impl Engine {
         }
     }
 
+    /// A workspace's zones, for the editor; also the ones Arrange put on screen, by their id
+    /// (`mosaikctl state` gives it), which are not saved and so not edited.
     pub(crate) fn zones_reply(&self, which: &str) -> Reply {
-        let Some(index) = self.find_workspace(which) else {
+        let arranged = self
+            .arranged
+            .as_ref()
+            .map(|a| &a.ws)
+            .filter(|w| w.id.0 == which.trim());
+        let Some(ws) = arranged.or_else(|| self.find_workspace(which).map(|i| &self.file.workspaces[i]))
+        else {
             return not_found(which);
         };
         let Some(topology) = self.read_topology() else {
             return no_monitors();
         };
-        let ws = &self.file.workspaces[index];
         Reply::Zones {
             workspace: ws.id.clone(),
             name: ws.name.clone(),
@@ -305,6 +312,13 @@ impl Engine {
             return failed(e);
         }
         self.workspace_keys.retain(|k| k.workspace != ws.id);
+        // What Arrange put on screen stays; it was arranged from no workspace now.
+        if let Some(a) = &mut self.arranged
+            && a.from.as_ref() == Some(&ws.id)
+        {
+            a.from = None;
+            self.file.active = None;
+        }
         if self.active.as_ref().is_some_and(|a| a.id == ws.id) {
             self.active = None;
             self.show_all_hidden();

@@ -96,5 +96,11 @@ without a way to quit.
   Undo after Open; a set started is not undone. The workspace probe checks that the window it
   minimised comes back where it was.
 - Not done here: Arrange still keeps its zones in a workspace (the open one, or a new one), as
-  ADR 0014 decided; it now says so. Windows' own text size is not applied to the window (Ctrl and
-  + is); making tabs from a workspace's page is next.
+  ADR 0014 decided; it now says so (since ADR 0030 it keeps them in none, and says only what it
+  did). Windows' own text size is not applied to the window (Ctrl and + is); making tabs from a
+  workspace's page is next.
+
+## Amended by ADR 0030 (2026-10-15)
+
+Arrange changes no workspace: it says what moved and what was minimised, never which workspace
+opens this way.

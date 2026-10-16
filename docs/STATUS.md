@@ -1359,6 +1359,32 @@ speed, 27 on the code); what they found and what changed is ADR 0029.
   dragged 120 px by its first line, kept at 416 of 1000). The dialog the Store's old watchdog
   left on screen when job 0151 stopped its Mosaïk ("Mosaïk has stopped") was closed, and that
   watchdog ended.
+- **On the owner's PC** (job 0154, at 6988ddd: the saver thread, apps' smallest sizes kept):
+  build 2 min 42 s; `mosaik.ps1 test` passing (every Rust test on Windows, interface 119, the
+  publish script's 17 checks against a stand-in of the Store); packed (280 files). Smart App
+  Control refused the new probe three times a minute apart, so no probe ran; job 0155 runs them.
+
+### Asked on 2026-10-15 (21:05): Arrange arranges, Save saves
+
+Asked "Should Arrange only tidy the windows, and only Save as workspace create or change a
+workspace?", the owner: "arrange should arrange, save should save. yes". ADR 0030.
+
+- **Arrange makes and changes no workspace**: the zones it puts on screen are kept apart (id
+  `~arranged`, never saved) for tags, snapping, tabs, zones that follow a resize and zones that
+  make room, until a workspace is opened or saved; it says only what it did ("Arranged 4
+  windows. 1 window minimized."). The workspace in use stays marked On screen, and Save (the side
+  menu's "Update “Email”", Home's "Replace with what's on screen") saves the arranged screen into
+  it. Undo puts back what was on screen before.
+- **Save saves the zones on screen** with the windows (`saved_over`): saving over a workspace
+  kept its old zones, which with Arrange's on screen would have left the windows over zones they
+  did not fill. Tests first: three core tests failed to build before (`saved_over` and the
+  reserved id did not exist) and pass, with the store's test for a workspace given that id by
+  hand.
+- The `smart` probe now checks that Arrange made no workspace and named none (with the old code,
+  "Workspace 1" was made: the check fails there), then saves the arranged screen as "Probe
+  arranged" (the same zones, no window moved, one workspace, open) before editing its apps.
+- Checks here: fmt; clippy -D warnings for Windows on every crate; core 260, ipc 11; interface
+  119; Playwright 30.
 
 ## Owner decisions
 

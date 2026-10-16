@@ -65,10 +65,10 @@ impl Engine {
         if big.is_empty() {
             return;
         }
-        let Some(active) = &self.active else {
+        let Some(ws) = self.on_screen().cloned() else {
             return;
         };
-        let Some(ws) = self.file.workspaces.iter().find(|w| w.id == active.id).cloned() else {
+        let Some(active) = &self.active else {
             return;
         };
         let zone_of = |h: WindowHandle| {

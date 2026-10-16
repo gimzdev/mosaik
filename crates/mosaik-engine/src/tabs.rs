@@ -160,10 +160,7 @@ impl Engine {
 
     /// The open workspace's tab groups as they are now, their reach not decided yet.
     pub(crate) fn groups_now(&self) -> Vec<GroupNow> {
-        let Some(active) = &self.active else {
-            return Vec::new();
-        };
-        let Some(ws) = self.file.workspaces.iter().find(|w| w.id == active.id) else {
+        let (Some(active), Some(ws)) = (&self.active, self.on_screen()) else {
             return Vec::new();
         };
         ws.layout
@@ -202,8 +199,7 @@ impl Engine {
 
     /// Where a window at `place` goes, from the layout.
     fn resolve(&self, place: &Place) -> Option<To> {
-        let active = self.active.as_ref()?;
-        let ws = self.file.workspaces.iter().find(|w| w.id == active.id)?;
+        let ws = self.on_screen()?;
         let topology = self.topology.as_ref()?;
         let resolver = Resolver::new(&ws.layout, topology, self.style());
         match resolver.target(place)? {
@@ -220,8 +216,7 @@ impl Engine {
 
     /// Where the window of a slot goes, from the layout.
     pub(crate) fn slot_target(&self, slot: &SlotId) -> Option<To> {
-        let active = self.active.as_ref()?;
-        let ws = self.file.workspaces.iter().find(|w| w.id == active.id)?;
+        let ws = self.on_screen()?;
         let place = ws.layout.slot(slot)?.place.clone();
         self.resolve(&place)
     }
@@ -813,20 +808,20 @@ impl Engine {
 
     // ----- What the user does with tabs -----
 
-    /// Changes the open workspace's layout, and saves it when it changed.
+    /// Changes the layout on screen (the open workspace's, or Arrange's), and saves it when it
+    /// changed (Arrange's is not saved).
     pub(crate) fn edit_layout<R>(&mut self, change: impl FnOnce(&mut Layout) -> R) -> Option<R> {
         let changed = self.edit_layout_quietly(change)?;
         if changed.1 {
-            self.persist();
+            self.persist_on_screen();
         }
         Some(changed.0)
     }
 
-    /// Changes the open workspace's layout without saving it (a drag in progress, saved when it
-    /// ends). Returns whether it changed.
+    /// Changes the layout on screen without saving it (a drag in progress, saved when it ends).
+    /// Returns whether it changed.
     fn edit_layout_quietly<R>(&mut self, change: impl FnOnce(&mut Layout) -> R) -> Option<(R, bool)> {
-        let id = self.active.as_ref()?.id.clone();
-        let ws = self.file.workspaces.iter_mut().find(|w| w.id == id)?;
+        let ws = self.on_screen_mut()?;
         let before = ws.layout.clone();
         let r = change(&mut ws.layout);
         let changed = ws.layout != before;
@@ -908,8 +903,8 @@ impl Engine {
         }
     }
 
-    /// The slot of a window in the open workspace, adding the window to the workspace (as a
-    /// window of its own, at `place`) when it is not part of it.
+    /// The slot of a window in the layout on screen, adding the window to it (as a window of its
+    /// own, at `place`) when it is not part of it.
     pub(crate) fn slot_for_window(&mut self, h: WindowHandle, place: Place) -> Option<SlotId> {
         if let Some(s) = self.active.as_ref()?.slot_of(h) {
             return Some(s.clone());
@@ -918,8 +913,7 @@ impl Engine {
         let path = self.scanner.process_path(facts.pid);
         let label = self.apps.label(&facts, path.as_deref());
         let id = {
-            let active = self.active.as_ref()?;
-            let ws = self.file.workspaces.iter_mut().find(|w| w.id == active.id)?;
+            let ws = self.on_screen_mut()?;
             let taken: HashSet<String> = ws.layout.slots.iter().map(|s| s.id.0.clone()).collect();
             let id = SlotId(
                 (1..)
@@ -1173,7 +1167,7 @@ impl Engine {
             self.kill_timer(timer::DRAG);
         }
         if d.reordered {
-            self.persist();
+            self.persist_on_screen();
         }
     }
 

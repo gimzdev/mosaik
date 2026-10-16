@@ -13,6 +13,23 @@ use crate::zone::{Zone, ZoneId};
 #[serde(transparent)]
 pub struct WorkspaceId(pub String);
 
+/// The id of what Arrange put on screen, which is not saved (ADR 0030). `workspace_id` never
+/// makes it (it keeps letters, digits and dashes); a file edited by hand that has it gives that
+/// workspace another when it is read.
+const ARRANGED: &str = "~arranged";
+
+impl WorkspaceId {
+    /// What Arrange put on screen: its zones, kept for tags, snapping and tabs until a workspace
+    /// is opened or saved.
+    pub fn arranged() -> Self {
+        Self(ARRANGED.to_owned())
+    }
+
+    pub fn is_arranged(&self) -> bool {
+        self.0 == ARRANGED
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SlotId(pub String);

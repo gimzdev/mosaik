@@ -35,3 +35,4 @@ what it costs. Measurements behind a decision are summarised in the record and i
 | [0027](0027-tab-strips-in-a-band.md) | A tab group's strip is in a band above it, never in a title bar: a chip for every tab, to drag out |
 | [0028](0028-zones-numbered-and-workspaces-previewed.md) | Zones numbered 1, 2, 3 by place; a workspace's page and Home show how it opens (Open, not a click); opening one minimises the other windows on its monitors |
 | [0029](0029-for-people-new-to-mosaik.md) | For people new to Mosaïk: bigger text and controls, a preview that says so, Back, named layouts, one place for results; an older Mosaïk asked to quit through its engine's window; scans of the windows shown only, waits that end when the answer comes |
+| [0030](0030-arrange-arranges-save-saves.md) | Arrange arranges, Save saves: Arrange makes and changes no workspace; its zones are kept apart until a workspace is opened or saved, and Save saves the zones on screen |

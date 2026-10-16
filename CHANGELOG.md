@@ -13,8 +13,11 @@
   Quarters show with their names, the other five under More layouts. What an action did shows in
   one place, under the picture.
 - The workspace on screen is marked "On screen" (it read as a button), in Mosaïk's window, the side
-  menu and the switcher. "Save layout" is "Save as workspace"; Arrange says which workspace now
-  opens its way, or the new one it was saved as.
+  menu and the switcher. "Save layout" is "Save as workspace".
+- Arrange arranges, Save saves: Arrange no longer makes a workspace ("Workspace 1") or changes the
+  one you are in; it tidies the windows and says what it did. Save as workspace keeps what is on
+  screen, its zones included, and the side menu's "Update “Email”" saves an arranged screen into
+  the workspace you are in.
 - A suggested set shows the apps it will start before it starts them: "Start these apps".
 - Opening a workspace can be undone, as Arrange can: the windows it minimised come back where
   they were. Home offers Undo after Open.

@@ -405,6 +405,27 @@ pub fn capture(
     }
 }
 
+/// What a save builds on (`capture`'s `previous`): the zones on screen (what Arrange put there,
+/// or the open workspace's) under the id, name and shortcut of the workspace saved over, none for
+/// a new one (ADR 0030). Saving keeps what the user sees: Arrange's zones are saved nowhere
+/// else, and a workspace saved over keeps none of its old zones that are not on screen. With
+/// nothing on screen, the workspace saved over keeps its own.
+pub fn saved_over(target: Option<&Workspace>, on_screen: Option<&Workspace>) -> Option<Workspace> {
+    let Some(screen) = on_screen else {
+        return target.cloned();
+    };
+    Some(match target {
+        Some(t) => Workspace {
+            layout: screen.layout.clone(),
+            ..t.clone()
+        },
+        None => Workspace {
+            hotkey: None,
+            ..screen.clone()
+        },
+    })
+}
+
 /// Where a workspace's windows are now, for [`remember`]: each slot with the window that fills
 /// it (if it is open), front to back.
 #[derive(Clone, Debug)]
@@ -1031,6 +1052,134 @@ mod tests {
         for s in &second.layout.slots {
             assert!(matches!(s.place, Place::Zone { .. }));
         }
+    }
+
+    /// `windows` put inside the zones of `ws`, as Mosaïk puts them.
+    fn placed_in(ws: &Workspace, windows: &[WindowFacts], t: &Topology) -> Vec<WindowFacts> {
+        let r = Resolver::new(&ws.layout, t, style());
+        windows
+            .iter()
+            .zip(&ws.layout.slots)
+            .map(|(w, s)| {
+                let Some(Target::Frame(f)) = r.target(&s.place) else {
+                    unreachable!("every slot has a zone")
+                };
+                WindowFacts {
+                    frame_rect: f,
+                    ..w.clone()
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_save_takes_the_zones_on_screen_and_the_name_and_shortcut_saved_over() {
+        // ADR 0030: Arrange changes no workspace, so its zones are on screen only. Saved over
+        // "Email" (three zones), the screen Arrange left (two halves) is what is kept: Email's
+        // own zones would leave the arranged windows over zones they do not fill.
+        let t = fixtures::single_1080p_100();
+        let three = snapped();
+        let seen3: Vec<Seen> = three.iter().map(|w| seen(w, "App")).collect();
+        let mut email = capture(
+            WorkspaceId("email".into()),
+            "Email".into(),
+            &seen3,
+            &t,
+            style(),
+            None,
+        );
+        email.hotkey = "Win+Alt+E".parse().ok();
+        assert!(email.hotkey.is_some());
+        let halves = vec![
+            win(
+                1,
+                "code.exe",
+                "a - Visual Studio Code",
+                Rect::new(0, 0, 960, 1032),
+            ),
+            win(
+                2,
+                "chrome.exe",
+                "b - Google Chrome",
+                Rect::new(960, 0, 1920, 1032),
+            ),
+        ];
+        let seen2: Vec<Seen> = halves.iter().map(|w| seen(w, "App")).collect();
+        let arranged = capture(
+            WorkspaceId::arranged(),
+            "Arranged".into(),
+            &seen2,
+            &t,
+            style(),
+            None,
+        );
+        assert_eq!(arranged.layout.zones.len(), 2);
+        let now = placed_in(&arranged, &halves, &t);
+        let seen_now: Vec<Seen> = now.iter().map(|w| seen(w, "App")).collect();
+
+        let base = saved_over(Some(&email), Some(&arranged));
+        let saved = capture(
+            email.id.clone(),
+            email.name.clone(),
+            &seen_now,
+            &t,
+            style(),
+            base.as_ref(),
+        );
+        assert_eq!(saved.id, email.id);
+        assert_eq!(saved.name, "Email");
+        assert_eq!(saved.hotkey, email.hotkey, "the shortcut stays the workspace's");
+        assert_eq!(saved.layout.zones, arranged.layout.zones, "the zones on screen");
+        assert_eq!(saved.layout.problems(), vec![]);
+        for s in &saved.layout.slots {
+            assert!(matches!(s.place, Place::Zone { .. }), "{:?}", s.place);
+        }
+        // Saved over Email's own zones, as before, all three would stay.
+        let old = capture(
+            email.id.clone(),
+            email.name.clone(),
+            &seen_now,
+            &t,
+            style(),
+            Some(&email),
+        );
+        assert!(old.layout.zones.len() >= 3);
+    }
+
+    #[test]
+    fn a_new_workspace_takes_the_zones_on_screen_but_no_shortcut() {
+        let t = fixtures::single_1080p_100();
+        let three = snapped();
+        let seen3: Vec<Seen> = three.iter().map(|w| seen(w, "App")).collect();
+        let mut coding = capture(
+            WorkspaceId("coding".into()),
+            "Coding".into(),
+            &seen3,
+            &t,
+            style(),
+            None,
+        );
+        coding.hotkey = "Win+Alt+C".parse().ok();
+        let base = saved_over(None, Some(&coding));
+        assert_eq!(base.as_ref().map(|b| &b.layout), Some(&coding.layout));
+        assert_eq!(
+            base.and_then(|b| b.hotkey),
+            None,
+            "a shortcut opens one workspace"
+        );
+        // Nothing on screen: a workspace saved over keeps its own zones; a new one starts afresh.
+        assert_eq!(saved_over(Some(&coding), None), Some(coding.clone()));
+        assert_eq!(saved_over(None, None), None);
+    }
+
+    #[test]
+    fn no_saved_workspace_gets_the_id_of_what_arrange_put_on_screen() {
+        let taken = vec![WorkspaceId("arranged".into())];
+        for name in ["~arranged", "Arranged", "~", "", " ~arranged "] {
+            assert!(!workspace_id(name, &[]).is_arranged(), "{name:?}");
+            assert!(!workspace_id(name, &taken).is_arranged(), "{name:?}");
+        }
+        assert!(WorkspaceId::arranged().is_arranged());
     }
 
     #[test]

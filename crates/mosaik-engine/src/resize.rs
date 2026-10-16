@@ -94,7 +94,7 @@ impl Engine {
         let active = self.active.as_ref()?;
         active.slot_of(h)?;
         let zone = self.zone_of(h, start, resizable, self.style())?.id.clone();
-        let ws = self.file.workspaces.iter().find(|w| w.id == active.id)?;
+        let ws = self.on_screen()?;
         let topology = self.topology.as_ref()?;
         let resolver = Resolver::new(&ws.layout, topology, self.style());
         let (ids, areas, work, dpi) = monitor_zones(ws, &resolver, &zone)?;
@@ -221,8 +221,8 @@ impl Engine {
         true
     }
 
-    /// Gives the open workspace's zones `ids` the areas `now` (they had `before`) and saves the
-    /// workspace. Returns the zones that changed.
+    /// Gives the zones `ids` on screen the areas `now` (they had `before`), and saves the
+    /// workspace they are a saved one's. Returns the zones that changed.
     pub(crate) fn set_zone_areas(
         &mut self,
         ids: &[ZoneId],

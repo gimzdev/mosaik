@@ -4,7 +4,8 @@
 //! A workspace's layout changes only when the user changes it: by saving, by dropping a window
 //! into a zone, or by moving one of its windows by hand. Windows that apps move on their own, or
 //! that the user maximises for a moment, go back to their places the next time the workspace
-//! opens.
+//! opens. Arrange changes none (ADR 0030): what it puts on screen is [`Arranged`], which the
+//! same changes go to, until a workspace is opened or saved.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,7 +21,7 @@ use mosaik_core::topology::Topology;
 use mosaik_core::window::{Cloak, WindowFacts, WindowHandle};
 use mosaik_core::workspace::{
     GroupSeen, Move, Present, Seen, TabSeen, capture, edge_distance, holding, holds_window, plan_refit,
-    plan_switch, regroup, remember, same_name, workspace_id,
+    plan_switch, regroup, remember, same_name, saved_over, workspace_id,
 };
 use mosaik_core::zone::{FrameStyle, ZoneColor, ZoneId};
 use mosaik_ipc::protocol::{ErrorCode, Reply};
@@ -65,6 +66,17 @@ pub(crate) struct Active {
     pub shown: HashMap<TabGroupId, SlotId>,
 }
 
+/// What Arrange put on screen, not saved (ADR 0030): its zones, and the windows in them, which
+/// tags, snapping and tabs use as they use an open workspace's, until a workspace is opened or
+/// saved.
+#[derive(Clone, Debug)]
+pub(crate) struct Arranged {
+    /// Its layout, under `WorkspaceId::arranged()`.
+    pub ws: Workspace,
+    /// The saved workspace it was arranged from: still the one in use, which Save updates.
+    pub from: Option<WorkspaceId>,
+}
+
 impl Active {
     pub fn slot_of(&self, h: WindowHandle) -> Option<&SlotId> {
         self.windows.iter().find(|(_, w)| **w == h).map(|(s, _)| s)
@@ -84,6 +96,54 @@ impl Active {
 }
 
 impl Engine {
+    /// Whether what is on screen is Arrange's, not a saved workspace.
+    pub(crate) fn arranged_on_screen(&self) -> bool {
+        self.active.as_ref().is_some_and(|a| a.id.is_arranged()) && self.arranged.is_some()
+    }
+
+    /// The layout whose zones are on screen: Arrange's, or the open workspace's.
+    pub(crate) fn on_screen(&self) -> Option<&Workspace> {
+        let active = self.active.as_ref()?;
+        match &self.arranged {
+            Some(a) if active.id.is_arranged() => Some(&a.ws),
+            _ => self.file.workspaces.iter().find(|w| w.id == active.id),
+        }
+    }
+
+    /// [`Engine::on_screen`], to change it.
+    pub(crate) fn on_screen_mut(&mut self) -> Option<&mut Workspace> {
+        let active = self.active.as_ref()?;
+        match &mut self.arranged {
+            Some(a) if active.id.is_arranged() => Some(&mut a.ws),
+            _ => self.file.workspaces.iter_mut().find(|w| w.id == active.id),
+        }
+    }
+
+    /// The saved workspace in use, as lists mark it "On screen" and Save updates it: the open
+    /// one, or the one Arrange started from.
+    pub(crate) fn in_use(&self) -> Option<&WorkspaceId> {
+        let active = self.active.as_ref()?;
+        if active.id.is_arranged() {
+            self.arranged.as_ref().and_then(|a| a.from.as_ref())
+        } else {
+            Some(&active.id)
+        }
+    }
+
+    /// The saved workspace whose zones are on screen (none after Arrange): the one whose zones
+    /// the editor shows as they are.
+    pub(crate) fn open_saved(&self) -> Option<&Workspace> {
+        self.on_screen().filter(|w| !w.id.is_arranged())
+    }
+
+    /// Writes `workspaces.json` after a change to what is on screen, unless that is Arrange's,
+    /// which is not saved.
+    pub(crate) fn persist_on_screen(&mut self) {
+        if !self.arranged_on_screen() {
+            self.persist();
+        }
+    }
+
     /// The zone of the open workspace that window `h`, whose visible frame is `frame`, sits in:
     /// the zone its slot (or its tab group) is placed in, when that zone holds it, since a
     /// window larger than its zone can cover a neighbouring zone just as well; else whichever
@@ -97,7 +157,7 @@ impl Engine {
     ) -> Option<&LiveZone> {
         let active = self.active.as_ref()?;
         let placed_in = active.slot_of(h).and_then(|slot| {
-            let layout = &self.file.workspaces.iter().find(|w| w.id == active.id)?.layout;
+            let layout = &self.on_screen()?.layout;
             match layout.effective_place(layout.slot(slot)?)? {
                 Place::Zone { zone } => Some(zone),
                 _ => None,
@@ -304,26 +364,34 @@ impl Engine {
             .position(|ws| same_name(&ws.name, name))
     }
 
-    /// Makes `id` the open workspace with these windows in its slots, and shows its frames.
+    /// Makes `id` the open workspace with these windows in its slots, and shows its frames. A
+    /// saved workspace opened leaves what Arrange put on screen behind; `WorkspaceId::arranged()`
+    /// is that, set in `arranged` first.
     pub(crate) fn activate(
         &mut self,
         id: WorkspaceId,
         windows: HashMap<SlotId, WindowHandle>,
         placed: Vec<(WindowHandle, Rect)>,
     ) {
-        let zones = match (&self.topology, self.file.workspaces.iter().find(|w| w.id == id)) {
-            (Some(t), Some(ws)) => live_zones(ws, t, self.style()),
-            _ => Vec::new(),
-        };
+        if !id.is_arranged() {
+            self.arranged = None;
+        }
         self.active = Some(Active {
-            id: id.clone(),
+            id,
             windows,
-            zones,
+            zones: Vec::new(),
             placed,
             launching: Vec::new(),
             shown: HashMap::new(),
         });
-        self.file.active = Some(id);
+        let zones = match (&self.topology, self.on_screen()) {
+            (Some(t), Some(ws)) => live_zones(ws, t, self.style()),
+            _ => Vec::new(),
+        };
+        if let Some(a) = &mut self.active {
+            a.zones = zones;
+        }
+        self.file.active = self.in_use().cloned();
     }
 
     /// The user moved or resized one of the open workspace's windows by hand: the workspace
@@ -336,25 +404,27 @@ impl Engine {
         let Some(topology) = self.topology.clone() else {
             return;
         };
-        let Some(index) = self.file.workspaces.iter().position(|w| w.id == active.id) else {
-            return;
-        };
         let Some(facts) = self.scanner.facts(window::hwnd(h)) else {
             return;
         };
         if facts.cloak == Cloak::ByShell {
             return;
         }
+        let style = self.style();
+        let Some(ws) = self.on_screen() else { return };
         let present = [Present { slot, window: &facts }];
-        let updated = remember(&self.file.workspaces[index], &present, &topology, self.style());
-        if updated != self.file.workspaces[index] {
-            self.file.workspaces[index] = updated;
-            self.persist();
+        let updated = remember(ws, &present, &topology, style);
+        if &updated != ws {
+            if let Some(ws) = self.on_screen_mut() {
+                *ws = updated;
+            }
+            self.persist_on_screen();
         }
     }
 
     /// Saves the windows on screen as the workspace `name` (updating the one with that name, if
-    /// any), makes it the open one and puts its windows in their zones.
+    /// any; without a name, the one in use), makes it the open one and puts its windows in their
+    /// zones. The zones on screen are saved with them (`saved_over`), Arrange's included.
     pub(crate) fn save(&mut self, name: Option<String>) -> Reply {
         if self.config.safe_mode {
             return error(
@@ -381,9 +451,8 @@ impl Engine {
             .map(|n| n.trim().to_owned())
             .filter(|n| !n.is_empty())
             .or_else(|| {
-                self.active
-                    .as_ref()
-                    .and_then(|a| self.file.workspaces.iter().find(|w| w.id == a.id))
+                self.in_use()
+                    .and_then(|id| self.file.workspaces.iter().find(|w| &w.id == id))
                     .map(|w| w.name.clone())
             })
             .unwrap_or_else(|| mosaik_core::workspace::suggested_name(&self.file.workspaces));
@@ -438,14 +507,8 @@ impl Engine {
         );
         let name = previous.as_ref().map_or(name, |p| p.name.clone());
         let style = self.style();
-        let mut ws = capture(
-            id.clone(),
-            name.clone(),
-            &seen,
-            &topology,
-            style,
-            previous.as_ref(),
-        );
+        let base = saved_over(previous.as_ref(), self.on_screen());
+        let mut ws = capture(id.clone(), name.clone(), &seen, &topology, style, base.as_ref());
         // Tab groups on screen stay tab groups, where their visible tab is. Their hidden tabs
         // (minimised ones too, when tabs are minimised) come from Mosaïk's own list.
         let groups = self.groups_now();
@@ -621,7 +684,7 @@ impl Engine {
         let undo = crate::arranging::Undo {
             at: Instant::now(),
             workspace: Some(ws.clone()),
-            workspace_id: ws.id.clone(),
+            arranged: self.arranged.clone(),
             active: self.active.as_ref().map(|a| (a.id.clone(), a.windows.clone())),
             windows: touched
                 .iter()
@@ -847,10 +910,10 @@ impl Engine {
         only: Option<&std::collections::HashSet<ZoneId>>,
         shown: Option<WindowHandle>,
     ) -> Vec<(WindowHandle, Rect, Rect)> {
-        let Some(active) = &self.active else {
+        let Some(ws) = self.on_screen().cloned() else {
             return Vec::new();
         };
-        let Some(ws) = self.file.workspaces.iter().find(|w| w.id == active.id).cloned() else {
+        let Some(active) = &self.active else {
             return Vec::new();
         };
         let in_zones = |slot: &SlotId| {
@@ -937,7 +1000,7 @@ impl Engine {
         let Some(topology) = self.topology.clone() else {
             return;
         };
-        let Some(ws) = self.file.workspaces.iter().find(|w| w.id == active.id).cloned() else {
+        let Some(ws) = self.on_screen().cloned() else {
             return;
         };
         let style = self.style();

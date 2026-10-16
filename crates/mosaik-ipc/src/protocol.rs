@@ -194,6 +194,8 @@ pub enum Reply {
     State(Box<StateSnapshot>),
     Workspaces {
         workspaces: Vec<WorkspaceSummary>,
+        /// The workspace in use, marked "On screen": the open one, or the one Arrange started
+        /// from.
         active: Option<WorkspaceId>,
     },
     Done {
@@ -420,6 +422,8 @@ pub struct StateSnapshot {
     pub topology_fingerprint: String,
     pub monitors: Vec<MonitorState>,
     pub windows: Vec<WindowState>,
+    /// What is on screen: the open workspace, or `~arranged`, what Arrange put there (not saved;
+    /// `zones` reads its zones by that id).
     pub active_workspace: Option<WorkspaceId>,
     pub hotkey: HotkeyState,
     pub hidden: Vec<HiddenWindow>,
