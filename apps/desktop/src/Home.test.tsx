@@ -131,8 +131,9 @@ const CHANGES: ReadonlySet<Command['cmd']> = new Set(['arrange', 'undo_arrange',
 
 function answer(auto: ArrangePreview = coding, extra: (c: Command) => Reply | null = () => null) {
   const asked: Command[] = [];
-  /** Arranged: the windows are where the picture showed them. */
+  /** Arranged: the windows are where the picture showed them, and Mosaïk keeps them so. */
   let arrangedNow = false;
+  let arrangedAs: ArrangePreview | null = null;
   engine.request.mockImplementation((c) => {
     asked.push(c);
     const reply = extra(c) ?? usual(c);
@@ -150,14 +151,16 @@ function answer(auto: ArrangePreview = coding, extra: (c: Command) => Reply | nu
         if (c.preset === 'full') return preview(now(resized(full, c)));
         if (c.preset === 'quarters') return preview(now(resized(quarters, c)));
         if (c.preset) return preview(now(resized(halves, c)));
-        return preview(now(resized(c.moves?.length ? traded : auto, c)));
+        return preview(now(resized(c.moves?.length ? traded : (arrangedAs ?? auto), c)));
       case 'preview_workspace':
         return preview(opening);
       case 'arrange':
         arrangedNow = true;
+        arrangedAs = c.moves?.length ? traded : null;
         return done('Moved 2 windows.');
       case 'undo_arrange':
         arrangedNow = false;
+        arrangedAs = null;
         return done('Windows are back where they were.');
       case 'switch':
         return done(`Opened “${c.workspace}”.`);
@@ -333,13 +336,10 @@ describe('Home', () => {
     await userEvent.click(arrange());
     expect(asked).toContainEqual({ cmd: 'arrange', moves: [move] });
     expect(await shown('Moved 2 windows.')).toBeInTheDocument();
-    // Arranged as they were put, the picture keeps them there, as the screen now is: the editor
-    // stays chosen for zone 2, and is not traded back.
+    // Arranged as they were put, the picture keeps them there, as the screen now is: Mosaïk keeps
+    // windows where they are, so the move is let go (sent again, it would trade them back).
     await waitFor(() => {
-      expect(asked.filter((c) => c.cmd === 'preview_arrange').at(-1)).toEqual({
-        cmd: 'preview_arrange',
-        moves: [{ window: 101, zone: 1 }],
-      });
+      expect(asked.filter((c) => c.cmd === 'preview_arrange').at(-1)).toEqual({ cmd: 'preview_arrange' });
     });
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();

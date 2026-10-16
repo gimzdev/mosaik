@@ -1564,6 +1564,32 @@ simetric and appealing". ADR 0032.
   too. Tests first: core 268, interface 133 (the picture before Mosaïk says, for each kind of
   drop), Playwright 35 (a stacked window dropped onto a window of another zone).
 
+- **On the owner's PC** (jobs 0161 and 0162, at 414b014 and cc6aa29): build and every test
+  passing; `smart`: two apps of the open workspace's zone traded (listed and pictured the other
+  way round, the first one's window in front of the other, put behind it first: 0 px back),
+  Halves from the side menu with every window in a half, the zone's own window in front after
+  Halves; the trade of two windows of a half on Home's picture right but for its check of the
+  window that keeps its size, measured against the whole half (781 px; now against where the
+  picture put it). Job 0161's reordering before the check changed the plan (the windows used
+  last count most), and its mosaikctl was refused by Smart App Control (made again in 0162).
+  The tour: 32 pictures, a window dragged onto another of its zone and back.
+- **A second review** (of 414b014, ADR 0032, Second review): stacking every zone pulled stacked
+  windows forward, and the next plan moved windows; a window brought to the front went back
+  behind at the next plan; zones made room after moves for their own windows only; a zone could
+  hold stacked windows only; Home's kept moves could trade windows back; a stack broke at a
+  window always on top; Undo did not restore the order among the others. Now: the plan keeps the
+  windows as they are on screen (of the windows filling a zone, the one in front is its own), the
+  zones as stretched are the plan's own, room after moves counts the windows stacked behind, a
+  window stacked where it no longer fits is stacked again, a lone stacked window is its zone's
+  own; Move windows moves a window down only when it is in front of the one before it, among
+  windows alike, and Undo puts each back under the window that was above it; Home lets every move
+  go once made. On 20000 random screens a second Move windows moves a window on 13 (156 with
+  windows of a minimum size), against 204 (357) before ADR 0032. Tests first: core 273
+  (arranging again after stacking, for five layouts and 3, 5 and 10 windows; a window brought to
+  the front stays; stretched zones; every window fits after moves; a zone of stacked windows
+  only), interface 133, Playwright 35. The `smart` probe checks that a second picture after Move
+  windows finds every window where it is, the zone's own window first.
+
 ## Owner decisions
 
 - 2026-10-11: the Patreon link is https://www.patreon.com/gimzdev (About and the tray menu only).

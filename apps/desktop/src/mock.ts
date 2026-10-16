@@ -374,7 +374,7 @@ function autoLayout(): { task: Task; shape: RatioRect[]; takes: (number | undefi
 
 /** What Arrange would do with `preset` (or its own choice), with the windows the user moved and
  * the zones as resized on the picture (`areas`, taken when there is one for each zone), as the
- * engine reports it (`arrange::plan_moved`, `editing::stretch_zones`): a window moved trades
+ * engine reports it (`arrange::plan_moved`, its `Stretched` zones): a window moved trades
  * places with the window in the zone it was put in, and keeps its zone's colour. */
 function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: RatioRect[] = []): ArrangePreview {
   const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
@@ -397,6 +397,27 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
   const own: (number | undefined)[] = rects.map((_, i) => {
     const n = zoneOf.indexOf(i);
     return n >= 0 ? n : undefined;
+  });
+  // Windows already in a zone stay as they are on screen (the engine's step 3): of the windows
+  // filling a zone, the one in front is its own window.
+  const filling = (a: Rect, b: Rect) =>
+    Math.abs(a.left - b.left) <= 2 &&
+    Math.abs(a.top - b.top) <= 2 &&
+    Math.abs(a.right - b.right) <= 2 &&
+    Math.abs(a.bottom - b.bottom) <= 2;
+  rects.forEach((r, i) => {
+    const f = onScreen.findIndex((s) => filling(s.now, r));
+    if (f < 0 || own[i] === f) return;
+    const given = own[i];
+    const was = zoneOf[f];
+    const left = was !== undefined && own[was] === f ? was : undefined;
+    zoneOf[f] = i;
+    own[i] = f;
+    if (left !== undefined) own[left] = undefined;
+    if (given !== undefined) {
+      zoneOf[given] = left;
+      if (left !== undefined) own[left] = given;
+    }
   });
   const stacked = onScreen.map(() => false);
   const area = (i: number) => {

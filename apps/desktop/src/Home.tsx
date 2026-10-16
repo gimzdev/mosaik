@@ -275,19 +275,10 @@ export function Home({
         // done: sent again, they would trade the windows back.
         say(reply.message);
         setUndoable(true);
-        // A window dropped onto another trades places with it, which sent again would trade them
-        // back: the trades in a zone are done, and a window put in another zone stays put there.
-        setPuts((list) =>
-          list.some((p) => p.move.onto !== undefined)
-            ? list.flatMap((p) =>
-                p.move.onto === undefined
-                  ? [p]
-                  : p.inZone
-                    ? []
-                    : [{ move: { window: p.move.window, zone: p.move.zone }, inZone: false }],
-              )
-            : list,
-        );
+        // Done: Mosaïk keeps the windows as they now are on screen (the window in front of a
+        // zone stays its own), so the moves are let go; sent again, each would trade the windows
+        // back. The zones as stretched stay chosen.
+        setPuts(NO_PUTS);
       } else {
         say(errorMessage(reply) ?? 'Your windows could not be arranged.', true);
         // Some windows may have moved all the same.

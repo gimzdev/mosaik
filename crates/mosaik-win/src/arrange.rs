@@ -41,7 +41,7 @@ pub fn raise(hwnd: HWND) -> Result<()> {
 }
 
 /// Whether `hwnd` stays above every window that is not (always on top).
-fn topmost(hwnd: HWND) -> bool {
+pub fn topmost(hwnd: HWND) -> bool {
     // SAFETY: reads the extended style of any window handle; 0 for one that has gone.
     let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
     style & WS_EX_TOPMOST.0 as isize != 0

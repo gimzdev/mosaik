@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::geometry::RatioRect;
-use crate::layout::{Launch, Layout, Place, Slot, SlotId, Workspace};
+use crate::layout::{Launch, Place, Slot, SlotId, Workspace};
 use crate::place::Resolver;
 use crate::topology::{MonitorId, Topology, fnv1a64, map_monitors};
 use crate::window::WindowFacts;
@@ -389,39 +389,22 @@ fn trade_in_zone(ws: &Workspace, a: &SlotId, b: &SlotId) -> Workspace {
     out
 }
 
-/// The zones of the layout's monitor `monitor` (an index in its monitors) take `areas`, in
-/// their order: the lines between them dragged on Home's picture (ADR 0031). Refused, leaving
-/// the layout as it was, when the counts differ, an area is under [`MIN_ZONE`] either way, or
-/// two areas cover each other. Returns whether they were taken.
-pub fn stretch_zones(layout: &mut Layout, monitor: usize, areas: &[RatioRect]) -> bool {
-    let here: Vec<usize> = layout
-        .zones
-        .iter()
-        .enumerate()
-        .filter(|(_, z)| z.monitor == monitor)
-        .map(|(i, _)| i)
-        .collect();
-    if here.is_empty() || here.len() != areas.len() {
-        return false;
-    }
+/// Whether `areas`, the zones of one monitor as the lines between them were dragged on Home's
+/// picture (ADR 0031), can be its zones: none under [`MIN_ZONE`] either way, and none over
+/// another.
+pub fn areas_fit(areas: &[RatioRect]) -> bool {
     let small = |a: &RatioRect| a.width() < MIN_ZONE - 1e-9 || a.height() < MIN_ZONE - 1e-9;
     let over = |a: &RatioRect, b: &RatioRect| {
         let w = a.right().min(b.right()) - a.left().max(b.left());
         let h = a.bottom().min(b.bottom()) - a.top().max(b.top());
         w > 1e-6 && h > 1e-6
     };
-    if areas.iter().any(small)
-        || areas
+    !areas.is_empty()
+        && !areas.iter().any(small)
+        && !areas
             .iter()
             .enumerate()
             .any(|(i, a)| areas[i + 1..].iter().any(|b| over(a, b)))
-    {
-        return false;
-    }
-    for (i, area) in here.into_iter().zip(areas) {
-        layout.zones[i].area = *area;
-    }
-    true
 }
 
 /// The workspace without its app `slot` (a tab leaves its group first). Its window, when open,
@@ -962,43 +945,20 @@ mod tests {
     }
 
     #[test]
-    fn a_monitors_zones_take_the_areas_stretched_on_the_picture() {
-        // ADR 0031: lines between zones dragged on Home's picture: the zones of the main monitor
-        // take the areas the picture sends, in their order; anything else is refused, unchanged.
-        let t = fixtures::uhd_200_plus_1080p_100();
-        let mut layout = workspace(&t).layout;
+    fn areas_stretched_on_the_picture_fit_when_none_is_too_small_or_over_another() {
+        // ADR 0031: lines between zones dragged on Home's picture; the plan takes the areas only
+        // when they fit (`arrange::Stretched`).
         let wide = [ratio(0.0, 0.0, 0.6, 1.0), ratio(0.6, 0.0, 1.0, 1.0)];
-        assert!(stretch_zones(&mut layout, 0, &wide));
-        assert_eq!(layout.zones[0].area, wide[0]);
-        assert_eq!(layout.zones[1].area, wide[1]);
-        assert_eq!(
-            layout.zones[2].area,
-            RatioRect::FULL,
-            "the other monitor's zone stays"
-        );
-        let before = layout.clone();
-        assert!(!stretch_zones(&mut layout, 0, &wide[..1]), "another count");
+        assert!(areas_fit(&wide));
+        assert!(!areas_fit(&[]), "none");
         assert!(
-            !stretch_zones(
-                &mut layout,
-                0,
-                &[ratio(0.0, 0.0, 0.97, 1.0), ratio(0.97, 0.0, 1.0, 1.0)]
-            ),
+            !areas_fit(&[ratio(0.0, 0.0, 0.97, 1.0), ratio(0.97, 0.0, 1.0, 1.0)]),
             "a zone under a twentieth of the screen"
         );
         assert!(
-            !stretch_zones(
-                &mut layout,
-                0,
-                &[ratio(0.0, 0.0, 0.7, 1.0), ratio(0.6, 0.0, 1.0, 1.0)]
-            ),
+            !areas_fit(&[ratio(0.0, 0.0, 0.7, 1.0), ratio(0.6, 0.0, 1.0, 1.0)]),
             "two zones over each other"
         );
-        assert!(
-            !stretch_zones(&mut layout, 5, &wide),
-            "a monitor it has no zones on"
-        );
-        assert_eq!(layout, before);
     }
 
     #[test]

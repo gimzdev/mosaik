@@ -161,12 +161,12 @@ the engine gathers windows and applies the result.
   window dragged onto another, or onto a zone, trades places with it (a click or Enter picks one,
   a second puts it there): exactly the two dropped one onto the other (`onto`), zones and places
   front to back, own window or stacked; Arrange lists and stacks each zone's windows front to
-  back (`Plan::order`, its own window first, stacked each below the one before by
-  `mover::stack`, put back by Undo); the lines
+  back (`Plan::order`, its own window first; `mover::stack` moves a window down only when it is
+  in front of the one before it, and Undo puts it back), and keeps windows already in a zone as
+  they are on screen (of those filling a zone, the one in front is its own); the lines
   between zones resize them (`LineHandle`, hidden until pointed at). The moves and the areas go
-  with the preview and with Arrange (`mosaik_core::arrange::plan_moved`, then
-  `editing::stretch_zones` before the zones are numbered), each window keeping its colour, each
-  zone its number. Move windows does it (ADR 0032),
+  with the preview and with Arrange (`mosaik_core::arrange::plan_moved`, the areas as its
+  `Stretched` zones), each window keeping its colour, each zone its number. Move windows does it (ADR 0032),
   changing no workspace, and Undo brings everything back; what was changed stays chosen, and
   Undo changes puts the layout's own back. Beside it, every workspace with its apps' icons: a
   click shows it in the picture as opening it would leave the screen (`preview_workspace`, the

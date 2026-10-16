@@ -26,9 +26,17 @@ were in a workspace: with windows of their kind first (two browsers together), e
 are fewest, else the larger zone; a window already filling a zone stays in it. Only a window that
 fits no zone, even stacked, still waits in the taskbar (ADR 0021: the zones make room first).
 The plan says each zone's windows front to back (`Plan::order`: its own window, then the others,
-those used last first); the picture lists them so, and Move windows stacks them so, each just
-below the one before (`put_below`, on a thread of its own), so the zone's own window is in front
-and none comes up over Mosaïk's window. Undo puts back the order they had.
+those used last first); the picture lists them so, and Move windows stacks them so, as little as
+it takes: a window in front of the one that should come before it is put just below that one
+(`put_below`, on a thread of its own), the others stay, so the order the windows were used in
+changes no more than that and none comes up over Mosaïk's window. Undo puts each window moved
+down back under the window that was above it.
+
+**As the screen is.** Windows already in a zone of the layout stay as they are on screen: of the
+windows filling a zone, the one in front is its own window (step 3 of the plan). So arranging
+again moves nothing, a window brought to the front of its zone stays there, and once Move windows
+has made the user's moves, Home lets them go. The zones as stretched on the picture are the
+plan's own (`Stretched`), so that the windows are fitted to them and found filling them.
 
 **A window dropped onto another trades places with exactly it**, wherever the two are: their
 zones, and their places in them, own window or stacked; when both are their zones' own windows,
@@ -38,9 +46,9 @@ front, or sends it behind (the owner's Chrome and Claude):
 - On Home's picture of the screen: the picture shows it at once, and Move windows does it
   (protocol 11: `onto` on a move, the window it was dropped onto). A trade in a zone waiting is
   a change to make, on a screen already arranged too ("Undo changes", not "already like this").
-  Each trade is made on the screen as it is then, so once Move windows has made them, Home drops
-  the trades in a zone and keeps a window put in another zone as a move into that zone: sent
-  again, a trade would put the windows back.
+  Each trade is made on the screen as it is then, so once Move windows has made them, Home lets
+  the moves go (sent again, a trade would put the windows back): the plan keeps the windows as
+  they are on screen.
 - On a workspace's picture (Home's preview of it, its page), saved at once (`move_app` with
   `swap_with`): in two zones the two apps trade zones and their places front to back
   (`editing::swap_apps`); in one zone, their places in it (`editing::trade_in_zone`). An app's
@@ -53,6 +61,9 @@ front, or sends it behind (the owner's Chrome and Claude):
   keyboard, the focus goes with the piece picked.
 - Windows are stacked only among windows alike, always on top or not: under one that is, a
   window would become so; one that is would stop being so under one that is not.
+- After the user's moves, the zones make room for the windows stacked behind too, when there is
+  room for all; a window stacked in a zone it no longer fits is stacked again where it fits. A
+  zone holding stacked windows only has the one in front for its own, as the picture shows it.
 
 **Move windows.** Home's main button, the tray's item and the side menu's first row say **Move
 windows**, with Mosaïk's tiles; Mosaïk then says "Moved 4 windows into Thirds." (or "Moved 4
@@ -99,3 +110,18 @@ puts the window to bring forward behind first, so its check cannot pass by chanc
 always on top would have lost it under one that is not; Undo left the new stacking; two tabs of
 one group trading places restacked their whole zone. Also: Home kept a trade made by Move
 windows and sent it again, trading the windows back.
+
+## Second review (2026-10-16)
+
+A second agent reviewed 414b014 and found, each now caught by a test written first: stacking
+every zone pulled each stacked window up to just below its zone's own window, and the next plan
+read that as which windows were used last and moved windows; the plan picked a zone's own window
+by what the task needs and how recently it was used, so a window brought to the front went back
+behind at the next Move windows; after a move, the zones made room for their own windows only,
+and a window stacked behind could be left in a zone narrower than it goes; a zone could hold a
+stacked window and no own window, which the picture took for its own; the moves Home kept after
+Move windows could trade windows back; a stack broke at a window always on top; Undo did not put
+windows back among the others. Measured on 20000 random screens of 2 to 9 windows, a second Move
+windows moves a window on 13 (no window with a minimum size) and 156 (one in five with one), where
+the plan before ADR 0032 moved one on 204 and 357: the remaining ones lay out the screen anew for
+a task the windows now say otherwise, or make room in other zones for a window that needs more.

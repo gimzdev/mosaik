@@ -116,4 +116,6 @@ would make a zone too small or put two over each other is not sent.
 The main button is **Move windows** ("move windows and open are good yes lets go"); a workspace
 keeps Open. Two pieces of one zone dropped onto each other no longer stay as they were: they
 trade places in it, front to back or in their tab strip, on Home and on a workspace's picture.
-Home's title row, picture and layouts are one width.
+Home's title row, picture and layouts are one width. The areas stretched on Home's picture are
+the plan's own zones (`arrange::Stretched`, checked by `editing::areas_fit`), so the windows are
+fitted to them; `editing::stretch_zones` is gone.

@@ -1709,7 +1709,22 @@ fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Re
         let za = zone_of(&st, &zs, pair_hwnds[0]);
         za.is_some() && za == zone_of(&st, &zs, pair_hwnds[1])
     };
-    let fits = fit(&st, &zs, styles, &pair_hwnds);
+    // Each where the picture put it (a window that keeps its size sits as `fit_size` puts it;
+    // one wearing its group's strip below the band, as in 3e).
+    let fits: Vec<Option<i32>> = pair_hwnds
+        .iter()
+        .map(|&h| {
+            let then = shown.windows.iter().find(|x| x.window == handle(h))?.then?;
+            let f = frame_rect(h)?;
+            let wanted = match zone_of(&st, &zs, h) {
+                Some(z) if wears_above(&st, h) => {
+                    Rect::new(then.left, styles.area(z, true).top, then.right, then.bottom)
+                }
+                _ => then,
+            };
+            Some(edge_error(f, wanted))
+        })
+        .collect();
     let undo = done(&ask(engine, Command::UndoArrange).0)?;
     let _ = settled(engine)?;
     let back_px = most_moved(&frames(w), &before);
@@ -2107,6 +2122,28 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     let message = done(&reply)?;
     let st = settled(engine)?;
     let own_in_front = pair.is_some_and(|(own, other)| z_at(own) < z_at(other));
+    // The picture again: every window where it is, each zone's own window still first (the
+    // review of 414b014: stacking them read as which windows were used last, and the next plan
+    // moved windows).
+    let again = preview(engine, Some("halves"))?;
+    let again_settled = again
+        .windows
+        .iter()
+        .all(|x| x.minimized || x.then.is_some_and(|t| edge_error(x.now, t) <= SLACK));
+    let again_front = pair.is_none_or(|(own, _)| {
+        again
+            .windows
+            .iter()
+            .find(|x| x.window == handle(own))
+            .and_then(|x| zone_index(&again, x))
+            .and_then(|z| {
+                again
+                    .windows
+                    .iter()
+                    .find(|y| !y.minimized && zone_index(&again, y) == Some(z))
+            })
+            .is_some_and(|first| first.window == handle(own))
+    });
     let zs = zones(engine, &ws.0, work)?;
     let got = sorted(rects(&zs));
     // Each window against where the picture said it would go. One that wears its group's strip
@@ -2172,8 +2209,12 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         "zones_back": zones_back,
         "all_shown": all_shown,
         "own_window_in_front": own_in_front,
+        "again_where_they_are": again_settled,
+        "again_own_window_first": again_front,
         "ok": shown_zones == halves
             && own_in_front
+            && again_settled
+            && again_front
             && planned.iter().all(Option::is_some)
             && minimized_shown == 0
             && untouched

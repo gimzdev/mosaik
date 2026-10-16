@@ -257,9 +257,7 @@ impl Engine {
         if order.len() < 2 {
             return;
         }
-        if !mover::stack(&order, mover::WAIT_ONE) {
-            tracing::warn!(windows = order.len(), "windows not stacked in time");
-        }
+        let _ = mover::stack(&order, mover::WAIT_ONE);
         // Strips and frames back above their windows.
         self.restack_soon();
     }

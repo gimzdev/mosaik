@@ -13,8 +13,8 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use mosaik_core::arrange::{Chosen, Goes, KeptZone, Kind, Move, Unit, plan_moved};
-use mosaik_core::editing::{stretch_zones, without_zones};
+use mosaik_core::arrange::{Chosen, Goes, KeptZone, Kind, Move, Stretched, Unit, plan_moved};
+use mosaik_core::editing::without_zones;
 use mosaik_core::geometry::{RatioRect, Rect};
 use mosaik_core::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
 use mosaik_core::place::{Resolver, Target, fit_size};
@@ -49,9 +49,9 @@ pub(crate) struct Undo {
     /// Windows that were minimised before (opening a workspace brings its own back): minimised
     /// again.
     pub(crate) minimized: Vec<WindowHandle>,
-    /// The windows Arrange stacked in a zone, each zone's as they were, front to back: stacked
-    /// so again (ADR 0032).
-    pub(crate) stacked: Vec<Vec<WindowHandle>>,
+    /// The windows Arrange moved down to stack them in their zones, each with the window that
+    /// was just above it: put back under it (ADR 0032).
+    pub(crate) lowered: Vec<mover::Lowered>,
 }
 
 /// What Arrange is about to do, worked out without changing anything.
@@ -103,9 +103,9 @@ fn fresh(prefix: &str, taken: &mut HashSet<String>) -> String {
     id
 }
 
-/// The windows of each zone that has more than one, in two orders: front to back as Arrange
-/// stacks them (`order`), and as they are on screen now (`windows`, front to back), for Undo.
-fn zone_stacks(p: &Prepared) -> Vec<(Vec<WindowHandle>, Vec<WindowHandle>)> {
+/// The windows of each zone that has more than one, front to back as Arrange stacks them: the
+/// zone's own window first (ADR 0032).
+fn zone_stacks(p: &Prepared) -> Vec<Vec<WindowHandle>> {
     let zone = |i: usize| match p.goes.get(i) {
         Some(Goes::Zone(r)) => Some(*r),
         _ => None,
@@ -116,17 +116,13 @@ fn zone_stacks(p: &Prepared) -> Vec<(Vec<WindowHandle>, Vec<WindowHandle>)> {
     zones
         .into_iter()
         .map(|r| {
-            let handles = |list: &mut dyn Iterator<Item = usize>| -> Vec<WindowHandle> {
-                list.filter(|&i| zone(i) == Some(r))
-                    .filter_map(|i| p.windows.get(i).map(|w| w.handle))
-                    .collect()
-            };
-            (
-                handles(&mut p.order.iter().copied()),
-                handles(&mut (0..p.windows.len())),
-            )
+            p.order
+                .iter()
+                .filter(|&&i| zone(i) == Some(r))
+                .filter_map(|&i| p.windows.get(i).map(|w| w.handle))
+                .collect::<Vec<_>>()
         })
-        .filter(|(stacked, _)| stacked.len() >= 2)
+        .filter(|stack| stack.len() >= 2)
         .collect()
 }
 
@@ -244,7 +240,11 @@ impl Engine {
                 })
             })
             .collect();
-        let plan = plan_moved(&units, &spots, &monitors, chosen, &moves);
+        // The main monitor's zones as the user stretched them on the picture (ADR 0031): the
+        // plan takes them with one area for each, none too small and none over another, and
+        // fits the windows to them.
+        let stretched = (!areas.is_empty()).then_some(Stretched { monitor: main, areas });
+        let plan = plan_moved(&units, &spots, &monitors, chosen, &moves, stretched);
 
         // What will be on screen: the zones there now, or none; no saved workspace changes.
         let on_screen = self.on_screen();
@@ -296,16 +296,6 @@ impl Engine {
                 area: z.area,
             });
             made.push(Some(id));
-        }
-        // The main monitor's zones as the user stretched them on the picture (ADR 0031): taken
-        // with one area for each, none too small and none over another.
-        if !areas.is_empty()
-            && let Some(m) = topology.monitors().get(main)
-        {
-            let index = ws.layout.monitor_index(m, &topology);
-            if !stretch_zones(&mut ws.layout, index, areas) {
-                tracing::debug!(areas = areas.len(), "stretched zones not taken");
-            }
         }
         // Numbered with the zones kept, in reading order, where they are once stretched.
         ws.layout.number_zones();
@@ -441,7 +431,7 @@ impl Engine {
                 .map(|w| (w.handle, w.frame_rect, w.maximized))
                 .collect(),
             minimized: Vec::new(),
-            stacked: stacks.iter().map(|(_, before)| before.clone()).collect(),
+            lowered: Vec::new(),
         });
         let id = p.ws.id.clone();
         self.arranged = Some(Arranged {
@@ -463,11 +453,13 @@ impl Engine {
             mosaik_win::arrange::minimize(window::hwnd(*h));
         }
         // The windows of a zone, each zone's own window in front, as the picture showed them
-        // (ADR 0032): each just below the one before, so none comes up over Mosaïk's window.
-        for (order, _) in &stacks {
-            if !mover::stack(order, mover::WAIT_ONE) {
-                tracing::warn!(windows = order.len(), "windows not stacked in time");
-            }
+        // (ADR 0032): moved down only where needed, so none comes up over Mosaïk's window.
+        let lowered: Vec<mover::Lowered> = stacks
+            .iter()
+            .flat_map(|order| mover::stack(order, mover::WAIT_ONE))
+            .collect();
+        if let Some(u) = &mut self.undo {
+            u.lowered = lowered;
         }
         let kept: Vec<(WindowHandle, Rect, Rect)> = placed
             .iter()
@@ -667,16 +659,9 @@ impl Engine {
                 mosaik_win::arrange::minimize(hwnd);
             }
         }
-        // The windows Arrange stacked in a zone, in the order they had (ADR 0032).
-        for before in &undo.stacked {
-            let open: Vec<WindowHandle> = before
-                .iter()
-                .copied()
-                .filter(|h| window::exists(window::hwnd(*h)))
-                .collect();
-            if !mover::stack(&open, mover::WAIT_ONE) {
-                tracing::debug!(windows = open.len(), "windows not stacked back in time");
-            }
+        // The windows Arrange moved down to stack them, back where they were (ADR 0032).
+        if !undo.lowered.is_empty() {
+            mover::unstack(&undo.lowered, mover::WAIT_ONE);
         }
         if let (Some(t), Some(ws)) = (&topology, self.on_screen()) {
             let zones = live_zones(ws, t, self.style());
