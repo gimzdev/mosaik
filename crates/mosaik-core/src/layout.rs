@@ -390,6 +390,28 @@ impl Layout {
     }
 
     /// The group a slot is a tab of.
+    /// Each app's place front to back, as opening the workspace stacks its windows and its
+    /// picture lists them (ADR 0032): the order of its slots, a tab of a group where the
+    /// group's front-most tab is (whichever tab shows).
+    pub fn ranks(&self) -> std::collections::HashMap<SlotId, usize> {
+        let own: std::collections::HashMap<&SlotId, usize> =
+            self.slots.iter().enumerate().map(|(i, s)| (&s.id, i)).collect();
+        self.slots
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let rank = self.group_of(&s.id).map_or(i, |g| {
+                    g.tabs
+                        .iter()
+                        .filter_map(|t| own.get(t).copied())
+                        .min()
+                        .unwrap_or(i)
+                });
+                (s.id.clone(), rank)
+            })
+            .collect()
+    }
+
     pub fn group_of(&self, slot: &SlotId) -> Option<&TabGroup> {
         match &self.slot(slot)?.place {
             Place::Tab { group } => self.tab_group(group),
@@ -1058,5 +1080,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn apps_rank_front_to_back_with_a_group_as_far_forward_as_its_front_tab() {
+        // ADR 0032: the order a workspace's picture lists a zone's apps in, and opening it
+        // stacks them in: its slots' order, a tab group where its front-most tab is.
+        let mut l = layout();
+        let window = |id: &str| Slot {
+            id: SlotId(id.into()),
+            label: None,
+            app: AppMatch::exe("a.exe"),
+            launch: None,
+            place: Place::Zone {
+                zone: ZoneId::new("z1"),
+            },
+        };
+        // s3, then the group's s1, then s4, then the group's s2.
+        l.slots = vec![window("s3"), l.slots[0].clone(), window("s4"), l.slots[1].clone()];
+        let ranks = l.ranks();
+        let rank = |id: &str| ranks.get(&SlotId(id.into())).copied();
+        assert_eq!(
+            (rank("s3"), rank("s1"), rank("s2"), rank("s4")),
+            (Some(0), Some(1), Some(1), Some(2))
+        );
+        assert_eq!(rank("gone"), None);
     }
 }

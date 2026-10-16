@@ -2,15 +2,15 @@
 //!
 //! Each monitor with windows gets the layout of its task ([`crate::task`]), in place of the open
 //! workspace's zones there: the window the task is done in takes the most room (an editor when
-//! coding, with the terminal under it), the windows that help sit beside it, and the ones that
-//! have nothing to do with it wait in the taskbar. New zones are named after their windows. No
-//! window gets a zone smaller than it goes ([`Unit::least`]): a window that fits nowhere is
-//! minimised rather than spill over its neighbours. Arranging twice moves nothing.
+//! coding, with the terminal under it), the windows that help sit beside it, and the others
+//! stack in those zones behind them. Zones are numbered by place. No window gets a zone smaller
+//! than it goes ([`Unit::least`]): a window that fits nowhere is minimised rather than spill over
+//! its neighbours. Arranging twice moves nothing.
 //!
 //! A layout picked for a monitor (the home page's layouts) replaces its zones with the layout's,
 //! for the windows that fit them and matter most to the task; each goes into the zone that suits
 //! it, by score: where it is now (a window that fills a zone stays), and the largest zones for
-//! the windows that matter most. Minimised windows stay in the taskbar rather than disappear.
+//! the windows that matter most; the windows left over stack in the zones (ADR 0032).
 //! The plan is pure; the engine applies it, and can undo it.
 
 use crate::fit;
@@ -433,8 +433,8 @@ pub struct Move {
 pub enum Goes {
     /// It fills this zone (an index into [`Plan::new_zones`]).
     Zone(usize),
-    /// It is minimised: it has nothing to do with the task, or every zone it fits has a window.
-    /// It stays in the taskbar, where it can be found, rather than disappear as a tab.
+    /// It is minimised: it fits no zone, even stacked behind another window (ADR 0032). It
+    /// stays in the taskbar, where it can be found, rather than spill over the other windows.
     Minimize,
     /// It stays where it is: there is no zone for it (no monitor to make one on).
     Stay,
@@ -543,8 +543,8 @@ fn steady(placed: &mut [task::Placement], here: &[usize], units: &[Unit], work: 
 /// The areas of a picked layout on `work`, made to fit the windows in its zones (`in_zone`):
 /// the zones make room for the windows that need more. When they cannot all fit, a window too
 /// big for its zone tries the other zones first (trading places with the window there); failing
-/// that, the window that needs the most room is taken out of its zone (it waits in the taskbar),
-/// until the others fit.
+/// that, the window that needs the most room is taken out of its zone (to be stacked in a zone
+/// it fits, or minimised), until the others fit.
 fn make_room_for(
     areas: &[RatioRect],
     in_zone: &mut [Option<usize>],
@@ -597,6 +597,61 @@ fn make_room_for(
     }
 }
 
+/// Step 4 of the plan: the windows left without a zone stack in the zones they fit, behind the
+/// windows there, rather than leave the screen (the owner, 2026-10-16: "when we have less zones
+/// than apps it just makes them disappear they should stack"): each stays in the zone it fills
+/// (so arranging twice moves nothing), else goes with the windows of its kind when a zone has
+/// one, else in the zone with the fewest windows, the larger first. A window that fits no zone
+/// still waits in the taskbar rather than spill over the others. `on` lists each monitor's units
+/// front to back, so the windows used last come first.
+fn stack_the_rest(
+    goes: &mut [Option<Goes>],
+    on: &[Vec<usize>],
+    new_zones: &[NewZone],
+    units: &[Unit],
+    monitors: &[Rect],
+) {
+    let mut count = vec![0_usize; new_zones.len()];
+    for g in goes.iter().flatten() {
+        if let Goes::Zone(r) = g {
+            count[*r] += 1;
+        }
+    }
+    for (m, work) in monitors.iter().enumerate() {
+        let here: Vec<usize> = (0..new_zones.len())
+            .filter(|&r| new_zones[r].monitor == m)
+            .collect();
+        for &u in on.get(m).map_or(&[][..], Vec::as_slice) {
+            if goes[u] != Some(Goes::Minimize) {
+                continue;
+            }
+            let rect = |r: usize| new_zones[r].area.to_rect(*work);
+            let kin = |r: usize| {
+                goes.iter()
+                    .enumerate()
+                    .any(|(v, g)| *g == Some(Goes::Zone(r)) && units[v].kind == units[u].kind)
+            };
+            let fills = |r: usize| covering(units[u].frame, rect(r)) >= 0.9;
+            let best = here
+                .iter()
+                .copied()
+                .filter(|&r| fits(&units[u], rect(r)))
+                .min_by(|&a, &b| {
+                    fills(b)
+                        .cmp(&fills(a))
+                        .then(kin(b).cmp(&kin(a)))
+                        .then(count[a].cmp(&count[b]))
+                        .then(rect(b).area().cmp(&rect(a).area()))
+                        .then(a.cmp(&b))
+                });
+            if let Some(r) = best {
+                goes[u] = Some(Goes::Zone(r));
+                count[r] += 1;
+            }
+        }
+    }
+}
+
 /// A layout the user picked for one monitor (the home page's layouts): that monitor's zones
 /// make way for the preset's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -613,10 +668,25 @@ pub fn plan(units: &[Unit], zones: &[KeptZone], monitors: &[Rect]) -> Plan {
 }
 
 /// [`plan`], with a layout the user picked for one monitor: there, its zones replace the open
-/// workspace's, for the windows that fit them and matter most to the task; the others are
-/// minimised.
+/// workspace's, for the windows that fit them and matter most to the task; the others stack in
+/// them.
 pub fn plan_with(units: &[Unit], zones: &[KeptZone], monitors: &[Rect], chosen: Option<Chosen>) -> Plan {
     plan_moved(units, zones, monitors, chosen, &[])
+}
+
+/// The windows' order front to back (indexes into the `count` units, front first) once the
+/// user's trades on the picture are made: each `(a, b)`, a window dropped onto another of its
+/// zone, swaps the two places, in the order they were made (ADR 0032). Which zone a window goes
+/// in does not change.
+pub fn traded_order(count: usize, trades: &[(usize, usize)]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..count).collect();
+    for &(a, b) in trades {
+        let at = |u: usize, order: &[usize]| order.iter().position(|&x| x == u);
+        if let (Some(i), Some(j)) = (at(a, &order), at(b, &order)) {
+            order.swap(i, j);
+        }
+    }
+    order
 }
 
 /// [`plan_with`], then the windows the user moved on the picture of the screen ([`Move`]), in
@@ -655,7 +725,7 @@ pub fn plan_moved(
 
     // 1. Every monitor with windows gets the layout of its task, in place of the open
     //    workspace's zones there: the main window the most room, the windows that help beside
-    //    it, each in an area it fits; the others minimised.
+    //    it, each in an area it fits; the others are left for step 4, which stacks them.
     for (m, work) in monitors.iter().enumerate() {
         let here = &on[m];
         if here.is_empty() || picked(m) {
@@ -770,7 +840,7 @@ pub fn plan_moved(
                 new_zone_window[from + k] = Some(u);
             }
         }
-        // A window left without a zone waits in the taskbar.
+        // A window left without a zone of its own is stacked in one in step 4.
         for &u in &kept {
             goes[u].get_or_insert(Goes::Minimize);
         }
@@ -850,13 +920,14 @@ pub fn plan_moved(
                 new_zones[r].color = c;
             }
         }
-        // A window no zone has room for any more waits in the taskbar.
+        // A window no zone has room for any more is stacked in one in step 4, if it fits.
         for u in before.into_iter().flatten() {
             if !in_zone.contains(&Some(u)) {
                 goes[u] = Some(Goes::Minimize);
             }
         }
     }
+    stack_the_rest(&mut goes, &on, &new_zones, units, monitors);
     let goes: Vec<Goes> = goes.into_iter().map(|g| g.unwrap_or(Goes::Stay)).collect();
 
     // The open workspace's zones on the monitors laid out anew make way; the others stay.
@@ -998,11 +1069,15 @@ mod tests {
         let term = &plan.new_zones[zone_of(&plan, 6)];
         assert!((term.area.top() - plan.new_zones[main].area.bottom()).abs() < 1e-9);
         // Claude, used last, beside them: three windows in the view. Chrome, Steam, the
-        // Calculator and Battle.net wait in the taskbar.
+        // Calculator and Battle.net stack in those zones, behind them, rather than leave the
+        // screen (the owner, 2026-10-16: "they should stack").
         assert!(matches!(plan.goes[0], Goes::Zone(_)));
-        for u in [1, 2, 4, 5] {
-            assert_eq!(plan.goes[u], Goes::Minimize, "unit {u}: {:?}", plan.goes);
-        }
+        assert!(
+            plan.goes.iter().all(|g| matches!(g, Goes::Zone(_))),
+            "{:?}",
+            plan.goes
+        );
+        assert_eq!(plan.new_zones.len(), 3, "no zone more: {:?}", plan.new_zones);
     }
 
     #[test]
@@ -1025,9 +1100,8 @@ mod tests {
 
     #[test]
     fn arranging_twice_moves_nothing() {
-        // The windows in their zones, the others minimised: Arrange again finds every window
-        // where it is (the order of those beside the main one does not change because the
-        // windows between them are gone).
+        // The windows in their zones, the others stacked behind them: Arrange again finds every
+        // window where it is, the stacked ones too (each stays in the zone it fills).
         let exes = [
             ("claude.exe", "Claude"),
             ("chrome.exe", "Google Chrome"),
@@ -1046,9 +1120,9 @@ mod tests {
             .collect();
         units[7].kind = Kind::Terminal;
         let first = plan(&units, &[], &[WORK]);
-        assert_eq!(
-            first.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count(),
-            3,
+        assert_eq!(first.new_zones.len(), 3, "{:?}", first.new_zones);
+        assert!(
+            first.goes.iter().all(|g| matches!(g, Goes::Zone(_))),
             "{:?}",
             first.goes
         );
@@ -1085,7 +1159,7 @@ mod tests {
     #[test]
     fn unknown_windows_get_one_main_zone_and_two_beside_it() {
         // Nothing says what the task is: the window used last is the main one, the next two sit
-        // beside it (three windows in a view), and the others wait in the taskbar.
+        // beside it (three windows in a view), and the others stack in those zones.
         for n in [5_i32, 6, 9] {
             let units: Vec<Unit> = (0..n)
                 .map(|i| {
@@ -1103,7 +1177,11 @@ mod tests {
                 "{:?}",
                 plan.goes
             );
-            assert!(plan.goes[3..].iter().all(|g| *g == Goes::Minimize));
+            assert!(
+                plan.goes[3..].iter().all(|g| matches!(g, Goes::Zone(_))),
+                "{:?}",
+                plan.goes
+            );
             let main = zone_of(&plan, 0);
             let largest = plan
                 .new_zones
@@ -1116,11 +1194,11 @@ mod tests {
     }
 
     #[test]
-    fn the_task_keeps_its_windows_and_sends_the_others_away() {
+    fn the_task_keeps_its_windows_in_front_and_stacks_the_others_behind() {
         // Job 0105, the owner's screen: ten windows. Claude in front, then Chrome, Steam,
         // Notepad++... The task is coding: an editor takes the most room with the terminal
         // under it and Claude, used last, beside them: three windows in the view. The others
-        // wait in the taskbar.
+        // stack in those three zones, none of them left out.
         let exes = [
             ("claude.exe", "Claude"),
             ("chrome.exe", "Google Chrome"),
@@ -1142,10 +1220,17 @@ mod tests {
             })
             .collect();
         let plan = plan(&units, &[], &[WORK]);
-        let placed: Vec<usize> = (0..units.len())
-            .filter(|&u| matches!(plan.goes[u], Goes::Zone(_)))
-            .collect();
-        assert_eq!(placed, vec![0, 3, 9], "{:?}", plan.goes);
+        assert_eq!(plan.new_zones.len(), 3, "{:?}", plan.new_zones);
+        assert!(
+            plan.goes.iter().all(|g| matches!(g, Goes::Zone(_))),
+            "{:?}",
+            plan.goes
+        );
+        // The three the task keeps are each the front window of a zone of their own.
+        let fronts = [0, 3, 9].map(|u| zone_of(&plan, u));
+        assert!(fronts[0] != fronts[1] && fronts[1] != fronts[2] && fronts[0] != fronts[2]);
+        // The browsers stack together.
+        assert_eq!(zone_of(&plan, 1), zone_of(&plan, 7), "Chrome and Edge");
         let main = zone_of(&plan, 3);
         assert_eq!(plan.new_zones[main].name, "1");
         assert!(plan.new_zones[main].area.left().abs() < 1e-9, "on the left");
@@ -1154,7 +1239,8 @@ mod tests {
             (plan.new_zones[term].area.top() - plan.new_zones[main].area.bottom()).abs() < 1e-9,
             "under it"
         );
-        // A layout picked keeps the windows that matter most to the task: Steam goes.
+        // A layout picked gives its zones to the windows that matter most to the task; Steam
+        // stacks behind one of them.
         let thirds = plan_with(
             &units[..4],
             &[],
@@ -1164,8 +1250,10 @@ mod tests {
                 preset: Preset::Thirds,
             }),
         );
-        assert_eq!(thirds.goes[2], Goes::Minimize, "{:?}", thirds.goes);
-        assert!(thirds.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count() == 3);
+        assert!(matches!(thirds.goes[2], Goes::Zone(_)), "{:?}", thirds.goes);
+        assert_eq!(thirds.new_zones.len(), 3);
+        let fronts: Vec<usize> = [0, 1, 3].iter().map(|&u| zone_of(&thirds, u)).collect();
+        assert!(fronts[0] != fronts[1] && fronts[1] != fronts[2] && fronts[0] != fronts[2]);
     }
 
     #[test]
@@ -1263,7 +1351,10 @@ mod tests {
     }
 
     #[test]
-    fn a_layout_with_fewer_zones_than_windows_minimizes_the_rest() {
+    fn a_layout_with_fewer_zones_than_windows_stacks_the_rest_in_them() {
+        // The owner, 2026-10-16: "when we have less zones than apps it just makes them disappear
+        // they should stack". Halves for four windows: two in each half, the editor in front of
+        // its own.
         let units = [
             unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
             unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
@@ -1276,15 +1367,57 @@ mod tests {
         };
         let plan = plan_with(&units, &[], &[WORK], Some(chosen));
         assert_eq!(plan.new_zones.len(), 2);
-        assert_eq!(plan.goes.iter().filter(|g| matches!(g, Goes::Zone(_))).count(), 2);
-        assert_eq!(
-            plan.goes.iter().filter(|g| **g == Goes::Minimize).count(),
-            2,
+        assert!(
+            plan.goes.iter().all(|g| matches!(g, Goes::Zone(_))),
             "{:?}",
             plan.goes
         );
-        // The editor, used last, has a zone of its own.
+        for z in 0..2 {
+            let n = plan.goes.iter().filter(|g| **g == Goes::Zone(z)).count();
+            assert_eq!(n, 2, "zone {z}: {:?}", plan.goes);
+        }
+        // The editor, used last, is in front: the first of its zone.
         assert!(matches!(plan.goes[0], Goes::Zone(_)));
+    }
+
+    #[test]
+    fn a_window_stacks_with_its_kind() {
+        // Halves for an editor and two browsers: the second browser goes with the first.
+        let units = [
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
+            unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
+            unit("msedge.exe", "Microsoft Edge", Rect::new(300, 300, 1200, 900)),
+        ];
+        let halves = Chosen {
+            monitor: 0,
+            preset: Preset::Halves,
+        };
+        let plan = plan_with(&units, &[], &[WORK], Some(halves));
+        assert_ne!(zone_of(&plan, 0), zone_of(&plan, 1));
+        assert_eq!(zone_of(&plan, 2), zone_of(&plan, 1), "{:?}", plan.goes);
+    }
+
+    #[test]
+    fn a_window_that_fits_no_zone_still_waits_in_the_taskbar() {
+        // Quarters for five windows, the fifth as large as the screen goes: it fits no quarter,
+        // even stacked, and is minimised rather than spill over the others.
+        let mut huge = unit("game.exe", "Game", Rect::new(0, 0, 1900, 1000));
+        huge.least = Size::new(1900, 1000);
+        huge.resizable = false;
+        let units = [
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
+            unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
+            unit("windowsterminal.exe", "Terminal", Rect::new(800, 400, 1600, 1000)),
+            unit("slack.exe", "Slack", Rect::new(300, 300, 800, 800)),
+            huge,
+        ];
+        let quarters = Chosen {
+            monitor: 0,
+            preset: Preset::Quarters,
+        };
+        let plan = plan_with(&units, &[], &[WORK], Some(quarters));
+        assert_eq!(plan.goes[4], Goes::Minimize, "{:?}", plan.goes);
+        assert!(plan.goes[..4].iter().all(|g| matches!(g, Goes::Zone(_))));
     }
 
     #[test]
@@ -1335,7 +1468,7 @@ mod tests {
             plan.goes
         );
         // Two windows of 1280 px cannot sit side by side on 1920: in Halves, the one that
-        // matters less waits in the taskbar.
+        // matters less stacks in the half that grew to 1280 px, behind the other.
         let mut second = unit("blizzard.exe", "Game", Rect::new(500, 100, 1780, 820));
         second.least = Size::new(1280, 720);
         let two = [units[0].clone(), second];
@@ -1344,12 +1477,12 @@ mod tests {
             preset: Preset::Halves,
         };
         let plan = plan_with(&two, &[], &[WORK], Some(halves));
-        assert_eq!(
-            plan.goes.iter().filter(|g| **g == Goes::Minimize).count(),
-            1,
+        assert!(
+            plan.goes.iter().all(|g| matches!(g, Goes::Zone(_))),
             "{:?}",
             plan.goes
         );
+        assert_eq!(zone_of(&plan, 0), zone_of(&plan, 1), "{:?}", plan.goes);
     }
 
     #[test]
@@ -1650,5 +1783,16 @@ mod tests {
     fn nothing_to_arrange_plans_nothing() {
         let plan = plan(&[], &[], &[WORK]);
         assert!(plan.new_zones.is_empty() && plan.goes.is_empty() && plan.gone.is_empty());
+    }
+
+    #[test]
+    fn windows_traded_in_a_zone_trade_places_front_to_back() {
+        // ADR 0032: a window dropped onto another of its zone on Home's picture; trades are made
+        // in the order they were, and a trade of a window with itself, or with one gone, is none.
+        assert_eq!(traded_order(4, &[]), vec![0, 1, 2, 3]);
+        assert_eq!(traded_order(4, &[(3, 1)]), vec![0, 3, 2, 1]);
+        assert_eq!(traded_order(4, &[(3, 1), (1, 0)]), vec![1, 3, 2, 0]);
+        assert_eq!(traded_order(4, &[(3, 1), (1, 3)]), vec![0, 1, 2, 3], "and back");
+        assert_eq!(traded_order(3, &[(2, 2), (0, 7)]), vec![0, 1, 2]);
     }
 }

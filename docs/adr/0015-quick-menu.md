@@ -68,3 +68,7 @@ is one choice: right edge, left edge, or off.
 
 A press in the 300 ms after the menu opened by itself, the pointer resting on its line, does
 nothing: it was meant for what was there a moment before (a browser's scroll bar).
+
+## Amended by ADR 0032 (2026-10-16)
+
+The first row says Move windows, as Home's button and the tray do.

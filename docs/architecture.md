@@ -124,7 +124,8 @@ the engine gathers windows and applies the result.
   windows say (`mosaik_core::task`: coding, design, writing, browsing, chat and mail, games), by
   a pure planner (`mosaik_core::arrange`). The window the task is done in gets the most room, a
   terminal goes under the editor when coding, and the windows that help most sit beside it; the
-  others are minimised (ADR 0017). Its zones replace the open workspace's on that monitor; with
+  others stack in the zones, behind a window of their kind or where there are fewest (ADR 0032;
+  before, they were minimised, ADR 0017). Its zones replace the open workspace's on that monitor; with
   no workspace open, a new one is made. No window gets a zone smaller than its app lets it go
   (`window::least_frame`, from `WM_GETMINMAXINFO`). Arranging twice moves nothing. Undo puts
   everything back, for ten minutes.
@@ -134,8 +135,8 @@ the engine gathers windows and applies the result.
   moves them as little as it can). The window keeps its place in the layout; it is not made the
   main one. Arrange fits every layout it considers this way, a layout picked does it after
   putting each window in a zone, and the engine does it from the size a window kept after
-  opening a workspace, a drop or a display change (`room.rs`). A window is minimised only when
-  the windows cannot all fit.
+  opening a workspace, a drop or a display change (`room.rs`). A window that cannot fit beside
+  the others stacks behind one; it is minimised only when it fits no zone (ADR 0032).
 - **Windows move only on the user's actions** (ADR 0017): Arrange, a layout, opening or saving
   a workspace, a drop, the zone editor, a resize by hand, a tab clicked, an app added or moved.
   A title bar read again later (a window brought forward) moves no window; a tab group's strip
@@ -145,27 +146,34 @@ the engine gathers windows and applies the result.
   zone's number on its colour, a line of its colour down its apps, an empty zone saying so; each
   app with Move (the other zones) and × to take it out. On its picture, an app dragged onto a
   zone goes in it, onto another app the two trade zones (`move_app` with `swap_with`,
-  `editing::swap_apps`), and the lines between zones save its zones (`zones`, `set_zones`, only
-  the edges moved changing). Adding a window on screen, moving an app to another zone or removing
+  `editing::swap_apps`), or in one zone their places in it, front to back or in their tab strip
+  (`editing::trade_in_zone`; a zone's apps rank front to back by `Layout::ranks`, which opening
+  it follows, and the open workspace's windows are stacked so at once, ADR 0032), and the lines
+  between zones save its zones (`zones`, `set_zones`, only the edges moved changing). Adding a window on screen, moving an app to another zone or removing
   it is a pure edit (`mosaik_core::editing`), saved, then applied at once in the open workspace.
 - **Home** (ADR 0016, 0024, 0031): a picture of the main monitor as the layout chosen would leave
   it, drawn from `preview_arrange` (the same preparation as Arrange, changing nothing): Automatic
   first (Arrange's own layout for the task it reads), or one of eight layouts, all in view in two
-  rows; the windows it would minimise are named under it. The picture (`Screen.tsx`) draws each
+  rows; the windows it would minimise are named under it (only those that fit no zone: the rest
+  stack in the zones, ADR 0032). The picture (`Screen.tsx`) draws each
   zone once, numbered and coloured, empty ones too, with the title bars of the windows it takes
   (Mosaïk says which: each preview zone's `id`, each window's and tab's `zone` and `app`). A
   window dragged onto another, or onto a zone, trades places with it (a click or Enter picks one,
-  a second puts it there); the lines between zones resize them (`LineHandle`, hidden until
-  pointed at). The moves and the areas go with the preview and with Arrange
-  (`mosaik_core::arrange::plan_moved`, then `editing::stretch_zones` before the zones are
-  numbered), each window keeping its colour, each zone its number. Arrange windows does it,
+  a second puts it there); two windows of one zone trade places front to back (`onto`,
+  `arrange::traded_order`, then stacked each below the one before by `mover::stack`); the lines
+  between zones resize them (`LineHandle`, hidden until pointed at). The moves and the areas go
+  with the preview and with Arrange (`mosaik_core::arrange::plan_moved`, then
+  `editing::stretch_zones` before the zones are numbered), each window keeping its colour, each
+  zone its number. Move windows does it (ADR 0032),
   changing no workspace, and Undo brings everything back; what was changed stays chosen, and
   Undo changes puts the layout's own back. Beside it, every workspace with its apps' icons: a
   click shows it in the picture as opening it would leave the screen (`preview_workspace`, the
   plan opening it follows: the apps it would start drawn dashed, a tab group as one bar of its
-  tabs, the windows it would minimise named below), with Open in place of Arrange windows (ADR
+  tabs, the windows it would minimise named below), with Open in place of Move windows (ADR
   0028), and its apps and zones changed on it are saved in it at once (`workspacePicture.ts`);
-  a double-click opens it, and Back, Esc or a layout chosen goes back to the screen. A ⋯ menu has Open and the rest, then come
+  a double-click opens it, and Back, Esc or a layout chosen goes back to the screen. The title
+  row, the picture and the layouts under it are one width (`pictureWidth`). A ⋯ menu has Open
+  and the rest, then come
   the suggested sets, shown the same way before "Start these apps" (ADR 0029). What an action did
   shows under the picture. The window reads from the engine once per burst (`reads.ts`: focus, a
   change and its own action make one read 150 ms after the last). Mosaïk's window has two

@@ -75,3 +75,10 @@ moves into or out of a band after a title bar is read.
 
 The quick menu's Save row says what it does ("Update “Email”", or "Save as workspace") and a toast
 confirms the save. A press in the 300 ms after the menu opened by itself does nothing.
+
+## Amended by ADR 0032 (2026-10-16)
+
+Windows left over once every zone is taken are no longer minimised: they stack in the zones,
+behind the window there, with windows of their kind first ("when we have less zones than apps
+it just makes them disappear they should stack"). Only a window that fits no zone, even stacked,
+still waits in the taskbar. The side menu's first row says Move windows.

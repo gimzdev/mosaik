@@ -110,3 +110,10 @@ now waits for the tab's new place). Also: a drag whose window left the picture m
 the release anywhere; a trade of two apps refits the zones they really were in, whatever zone a
 picture drawn before a change named (the `smart` probe trades back that way); a resize that
 would make a zone too small or put two over each other is not sent.
+
+## Amended by ADR 0032 (2026-10-16)
+
+The main button is **Move windows** ("move windows and open are good yes lets go"); a workspace
+keeps Open. Two pieces of one zone dropped onto each other no longer stay as they were: they
+trade places in it, front to back or in their tab strip, on Home and on a workspace's picture.
+Home's title row, picture and layouts are one width.

@@ -63,6 +63,11 @@
         {
           "window": 197794,
           "zone": 0
+        },
+        {
+          "onto": 330512,
+          "window": 197794,
+          "zone": 0
         }
       ],
       "preset": "thirds"
@@ -215,7 +220,7 @@
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 10,
+      "protocol": 11,
       "reply": "hello"
     },
     {

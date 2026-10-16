@@ -140,7 +140,7 @@ const GLYPHS = {
   edit: <path d="M3 13l.8-3.2L10.5 3l2.5 2.5-6.8 6.8z" />,
   trash: <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5" />,
   spark: <path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" fill="currentColor" stroke="none" />,
-  // Mosaïk's four tiles (its mark), for Arrange windows: the screen made a mosaic.
+  // Mosaïk's four tiles (its mark), for Move windows: the screen made a mosaic.
   tiles: (
     <g fill="currentColor" stroke="none">
       <rect x="1" y="1" width="8" height="8" rx="1.6" />

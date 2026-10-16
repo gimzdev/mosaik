@@ -245,6 +245,28 @@ describe('a workspace’s page', () => {
     });
   });
 
+  it('trades two apps of one zone on its picture, in its strip or front to back, saved at once', async () => {
+    // ADR 0032, the owner: "i should be able to permute chrome with claude". In zone 2, Windows
+    // Terminal and Claude are tabs of one group; in zone 1, Slack sits behind Visual Studio Code.
+    const [code] = opening.windows;
+    if (!code) throw new Error('the fixture has the editor');
+    const slack = { ...code, window: 103, label: 'Slack', icon: null, app: 's4' };
+    const two: ArrangePreview = { ...opening, windows: [code, slack, ...opening.windows.slice(1)] };
+    const asked = answer((c) => (c.cmd === 'preview_workspace' ? preview(two) : null));
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'Claude, a tab in zone 2' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Windows Terminal, a tab in zone 2' }));
+    expect(asked).toContainEqual({ cmd: 'move_app', workspace: 'ship', app: 's3', zone: 'z2', swap_with: 's2' });
+    expect(await shown('Claude and Windows Terminal traded places in zone 2.')).toBeInTheDocument();
+    // Two windows of their own: the one behind comes to the front at once.
+    const pictured = () => screen.getByRole('group', { name: /^Visual Studio Code|^Slack/ });
+    await userEvent.click(screen.getByRole('button', { name: 'Slack in zone 1' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Visual Studio Code in zone 1' }));
+    expect(pictured().getAttribute('aria-label')).toMatch(/^Slack in zone 1, Visual Studio Code in zone 1, /);
+    expect(asked).toContainEqual({ cmd: 'move_app', workspace: 'ship', app: 's4', zone: 'z1', swap_with: 's1' });
+    expect(await shown('Slack and Visual Studio Code traded places in zone 1.')).toBeInTheDocument();
+  });
+
   it('reads again once for a burst of focus events, and uses what a change of its apps answers', async () => {
     const asked = answer();
     page();

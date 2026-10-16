@@ -99,7 +99,7 @@ if Mosaïk stops
 
 <p>Open Mosaïk from the Start menu or its tray icon: <b>Your screen</b> shows your windows as <b>Automatic</b> would lay them out,<br>
 each in its zone. Choose a layout instead to see it first, drag a window onto another to swap them, and drag the line between two zones to resize them.<br>
-Nothing moves until <b>Arrange windows</b>; <b>Undo</b> puts them back.</p>
+Nothing moves until <b>Move windows</b>; <b>Undo</b> puts them back.</p>
 
 <p>Beside it, click a workspace and the picture shows it as it will open; <b>Open</b> opens it.<br>
 <b>Suggested</b> offers sets of your apps that go together, such as <b>Coding</b>:<br>

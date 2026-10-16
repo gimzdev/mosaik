@@ -13,6 +13,7 @@ use mosaik_ipc::protocol::{AppZone, OpenWindow, Reply, WorkspaceApp, WorkspaceAp
 use mosaik_win::{apps, window};
 
 use crate::editing::{failed, no_monitors, not_found, refused};
+use crate::mover;
 use crate::thread::Engine;
 
 impl Engine {
@@ -231,8 +232,40 @@ impl Engine {
         self.apps_reply(&id)
     }
 
-    /// Puts an app of a workspace in one of its zones; with `swap_with` (the app in that zone),
-    /// the two trade places (ADR 0031).
+    /// In the open workspace, the windows showing in `zone` (its windows of their own, its tab
+    /// groups' tabs showing) are stacked front to back as its apps now rank (ADR 0032), under
+    /// the front one, so nothing comes up over Mosaïk's window.
+    fn stack_zone(&mut self, zone: &ZoneId) {
+        let order: Vec<WindowHandle> = {
+            let (Some(active), Some(ws)) = (&self.active, self.on_screen()) else {
+                return;
+            };
+            let ranks = ws.layout.ranks();
+            let mut shown: Vec<(usize, WindowHandle)> = ws
+                .layout
+                .slots
+                .iter()
+                .filter(
+                    |s| matches!(ws.layout.effective_place(s), Some(Place::Zone { zone: z }) if z == zone),
+                )
+                .filter_map(|s| Some((ranks.get(&s.id).copied()?, *active.windows.get(&s.id)?)))
+                .filter(|(_, w)| !self.hiding.hidden.contains_key(w) && window::is_visible(window::hwnd(*w)))
+                .collect();
+            shown.sort_by_key(|(rank, _)| *rank);
+            shown.into_iter().map(|(_, w)| w).collect()
+        };
+        if order.len() < 2 {
+            return;
+        }
+        if !mover::stack(&order, mover::WAIT_ONE) {
+            tracing::warn!(windows = order.len(), "windows not stacked in time");
+        }
+        // Strips and frames back above their windows.
+        self.restack_soon();
+    }
+
+    /// Puts an app of a workspace in one of its zones; with `swap_with` (another app), the two
+    /// trade places: zones (ADR 0031), or in one zone their places in it (ADR 0032).
     pub(crate) fn move_app_to(
         &mut self,
         which: &str,
@@ -272,14 +305,26 @@ impl Engine {
                 return failed(e);
             }
             tracing::info!(slot = %slot.0, zone = %zone.0, swap = swap_with.is_some(), "app moved");
+            // Two apps of one zone traded places in it.
+            let in_zone = swap_with.is_some() && left.as_ref() == Some(zone);
             if self.is_open(index) {
-                if let Some(a) = &mut self.active {
-                    // They may have been tabs shown for now: they are no longer.
+                let one_group = swap_with.is_some_and(|other| {
+                    let ws = &self.file.workspaces[index];
+                    ws.layout.group_of(slot).is_some_and(|g| g.tabs.contains(other))
+                });
+                if let Some(a) = &mut self.active
+                    && !one_group
+                {
+                    // They may have been tabs shown for now: they are no longer. Two tabs of one
+                    // group trading places in its strip leave the tab showing as it is.
                     a.shown.retain(|_, s| s != slot && Some(&*s) != swap_with);
                 }
                 self.place_in(zone, None);
                 if let Some(left) = left.filter(|l| swap_with.is_some() && l != zone) {
                     self.place_in(&left, None);
+                }
+                if in_zone {
+                    self.stack_zone(zone);
                 }
             }
         }

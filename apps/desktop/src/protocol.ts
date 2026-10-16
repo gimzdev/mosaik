@@ -136,10 +136,13 @@ export interface HotkeyState {
 }
 
 /** A window the user put in another zone of the picture of the main screen: the `zone`-th of the
- * preview's zones. The window there takes its place. */
+ * preview's zones. The window there takes its place. With `onto`, a window of that same zone it
+ * was dropped onto: the two trade places front to back, and no window changes zone (protocol 11,
+ * ADR 0032). */
 export interface ArrangeMove {
   window: number;
   zone: number;
+  onto?: number;
 }
 
 /** A zone of the main screen once arranged (`preview_arrange`), or once a workspace opens

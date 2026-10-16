@@ -1,6 +1,7 @@
 // Changes made on a workspace's picture (Home's preview of it, and its own page), sent to Mosaïk
 // at once and saved in the workspace (ADR 0031): an app put in another zone, or trading zones with
-// the app it was dropped on; its zones resized by the lines between them. One change at a time,
+// the app it was dropped on (places, in its own zone: ADR 0032); its zones resized by the lines
+// between them. One change at a time,
 // in the order made: a resize reads the zones' revision, which the one before it changes.
 
 import { MIN_ZONE } from './editor/model';
@@ -67,7 +68,9 @@ export function moveApp(workspace: string, name: string | null, preview: Arrange
     }
     const text =
       d.onto && swap !== null
-        ? `${d.piece.label} and ${d.onto.label} traded zones${naming('in', name)}.`
+        ? d.from === d.zone
+          ? `${d.piece.label} and ${d.onto.label} traded places in zone ${zone.name}${naming('of', name)}.`
+          : `${d.piece.label} and ${d.onto.label} traded zones${naming('in', name)}.`
         : `${d.piece.label} goes in zone ${zone.name}${naming('of', name)}.`;
     return { reply, text, done: true };
   });

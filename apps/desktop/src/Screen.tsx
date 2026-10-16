@@ -42,11 +42,19 @@ const MAIN = 'main';
 const BAR = 24;
 const GAP = 3;
 
-/** The picture's size: as wide as there is room for, and never so tall that what is below it is
- * out of sight in a small window (`tallest`, in percent of the window's height). */
+/** The picture's width: as wide as there is room for, and never so tall that what is below it is
+ * out of sight in a small window (`tallest`, in percent of the window's height). What goes above
+ * and below it takes the same width, so they line up with it. */
+export function pictureWidth(area: Rect | null, tallest = 44): CSSProperties {
+  const a = area ?? SOME_SCREEN;
+  const ratio = (a.right - a.left) / Math.max(1, a.bottom - a.top);
+  return { width: `min(100%, calc(${String(tallest)}vh * ${String(ratio)}))` };
+}
+
+/** The picture's size: its width (`pictureWidth`), in the screen's proportions. */
 function deskSize(area: Rect, tallest: number): CSSProperties {
   const ratio = (area.right - area.left) / Math.max(1, area.bottom - area.top);
-  return { aspectRatio: String(ratio), width: `min(100%, calc(${String(tallest)}vh * ${String(ratio)}))` };
+  return { aspectRatio: String(ratio), ...pictureWidth(area, tallest) };
 }
 
 const wide = (r: Rect) => r.right - r.left || 1;
@@ -133,17 +141,38 @@ const put = (w: PreviewWindow, z: ArrangePreview['zones'][number]): PreviewWindo
   ...(z.id === undefined ? {} : { zone: z.id }),
 });
 
+/** The picture with windows `a` and `b` trading places in its list: front to back in their zone
+ * (ADR 0032). */
+function traded(preview: ArrangePreview, a: PreviewWindow, b: PreviewWindow): ArrangePreview {
+  const [i, j] = [preview.windows.indexOf(a), preview.windows.indexOf(b)];
+  if (i < 0 || j < 0 || i === j) return preview;
+  const windows = [...preview.windows];
+  windows[i] = b;
+  windows[j] = a;
+  return { ...preview, windows };
+}
+
 /**
  * Arrange's picture once `window` is put in the `zone`-th zone, before Mosaïk says: it trades
  * places with the windows there (or leaves its own zone empty), and the two zones' colours go with
- * their windows; the zones keep their numbers. Mosaïk's own answer follows (it may also make room
- * for a window that needs more).
+ * their windows; the zones keep their numbers. Put `onto` a window of its own zone, the two trade
+ * places front to back (ADR 0032). Mosaïk's own answer follows (it may also make room for a window
+ * that needs more).
  */
-export function moved(preview: ArrangePreview, window: number, zone: number): ArrangePreview {
+export function moved(
+  preview: ArrangePreview,
+  window: number,
+  zone: number,
+  onto: number | null = null,
+): ArrangePreview {
   const target = preview.zones[zone];
   const w = preview.windows.find((x) => x.window === window);
   const fromIndex = w ? zoneIndex(preview, w) : -1;
   const from = preview.zones[fromIndex];
+  if (w && fromIndex === zone && onto !== null) {
+    const other = preview.windows.find((x) => x.window === onto && zoneIndex(preview, x) === zone);
+    return other ? traded(preview, w, other) : preview;
+  }
   if (!target || !w || !from || fromIndex === zone) return preview;
   const there = new Set(preview.windows.filter((x) => x !== w && zoneIndex(preview, x) === zone));
   return {
@@ -156,8 +185,9 @@ export function moved(preview: ArrangePreview, window: number, zone: number): Ar
 }
 
 /** A workspace's picture once an app is put elsewhere, before Mosaïk says: it goes in the zone,
- * and the app it was dropped on takes its old one. A tab leaving its group waits for Mosaïk's
- * answer, which draws the group again. */
+ * and the app it was dropped on takes its old one; two apps of one zone trade places in it, front
+ * to back (ADR 0032). A tab leaving its group, or trading places in it, waits for Mosaïk's answer,
+ * which draws the group again. */
 export function dropped(preview: ArrangePreview, d: Dropped): ArrangePreview {
   if (d.piece.tab || d.onto?.tab) return preview;
   const target = preview.zones[d.zone];
@@ -165,6 +195,7 @@ export function dropped(preview: ArrangePreview, d: Dropped): ArrangePreview {
   if (!target || !w) return preview;
   const from = preview.zones[zoneIndex(preview, w)];
   const other = d.onto ? preview.windows.find((x) => x.app !== undefined && x.app === d.onto?.app) : undefined;
+  if (zoneIndex(preview, w) === d.zone) return other ? traded(preview, w, other) : preview;
   return {
     ...preview,
     windows: preview.windows.map((x) => (x === w ? put(x, target) : x === other && from ? put(x, from) : x)),
@@ -211,16 +242,19 @@ export interface Piece {
 }
 
 /** A piece put elsewhere: in the `zone`-th zone of the picture, onto another piece (which takes
- * its place) or onto the zone itself. */
+ * its place) or onto the zone itself. `from` is the zone it was in: the same zone, onto another
+ * piece, the two trade places in it (ADR 0032). */
 export interface Dropped {
   piece: Piece;
   zone: number;
   onto: Piece | null;
+  from: number;
 }
 
 export interface PictureEdits {
   /** `arrange`: a window put in a zone trades places with the window there. `workspace`: an app
-   * dropped onto another trades zones with it, dropped onto a zone joins it. */
+   * dropped onto another trades zones with it, dropped onto a zone joins it. In both, two of one
+   * zone trade places in it. */
   kind: 'arrange' | 'workspace';
   onDrop: (dropped: Dropped) => void;
   /** A line between zones was moved: the zones' areas now, in the picture's order. */
@@ -341,8 +375,12 @@ export function Screen({
   const dragged = useRef(false);
   const last = useRef(new Map<string, Spot>());
   /** The piece put elsewhere with the keyboard, from its zone, on the picture shown then: it takes
-   * the focus once drawn in another zone, which for a tab is once Mosaïk has answered. */
-  const focusNext = useRef<{ key: string; from: number; seen: ArrangePreview | null } | null>(null);
+   * the focus once drawn in another zone, which for a tab is once Mosaïk has answered; traded in
+   * its own zone (`same`), once the picture has changed. */
+  const focusNext = useRef<{ key: string; from: number; seen: ArrangePreview | null; same: boolean } | null>(null);
+  /** Pieces traded in one zone, on the picture shown then: they fly to their new places once the
+   * picture changes, though their zone does not. */
+  const fly = useRef<{ keys: Set<string>; seen: ArrangePreview | null } | null>(null);
   /** The zones as a line between them is being moved, over the picture they started from. */
   const [stretch, setStretch] = useState<{ from: ArrangePreview; drafts: Draft[] } | null>(null);
   const stretchLatest = useRef<{ from: ArrangePreview; drafts: Draft[] } | null>(null);
@@ -396,18 +434,20 @@ export function Screen({
     setPicked(next);
   };
 
-  const putIn = (piece: Piece, t: Target) => {
-    edit?.onDrop({ piece, zone: t.zone, onto: t.onto });
+  const putIn = (key: string, piece: Piece, from: number, t: Target) => {
+    if (t.zone === from && t.key !== null) fly.current = { keys: new Set([key, t.key]), seen: preview };
+    edit?.onDrop({ piece, zone: t.zone, onto: t.onto, from });
   };
 
-  /** What is under the pointer: another piece (not in the same zone), else a zone (not its own). */
+  /** What is under the pointer: another piece (in the same zone too: the two trade places in it),
+   * else a zone (not its own). */
   const targetAt = (x: number, y: number, self: string, from: number): Target | null => {
     const hit = (el: HTMLElement) => {
       const r = el.getBoundingClientRect();
       return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
     };
     for (const [key, d] of drawn.current) {
-      if (key !== self && d.piece && hit(d.el)) return d.zone === from ? null : { zone: d.zone, onto: d.piece, key };
+      if (key !== self && d.piece && hit(d.el)) return { zone: d.zone, onto: d.piece, key };
     }
     for (const [zone, el] of zoneEls.current) {
       if (hit(el)) return zone === from ? null : { zone, onto: null, key: null };
@@ -467,7 +507,7 @@ export function Screen({
         width: d.grab.w,
         zone: d.zone,
       });
-      putIn(d.piece, d.over);
+      putIn(key, d.piece, d.zone, d.over);
     },
     onPointerCancel: () => {
       press.current = null;
@@ -481,12 +521,12 @@ export function Screen({
         dragged.current = false;
         return;
       }
-      if (!chosen || chosen.key === key || chosen.zone === zone) {
+      if (!chosen || chosen.key === key) {
         pick(chosen?.key === key ? null : { key, piece, zone });
         return;
       }
-      focusNext.current = { key: chosen.key, from: chosen.zone, seen: preview };
-      putIn(chosen.piece, { zone, onto: piece, key });
+      focusNext.current = { key: chosen.key, from: chosen.zone, seen: preview, same: chosen.zone === zone };
+      putIn(chosen.key, chosen.piece, chosen.zone, { zone, onto: piece, key });
       pick(null);
     },
   });
@@ -500,17 +540,20 @@ export function Screen({
     };
   };
 
-  // A piece whose zone changed flies from where it was to its new place (and a piece put there
-  // with the keyboard takes the focus there).
+  // A piece whose zone changed, or traded in its zone, flies from where it was to its new place
+  // (and a piece put there with the keyboard takes the focus there).
   useLayoutEffect(() => {
     const before = last.current;
     const now = new Map<string, Spot>();
     const still = reducedMotion();
+    const traded = fly.current !== null && fly.current.seen !== preview ? fly.current.keys : null;
+    if (traded) fly.current = null;
     for (const [key, d] of drawn.current) {
       const r = d.el.getBoundingClientRect();
       now.set(key, { left: r.left, top: r.top, width: r.width, zone: d.zone });
       const was = before.get(key);
-      if (!was || was.zone === d.zone || still || typeof d.el.animate !== 'function') continue;
+      if (!was || still || typeof d.el.animate !== 'function') continue;
+      if (was.zone === d.zone && !traded?.has(key)) continue;
       if (r.width <= 0 || was.width <= 0) continue;
       d.el.animate(
         [
@@ -524,7 +567,7 @@ export function Screen({
     const next = focusNext.current;
     if (next !== null) {
       const d = drawn.current.get(next.key);
-      if (d && d.zone !== next.from) {
+      if (d && (next.same ? preview !== next.seen : d.zone !== next.from)) {
         d.el.focus();
         focusNext.current = null;
       } else if (preview !== next.seen) {
@@ -777,8 +820,8 @@ export function Screen({
                     aria-label={`Zone ${z.name}${list.length ? '' : ', empty'}`}
                     className="absolute inset-0 z-0 cursor-pointer rounded-[9px] hover:bg-[color-mix(in_srgb,var(--desk-text)_8%,transparent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)]"
                     onClick={() => {
-                      focusNext.current = { key: chosen.key, from: chosen.zone, seen: preview };
-                      putIn(chosen.piece, { zone: i, onto: null, key: null });
+                      focusNext.current = { key: chosen.key, from: chosen.zone, seen: preview, same: false };
+                      putIn(chosen.key, chosen.piece, chosen.zone, { zone: i, onto: null, key: null });
                       pick(null);
                     }}
                   />

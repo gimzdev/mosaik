@@ -13,10 +13,14 @@
   keeps its number and colour and says it is empty.
 - On the picture, drag a window onto another (or onto a zone) to swap them, and drag the line
   between two zones to resize them; "Undo changes" puts the layout back. The lines show only when
-  you point at them. "Arrange windows" (with Mosaïk's tiles) then puts your windows there.
+  you point at them. "Move windows" (with Mosaïk's tiles) then puts your windows there.
+- A layout with fewer zones than windows stacks the rest in its zones, behind a window of their
+  kind, instead of minimising them. Drag a window onto another of its zone to bring it to the
+  front.
 - The same on a workspace's picture, on Home and on its page: drag its apps to other zones, or
-  onto each other to trade places, and resize its zones; each change is saved in the workspace at
-  once.
+  onto each other to trade places (in one zone: which is in front, or the order of its tabs), and
+  resize its zones; each change is saved in the workspace at once.
+- Home's title, picture and layouts are one width, the button ending where the picture does.
 - Every layout is in view, in two rows beside Automatic: Halves, Thirds, Main + side, Side +
   main, Half + stack, Stack + half, Quarters and Full screen. Top + bottom and Three rows are gone
   (split a zone into rows in the zone editor instead), and so is More layouts.

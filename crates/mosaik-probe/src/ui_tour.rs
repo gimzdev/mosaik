@@ -6,7 +6,7 @@
 //! light, at the window's usual and smallest size, and the switcher. On Home, a layout is also
 //! chosen, so the picture shows where the windows would go; a window of the picture is dragged
 //! onto another, and a line between its zones across, each then undone with Undo changes
-//! (Arrange windows is never clicked: no window moves).
+//! (Move windows is never clicked: no window moves).
 //!
 //! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Website",
 //! with three zones and no windows, so nothing of the user's is touched. The profile has no
@@ -753,8 +753,7 @@ impl Tour {
         self.stretch_in_picture("home-stretched")?;
 
         // The workspace picked: the picture shows it as it would open, with Open in place of
-        // Arrange windows (nothing opens); Back returns to the screen as it is, and Arrange
-        // windows.
+        // Move windows (nothing opens); Back returns to the screen as it is, and Move windows.
         let row = self.reveal("button", WORKSPACE)?;
         self.click(&row)?;
         pump_until(1200, || false);
@@ -767,7 +766,7 @@ impl Tour {
             "page": "home-picked",
             "shot": picked_shot,
             "open_button": open,
-            "back_to_arrange": self.find("button", "Arrange windows").is_ok(),
+            "back_to_arrange": self.find("button", "Move windows").is_ok(),
         });
         println!("page home-picked: {page}");
         self.pages.push(page);

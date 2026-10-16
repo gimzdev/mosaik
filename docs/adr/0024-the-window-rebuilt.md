@@ -108,3 +108,7 @@ people use them.
 
 Eight layouts besides Automatic (no Top + bottom or Three rows), all in view; the picture draws
 zones, with the windows' title bars in them, and its lines resize them; Arrange windows.
+
+## Amended by ADR 0032 (2026-10-16)
+
+Home's main button says Move windows; windows a layout has no zone for stack in its zones.

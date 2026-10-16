@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { type Page, expect, test } from '@playwright/test';
+import { type Locator, type Page, expect, test } from '@playwright/test';
 
 /** No accessibility problems that axe rates serious or critical (WCAG 2.1 A and AA). */
 async function accessible(page: Page) {
@@ -19,8 +19,31 @@ const shown = (page: Page, text: string) => page.locator('main').getByText(text,
 
 /** The stand-in's screen as the automatic layout would leave it. */
 const AUTO = 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 4, Slack in zone 3.';
-const arrange = (page: Page) => page.getByRole('button', { name: 'Arrange windows', exact: true });
+const arrange = (page: Page) => page.getByRole('button', { name: 'Move windows', exact: true });
 const HINT = 'Drag a window onto another to swap them, or a line between zones to resize them.';
+
+/** Where a bar of a picture is once it has stopped moving: zones glide to a new layout. */
+async function still(page: Page, l: Locator) {
+  let last = await l.boundingBox();
+  for (let tries = 0; tries < 40; tries += 1) {
+    await page.waitForTimeout(60);
+    const now = await l.boundingBox();
+    if (now && now.x === last?.x && now.y === last.y && now.width === last.width) return now;
+    last = now;
+  }
+  throw new Error('it never stopped moving');
+}
+
+/** Drags one bar or tab of a picture onto another, as a person does: a press, a few pixels to
+ * start the drag, then the rest of the way. */
+async function dragOnto(page: Page, from: Locator, to: Locator) {
+  const [a, b] = [await still(page, from), await still(page, to)];
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2 + 10, a.y + a.height / 2 + 6, { steps: 4 });
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+  await page.mouse.up();
+}
 
 /** Opens a workspace's page from its card's menu on Home. */
 async function editWorkspace(page: Page, name: string) {
@@ -87,14 +110,15 @@ test.describe('Home', () => {
     await page.goto('/');
     await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
     await page.getByRole('radio', { name: 'Thirds' }).check();
-    await expect(shown(page, 'Slack will be minimized.')).toBeVisible();
+    // Four windows for three zones: the fourth stacks in one rather than go to the taskbar.
     await expect(
       page.getByRole('group', {
-        name: 'Visual Studio Code in zone 2, Google Chrome in zone 1, Windows Terminal in zone 3, Slack minimized.',
+        name: 'Visual Studio Code in zone 2, Google Chrome in zone 1, Windows Terminal in zone 3, Slack in zone 2.',
       }),
     ).toBeVisible();
+    await expect(page.getByText(/will be minimized/)).toHaveCount(0);
     await arrange(page).click();
-    await expect(shown(page, 'Arranged 3 windows in Thirds. 1 window minimized.')).toBeVisible();
+    await expect(shown(page, 'Moved 4 windows into Thirds.')).toBeVisible();
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(shown(page, 'Windows are back where they were.')).toBeVisible();
     await accessible(page);
@@ -104,7 +128,7 @@ test.describe('Home', () => {
     await page.goto('/');
     await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
     await arrange(page).click();
-    await expect(shown(page, 'Arranged 4 windows.')).toBeVisible();
+    await expect(shown(page, 'Moved 4 windows.')).toBeVisible();
     await expect(shown(page, 'Your windows are already like this.')).toBeHidden();
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(shown(page, 'Windows are back where they were.')).toBeVisible();
@@ -134,12 +158,46 @@ test.describe('Home', () => {
     await expect(page.getByRole('button', { name: 'Undo changes' })).toBeVisible();
     await accessible(page);
     await arrange(page).click();
-    await expect(shown(page, 'Arranged 4 windows.')).toBeVisible();
+    await expect(shown(page, 'Moved 4 windows.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Undo changes' })).toBeHidden();
     // Arranged as they were put: the picture shows them there now.
     const [c, d] = [await code.boundingBox(), await browser.boundingBox()];
     expect(c && Math.abs(c.x - b.x) < 3).toBe(true);
     expect(d && Math.abs(d.x - a.x) < 3).toBe(true);
+  });
+
+  test('two windows of one zone trade places front to back, and Move windows puts them so', async ({ page }) => {
+    // ADR 0032, the owner: "i should be able to permute chrome with claude". In Thirds, Slack
+    // stacks behind Visual Studio Code in zone 2; dropped onto it, it comes to the front.
+    await page.goto('/');
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
+    await page.getByRole('radio', { name: 'Thirds' }).check();
+    await expect(
+      page.getByRole('group', {
+        name: 'Visual Studio Code in zone 2, Google Chrome in zone 1, Windows Terminal in zone 3, Slack in zone 2.',
+      }),
+    ).toBeVisible();
+    const code = page.getByRole('button', { name: 'Visual Studio Code in zone 2' });
+    const slack = page.getByRole('button', { name: 'Slack in zone 2' });
+    const [a, b] = [await still(page, code), await still(page, slack)];
+    expect(a.y < b.y).toBe(true);
+    await dragOnto(page, slack, code);
+    await expect(
+      page.getByRole('group', {
+        name: 'Slack in zone 2, Google Chrome in zone 1, Windows Terminal in zone 3, Visual Studio Code in zone 2.',
+      }),
+    ).toBeVisible();
+    // Slack's bar is now the first of the zone.
+    await expect
+      .poll(async () => {
+        const [c, d] = [await code.boundingBox(), await slack.boundingBox()];
+        return c && d ? d.y < c.y : false;
+      })
+      .toBe(true);
+    await expect(page.getByRole('button', { name: 'Undo changes' })).toBeVisible();
+    await arrange(page).click();
+    await expect(shown(page, 'Moved 4 windows into Thirds.')).toBeVisible();
+    await accessible(page);
   });
 
   test('a line between zones dragged resizes them; Arrange puts the windows so, and the picture keeps them', async ({
@@ -161,7 +219,7 @@ test.describe('Home', () => {
     await expect(line).toHaveAttribute('aria-valuenow', '48');
     await expect(page.getByRole('button', { name: 'Undo changes' })).toBeVisible();
     await arrange(page).click();
-    await expect(shown(page, 'Arranged 4 windows.')).toBeVisible();
+    await expect(shown(page, 'Moved 4 windows.')).toBeVisible();
     // The screen is as the picture showed it: nothing more to undo there.
     await expect(page.getByRole('button', { name: 'Undo changes' })).toBeHidden();
     await expect(line).toHaveAttribute('aria-valuenow', '48');
@@ -175,7 +233,11 @@ test.describe('Home', () => {
     await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('radio', { name: 'Halves' })).toBeChecked();
     await expect(page.getByRole('radio', { name: 'Halves' })).toBeFocused();
-    await expect(shown(page, 'Windows Terminal and Slack will be minimized.')).toBeVisible();
+    await expect(
+      page.getByRole('group', {
+        name: 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 1, Slack in zone 2.',
+      }),
+    ).toBeVisible();
   });
 
   test('a workspace picked shows how it opens, and opens with Open', async ({ page }) => {
@@ -340,6 +402,31 @@ test.describe('a workspace’s page', () => {
     await expect(page.getByRole('button', { name: 'Claude starts in zone 3' })).toBeVisible();
     const apps = page.getByRole('group', { name: 'Apps of “Backend”' });
     await expect(apps.getByRole('group', { name: 'Zone 3', exact: true }).getByText('Claude')).toBeVisible();
+    await accessible(page);
+  });
+
+  test('two tabs of one zone trade places in their strip, the tab showing staying so', async ({ page }) => {
+    // ADR 0032, the owner: "i should be able to permute chrome with claude".
+    await page.goto('/');
+    await editWorkspace(page, 'Backend');
+    const chrome = page.getByRole('button', { name: 'Google Chrome, a tab in zone 2' });
+    const claude = page.getByRole('button', { name: 'Claude, a tab in zone 2' });
+    const [a, b] = [await chrome.boundingBox(), await claude.boundingBox()];
+    expect(a && b && a.x < b.x).toBe(true);
+    await dragOnto(page, claude, chrome);
+    await expect(shown(page, 'Claude and Google Chrome traded places in zone 2.')).toBeVisible();
+    await expect
+      .poll(async () => {
+        const [c, d] = [await chrome.boundingBox(), await claude.boundingBox()];
+        return c && d ? d.x < c.x : false;
+      })
+      .toBe(true);
+    // Chrome still shows, Claude behind it; the list says the order too.
+    await expect(page.getByRole('group', { name: /Google Chrome in zone 2 with Claude as tabs/ })).toBeVisible();
+    const zone2 = page
+      .getByRole('group', { name: 'Apps of “Backend”' })
+      .getByRole('group', { name: 'Zone 2', exact: true });
+    await expect(zone2.getByText(/^(MSYS2|Claude|Google Chrome)$/)).toHaveText(['MSYS2', 'Claude', 'Google Chrome']);
     await accessible(page);
   });
 

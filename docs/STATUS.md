@@ -1497,8 +1497,45 @@ discreet or not shown". ADR 0031.
   windows, the engine's 0.4 ms, every window 2.2 ms. `workspace --drag` (tags in title bars):
   saved in 4 ms, opened in 11 ms, opening undone in 10 ms with the window it minimised back 0 px;
   tab clicks with the strip above after each, in the same place, 0 px; memory with frames 8.9 MB.
-  Not run: the probe with tags above windows, `smart` (Halves stretched, two apps trading zones)
-  and the UI tour.
+  The probe with tags above windows ran while the PC was in use, and failed (no strip joined,
+  the terminal 1056 px off its zone, the group 456 px off): job 0160 runs it again. Not run:
+  `smart` (Halves stretched, two apps trading zones) and the UI tour.
+
+### Asked on 2026-10-16 (00:41): Move windows, windows stacked, trades in a zone, one width
+
+"move windows and open are good yes lets go"; "i should be able to permute chrome with claude";
+"when we have less zones than apps it just makes them disappear they should stack"; "the
+alignment of anim and the buttons at bottom are weird cause buttons go further it doesnt feel
+simetric and appealing". ADR 0032.
+
+- **Windows stack**: Arrange's plan ends with `stack_the_rest`: a window left over goes in a zone
+  it fits, behind the window there, with windows of its kind first, else where there are fewest,
+  else the larger zone; a window that fits no zone, even stacked, still waits in the taskbar.
+  Home's picture shows them in their zone, and says nothing will be minimised.
+- **Trades in a zone**: on Home, a window dropped onto another of its zone trades places with it
+  front to back (protocol 11, `onto` on a move; `arrange::traded_order`), and Move windows
+  stacks them so (`put_below`, each just below the one before, on a thread of its own, so none
+  comes up over Mosaïk's window). On a workspace's picture, two apps of one zone trade places in
+  it (`editing::trade_in_zone`): two tabs in their strip (the tab showing stays so), two windows
+  front to back, a tab and a window the tab's place in its group for the window's; the
+  workspace's preview lists a zone's apps front to back (`Layout::ranks`, the order opening it
+  follows), and in the open workspace the windows are stacked so at once. Pieces traded fly to
+  their places; with the keyboard the focus goes with the piece picked.
+- **Move windows**: Home's button, the tray's item and the side menu's first row; "Moved 4
+  windows into Thirds."; a workspace keeps Open.
+- **One width**: Home's title row, picture, layouts and the line under them share the picture's
+  width (`pictureWidth`), so the button ends where the picture does.
+- Tests first where they are code: core (stacking: fewer zones than windows, kind, a window that
+  fits no zone; two apps of one zone in every case, and back; ranks; trades in order), the
+  protocol (`onto`), the interface (a window behind brought to the front on Home, sent with
+  `onto`, the focus following; tabs and windows of one zone traded on a workspace's page), the
+  stand-in engine, Playwright (Slack brought in front of Visual Studio Code in Thirds; Claude
+  before Chrome in Backend's strip). The `smart` probe gains `traded_in_zone` (Halves: the window
+  behind in front after Move windows, both in the half, Undo) and `reordered` (two apps of the
+  open workspace's zone: listed and pictured the other way round, the first one's window in
+  front, both filling the zone, all put back); the windows `moved` puts elsewhere come from two
+  zones. Checks here: fmt; clippy -D warnings for Windows on every crate; core 267, ipc 12;
+  interface 130; Playwright 34.
 
 ## Owner decisions
 

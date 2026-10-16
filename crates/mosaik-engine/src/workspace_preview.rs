@@ -192,6 +192,16 @@ impl Engine {
                 app: None,
             });
         }
+        // Front to back, as opening it stacks them and its zones list them (ADR 0032): an app
+        // that starts among the open ones where it ranks; the windows it minimises last.
+        let ranks = ws.layout.ranks();
+        windows.sort_by_key(|w| {
+            w.app
+                .as_ref()
+                .and_then(|a| ranks.get(a))
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         Reply::Preview(Box::new(ArrangePreview {
             work_area,
             zones,

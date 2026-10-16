@@ -55,3 +55,8 @@ window."
   each way: its quarter grows, every window fits, the zones still fill the screen, and of five
   windows for four quarters only one other is minimised) and 3i (a tall window dropped into the
   smallest zone: the zone grows, every window fits), in `docs/STATUS.md`.
+
+## Amended by ADR 0032 (2026-10-16)
+
+A window the zones cannot make room for beside the others stacks behind a window of a zone it
+fits; it is minimised only when it fits no zone at all.

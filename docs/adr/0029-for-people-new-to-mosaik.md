@@ -111,3 +111,7 @@ The picture says "Nothing moves yet." beside Arrange windows (Mosaïk's tiles, n
 and "Drag a window onto another to swap them, or a line between zones to resize them."; Undo
 swaps is Undo changes. The layouts are all in view (Automatic, then eight in two rows, without
 Top + bottom and Three rows), with no More layouts. The first run's line of welcome is gone.
+
+## Amended by ADR 0032 (2026-10-16)
+
+The main button says Move windows (with Mosaïk's tiles); "Nothing moves yet." stays beside it.

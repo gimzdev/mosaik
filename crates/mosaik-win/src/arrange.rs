@@ -3,9 +3,9 @@
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, HWND_TOP, IsHungAppWindow, SW_SHOWMINNOACTIVE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos,
-    ShowWindowAsync,
+    GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, HWND_TOP, IsHungAppWindow, SW_SHOWMINNOACTIVE,
+    SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
+    SetForegroundWindow, SetWindowPos, ShowWindowAsync, WS_EX_TOPMOST,
 };
 
 use crate::error::{Context, Result};
@@ -35,6 +35,32 @@ pub fn raise(hwnd: HWND) -> Result<()> {
             0,
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS,
+        )
+    }
+    .ctx("SetWindowPos")
+}
+
+/// Puts `hwnd` just below `above`, without activating it: windows stacked in one zone put in
+/// the order the user chose (ADR 0032), under the front one rather than over every window,
+/// Mosaïk's own among them. Synchronous, unlike [`raise`], so a chain of them lands in order:
+/// call it off the engine thread (the mover does). Nothing is done when `above` is a topmost
+/// window, which would make `hwnd` one too.
+pub fn put_below(hwnd: HWND, above: HWND) -> Result<()> {
+    // SAFETY: reads the extended style of any window handle; 0 for one that has gone.
+    let style = unsafe { GetWindowLongPtrW(above, GWL_EXSTYLE) };
+    if style & WS_EX_TOPMOST.0 as isize != 0 {
+        return Ok(());
+    }
+    // SAFETY: z-order only (no move, no size, no activation) of another app's window.
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(above),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
         )
     }
     .ctx("SetWindowPos")

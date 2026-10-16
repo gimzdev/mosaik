@@ -60,3 +60,8 @@ the owner, on 2026-10-15: "arrange should arrange, save should save. yes".
   preview go on and only Save is refused.
 - Opening a suggested set after Arrange leaves Arrange's zones behind for good: a set started is
   not undone (ADR 0029), and Arrange's zones were not saved.
+
+## Amended by ADR 0032 (2026-10-16)
+
+The button that arranges says Move windows, and Mosaïk then says "Moved 4 windows." (or "Moved 4
+windows into Thirds."); windows left over stack in the zones rather than being minimised.

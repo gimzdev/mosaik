@@ -67,7 +67,7 @@ fn arrange_goes_on_when_the_workspaces_cannot_be_saved() {
     // Nothing to manage: Arrange gets as far as finding no window, and says so.
     match arranged {
         Reply::Error { message, .. } => {
-            assert_eq!(message, "There are no windows on screen to arrange.", "Arrange");
+            assert_eq!(message, "There are no windows on screen to move.", "Arrange");
         }
         other => panic!("Arrange: {other:?}"),
     }

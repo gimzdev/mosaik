@@ -155,7 +155,7 @@ function answer(auto: ArrangePreview = coding, extra: (c: Command) => Reply | nu
         return preview(opening);
       case 'arrange':
         arrangedNow = true;
-        return done('Arranged 2 windows for coding.');
+        return done('Moved 2 windows.');
       case 'undo_arrange':
         arrangedNow = false;
         return done('Windows are back where they were.');
@@ -184,7 +184,7 @@ function home(props: Partial<Parameters<typeof Home>[0]> = {}) {
 
 const picture = () => screen.getByRole('group', { name: /main screen|Visual Studio Code|Nothing is open/ });
 const tile = (name: string) => screen.getByRole('button', { name });
-const arrange = () => screen.getByRole('button', { name: 'Arrange windows' });
+const arrange = () => screen.getByRole('button', { name: 'Move windows' });
 const title = () => screen.getByRole('heading', { level: 2, name: /Your screen|Preview of/ });
 const HINT = 'Drag a window onto another to swap them, or a line between zones to resize them.';
 
@@ -199,8 +199,8 @@ describe('Home', () => {
     expect(screen.getByRole('radio', { name: 'Automatic' })).toBeChecked();
     // Nothing else to say: how to change the picture.
     expect(screen.getByText(HINT)).toBeInTheDocument();
-    // Arrange windows has Mosaïk's tiles; Automatic keeps the spark.
-    expect(arrange()).toHaveTextContent('Arrange windows');
+    // Move windows has Mosaïk's tiles; Automatic keeps the spark.
+    expect(arrange()).toHaveTextContent('Move windows');
     expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
   });
 
@@ -258,8 +258,8 @@ describe('Home', () => {
     });
     await userEvent.click(arrange());
     expect(asked).toContainEqual({ cmd: 'arrange' });
-    expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
-    expect(said()).toBe('Arranged 2 windows for coding.');
+    expect(await shown('Moved 2 windows.')).toBeInTheDocument();
+    expect(said()).toBe('Moved 2 windows.');
     await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
     expect(asked).toContainEqual({ cmd: 'undo_arrange' });
     expect(await shown('Windows are back where they were.')).toBeInTheDocument();
@@ -330,12 +330,48 @@ describe('Home', () => {
     expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
     await userEvent.click(arrange());
     expect(asked).toContainEqual({ cmd: 'arrange', moves: [{ window: 101, zone: 1 }] });
-    expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
+    expect(await shown('Moved 2 windows.')).toBeInTheDocument();
     // Arranged as they were put, the picture keeps them there, as the screen now is.
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
     });
     expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 2, Google Chrome in zone 1.');
+  });
+
+  it('trades two windows of one zone front to back, shows it at once, and moves them so', async () => {
+    // ADR 0032, the owner: "i should be able to permute chrome with claude". Claude, stacked
+    // behind the browser in zone 2, put onto it comes to the front.
+    const [code, browser] = coding.windows;
+    if (!code || !browser) throw new Error('the fixture has two windows');
+    const claude = { ...browser, window: 103, label: 'Claude', icon: null };
+    const stacked: ArrangePreview = { ...coding, windows: [code, browser, claude] };
+    const swapped: ArrangePreview = { ...coding, windows: [code, claude, browser] };
+    const asked = answer(stacked, (c) => (c.cmd === 'preview_arrange' && c.moves?.length ? preview(swapped) : null));
+    home();
+    await waitFor(() => {
+      expect(picture()).toHaveAttribute(
+        'aria-label',
+        'Visual Studio Code in zone 1, Google Chrome in zone 2, Claude in zone 2.',
+      );
+    });
+    await userEvent.click(tile('Claude in zone 2'));
+    await userEvent.click(tile('Google Chrome in zone 2'));
+    // At once, then as Mosaïk says: Claude in front, both in zone 2.
+    expect(picture()).toHaveAttribute(
+      'aria-label',
+      'Visual Studio Code in zone 1, Claude in zone 2, Google Chrome in zone 2.',
+    );
+    const move = { window: 103, zone: 1, onto: 102 };
+    await waitFor(() => {
+      expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [move] });
+    });
+    expect(screen.getByRole('button', { name: 'Undo changes' })).toBeInTheDocument();
+    // The focus goes with Claude, to its new place.
+    await waitFor(() => {
+      expect(tile('Claude in zone 2')).toHaveFocus();
+    });
+    await userEvent.click(arrange());
+    expect(asked).toContainEqual({ cmd: 'arrange', moves: [move] });
   });
 
   it('picks and puts a window with the keyboard alone, and lets go with Escape', async () => {
@@ -426,7 +462,7 @@ describe('Home', () => {
     expect(screen.getByRole('button', { name: 'Undo changes' })).toBeInTheDocument();
     await userEvent.click(arrange());
     expect(asked).toContainEqual({ cmd: 'arrange', areas });
-    expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
+    expect(await shown('Moved 2 windows.')).toBeInTheDocument();
   });
 
   it('lets go of zones resized once the screen has other zones', async () => {
@@ -463,12 +499,12 @@ describe('Home', () => {
     expect(screen.getByText('Nothing moves until you press Open.')).toBeInTheDocument();
     expect(screen.getByText('Windows Terminal will start. Google Chrome will be minimized.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByRole('button', { name: 'Arrange windows' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Move windows' })).not.toBeInTheDocument();
     expect(asked.some((c) => c.cmd === 'switch')).toBe(false);
     await userEvent.click(screen.getByRole('button', { name: 'Open “Ship”' }));
     expect(asked).toContainEqual({ cmd: 'switch', workspace: 'ship' });
     expect(await shown('Opened “Ship”; starting 1 app.')).toBeInTheDocument();
-    // Open, it is let go: Arrange windows is back.
+    // Open, it is let go: Move windows is back.
     expect(arrange()).toBeInTheDocument();
     expect(title()).toHaveTextContent('Your screen');
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveAttribute('aria-pressed', 'false');
@@ -513,14 +549,14 @@ describe('Home', () => {
   });
 
   it('lets go of a window picked once the picture cannot change, for good', async () => {
-    // Review of 596ba4f: picked, then Arrange windows, the window came back picked, unsaid, with
+    // Review of 596ba4f: picked, then Move windows, the window came back picked, unsaid, with
     // the zones' buttons over the picture and its lines hidden.
     answer();
     home();
     await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in zone 1' }));
     expect(screen.getByText('Choose where Visual Studio Code goes. Esc cancels.')).toBeInTheDocument();
     await userEvent.click(arrange());
-    expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
+    expect(await shown('Moved 2 windows.')).toBeInTheDocument();
     await waitFor(() => {
       expect(tile('Visual Studio Code in zone 1')).toBeInTheDocument();
     });
@@ -774,7 +810,7 @@ describe('Home', () => {
     expect(count(asked, 'preview_arrange') - first).toBe(1);
     const second = count(asked, 'preview_arrange');
     await userEvent.click(arrange());
-    expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
+    expect(await shown('Moved 2 windows.')).toBeInTheDocument();
     await wait(400);
     expect(count(asked, 'preview_arrange') - second).toBe(1);
   });

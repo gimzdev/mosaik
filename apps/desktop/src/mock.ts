@@ -188,6 +188,9 @@ const workspaces: Workspace[] =
       ];
 let active: string | null = workspaces[0]?.id ?? null;
 let revision = 1;
+/** The tab showing in a zone's group (`workspace/zone`), once two of its tabs traded places: it
+ * stays the one showing (ADR 0032). Else a group shows its first tab. */
+const showing = new Map<string, string>();
 
 /** The sets the stand-in offers: the apps of a developer's Start menu that go together. */
 const SETS: { id: string; name: string; apps: string[] }[] =
@@ -392,7 +395,8 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
   for (const m of moves) {
     const n = onScreen.findIndex((s) => s.window === m.window);
     const from = zoneOf[n];
-    if (n < 0 || m.zone >= rects.length || from === m.zone) continue;
+    // A window dropped onto another of its zone changes no zone (below).
+    if (m.onto !== undefined || n < 0 || m.zone >= rects.length || from === m.zone) continue;
     const there = zoneOf.indexOf(m.zone);
     zoneOf[n] = m.zone;
     if (from === undefined) {
@@ -402,6 +406,21 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
       [colorOf[from], colorOf[m.zone]] = [colorOf[m.zone] ?? m.zone, colorOf[from] ?? from];
     }
   }
+  // The windows left over stack in the zones (ADR 0032, the engine's step 4): with their kind,
+  // else where there are fewest, the larger zone first.
+  const area = (i: number) => {
+    const r = rects[i];
+    return r ? (r.right - r.left) * (r.bottom - r.top) : 0;
+  };
+  onScreen.forEach((s, n) => {
+    if (zoneOf[n] !== undefined || rects.length === 0) return;
+    const count = (i: number) => zoneOf.filter((z) => z === i).length;
+    const kin = (i: number) => onScreen.some((o, m) => zoneOf[m] === i && o.kind === s.kind);
+    const [best] = rects
+      .map((_, i) => i)
+      .sort((a, b) => Number(kin(b)) - Number(kin(a)) || count(a) - count(b) || area(b) - area(a) || a - b);
+    zoneOf[n] = best;
+  });
   const windows: PreviewWindow[] = onScreen.map((s, n): PreviewWindow => {
     const zone = zoneOf[n];
     const rect = zone === undefined ? undefined : rects[zone];
@@ -417,6 +436,16 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
           zone: `a${String(zone + 1)}`,
         };
   });
+  // Windows dropped onto another of their zone trade places front to back (ADR 0032).
+  for (const m of moves) {
+    if (m.onto === undefined) continue;
+    const i = windows.findIndex((w) => w.window === m.window);
+    const j = windows.findIndex((w) => w.window === m.onto);
+    const [a, b] = [windows[i], windows[j]];
+    if (!a || !b) continue;
+    windows[i] = b;
+    windows[j] = a;
+  }
   const numbers = readingNumbers(shape);
   return {
     work_area: work,
@@ -489,7 +518,7 @@ function previewWorkspace(w: Workspace): ArrangePreview {
       group.push(a);
     }
     for (const unit of units) {
-      const shown = unit[0];
+      const shown = unit.find((a) => a.id === showing.get(`${w.id}/${z.id ?? ''}`)) ?? unit[0];
       if (!shown) continue;
       const open = openOf(shown.label);
       windows.push({
@@ -542,17 +571,19 @@ function arrange(preset: string | undefined, moves: ArrangeMove[] = [], areas: R
     return {
       reply: 'error',
       code: 'failed',
-      message: 'There are no windows on screen to arrange.',
+      message: 'There are no windows on screen to move.',
       hint: 'Open the apps you work with, then arrange them.',
     };
   }
   const p = preview(known?.id, moves, areas);
   beforeArrange = onScreen;
   activeBefore = active;
-  // Minimised windows leave the screen, as they leave the picture.
-  onScreen = onScreen.flatMap((s, i) => {
-    const w = p.windows[i];
-    return w?.minimized ? [] : [{ ...s, now: w?.then ?? s.now }];
+  // Minimised windows leave the screen, as they leave the picture; the others are front to back
+  // as the picture had them (traded in a zone, ADR 0032).
+  const before = onScreen;
+  onScreen = p.windows.flatMap((w) => {
+    const s = before.find((o) => o.window === w.window);
+    return !s || w.minimized ? [] : [{ ...s, now: w.then ?? s.now }];
   });
   const gone = p.windows.length - onScreen.length;
   const n = onScreen.length;
@@ -560,7 +591,7 @@ function arrange(preset: string | undefined, moves: ArrangeMove[] = [], areas: R
   // saves (ADR 0030): no workspace is made or changed, and the one in use stays so.
   return done(
     [
-      `Arranged ${String(n)} ${n === 1 ? 'window' : 'windows'}${known ? ` in ${known.label}` : ''}.`,
+      `Moved ${String(n)} ${n === 1 ? 'window' : 'windows'}${known ? ` into ${known.label}` : ''}.`,
       gone ? `${gone === 1 ? '1 window' : `${String(gone)} windows`} minimized.` : '',
     ]
       .filter(Boolean)
@@ -667,7 +698,7 @@ const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.0.2-dev', protocol: 10 };
+      return { reply: 'hello', app_version: '1.0.2-dev', protocol: 11 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -807,8 +838,9 @@ function answer(command: Command): Reply {
         w.appList.splice(w.appList.indexOf(app), 1);
         return apps(w);
       }
-      // Dropped on another app, the two trade zones (`editing::swap_apps`); else it goes in the
-      // zone. A tab leaves its group, unless it stays in the group's zone.
+      // Dropped on another app, the two trade zones (`editing::swap_apps`), or in one zone their
+      // places in it (ADR 0032); else it goes in the zone. A tab leaves its group, unless it stays
+      // in the group's zone.
       const other = command.swap_with === undefined ? null : w.appList.find((a) => a.id === command.swap_with);
       if (other === undefined) {
         return {
@@ -818,7 +850,21 @@ function answer(command: Command): Reply {
           hint: 'Look at the list again.',
         };
       }
-      if (other && other.zone !== app.zone) {
+      if (other && other !== app && other.zone === app.zone) {
+        const key = `${w.id}/${app.zone ?? ''}`;
+        const shown = showing.get(key) ?? w.appList.find((a) => a.zone === app.zone && a.tab)?.id;
+        const [i, j] = [w.appList.indexOf(app), w.appList.indexOf(other)];
+        w.appList[i] = other;
+        w.appList[j] = app;
+        const [wasTab, otherTab] = [app.tab, other.tab];
+        Object.assign(app, { tab: otherTab });
+        Object.assign(other, { tab: wasTab });
+        // Two tabs keep the one showing; a tab leaving the group gives the showing to the one
+        // taking its place.
+        const passed =
+          wasTab !== otherTab ? (shown === app.id ? other.id : shown === other.id ? app.id : shown) : shown;
+        if (passed !== undefined) showing.set(key, passed);
+      } else if (other && other.zone !== app.zone) {
         const was = app.zone;
         Object.assign(app, { zone: other.zone, tab: false });
         Object.assign(other, { zone: was, tab: false });
@@ -857,7 +903,7 @@ function answer(command: Command): Reply {
       return {
         reply: 'state',
         app_version: '1.0.2-dev',
-        protocol: 10,
+        protocol: 11,
         safe_mode: false,
         watchdog: true,
         monitors,

@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use mosaik_core::arrange::{Chosen, Goes, KeptZone, Kind, Move, Unit, plan_moved};
+use mosaik_core::arrange::{Chosen, Goes, KeptZone, Kind, Move, Unit, plan_moved, traded_order};
 use mosaik_core::editing::{stretch_zones, without_zones};
 use mosaik_core::geometry::{RatioRect, Rect};
 use mosaik_core::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
@@ -63,6 +63,10 @@ struct Prepared {
     on_monitor: Vec<usize>,
     /// Where each window goes, in the order of `windows`.
     goes: Vec<Goes>,
+    /// The windows front to back (indexes into `windows`) once the user's trades in a zone are
+    /// made (ADR 0032), and the windows traded: their zones are stacked in that order.
+    order: Vec<usize>,
+    traded: HashSet<usize>,
     /// What the main monitor's windows say the user is doing, when it is laid out for that.
     task: Option<Task>,
     /// What will be on screen, and the saved workspace in use (which stays so).
@@ -94,6 +98,27 @@ fn fresh(prefix: &str, taken: &mut HashSet<String>) -> String {
         .unwrap_or_else(|| format!("{prefix}0"));
     taken.insert(id.clone());
     id
+}
+
+/// The windows of each zone that has a window the user traded on the picture, front to back as
+/// traded: the order to stack them in.
+fn traded_stacks(p: &Prepared) -> Vec<Vec<WindowHandle>> {
+    let zone = |i: usize| match p.goes.get(i) {
+        Some(Goes::Zone(r)) => Some(*r),
+        _ => None,
+    };
+    let zones: HashSet<usize> = p.traded.iter().filter_map(|&i| zone(i)).collect();
+    zones
+        .into_iter()
+        .map(|r| {
+            p.order
+                .iter()
+                .filter(|&&i| zone(i) == Some(r))
+                .filter_map(|&i| p.windows.get(i).map(|w| w.handle))
+                .collect::<Vec<_>>()
+        })
+        .filter(|order| order.len() >= 2)
+        .collect()
 }
 
 fn plural(n: usize, one: &str, many: &str) -> String {
@@ -132,7 +157,7 @@ impl Engine {
             return Err(error(
                 ErrorCode::Failed,
                 "Mosaïk is in safe mode: it does not move windows.",
-                Some("Restart Mosaïk normally to arrange windows."),
+                Some("Restart Mosaïk normally to move windows."),
             ));
         }
         // Arrange saves nothing (ADR 0030): a workspaces file that cannot be written does not
@@ -195,10 +220,20 @@ impl Engine {
             monitor: main,
             preset,
         });
+        // Windows dropped onto another of their zone trade places front to back (ADR 0032),
+        // changing no zone; a trade with a window gone since is dropped.
+        let index_of = |h: WindowHandle| windows.iter().position(|w| w.handle == h);
+        let trades: Vec<(usize, usize)> = moves
+            .iter()
+            .filter_map(|m| Some((index_of(m.window)?, index_of(m.onto?)?)))
+            .collect();
+        let order = traded_order(windows.len(), &trades);
+        let traded: HashSet<usize> = trades.iter().flat_map(|&(a, b)| [a, b]).collect();
         // The picture shows the main monitor's zones, so a move's zone is one of those; a move
         // of a window that has gone since is dropped.
         let moves: Vec<Move> = moves
             .iter()
+            .filter(|m| m.onto.is_none())
             .filter_map(|m| {
                 Some(Move {
                     unit: windows.iter().position(|w| w.handle == m.window)?,
@@ -360,6 +395,8 @@ impl Engine {
             labels,
             on_monitor,
             goes: plan.goes,
+            order,
+            traded,
             task,
             ws,
             from,
@@ -387,10 +424,11 @@ impl Engine {
         if p.windows.is_empty() {
             return error(
                 ErrorCode::Failed,
-                "There are no windows on screen to arrange.",
+                "There are no windows on screen to move.",
                 Some("Open the apps you work with, then arrange them."),
             );
         }
+        let stacks = traded_stacks(&p);
         self.undo = Some(Undo {
             at: Instant::now(),
             workspace: None,
@@ -421,6 +459,12 @@ impl Engine {
             .collect();
         for h in &p.minimize {
             mosaik_win::arrange::minimize(window::hwnd(*h));
+        }
+        // The windows of a zone the user traded on the picture: stacked so (ADR 0032).
+        for order in &stacks {
+            if !mover::stack(order, mover::WAIT_ONE) {
+                tracing::warn!(windows = order.len(), "windows not stacked in time");
+            }
         }
         let kept: Vec<(WindowHandle, Rect, Rect)> = placed
             .iter()
@@ -453,11 +497,11 @@ impl Engine {
         let placed_n = p.windows.len().saturating_sub(p.minimize.len());
         let mut message = match p.preset {
             Some(preset) => format!(
-                "Arranged {} in {}.",
+                "Moved {} into {}.",
                 plural(placed_n, "window", "windows"),
                 preset.label()
             ),
-            None => format!("Arranged {}.", plural(placed_n, "window", "windows")),
+            None => format!("Moved {}.", plural(placed_n, "window", "windows")),
         };
         match p.minimize.len() {
             0 => {}
@@ -532,7 +576,9 @@ impl Engine {
         };
         let mut windows = Vec::new();
         let mut elsewhere = 0u32;
-        for (i, w) in p.windows.iter().enumerate() {
+        // Front to back, as the user traded them (ADR 0032).
+        for &i in &p.order {
+            let w = &p.windows[i];
             if p.on_monitor[i] != p.main {
                 elsewhere += 1;
                 continue;

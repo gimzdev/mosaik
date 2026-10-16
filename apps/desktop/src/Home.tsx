@@ -1,14 +1,15 @@
-// Home: the main screen as the chosen layout would leave it, with Arrange windows beside it, and
-// the workspaces in a column of their own. The automatic layout is chosen first (Arrange reads
+// Home: the main screen as the chosen layout would leave it, with Move windows beside it, and
+// the workspaces in a column of their own. The automatic layout is chosen first (Mosaïk reads
 // what the windows are for); any of the eight layouts can be chosen instead, and the picture shows
-// it before anything moves. On the picture, windows dragged onto each other trade places and the
-// lines between zones resize them (ADR 0031); Undo changes puts the layout's own back. Arrange
-// windows does it; Undo puts everything back. A workspace picked in the column shows in the picture
-// as opening it would leave the screen, with Open (the owner: "we shouldnt open the workspace when
-// clicking on it it should show it in the anim as preview and show an open button"); its apps and
-// zones can be changed there too, and are saved in it at once. A suggested one shows the apps it
-// starts, with Start these apps. Back, or Esc, shows the screen again. Whatever an action did,
-// here or in the column, is said in one line under the picture.
+// it before anything moves. On the picture, windows dragged onto each other trade places (in one
+// zone, front to back: ADR 0032) and the lines between zones resize them (ADR 0031); Undo changes
+// puts the layout's own back. Move windows does it; Undo puts everything back. A workspace picked
+// in the column shows in the picture as opening it would leave the screen, with Open (the owner:
+// "we shouldnt open the workspace when clicking on it it should show it in the anim as preview and
+// show an open button"); its apps and zones can be changed there too, and are saved in it at
+// once. A suggested one shows the apps it starts, with Start these apps. Back, or Esc, shows the
+// screen again. Whatever an action did, here or in the column, is said in one line under the
+// picture.
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -27,7 +28,7 @@ import {
   errorMessage,
 } from './protocol';
 import { useReads } from './reads';
-import { AppsToStart, type PictureEdits, Screen, dropped, moved, settled, stretched } from './Screen';
+import { AppsToStart, type PictureEdits, Screen, dropped, moved, pictureWidth, settled, stretched } from './Screen';
 import { Button, PageTitle, Status, useAnnounce } from './ui';
 import { type Change, moveApp, resizeZones } from './workspacePicture';
 import { type Shown, type Sorted, type Target, Workspaces } from './Workspaces';
@@ -166,7 +167,7 @@ export function Home({
   // command that worked needs no read of its own; one refused says nothing, so it asks for one.
   const what = shown
     ? `${shown.kind}:${target(shown).id}`
-    : `arrange:${choice}:${moves.map((m) => `${String(m.window)}>${String(m.zone)}`).join(',')}:${areasKey(areas)}`;
+    : `arrange:${choice}:${moves.map((m) => `${String(m.window)}>${String(m.zone)}${m.onto === undefined ? '' : `~${String(m.onto)}`}`).join(',')}:${areasKey(areas)}`;
   const poke = useReads(async (_why, current) => {
     if (shown?.kind === 'set') return;
     if (shown?.kind === 'workspace') {
@@ -298,10 +299,11 @@ export function Home({
     launch({ kind: 'set', id: s.id }, { cmd: 'open_set', set: s.id }, `The apps of ${s.name} could not be started.`);
   };
 
-  /** A window put in another zone of the picture: it shows there at once, then as Mosaïk says. */
-  const move = (window: number, zone: number) => {
-    if (picture) setEarly(moved(picture, window, zone));
-    setMoves((list) => [...list, { window, zone }]);
+  /** A window put in another zone of the picture, or onto another window of its zone (`onto`: the
+   * two trade places front to back, ADR 0032): it shows so at once, then as Mosaïk says. */
+  const move = (window: number, zone: number, onto: number | null) => {
+    if (picture) setEarly(moved(picture, window, zone, onto));
+    setMoves((list) => [...list, onto === null ? { window, zone } : { window, zone, onto }]);
     setOutcome(null);
   };
 
@@ -360,7 +362,7 @@ export function Home({
     return {
       kind: 'arrange',
       onDrop: (d) => {
-        move(d.piece.window, d.zone);
+        move(d.piece.window, d.zone, d.zone === d.from ? (d.onto?.window ?? null) : null);
       },
       onStretch: stretch,
     };
@@ -435,7 +437,7 @@ export function Home({
     return (
       <Button tone="primary" size="lg" pending={arranging} disabled={!hasWindows || arranging} onClick={arrange}>
         {arranging ? null : <Glyph name="tiles" />}
-        Arrange windows
+        Move windows
       </Button>
     );
   };
@@ -446,66 +448,74 @@ export function Home({
         Home
       </PageTitle>
       <div className="grid gap-x-6 gap-y-8 min-[720px]:grid-cols-[minmax(0,1fr)_16rem]">
-        <section aria-labelledby="arrange-title" className="flex min-w-0 flex-col">
-          <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
-            <div className="min-w-0 flex-1 basis-60">
-              <div className="flex flex-wrap items-center gap-x-2">
-                <h2 id="arrange-title" className="font-display text-title font-bold tracking-tight break-words">
-                  {shown ? `Preview of “${nameOf(shown)}”` : 'Your screen'}
-                </h2>
-                {shown ? (
-                  <Button tone="quiet" size="sm" label="Back to my screen" onClick={back}>
-                    <Glyph name="back" size={14} />
-                    Back
-                  </Button>
-                ) : null}
+        <section aria-labelledby="arrange-title" className="min-w-0">
+          {/* The title and its button, the picture, the layouts and what was done: one width, the
+              picture's, so they line up (the owner: the layouts went past the picture, "it
+              doesnt feel simetric"). */}
+          <div
+            className="flex min-w-0 flex-col"
+            style={pictureWidth(picture?.work_area ?? arranged?.work_area ?? null)}
+          >
+            <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+              <div className="min-w-0 flex-1 basis-60">
+                <div className="flex flex-wrap items-center gap-x-2">
+                  <h2 id="arrange-title" className="font-display text-title font-bold tracking-tight break-words">
+                    {shown ? `Preview of “${nameOf(shown)}”` : 'Your screen'}
+                  </h2>
+                  {shown ? (
+                    <Button tone="quiet" size="sm" label="Back to my screen" onClick={back}>
+                      <Glyph name="back" size={14} />
+                      Back
+                    </Button>
+                  ) : null}
+                </div>
+                <p className="mt-0.5 text-small text-[var(--muted)]">{subtitle}</p>
               </div>
-              <p className="mt-0.5 text-small text-[var(--muted)]">{subtitle}</p>
+              {/* On the right, on a line of its own too when the window is narrow. */}
+              <div className="ml-auto">{action()}</div>
             </div>
-            {/* On the right, on a line of its own too when the window is narrow. */}
-            <div className="ml-auto">{action()}</div>
-          </div>
 
-          <div className="mt-4">
-            {shown?.kind === 'set' ? (
-              <AppsToStart
-                name={shown.set.name}
-                apps={shown.set.apps}
-                icons={shown.set.icons}
-                area={arranged?.work_area ?? null}
-              />
-            ) : (
-              <Screen preview={picture} unread={problem !== null && !shown} edit={pictureEdits} onPick={setPicking} />
-            )}
-          </div>
+            <div className="mt-4">
+              {shown?.kind === 'set' ? (
+                <AppsToStart
+                  name={shown.set.name}
+                  apps={shown.set.apps}
+                  icons={shown.set.icons}
+                  area={arranged?.work_area ?? null}
+                />
+              ) : (
+                <Screen preview={picture} unread={problem !== null && !shown} edit={pictureEdits} onPick={setPicking} />
+              )}
+            </div>
 
-          <div className="mt-3">
-            <LayoutPicker value={shown ? null : choice} disabled={!hasWindows} onChoose={choose} />
-          </div>
+            <div className="mt-3">
+              <LayoutPicker value={shown ? null : choice} disabled={!hasWindows} onChoose={choose} />
+            </div>
 
-          <div className="mt-2 flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">
-            {problem && !shown ? <Status text={problem} error /> : null}
-            {outcome ? (
-              <Status text={outcome.text} error={outcome.error} />
-            ) : said || hint ? (
-              <p className="text-small text-[var(--muted)]">{said ?? hint}</p>
-            ) : null}
-            {undoable ? (
-              <Button tone="quiet" size="sm" onClick={undo}>
-                <Glyph name="undo" size={14} />
-                Undo
-              </Button>
-            ) : null}
-            {(moves.length || areas.length) && !arranging && !shown && !(picture && settled(picture)) ? (
-              <Button
-                tone="quiet"
-                size="sm"
-                hint="Put the windows and zones back as the layout has them"
-                onClick={reset}
-              >
-                Undo changes
-              </Button>
-            ) : null}
+            <div className="mt-2 flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">
+              {problem && !shown ? <Status text={problem} error /> : null}
+              {outcome ? (
+                <Status text={outcome.text} error={outcome.error} />
+              ) : said || hint ? (
+                <p className="text-small text-[var(--muted)]">{said ?? hint}</p>
+              ) : null}
+              {undoable ? (
+                <Button tone="quiet" size="sm" onClick={undo}>
+                  <Glyph name="undo" size={14} />
+                  Undo
+                </Button>
+              ) : null}
+              {(moves.length || areas.length) && !arranging && !shown && !(picture && settled(picture)) ? (
+                <Button
+                  tone="quiet"
+                  size="sm"
+                  hint="Put the windows and zones back as the layout has them"
+                  onClick={reset}
+                >
+                  Undo changes
+                </Button>
+              ) : null}
+            </div>
           </div>
         </section>
 

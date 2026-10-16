@@ -30,7 +30,10 @@ use thiserror::Error;
 /// `preview_arrange`), two apps of a workspace trading zones (`swap_with` on `move_app`), and in
 /// a preview each zone's id and exact place and the zone and app of each window and tab (`id`,
 /// `area`, `zone`, `app`).
-pub const PROTOCOL_VERSION: u32 = 10;
+/// 11: two windows of one zone of the home page's picture trading places front to back (`onto`
+/// on a move); two apps of one zone of a workspace trade places in it (`move_app` with
+/// `swap_with`), and its preview lists them front to back.
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -366,6 +369,10 @@ pub struct ArrangePreview {
 pub struct ArrangeMove {
     pub window: WindowHandle,
     pub zone: u32,
+    /// The window of that same zone it was dropped onto: the two trade places in the zone,
+    /// front to back, and no window changes zone (ADR 0032).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub onto: Option<WindowHandle>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -730,6 +737,7 @@ mod tests {
                 moves: vec![ArrangeMove {
                     window: WindowHandle(42),
                     zone: 1,
+                    onto: None,
                 }],
                 areas: vec![
                     RatioRect::new(0.0, 0.0, 0.6, 1.0).unwrap(),
@@ -800,7 +808,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":10,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":11,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -809,7 +817,23 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":10,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":11,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+    }
+
+    #[test]
+    fn a_window_dropped_on_another_of_its_zone_says_which() {
+        // Protocol 11 (ADR 0032): `onto`, the window of the same zone the two trade places with;
+        // a move without it reads as before, and says nothing of it.
+        let m: ArrangeMove = serde_json::from_str(r#"{"window":42,"zone":1}"#).unwrap();
+        assert_eq!(m.onto, None);
+        assert_eq!(serde_json::to_string(&m).unwrap(), r#"{"window":42,"zone":1}"#);
+        let traded = ArrangeMove {
+            onto: Some(WindowHandle(7)),
+            ..m
+        };
+        let line = serde_json::to_string(&traded).unwrap();
+        assert_eq!(line, r#"{"window":42,"zone":1,"onto":7}"#);
+        assert_eq!(serde_json::from_str::<ArrangeMove>(&line).unwrap(), traded);
     }
 
     #[test]
@@ -854,12 +878,12 @@ mod tests {
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":11,"id":1,"cmd":"state"}"#).unwrap_err();
+        let err = decode_request(br#"{"v":12,"id":1,"cmd":"state"}"#).unwrap_err();
         assert_eq!(
             err,
             ProtocolError::UnsupportedVersion {
-                client: 11,
-                server: 10
+                client: 12,
+                server: 11
             }
         );
         // Older clients are understood.
@@ -1003,7 +1027,7 @@ mod tests {
                 rect: Rect::new(1654, 196, 1920, 556),
                 open: true,
                 rows: vec![QuickMenuRow {
-                    label: "Arrange windows".into(),
+                    label: "Move windows".into(),
                     rect: Rect::new(1670, 272, 1906, 306),
                     enabled: true,
                 }],
@@ -1044,6 +1068,7 @@ mod wire {
                 moves: vec![ArrangeMove {
                     window: WindowHandle(0x0003_04a2),
                     zone: 2,
+                    onto: None,
                 }],
                 areas: Vec::new(),
             },
@@ -1054,10 +1079,18 @@ mod wire {
             },
             Command::PreviewArrange {
                 preset: Some("thirds".into()),
-                moves: vec![ArrangeMove {
-                    window: WindowHandle(0x0003_04a2),
-                    zone: 0,
-                }],
+                moves: vec![
+                    ArrangeMove {
+                        window: WindowHandle(0x0003_04a2),
+                        zone: 0,
+                        onto: None,
+                    },
+                    ArrangeMove {
+                        window: WindowHandle(0x0003_04a2),
+                        zone: 0,
+                        onto: Some(WindowHandle(0x0005_0b10)),
+                    },
+                ],
                 areas: vec![
                     RatioRect::new(0.0, 0.0, 0.25, 1.0).unwrap_or(RatioRect::FULL),
                     RatioRect::new(0.25, 0.0, 0.625, 1.0).unwrap_or(RatioRect::FULL),

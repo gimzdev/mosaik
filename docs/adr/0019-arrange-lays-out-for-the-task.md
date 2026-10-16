@@ -80,3 +80,8 @@ only when the windows cannot all fit.
 ## Amended by ADR 0028 (2026-10-15)
 
 New zones are numbered by place, not named after the windows put in them.
+
+## Amended by ADR 0032 (2026-10-16)
+
+The windows the task's layout has no area for stack in its zones (with their kind, else where
+there are fewest) rather than being minimised; Home's picture lists them in their zone.

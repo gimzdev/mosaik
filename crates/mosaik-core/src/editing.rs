@@ -321,8 +321,9 @@ pub fn move_app(ws: &Workspace, slot: &SlotId, zone: &ZoneId) -> Result<Workspac
     Ok(out)
 }
 
-/// The workspace with its apps `a` and `b` trading zones (one dropped on the other in its
-/// picture, ADR 0031). A tab leaves its group for the other zone; two apps of one zone stay.
+/// The workspace with its apps `a` and `b` trading places (one dropped on the other in its
+/// picture). In two zones they trade zones, a tab leaving its group for the other zone (ADR
+/// 0031); in one zone, they trade their places in it ([`trade_in_zone`], ADR 0032).
 pub fn swap_apps(ws: &Workspace, a: &SlotId, b: &SlotId) -> Result<Workspace, EditError> {
     let zone_of = |slot: &SlotId| -> Result<ZoneId, EditError> {
         let s = ws.layout.slot(slot).ok_or(EditError::GoneApp)?;
@@ -333,10 +334,53 @@ pub fn swap_apps(ws: &Workspace, a: &SlotId, b: &SlotId) -> Result<Workspace, Ed
     };
     let (za, zb) = (zone_of(a)?, zone_of(b)?);
     if za == zb {
-        return Ok(ws.clone());
+        return Ok(trade_in_zone(ws, a, b));
     }
     let out = move_app(ws, a, &zb)?;
     move_app(&out, b, &za)
+}
+
+/// Two apps of one zone trade their places in it, as its picture lists them (the owner: "i
+/// should be able to permute chrome with claude"): their order front to back (the order of the
+/// layout's slots, which opening the workspace follows), and their places in tab groups. Two
+/// tabs of one group trade places in its strip, the tab showing staying the one showing; a tab
+/// and a window trade the tab's place in its group, showing if it was, for the window's.
+fn trade_in_zone(ws: &Workspace, a: &SlotId, b: &SlotId) -> Workspace {
+    let mut out = ws.clone();
+    let layout = &mut out.layout;
+    let at = |id: &SlotId| layout.slots.iter().position(|s| &s.id == id);
+    let (Some(ia), Some(ib)) = (at(a), at(b)) else {
+        return out;
+    };
+    if ia == ib {
+        return out;
+    }
+    let (pa, pb) = (layout.slots[ia].place.clone(), layout.slots[ib].place.clone());
+    let one_group = matches!((&pa, &pb), (Place::Tab { group: ga }, Place::Tab { group: gb }) if ga == gb);
+    layout.slots[ia].place = pb;
+    layout.slots[ib].place = pa;
+    layout.slots.swap(ia, ib);
+    let other = |id: &SlotId| {
+        if id == a {
+            Some(b.clone())
+        } else if id == b {
+            Some(a.clone())
+        } else {
+            None
+        }
+    };
+    for g in &mut layout.tab_groups {
+        for tab in &mut g.tabs {
+            if let Some(o) = other(tab) {
+                *tab = o;
+            }
+        }
+        // The app showing in a group it leaves gives the showing to the one taking its place.
+        if !one_group && let Some(o) = other(&g.active) {
+            g.active = o;
+        }
+    }
+    out
 }
 
 /// The zones of the layout's monitor `monitor` (an index in its monitors) take `areas`, in
@@ -974,8 +1018,6 @@ mod tests {
         assert_eq!(zone_of(&out, "s2"), z("z1"));
         assert_eq!(zone_of(&out, "s3"), z("z2"), "the other tab stays");
         assert_eq!(out.layout.problems(), vec![]);
-        // Two apps of one zone: nothing to trade.
-        assert_eq!(swap_apps(&ws, &sid("s2"), &sid("s3")).unwrap(), ws);
         assert_eq!(swap_apps(&ws, &sid("s1"), &sid("gone")), Err(EditError::GoneApp));
         // An app with a place of its own, not a zone: refused.
         let mut free = ws.clone();
@@ -984,5 +1026,95 @@ mod tests {
             swap_apps(&free, &sid("s1"), &sid("s2")),
             Err(EditError::NotInZone)
         );
+    }
+
+    #[test]
+    fn two_apps_of_one_zone_trade_places_in_it() {
+        // ADR 0032, the owner: "i should be able to permute chrome with claude". In one zone, two
+        // apps trade their places in it, as the picture shows them: front to back, and in a tab
+        // group's strip.
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let sid = |s: &str| SlotId(s.into());
+        let in_z2 = || Place::Zone {
+            zone: ZoneId::new("z2"),
+        };
+        let g1 = || Place::Tab {
+            group: TabGroupId("g1".into()),
+        };
+        // z2: the tab group g1 (s2 showing, s3), then s4 and s5, windows of their own.
+        let mut ws = workspace(&t);
+        for id in ["s4", "s5"] {
+            ws.layout.slots.push(Slot {
+                id: sid(id),
+                label: None,
+                app: AppMatch::exe("a.exe"),
+                launch: None,
+                place: in_z2(),
+            });
+        }
+        let order = |w: &Workspace| {
+            let ids: Vec<&str> = w.layout.slots.iter().map(|s| s.id.0.as_str()).collect();
+            ids.join(" ")
+        };
+        let strip = |w: &Workspace, g: &str| {
+            let g = w.layout.tab_group(&TabGroupId(g.into())).expect("the group");
+            let tabs: Vec<&str> = g.tabs.iter().map(|t| t.0.as_str()).collect();
+            (tabs.join(" "), g.active.0.clone())
+        };
+        let place = |w: &Workspace, s: &str| w.layout.slot(&sid(s)).map(|x| x.place.clone());
+
+        // Two tabs of one group trade places in its strip; the tab showing stays the one showing.
+        let out = swap_apps(&ws, &sid("s3"), &sid("s2")).unwrap();
+        assert_eq!(strip(&out, "g1"), ("s3 s2".into(), "s2".into()));
+        assert_eq!(out.layout.problems(), vec![]);
+
+        // Two windows of their own trade places front to back.
+        let out = swap_apps(&ws, &sid("s5"), &sid("s4")).unwrap();
+        assert_eq!(order(&out), "s1 s2 s3 s5 s4");
+        assert_eq!(
+            (place(&out, "s4"), place(&out, "s5")),
+            (Some(in_z2()), Some(in_z2()))
+        );
+        assert_eq!(strip(&out, "g1"), strip(&ws, "g1"), "the group is left as it was");
+
+        // A tab and a window: the window takes the tab's place in the group (showing, as the tab
+        // was), the tab the window's place in the zone, out of the group.
+        let out = swap_apps(&ws, &sid("s2"), &sid("s4")).unwrap();
+        assert_eq!(strip(&out, "g1"), ("s4 s3".into(), "s4".into()));
+        assert_eq!(
+            (place(&out, "s2"), place(&out, "s4")),
+            (Some(in_z2()), Some(g1()))
+        );
+        assert_eq!(order(&out), "s1 s4 s3 s2 s5");
+        assert_eq!(out.layout.problems(), vec![]);
+        // Traded back, the workspace is as it was.
+        assert_eq!(swap_apps(&out, &sid("s4"), &sid("s2")).unwrap(), ws);
+
+        // Two tabs of two groups in one zone trade groups; each group keeps showing its place.
+        let mut two = ws.clone();
+        two.layout.tab_groups.push(TabGroup {
+            id: TabGroupId("g2".into()),
+            tabs: vec![sid("s4"), sid("s5")],
+            active: sid("s5"),
+            place: in_z2(),
+        });
+        for id in ["s4", "s5"] {
+            two.layout
+                .slots
+                .iter_mut()
+                .find(|s| s.id == sid(id))
+                .unwrap()
+                .place = Place::Tab {
+                group: TabGroupId("g2".into()),
+            };
+        }
+        assert_eq!(two.layout.problems(), vec![]);
+        let out = swap_apps(&two, &sid("s3"), &sid("s5")).unwrap();
+        assert_eq!(strip(&out, "g1"), ("s2 s5".into(), "s2".into()));
+        assert_eq!(strip(&out, "g2"), ("s4 s3".into(), "s3".into()));
+        assert_eq!(out.layout.problems(), vec![]);
+
+        // An app dropped on itself: nothing changes.
+        assert_eq!(swap_apps(&ws, &sid("s4"), &sid("s4")).unwrap(), ws);
     }
 }

@@ -591,7 +591,7 @@ fn tray_menu(
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
     menu.append_items(&[
-        &MenuItem::with_id(app, "arrange", "Arrange windows", true, None::<&str>)?,
+        &MenuItem::with_id(app, "arrange", "Move windows", true, None::<&str>)?,
         &MenuItem::with_id(app, "switcher", "Switch workspace", true, None::<&str>)?,
         &MenuItem::with_id(app, "settings", "Open Mosaïk", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,

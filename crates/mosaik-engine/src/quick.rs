@@ -1,6 +1,6 @@
 //! The side menu: a thin handle at an edge of the main monitor (`mosaik_overlay::edge`) that
 //! opens as soon as the pointer stops on it (or it is clicked), sliding in from the edge, onto
-//! what is done most: Mosaïk (a click opens its window), Arrange and a strip of layouts, the
+//! what is done most: Mosaïk (a click opens its window), Move windows and a strip of layouts, the
 //! workspaces with the one open marked (a click opens one), saving the layout, editing the zones,
 //! and snapping on or off. Dragging the handle, or the open menu by its first line, along its
 //! edge moves it; the place is kept.
@@ -257,7 +257,7 @@ impl Engine {
                     tracing::error!(error = %e, "quick menu handle not made");
                     self.notice(
                         "The side menu is off",
-                        format!("Mosaïk could not show its line at the screen's edge ({e}). Arrange and the rest are in Mosaïk's window, the tray menu and the switcher."),
+                        format!("Mosaïk could not show its line at the screen's edge ({e}). Move windows and the rest are in Mosaïk's window, the tray menu and the switcher."),
                     );
                     return;
                 }
@@ -278,8 +278,8 @@ impl Engine {
         self.watch.put_canvas(canvas);
     }
 
-    /// The menu's rows, with what each does: first Mosaïk (which opens its window), then Arrange
-    /// and a strip of layouts, the workspaces with the one open marked, and the rest.
+    /// The menu's rows, with what each does: first Mosaïk (which opens its window), then Move
+    /// windows and a strip of layouts, the workspaces with the one open marked, and the rest.
     fn quick_rows(&self) -> Vec<(Action, Row)> {
         // The workspace in use, which Save updates (after Arrange too); its zones are the ones
         // the editor shows only while they are on screen.
@@ -317,7 +317,7 @@ impl Engine {
                     primary: true,
                     enabled: moves,
                     rule_before: true,
-                    ..row("Arrange")
+                    ..row("Move windows")
                 },
             ),
             (

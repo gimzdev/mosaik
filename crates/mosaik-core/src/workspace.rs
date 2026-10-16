@@ -611,25 +611,9 @@ pub fn plan_switch(
         .collect();
     // Front to back by slot; a tab group is as far forward as its front-most tab, whichever tab
     // shows (a hidden tab saved last takes the group's place when the others are closed).
-    let position: HashMap<&SlotId, usize> = to
-        .layout
-        .slots
-        .iter()
-        .enumerate()
-        .map(|(i, s)| (&s.id, i))
-        .collect();
-    let rank = |slot: &Slot| -> usize {
-        let own = position.get(&slot.id).copied().unwrap_or(usize::MAX);
-        to.layout.group_of(&slot.id).map_or(own, |g| {
-            g.tabs
-                .iter()
-                .filter_map(|t| position.get(t).copied())
-                .min()
-                .unwrap_or(own)
-        })
-    };
+    let ranks = to.layout.ranks();
     let mut ordered: Vec<&Slot> = to.layout.slots.iter().collect();
-    ordered.sort_by_key(|s| rank(s));
+    ordered.sort_by_key(|s| ranks.get(&s.id).copied().unwrap_or(usize::MAX));
     for slot in ordered {
         match assigned.get(&slot.id) {
             Some(window) => {

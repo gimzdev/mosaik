@@ -98,3 +98,8 @@ set: Start these apps) or a double-click. What an action did shows under the pic
 The picture draws each zone once, with its windows' title bars in it, and its lines resize the
 zones; Arrange windows; the layouts all in view, without Top + bottom and Three rows; no word
 of welcome.
+
+## Amended by ADR 0032 (2026-10-16)
+
+The main button says Move windows. Two windows of one zone dropped onto each other trade places
+front to back. The title row, the picture and the layouts under it are one width.

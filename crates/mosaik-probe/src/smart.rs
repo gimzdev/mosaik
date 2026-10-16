@@ -946,7 +946,8 @@ fn arrange(
 
     // 3d. A fourth window, opened last: Arrange lays the screen out again, three windows to a
     // view. The window used last (the new one) takes the main zone, two sit beside it, and the
-    // one used longest ago is minimised (it stays in the taskbar); Undo brings every window back.
+    // one used longest ago stacks in one of those zones rather than leave the screen (ADR 0032:
+    // none is minimised); Undo brings every window back.
     let e = open(
         opened,
         "Probe E",
@@ -987,6 +988,7 @@ fn arrange(
         .filter(|(_, h)| mosaik_win::window::geometry(**h).is_some_and(|g| g.minimized))
         .map(|(i, _)| i)
         .collect();
+    let in_zones = five.iter().filter(|h| zone_of(&st, &zs, **h).is_some()).count();
     let undo = done(&ask(engine, Command::UndoArrange).0)?;
     let st = settled(engine)?;
     let e_back = frame_rect(e).map(|f| edge_error(f, e_before));
@@ -1006,12 +1008,14 @@ fn arrange(
             "message": fifth,
             "new_window_main": e_main,
             "minimized": minimized,
+            "in_zones": in_zones,
             "undo": undo,
             "back_px": e_back,
             "others_back_px": others_back,
             "still_a_tab": e_grouped,
             "all_shown": all_shown,
-            "ok": fifth.contains(" 1 window minimized.") && e_main && minimized.len() == 1
+            "ok": !fifth.contains("minimized") && e_main && minimized.is_empty()
+                && in_zones == five.len()
                 && e_back.is_some_and(|b| b <= SLACK) && others_back <= SLACK && !e_grouped
                 && all_shown,
         }),
@@ -1020,11 +1024,13 @@ fn arrange(
     pump_until(600, || false);
     out.insert("layout".into(), layout(engine, styles, work, &w)?);
     out.insert("moved".into(), put_elsewhere(engine, styles, work, &w)?);
+    out.insert("traded_in_zone".into(), traded_in_zone(engine, styles, work, &w)?);
     out.insert("stretched".into(), stretched(engine, styles, work, &w)?);
     out.insert("to_front".into(), to_front(engine, &w)?);
     out.insert("saved".into(), save_arranged(engine, work, &w)?);
     out.insert("apps".into(), apps(engine, styles, work, opened, &w)?);
     out.insert("swapped".into(), swapped(engine, styles, work, &w)?);
+    out.insert("reordered".into(), reordered(engine, styles, work, &w)?);
     out.insert("least".into(), least(engine, styles, work, opened, &w)?);
     *arranged = w;
     let ok = out.values().all(|v| v["ok"] == json!(true));
@@ -1526,15 +1532,23 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
         .iter()
         .filter(|x| !x.minimized && x.then.is_some())
         .collect();
-    let (Some(a), Some(b)) = (placed.first().copied(), placed.get(1).copied()) else {
+    // Two windows of two halves (the third stacks in one of them, ADR 0032).
+    let Some(a) = placed.first().copied() else {
         return Ok(json!({ "placed": placed.len(), "ok": false }));
     };
-    let (Some(za), Some(zb)) = (zone_index(&base, a), zone_index(&base, b)) else {
+    let Some(za) = zone_index(&base, a) else {
         return Ok(json!({ "zones_found": false, "ok": false }));
+    };
+    let Some((b, zb)) = placed
+        .iter()
+        .find_map(|x| zone_index(&base, x).filter(|z| *z != za).map(|z| (*x, z)))
+    else {
+        return Ok(json!({ "other_zone": false, "ok": false }));
     };
     let mv = ArrangeMove {
         window: a.window,
         zone: u32::try_from(zb).unwrap_or(u32::MAX),
+        onto: None,
     };
     let start = Instant::now();
     let shown = preview_moved(engine, Some("halves"), vec![mv])?;
@@ -1615,9 +1629,87 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
         "undo": undo,
         "back_px": back,
         "ok": traded && with_windows && untouched
-            && message.contains("in Halves.")
+            && message.contains("into Halves.")
             && landed.iter().all(|x| x["ok"] == json!(true))
             && back <= SLACK,
+    }))
+}
+
+/// 3e4. Halves for the three windows, two of them stacked in one half (ADR 0032): the one behind
+/// dropped onto the one in front on the home page's picture (the owner: "i should be able to
+/// permute chrome with claude"). The picture lists them the other way round, nothing moving;
+/// Arrange with that trade puts the one that was behind in front, both in their half; Undo puts
+/// every window back.
+fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
+    let before = frames(w);
+    let base = preview(engine, Some("halves"))?;
+    // A zone's windows in the picture, front to back.
+    let in_zone = |p: &ArrangePreview, z: usize| -> Vec<mosaik_core::window::WindowHandle> {
+        p.windows
+            .iter()
+            .filter(|x| !x.minimized && zone_index(p, x) == Some(z))
+            .map(|x| x.window)
+            .collect()
+    };
+    let Some((zone, pair)) = (0..base.zones.len())
+        .map(|z| (z, in_zone(&base, z)))
+        .find(|(_, list)| list.len() == 2)
+    else {
+        return Ok(json!({ "stacked_pair": false, "ok": false }));
+    };
+    let (front, back) = (pair[0], pair[1]);
+    let mv = ArrangeMove {
+        window: back,
+        zone: u32::try_from(zone).unwrap_or(u32::MAX),
+        onto: Some(front),
+    };
+    let start = Instant::now();
+    let shown = preview_moved(engine, Some("halves"), vec![mv])?;
+    let preview_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let traded = in_zone(&shown, zone) == vec![back, front];
+    let untouched = most_moved(&frames(w), &before) <= SLACK;
+
+    let (reply, ms) = ask(
+        engine,
+        Command::Arrange {
+            preset: Some("halves".into()),
+            moves: vec![mv],
+            areas: Vec::new(),
+        },
+    );
+    let message = done(&reply)?;
+    let st = settled(engine)?;
+    let ws = st
+        .active_workspace
+        .clone()
+        .ok_or("no workspace open after the trade")?;
+    let zs = zones(engine, &ws.0, work)?;
+    let hwnd_of = |h| w.iter().copied().find(|x| handle(*x) == h);
+    let z_order = mosaik_win::window::top_level();
+    let at = |h| hwnd_of(h).and_then(|x| z_order.iter().position(|y| *y == x));
+    let back_in_front = matches!((at(back), at(front)), (Some(b), Some(f)) if b < f);
+    let pair_hwnds: Vec<HWND> = [back, front].into_iter().filter_map(hwnd_of).collect();
+    let one_zone = pair_hwnds.len() == 2 && {
+        let za = zone_of(&st, &zs, pair_hwnds[0]);
+        za.is_some() && za == zone_of(&st, &zs, pair_hwnds[1])
+    };
+    let fits = fit(&st, &zs, styles, &pair_hwnds);
+    let undo = done(&ask(engine, Command::UndoArrange).0)?;
+    let _ = settled(engine)?;
+    let back_px = most_moved(&frames(w), &before);
+    Ok(json!({
+        "preview_ms": preview_ms,
+        "traded_in_picture": traded,
+        "preview_changed_nothing": untouched,
+        "message": message,
+        "ms": ms,
+        "behind_now_in_front": back_in_front,
+        "one_zone": one_zone,
+        "fit_px": fits,
+        "undo": undo,
+        "back_px": back_px,
+        "ok": traded && untouched && message.contains("into Halves.") && back_in_front && one_zone
+            && all_fit(&fits) && back_px <= SLACK,
     }))
 }
 
@@ -1798,9 +1890,122 @@ fn swapped(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Va
     }))
 }
 
+/// 3h2. Two apps of one zone of the open workspace trade places in it (ADR 0032, the owner: "i
+/// should be able to permute chrome with claude"): the second window's app put in the first's
+/// zone, then the two traded. The workspace lists them the other way round, and its picture
+/// too; the window now first is in front, both filling the zone. Traded back and put back in
+/// its zone, no window has moved.
+fn reordered(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
+    let st = settled(engine)?;
+    let ws = st
+        .active_workspace
+        .clone()
+        .ok_or("no workspace open to reorder its apps")?;
+    let zs = zones(engine, &ws.0, work)?;
+    let listed = apps_of(
+        engine,
+        Command::Apps {
+            workspace: ws.0.clone(),
+        },
+    )?;
+    let zone_id = |h: HWND| {
+        st.windows
+            .iter()
+            .find(|x| x.handle == handle(h))
+            .and_then(|x| x.zone.clone())
+    };
+    let (Some(za), Some(zb)) = (zone_id(w[0]), zone_id(w[1])) else {
+        return Err("the workspace's windows are in no zone".into());
+    };
+    let app_in = |z: &ZoneId| {
+        listed
+            .apps
+            .iter()
+            .find(|a| a.zone.as_ref() == Some(z) && !a.tab)
+            .map(|a| a.id.clone())
+    };
+    let (Some(a), Some(b)) = (app_in(&za), app_in(&zb)) else {
+        return Err("no app in the windows' zones".into());
+    };
+    let before = frames(w);
+    let move_app = |app: &SlotId, zone: &ZoneId, with: Option<&SlotId>| {
+        apps_of(
+            engine,
+            Command::MoveApp {
+                workspace: ws.0.clone(),
+                app: app.clone(),
+                zone: zone.clone(),
+                swap_with: with.cloned(),
+            },
+        )
+    };
+    let in_za = |apps: &WorkspaceApps| -> Vec<SlotId> {
+        apps.apps
+            .iter()
+            .filter(|x| x.zone.as_ref() == Some(&za))
+            .map(|x| x.id.clone())
+            .collect()
+    };
+    let first = in_za(&move_app(&b, &za, None)?);
+    let _ = settled(engine)?;
+    let start = Instant::now();
+    let traded = move_app(&b, &za, Some(&a))?;
+    let ms = start.elapsed().as_secs_f64() * 1000.0;
+    let st = settled(engine)?;
+    let second = in_za(&traded);
+    let reversed = first.len() == 2 && second.iter().eq(first.iter().rev());
+    let picture: Vec<SlotId> = match engine.request(
+        Command::PreviewWorkspace {
+            workspace: ws.0.clone(),
+        },
+        TIMEOUT,
+    ) {
+        Reply::Preview(p) => p
+            .windows
+            .iter()
+            .filter(|x| x.zone.as_ref() == Some(&za))
+            .filter_map(|x| x.app.clone())
+            .collect(),
+        other => return Err(format!("preview_workspace: {other:?}")),
+    };
+    let picture_follows = picture == second;
+    let window_of = |s: &SlotId| {
+        if *s == a {
+            Some(w[0])
+        } else if *s == b {
+            Some(w[1])
+        } else {
+            None
+        }
+    };
+    let z_order = mosaik_win::window::top_level();
+    let at = |s: Option<&SlotId>| {
+        s.and_then(window_of)
+            .and_then(|h| z_order.iter().position(|x| *x == h))
+    };
+    let first_in_front = matches!((at(second.first()), at(second.get(1))), (Some(f), Some(n)) if f < n);
+    let fits = fit(&st, &zs, styles, &w[..2]);
+    let _ = move_app(&b, &za, Some(&a))?;
+    let _ = move_app(&b, &zb, None)?;
+    let _ = settled(engine)?;
+    let back = most_moved(&frames(w), &before);
+    Ok(json!({
+        "ms": ms,
+        "listed_before": first.iter().map(|s| s.0.clone()).collect::<Vec<_>>(),
+        "listed_after": second.iter().map(|s| s.0.clone()).collect::<Vec<_>>(),
+        "reversed": reversed,
+        "picture_follows": picture_follows,
+        "first_in_front": first_in_front,
+        "fit_px": fits,
+        "back_px": back,
+        "ok": reversed && picture_follows && first_in_front && all_fit(&fits) && back <= SLACK,
+    }))
+}
+
 /// 3e. A layout picked on the home page, with the three windows arranged: the picture shows the
 /// main monitor in halves and where each window would go, changing nothing; Arrange puts them
-/// there (the window left over minimised); Undo puts back the zones and the windows.
+/// there (the window left over stacked in a half, ADR 0032); Undo puts back the zones and the
+/// windows.
 fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
     let st = settled(engine)?;
     let ws = st
@@ -1924,10 +2129,10 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         "all_shown": all_shown,
         "ok": shown_zones == halves
             && planned.iter().all(Option::is_some)
-            && minimized_shown == 1
+            && minimized_shown == 0
             && untouched
-            && message.contains("in Halves.")
-            && message.contains("1 window minimized")
+            && message.contains("into Halves.")
+            && !message.contains("minimized")
             && got == halves
             && landed.iter().all(|x| x["ok"] == json!(true))
             && back <= SLACK
@@ -2221,7 +2426,7 @@ fn quick_menu(
             // It opens as soon as the pointer stops on the handle (the owner: "instantly"),
             // Mosaïk on its first line (it opens the window), Arrange, a strip of layouts, the
             // workspaces with the open one listed once, and no Undo row.
-            "ok": rested && open_ms <= 250 && labels.get(1) == Some(&"Arrange")
+            "ok": rested && open_ms <= 250 && labels.get(1) == Some(&"Move windows")
                 && ["Halves", "Thirds", "Main + side", "Half + stack", "Quarters"].iter().all(|l| labels.contains(l))
                 && ws_name.as_deref().is_none_or(|n| labels.iter().filter(|l| **l == n).count() == 1)
                 && !labels.contains(&"Undo arrange")
@@ -2251,7 +2456,7 @@ fn quick_menu(
     let row = menu
         .rows
         .iter()
-        .find(|r| r.label == "Arrange")
+        .find(|r| r.label == "Move windows")
         .ok_or("the menu has no Arrange row")?;
     glide(q.rect.center(), row.rect.center());
     pump_until(150, || false);

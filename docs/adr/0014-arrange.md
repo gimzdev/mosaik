@@ -76,3 +76,8 @@ Arrange makes no workspace and changes none ("arrange should arrange, save shoul
 zones it puts on screen are kept apart for tags, snapping and tabs until a workspace is opened
 or saved, and the workspace in use stays the one Save updates. Undo puts back what was on
 screen before.
+
+## Amended by ADR 0032 (2026-10-16)
+
+Windows left over stack in the zones (ADR 0017 had them minimised). Home's button, the tray and
+the side menu say Move windows.

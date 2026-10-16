@@ -146,6 +146,50 @@ pub(crate) fn move_all(moves: &[(WindowHandle, To)], wait: Duration) -> Vec<Outc
     done
 }
 
+/// Stacks `order` (front to back) under its first window, each just below the one before
+/// (ADR 0032: windows of one zone traded on a picture), on a thread of its own: the calls into
+/// the apps land in order, and the engine waits at most `wait`, handling its messages. The
+/// windows above the first stay above it, so nothing comes up over Mosaïk's own window. Returns
+/// whether every window took its place in time.
+pub(crate) fn stack(order: &[WindowHandle], wait: Duration) -> bool {
+    if order.len() < 2 {
+        return true;
+    }
+    let (finished, done) = mpsc::channel::<()>();
+    let wake = Wake::new();
+    let thread_wake = wake.clone();
+    let order = order.to_vec();
+    let spawned = std::thread::Builder::new()
+        .name("mosaik-stack".into())
+        .spawn(move || {
+            for pair in order.windows(2) {
+                if let [above, below] = pair
+                    && let Err(e) = arrange::put_below(window::hwnd(*below), window::hwnd(*above))
+                {
+                    tracing::debug!(error = %e, "window not stacked");
+                }
+            }
+            let _ = finished.send(());
+            if let Some(w) = thread_wake {
+                w.set();
+            }
+        });
+    if spawned.is_err() {
+        return false;
+    }
+    let deadline = Instant::now() + wait;
+    loop {
+        match done.try_recv() {
+            Ok(()) | Err(mpsc::TryRecvError::Disconnected) => return true,
+            Err(mpsc::TryRecvError::Empty) => {}
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        pump_for(slice(deadline, wake.as_deref()), wake.as_deref());
+    }
+}
+
 /// One window following the pointer (dragged by the band Mosaïk draws above it), moved on a
 /// thread of its own: the engine never waits for the app, and an app slow to move gets only the
 /// latest place. The moves are synchronous on that thread, so they land in order, and before a
