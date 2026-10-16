@@ -1647,6 +1647,15 @@ simetric and appealing". ADR 0032.
   its colour, and Undo stacking them as they were; the side menu; the tour: 32 pictures. Mosaïk
   left in the tray (1.0.2, protocol 11, watchdog, Win+Alt+Space); packed (289 files); both files
   beside the repository brought up to date (the key line kept).
+- **A fifth review** (of 5d4705f, ADR 0032, Fifth review): a window that keeps a size larger
+  than its part of a zone (Move windows puts it over the band) was not found there; in a layout
+  picked, a window parked in a zone it did not fit until the last step made a zone shown empty
+  trade with a window not shown (40 of 4497 random drops); a window snapped into a zone by Windows
+  did not fill the part inside wide gaps or below a band (157 of 20000 random screens); the tabs
+  of a group that cannot be hidden were measured without their strip. All fixed, tests first:
+  core 293 (a window kept taller than its part; drops onto zones shown empty in Half and stack
+  and Quarters; windows snapped into rows below bands and into quarters with gaps; the random
+  screens with bands now placing windows as the mover does).
 
 ## Owner decisions
 

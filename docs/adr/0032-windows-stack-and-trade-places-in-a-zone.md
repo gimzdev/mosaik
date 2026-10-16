@@ -36,9 +36,9 @@ strips aside, or on top of the others when none was.
 **As the screen is.** Zones that Move windows made with the layout asked for now (the same layout
 picked, or the layout of the task both times) are that layout again while every window there is
 still in the zone it was put in, filling the part of it a window takes (below a tab group's strip
-or a tag's band, inside the gaps: `Unit::inset`; a window that keeps its size where
-`place::fit_size` puts it there), and, for the layout of a task, no zone it put a window in is
-empty (step 0 of the plan,
+or a tag's band, inside the gaps: `Unit::inset`; a window that keeps a size there, its own or a
+least size larger than that part, where the mover puts it, `place::fit_size`), or the zone itself,
+and, for the layout of a task, no zone it put a window in is empty (step 0 of the plan,
 `KeptZone::arranged`): each window stays in its zone, the one in front its own, whatever task
 the windows, stacked anew, say now, and the zones keep the room they made for the user's moves.
 A window opened since, closed or taken out of its zone lays the screen out anew; then too,
@@ -194,3 +194,19 @@ style for a group's shown tab); the third review's guard holds for a task's layo
 that is the screen's again keeps its colour there (`NewZone::kept`); the colours of the zones kept
 are not given again. On 6000 random screens with bands, gaps and tab groups at 100% to 150%, the
 next plan finds every window where it is.
+
+## Fifth review (2026-10-16)
+
+A fifth agent reviewed 5d4705f and found, each now caught by a test written first: a window
+that goes no smaller than more than its part of a zone is put there by Move windows at the size
+it keeps, over the band (`place::fit_size`), so it did not fill its part and the next plan did not
+find it there; in a layout picked, the window the layout gave a zone that another window filled
+was put where that window had been even where it did not fit, until the last step took it out,
+so the picture showed that zone empty and a window dropped onto it traded places with one not
+shown (40 of 4497 random drops onto a zone shown empty moved another window); a window filling a
+zone exactly, as Windows' snapping or another tool leaves it, did not fill the part below a band
+or inside wide gaps and was stacked elsewhere (157 of 20000 random screens); the tabs of a group
+that cannot be hidden were measured without their strip's band. Now a window is in a zone when it
+fills its part, sits where the mover puts it at the size it keeps, or fills the zone itself; in
+a layout picked, that window is stacked where it fits and the zone left stays empty; every tab of
+a group is measured below its strip.

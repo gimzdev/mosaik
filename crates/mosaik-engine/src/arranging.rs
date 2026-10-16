@@ -240,11 +240,12 @@ impl Engine {
             }
             (spots, zone_of_window)
         };
-        // The tab that shows of each group: Move windows puts it below its strip's band.
-        let shown_tabs: HashSet<WindowHandle> = self
+        // The tabs of each group: Move windows puts them below their strip's band (the one
+        // that shows; every one, when they cannot be hidden and stay on screen).
+        let tabs: HashSet<WindowHandle> = self
             .groups_now()
             .iter()
-            .filter_map(|g| g.visible().map(|(_, w)| *w))
+            .flat_map(|g| g.open.iter().map(|(_, w)| *w))
             .collect();
         let units: Vec<Unit> = windows
             .iter()
@@ -253,7 +254,7 @@ impl Engine {
                 let dpi = topology.monitor_for_rect(w.frame_rect).dpi;
                 // Where Move windows puts it inside a zone: the window's part of it, which it
                 // fills once there (ADR 0032).
-                let placed_with = if shown_tabs.contains(&w.handle) {
+                let placed_with = if tabs.contains(&w.handle) {
                     style.for_tabs()
                 } else {
                     style
