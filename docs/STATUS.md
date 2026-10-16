@@ -1490,6 +1490,15 @@ discreet or not shown". ADR 0031.
   release anywhere, and a trade refits the zones the two apps were really in (the `smart` probe
   trades back from a stale zone). A resize making a zone too small, or two overlap, is not sent.
   Checks here: interface 128, Playwright 32, core 262, ipc 11, clippy, fmt.
+- **On the owner's PC** (job 0159, at b56b8a1, stopped at the owner's word after its first
+  probe: "just stop all pc job crons shit if they aint necessary and you must warn me before
+  them"; from now on a PC job is asked for first): build passing; `mosaik.ps1 test`: "Every test
+  passed."; the engine's arrange test ok; a release probe ran at the first try. The scan: 308
+  windows, the engine's 0.4 ms, every window 2.2 ms. `workspace --drag` (tags in title bars):
+  saved in 4 ms, opened in 11 ms, opening undone in 10 ms with the window it minimised back 0 px;
+  tab clicks with the strip above after each, in the same place, 0 px; memory with frames 8.9 MB.
+  Not run: the probe with tags above windows, `smart` (Halves stretched, two apps trading zones)
+  and the UI tour.
 
 ## Owner decisions
 
