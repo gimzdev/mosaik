@@ -1761,6 +1761,14 @@ simetric and appealing". ADR 0032.
   screen), Rename (in the row) and Edit, Edit zones being on the page. Tests first: core 307,
   interface 145, Playwright 40 (a drop beside a name joins, onto a name trades; the page's edges
   line up in the middle at two sizes; a rename in the row, with axe).
+- **On the owner's PC** (job 0175, at 1f9f870): build and every test passing (interface 145);
+  the engine's arrange test ok; the scan 0.4 ms (306 windows); `smart`, every check passing; the
+  side menu; the tour: 33 pictures, the workspace's page in one width in the middle, the rename
+  in the row, the zone editor reached through the workspace's page, Like Windows following
+  Windows. Mosaïk left in the tray (1.0.2, protocol 12, watchdog, Win+Alt+Space); the owner's
+  "Coding" on all ten layouts, every app kept, nothing saved. Packed (295 files); both files
+  beside the repository brought up to date (the key line kept), and again at the commit recording
+  this.
 
 ## Owner decisions
 
