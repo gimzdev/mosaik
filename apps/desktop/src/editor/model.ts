@@ -256,18 +256,12 @@ export function recolor(drafts: Draft[], key: string, color: ZoneColor): Draft[]
   return drafts.map((d) => (d.key === key ? { ...d, color } : d));
 }
 
-/** The same presets as `mosaik_core::presets::Preset`, by the same ids and shapes. */
+/** The presets of `mosaik_core::presets::Preset` offered here, by the same ids and shapes. The
+ * two of rows only (`rows`, `three-rows`) are left to the engine (`mosaikctl arrange`): the owner,
+ * on 2026-10-15, "noone ever uses that shit and if they want they can custom" (a zone split in
+ * rows here). */
 export type Preset =
-  | 'full'
-  | 'halves'
-  | 'thirds'
-  | 'main-side'
-  | 'side-main'
-  | 'quarters'
-  | 'half-stack'
-  | 'stack-half'
-  | 'rows'
-  | 'three-rows';
+  'full' | 'halves' | 'thirds' | 'main-side' | 'side-main' | 'quarters' | 'half-stack' | 'stack-half';
 
 export const PRESETS: readonly { id: Preset; label: string }[] = [
   { id: 'full', label: 'Full screen' },
@@ -278,8 +272,6 @@ export const PRESETS: readonly { id: Preset; label: string }[] = [
   { id: 'quarters', label: 'Quarters' },
   { id: 'half-stack', label: 'Half + stack' },
   { id: 'stack-half', label: 'Stack + half' },
-  { id: 'rows', label: 'Top + bottom' },
-  { id: 'three-rows', label: 'Three rows' },
 ];
 
 const SHAPES: Record<Preset, RatioRect[]> = {
@@ -316,15 +308,6 @@ const SHAPES: Record<Preset, RatioRect[]> = {
     { left: 0, top: 0, right: 0.5, bottom: 0.5 },
     { left: 0.5, top: 0, right: 1, bottom: 1 },
     { left: 0, top: 0.5, right: 0.5, bottom: 1 },
-  ],
-  rows: [
-    { left: 0, top: 0, right: 1, bottom: 0.5 },
-    { left: 0, top: 0.5, right: 1, bottom: 1 },
-  ],
-  'three-rows': [
-    { left: 0, top: 0, right: 1, bottom: 1 / 3 },
-    { left: 0, top: 1 / 3, right: 1, bottom: 2 / 3 },
-    { left: 0, top: 2 / 3, right: 1, bottom: 1 },
   ],
 };
 

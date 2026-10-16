@@ -43,6 +43,7 @@ fn arrange_goes_on_when_the_workspaces_cannot_be_saved() {
         Command::Arrange {
             preset: None,
             moves: Vec::new(),
+            areas: Vec::new(),
         },
         TIMEOUT,
     );
@@ -50,6 +51,7 @@ fn arrange_goes_on_when_the_workspaces_cannot_be_saved() {
         Command::PreviewArrange {
             preset: None,
             moves: Vec::new(),
+            areas: Vec::new(),
         },
         TIMEOUT,
     );

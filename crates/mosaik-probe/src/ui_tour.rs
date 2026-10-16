@@ -4,8 +4,9 @@
 //! with no name, and the order the Tab key goes through them. Home (with a workspace's ⋯ menu),
 //! a workspace's page, the zone editor and Settings (with Advanced and About), in dark and
 //! light, at the window's usual and smallest size, and the switcher. On Home, a layout is also
-//! chosen, so the picture shows where the windows would go, and a window of the picture is
-//! dragged onto another, then Reset (Arrange is never clicked: no window moves).
+//! chosen, so the picture shows where the windows would go; a window of the picture is dragged
+//! onto another, and a line between its zones across, each then undone with Undo changes
+//! (Arrange my screen is never clicked: no window moves).
 //!
 //! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Ship",
 //! with three zones and no windows, so nothing of the user's is touched. The profile has no
@@ -30,8 +31,8 @@ use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, TreeScope_Descendants, UIA_ButtonControlTypeId,
     UIA_CONTROLTYPE_ID, UIA_CheckBoxControlTypeId, UIA_ComboBoxControlTypeId, UIA_EditControlTypeId,
     UIA_GroupControlTypeId, UIA_HyperlinkControlTypeId, UIA_ListItemControlTypeId, UIA_MenuItemControlTypeId,
-    UIA_RadioButtonControlTypeId, UIA_SliderControlTypeId, UIA_SpinnerControlTypeId,
-    UIA_TabItemControlTypeId, UIA_TextControlTypeId,
+    UIA_RadioButtonControlTypeId, UIA_SeparatorControlTypeId, UIA_SliderControlTypeId,
+    UIA_SpinnerControlTypeId, UIA_TabItemControlTypeId, UIA_TextControlTypeId, UIA_ThumbControlTypeId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_ESCAPE, VK_TAB};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -132,6 +133,7 @@ impl Control {
                 | "link"
                 | "menu item"
                 | "radio"
+                | "separator"
                 | "slider"
                 | "spinner"
                 | "tab"
@@ -154,6 +156,9 @@ fn role_of(t: UIA_CONTROLTYPE_ID) -> &'static str {
         (UIA_TabItemControlTypeId, "tab"),
         (UIA_TextControlTypeId, "text"),
         (UIA_GroupControlTypeId, "group"),
+        // A line between zones: a separator that moves (Chromium may give it either).
+        (UIA_SeparatorControlTypeId, "separator"),
+        (UIA_ThumbControlTypeId, "separator"),
     ]
     .into_iter()
     .find(|(id, _)| *id == t)
@@ -476,8 +481,9 @@ impl Tour {
     }
 
     /// Drags the first window of Home's picture onto the second, as a person does (the button
-    /// held down all the way), and takes the picture once the two have traded places; Undo swaps
-    /// then puts them back. Only the picture changes: no window moves until Arrange.
+    /// held down all the way), and takes the picture once the two have traded places; Undo
+    /// changes then puts them back. Only the picture changes: no window moves until Arrange my
+    /// screen.
     fn drag_in_picture(&mut self, shot: &str) -> Result<(), String> {
         let smart = self.find("radio", "Automatic")?;
         let title = self.heading("Your screen")?;
@@ -531,7 +537,7 @@ impl Tour {
         let traded = at(&a.name).is_some_and(|p| b.rect.contains(p))
             && at(&b.name).is_some_and(|p| a.rect.contains(p));
         let file = self.shot(shot)?;
-        let reset = self.find("button", "Undo swaps");
+        let reset = self.find("button", "Undo changes");
         if let Ok(r) = &reset {
             self.click(r)?;
             pump_until(900, || false);
@@ -547,6 +553,75 @@ impl Tour {
             "dragged": a.name,
             "onto": b.name,
             "traded": traded,
+            "reset": reset.is_ok(),
+            "put_back": put_back,
+        });
+        println!("page {shot}: {page}");
+        self.pages.push(page);
+        Ok(())
+    }
+
+    /// Drags the first line between the zones of Home's picture 60 pixels to the left (or 30 up,
+    /// for a line across it), as a person does, and takes the picture once the zones have
+    /// followed; Undo changes then puts them back. Only the picture changes.
+    fn stretch_in_picture(&mut self, shot: &str) -> Result<(), String> {
+        let line = |tour: &Self| {
+            tour.uia
+                .controls(tour.hwnd)
+                .into_iter()
+                .find(|c| c.role == "separator" && c.name.starts_with("Line "))
+        };
+        let Some(before) = line(self) else {
+            let page = json!({ "page": shot, "skipped": "no line between zones in the picture" });
+            println!("page {shot}: {page}");
+            self.pages.push(page);
+            return Ok(());
+        };
+        let across = before.rect.height() > before.rect.width();
+        let step = 60;
+        let from = before.rect.center();
+        let to = if across {
+            Point::new(from.x - step, from.y)
+        } else {
+            Point::new(from.x, from.y - step / 2)
+        };
+        self.uncovered(from, &before.label())?;
+        input::move_to(from);
+        pump_until(150, || false);
+        {
+            let _button = LeftButton::press();
+            pump_until(100, || false);
+            for k in 1..=12 {
+                input::move_to(Point::new(
+                    from.x + (to.x - from.x) * k / 12,
+                    from.y + (to.y - from.y) * k / 12,
+                ));
+                pump_until(20, || false);
+            }
+            pump_until(150, || false);
+        }
+        pump_until(1000, || false);
+        let after = line(self);
+        // The line followed the pointer, to within the grid of 48ths.
+        let moved = after.as_ref().is_some_and(|a| {
+            let c = a.rect.center();
+            (c.x - to.x).abs() + (c.y - to.y).abs() <= step / 3
+        });
+        let file = self.shot(shot)?;
+        let reset = self.find("button", "Undo changes");
+        if let Ok(r) = &reset {
+            self.click(r)?;
+            pump_until(900, || false);
+        }
+        let put_back = line(self).is_some_and(|b| {
+            let c = b.rect.center();
+            (c.x - from.x).abs() + (c.y - from.y).abs() <= 4
+        });
+        let page = json!({
+            "page": shot,
+            "shot": file,
+            "line": before.name,
+            "stretched": moved,
             "reset": reset.is_ok(),
             "put_back": put_back,
         });
@@ -675,9 +750,11 @@ impl Tour {
         self.choose_layout("Thirds", "home-thirds")?;
         self.choose_layout("Automatic", "home-smart")?;
         self.drag_in_picture("home-dragged")?;
+        self.stretch_in_picture("home-stretched")?;
 
         // The workspace picked: the picture shows it as it would open, with Open in place of
-        // Arrange (nothing opens); Back returns to the screen as it is, and Arrange.
+        // Arrange my screen (nothing opens); Back returns to the screen as it is, and Arrange my
+        // screen.
         let row = self.reveal("button", WORKSPACE)?;
         self.click(&row)?;
         pump_until(1200, || false);
@@ -690,7 +767,7 @@ impl Tour {
             "page": "home-picked",
             "shot": picked_shot,
             "open_button": open,
-            "back_to_arrange": self.find("button", "Arrange").is_ok(),
+            "back_to_arrange": self.find("button", "Arrange my screen").is_ok(),
         });
         println!("page home-picked: {page}");
         self.pages.push(page);

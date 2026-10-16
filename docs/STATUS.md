@@ -1440,6 +1440,44 @@ workspace?", the owner: "arrange should arrange, save should save. yes". ADR 003
   - Mosaïk left in the tray (1.0.2, watchdog, Win+Alt+Space registered); packed (282 files) and
     both files beside the repository brought up to date (the key line kept).
 
+### Asked on 2026-10-15 (22:49): the picture, the layouts, Arrange my screen
+
+With three pictures of 1.0.2: the first-run line ("this shit has to go"); "Coding" previewed with
+two windows of one zone drawn over each other and its empty zone without colour or number ("look
+at the anim wtf is happening"); a workspace's apps with rows of zone dots ("the options look like
+absolute garbage"). Also: no More layouts, no layouts of rows only, "9 left fitting in 2 lines";
+Arrange renamed with its own icon ("apply is not clear enough"); windows dragged and zones
+stretched on Home's picture and on a workspace's. Then, of the bars between zones: "either
+discreet or not shown". ADR 0031.
+
+- **The picture** draws each zone once, numbered, in its colour, with the title bars of the
+  windows it takes one under the other (a tab group as one bar, an app to start dashed), "+2
+  more" when there is no room, and an empty zone with its number and colour, saying so. Mosaïk
+  names each preview zone and each window's zone and app (protocol 10), so the page no longer
+  works it out from rectangles.
+- **Changing it**: a window (or a tab) dragged by its bar onto another, or onto a zone, with a
+  ghost under the pointer; Enter, then Enter on a zone or a window, without a mouse. The lines
+  between zones resize them (the zone editor's, hidden until pointed at, there too). On Home the
+  areas go with `preview_arrange` and `arrange` (`editing::stretch_zones`, then the zones are
+  numbered); on a workspace's picture an app dropped on another trades zones with it
+  (`move_app` with `swap_with`, `editing::swap_apps`) and lines save its zones (`set_zones`, only
+  the edges moved changing), at once. What was changed on Home stays chosen after Arrange my
+  screen, so the picture shows the screen as it now is; Undo changes shows while the two differ.
+- **Home**: Arrange my screen, with Mosaïk's four tiles; "Nothing moves yet."; every layout in
+  view (Automatic, then two rows of four; no Top + bottom or Three rows, which the engine keeps
+  for `mosaikctl`); no word of welcome.
+- **A workspace's page** lists its apps zone by zone, each zone's number on its colour with a line
+  of its colour down its apps, Move (the other zones) and ×; an empty zone says how to fill it.
+- Tests first where they are code: the core's `stretch_zones` and `swap_apps` tests failed to
+  build before (neither existed); the interface's presets are checked against the engine's but
+  for the two of rows only. Checks here: fmt; clippy -D warnings for Windows on every crate; core
+  262, ipc 11; interface 122; Playwright 32 (a workspace like the owner's "Coding" in the stand-in
+  engine: each bar under the other, the empty zone with its number, a tab dragged into it). The
+  `smart` probe gains Halves stretched to two thirds (picture, Arrange, Undo) and two apps of the
+  open workspace trading zones; the UI tour drags a line of Home's picture. Site 1.11.4: "pick one
+  of eight layouts", and the windows and lines dragged. The Store's own description, typed in
+  Partner Center, still says "ten layouts" (docs/RELEASE.md has the new words).
+
 ## Owner decisions
 
 - 2026-10-11: the Patreon link is https://www.patreon.com/gimzdev (About and the tray menu only).

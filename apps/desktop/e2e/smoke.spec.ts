@@ -19,7 +19,8 @@ const shown = (page: Page, text: string) => page.locator('main').getByText(text,
 
 /** The stand-in's screen as the automatic layout would leave it. */
 const AUTO = 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 4, Slack in zone 3.';
-const arrange = (page: Page) => page.getByRole('button', { name: 'Arrange', exact: true });
+const arrange = (page: Page) => page.getByRole('button', { name: 'Arrange my screen', exact: true });
+const HINT = 'Drag a window onto another to swap them, or a line between zones to resize them.';
 
 /** Opens a workspace's page from its card's menu on Home. */
 async function editWorkspace(page: Page, name: string) {
@@ -39,39 +40,47 @@ test.describe('Home', () => {
   test('shows the automatic layout for the screen, Arrange and the layouts, and is accessible', async ({ page }) => {
     await page.goto('/');
     await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
-    await expect(shown(page, 'Automatic layout for coding. Nothing moves until you press Arrange.')).toBeVisible();
-    await expect(shown(page, 'Drag a window onto another to swap them.')).toBeVisible();
+    await expect(shown(page, 'Automatic layout for coding. Nothing moves yet.')).toBeVisible();
+    await expect(shown(page, HINT)).toBeVisible();
     const layouts = page.getByRole('region', { name: 'Your screen' }).getByRole('radio');
-    await expect(layouts).toHaveCount(6);
+    await expect(layouts).toHaveCount(9);
     await expect(page.getByRole('radio', { name: 'Automatic' })).toBeChecked();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await accessible(page);
     await windowDoesNotScroll(page);
   });
 
-  test('the other five layouts are under More layouts, and the one chosen there shows in its place', async ({
+  test('the layouts are all in view, in two rows beside Automatic, and a click anywhere on one chooses it', async ({
     page,
   }) => {
+    // The owner: "we dont want dropdown menu", "9 left fitting in 2 lines of options".
     await page.goto('/');
     await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
-    await page.getByRole('button', { name: 'More layouts' }).click();
-    const more = page.getByRole('group', { name: 'More layouts' });
-    await expect(more.getByRole('radio')).toHaveCount(5);
-    await expect(more.getByRole('radio', { name: 'Side + main' })).toBeFocused();
+    const group = page.getByRole('group', { name: 'Layout' });
+    await expect(group.getByRole('button')).toHaveCount(0);
+    // Automatic as tall as the two rows; the eight others in two rows of four.
+    const boxes = await Promise.all(
+      (await group.locator('label').all()).map(async (l) => {
+        const b = await l.boundingBox();
+        if (!b) throw new Error('a layout is not drawn');
+        return b;
+      }),
+    );
+    const [auto, ...others] = boxes;
+    if (!auto) throw new Error('Automatic is not drawn');
+    expect(others).toHaveLength(8);
+    expect(new Set(others.map((b) => Math.round(b.y))).size).toBe(2);
+    expect(auto.height).toBeGreaterThan(Math.max(...others.map((b) => b.height)) * 1.8);
+    await expect(group.getByText('Three rows')).toHaveCount(0);
+    await expect(group.getByText('Top + bottom')).toHaveCount(0);
+    // A click anywhere on it, its picture or its name, chooses it: its radio button covers it.
+    await group
+      .locator('label')
+      .filter({ hasText: 'Stack + half' })
+      .click({ position: { x: 12, y: 12 } });
+    await expect(group.getByRole('radio', { name: 'Stack + half' })).toBeChecked();
+    await expect(shown(page, 'Stack + half. Nothing moves yet.')).toBeVisible();
     await accessible(page);
-    // The arrow keys choose, and the picture follows; Enter closes the list.
-    await page.keyboard.press('ArrowDown');
-    await expect(more.getByRole('radio', { name: 'Stack + half' })).toBeChecked();
-    await expect(shown(page, 'Stack + half. Nothing moves until you press Arrange.')).toBeVisible();
-    await page.keyboard.press('Enter');
-    await expect(more).toBeHidden();
-    const button = page.getByRole('button', { name: 'More layouts: Stack + half' });
-    await expect(button).toBeFocused();
-    await button.click();
-    // The radio button covers the whole line: a click anywhere on it lands on the radio.
-    await page.getByRole('group', { name: 'More layouts' }).getByRole('radio', { name: 'Three rows' }).click();
-    await expect(page.getByRole('button', { name: 'More layouts: Three rows' })).toBeVisible();
-    await expect(shown(page, 'Three rows. Nothing moves until you press Arrange.')).toBeVisible();
   });
 
   test('a layout shows where the windows would go; Arrange puts them there; Undo puts them back', async ({ page }) => {
@@ -122,15 +131,41 @@ test.describe('Home', () => {
         return c && d ? Math.abs(c.x - b.x) < 3 && Math.abs(d.x - a.x) < 3 && Math.abs(c.y - b.y) < 3 : false;
       })
       .toBe(true);
-    await expect(page.getByRole('button', { name: 'Undo swaps' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Undo changes' })).toBeVisible();
     await accessible(page);
     await arrange(page).click();
     await expect(shown(page, 'Arranged 4 windows.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Undo swaps' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Undo changes' })).toBeHidden();
     // Arranged as they were put: the picture shows them there now.
     const [c, d] = [await code.boundingBox(), await browser.boundingBox()];
     expect(c && Math.abs(c.x - b.x) < 3).toBe(true);
     expect(d && Math.abs(d.x - a.x) < 3).toBe(true);
+  });
+
+  test('a line between zones dragged resizes them; Arrange puts the windows so, and the picture keeps them', async ({
+    page,
+  }) => {
+    // The owner: "for anim homescreen we should be able to stretch zones".
+    await page.goto('/');
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
+    const line = page.getByRole('separator', { name: 'Line right of zone 1 and zone 4, left of zone 2 and zone 3' });
+    await expect(line).toHaveAttribute('aria-valuenow', '58');
+    const box = await line.boundingBox();
+    const picture = await page.getByRole('group', { name: AUTO }).boundingBox();
+    if (!box || !picture) throw new Error('the line is not drawn');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    // A tenth of the picture to the left.
+    await page.mouse.move(box.x + box.width / 2 - picture.width / 10, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await expect(line).toHaveAttribute('aria-valuenow', '48');
+    await expect(page.getByRole('button', { name: 'Undo changes' })).toBeVisible();
+    await arrange(page).click();
+    await expect(shown(page, 'Arranged 4 windows.')).toBeVisible();
+    // The screen is as the picture showed it: nothing more to undo there.
+    await expect(page.getByRole('button', { name: 'Undo changes' })).toBeHidden();
+    await expect(line).toHaveAttribute('aria-valuenow', '48');
+    await accessible(page);
   });
 
   test('the arrow keys go through the layouts, and the picture follows', async ({ page }) => {
@@ -243,7 +278,7 @@ test.describe('Home', () => {
 });
 
 test.describe('a workspace’s page', () => {
-  test('shows how it opens, lists its apps with their zones, and moves, removes and adds them', async ({ page }) => {
+  test('shows how it opens, lists its apps by zone, and moves, removes and adds them', async ({ page }) => {
     await page.goto('/');
     await editWorkspace(page, 'Ship the release');
     await expect(
@@ -251,22 +286,61 @@ test.describe('a workspace’s page', () => {
         name: 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 3 with Slack as tabs.',
       }),
     ).toBeVisible();
-    const apps = page.getByRole('list', { name: 'Apps of “Ship the release”' });
+    const apps = page.getByRole('group', { name: 'Apps of “Ship the release”' });
     await expect(apps.getByRole('listitem')).toHaveCount(4);
-    await page.getByRole('button', { name: 'Put Slack in zone 2' }).click();
+    await expect(apps.getByRole('group', { name: 'Zone 3', exact: true }).getByRole('listitem')).toHaveCount(2);
+    await page.getByRole('button', { name: 'Move Slack to another zone' }).click();
+    await page.getByRole('button', { name: 'Zone 2', exact: true }).click();
     await expect(shown(page, 'Slack goes in zone 2.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Slack is in zone 2' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(apps.getByRole('group', { name: 'Zone 2', exact: true }).getByText('Slack')).toBeVisible();
     await page.getByRole('button', { name: 'Remove Slack' }).click();
     await expect(apps.getByRole('listitem')).toHaveCount(3);
     await page.getByRole('button', { name: 'Add a window to “Ship the release”' }).click();
-    await expect(page.getByRole('button', { name: /^Slack/ })).toBeInViewport({ ratio: 1 });
-    await page.getByRole('button', { name: /^Slack/ }).click();
+    const slack = page.getByRole('button', { name: 'Slack Slack window' });
+    await expect(slack).toBeInViewport({ ratio: 1 });
+    await slack.click();
     await expect(shown(page, 'Slack added.')).toBeVisible();
     await expect(apps.getByRole('listitem')).toHaveCount(4);
     await accessible(page);
     await windowDoesNotScroll(page);
     await page.getByRole('button', { name: 'Back to Home' }).click();
     await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
+  });
+
+  test('its picture shows each zone once, empty ones too, and an app dragged there goes in it', async ({ page }) => {
+    // The owner, of a workspace with two windows in one zone drawn over each other: "look at the
+    // anim wtf is happening"; and "when a zone is empty we dont have either color or number".
+    await page.goto('/');
+    await editWorkspace(page, 'Release checks');
+    const picture = page.getByRole('group', {
+      name: 'Visual Studio Code in zone 1, Windows Terminal in zone 1 with File Explorer as tabs, MSYS2 starts in zone 2, Google Chrome in zone 2 with Claude as tabs, Slack minimized. Zone 3 is empty.',
+    });
+    await expect(picture).toBeVisible();
+    await expect(picture.getByText('Empty', { exact: true })).toBeVisible();
+    // Every bar in its zone, one under the other: none drawn over another.
+    const bars = await Promise.all(
+      ['Visual Studio Code in zone 1', 'Windows Terminal, a tab in zone 1'].map(async (name) => {
+        const b = await page.getByRole('button', { name }).boundingBox();
+        if (!b) throw new Error(`${name} is not drawn`);
+        return b;
+      }),
+    );
+    const [first, second] = bars;
+    expect(first && second && second.y >= first.y + first.height).toBe(true);
+    // Claude dragged out of its group into the empty zone.
+    const claude = page.getByRole('button', { name: 'Claude, a tab in zone 2' });
+    const empty = await picture.getByText('Empty', { exact: true }).boundingBox();
+    const from = await claude.boundingBox();
+    if (!empty || !from) throw new Error('not drawn');
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(empty.x + empty.width / 2, empty.y + empty.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await expect(shown(page, 'Claude goes in zone 3.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Claude starts in zone 3' })).toBeVisible();
+    const apps = page.getByRole('group', { name: 'Apps of “Release checks”' });
+    await expect(apps.getByRole('group', { name: 'Zone 3', exact: true }).getByText('Claude')).toBeVisible();
+    await accessible(page);
   });
 
   test('renames it, and deletes it after asking', async ({ page }) => {
@@ -416,7 +490,8 @@ test.describe('the zone editor', () => {
     await expect(page.getByRole('separator')).toHaveCount(2);
     await expect(page.getByRole('separator', { name: /^Line right of .+ and .+, left of / })).toHaveCount(1);
     await page.getByRole('button', { name: 'Start from a layout' }).click();
-    await page.getByRole('button', { name: 'Three rows' }).click();
+    await expect(page.getByRole('button', { name: 'Three rows' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Thirds' }).click();
     await expect(page.getByRole('separator', { name: /^Line between / })).toHaveCount(2);
     await accessible(page);
   });
@@ -434,22 +509,19 @@ test('the first run has no tour: Home shows what Arrange will do, and Mosaïk st
   await page.goto('/?first=1');
   await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  // A word of welcome, and the workspaces made of the windows open, each until put away.
-  const welcome = shown(
-    page,
-    'Mosaïk tidies your windows. Choose a layout, press Arrange, and Undo puts everything back. The thin line on the right edge of your screen opens the same choices.',
-  );
-  await expect(welcome).toBeVisible();
+  // No word of welcome to put away (the owner: "this shit has to go"); the workspaces made of the
+  // windows open are said, until put away.
+  await expect(page.getByText(/Mosaïk tidies your windows/)).toHaveCount(0);
   await expect(shown(page, 'Made from the windows you had open. Delete any you don’t need.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Coding', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Your screen' }).getByRole('button', { name: 'Got it' })).toHaveCount(
+    0,
+  );
   await accessible(page);
-  await page.getByRole('region', { name: 'Your screen' }).getByRole('button', { name: 'Got it' }).click();
-  await expect(welcome).toBeHidden();
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('switch', { name: 'Start with Windows' })).toBeChecked();
   await page.getByRole('button', { name: 'Home' }).click();
   await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
-  await expect(welcome).toBeHidden();
 });
 
 test('Mosaïk’s notes wait behind a button, never over the page', async ({ page }) => {

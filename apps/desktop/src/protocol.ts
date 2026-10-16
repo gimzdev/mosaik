@@ -79,8 +79,8 @@ export type Command =
   | { cmd: 'switch'; workspace: string }
   | { cmd: 'save'; workspace: string | null }
   | { cmd: 'rescue' }
-  | { cmd: 'arrange'; preset?: string; moves?: ArrangeMove[] }
-  | { cmd: 'preview_arrange'; preset?: string; moves?: ArrangeMove[] }
+  | { cmd: 'arrange'; preset?: string; moves?: ArrangeMove[]; areas?: RatioRect[] }
+  | { cmd: 'preview_arrange'; preset?: string; moves?: ArrangeMove[]; areas?: RatioRect[] }
   | { cmd: 'preview_workspace'; workspace: string }
   | { cmd: 'undo_arrange' }
   | { cmd: 'show_switcher' }
@@ -97,7 +97,7 @@ export type Command =
   | { cmd: 'hold_hotkeys'; hold: boolean }
   | { cmd: 'apps'; workspace: string }
   | { cmd: 'add_app'; workspace: string; window: number; zone: string | null }
-  | { cmd: 'move_app'; workspace: string; app: string; zone: string }
+  | { cmd: 'move_app'; workspace: string; app: string; zone: string; swap_with?: string }
   | { cmd: 'remove_app'; workspace: string; app: string }
   | { cmd: 'sets' }
   | { cmd: 'open_set'; set: string }
@@ -145,6 +145,8 @@ export interface ArrangeMove {
 /** A zone of the main screen once arranged (`preview_arrange`), or once a workspace opens
  * (`preview_workspace`). */
 export interface PreviewZone {
+  /** Its id, which `move_app` and the zone editor take. */
+  id?: string;
   /** Its number by place ("1"). */
   name: string;
   color: ZoneColor;
@@ -157,6 +159,8 @@ export interface PreviewTab {
   icon: string | null;
   /** The tab that shows. */
   shown: boolean;
+  /** The workspace's app it is (for `move_app`). */
+  app?: string;
 }
 
 /** A window of the main screen: where it is, and where Arrange, or opening a workspace, would
@@ -177,6 +181,10 @@ export interface PreviewWindow {
   starting?: boolean;
   /** The tabs of its tab group, in order, itself among them; none when it is not a tab. */
   tabs?: PreviewTab[];
+  /** The zone it goes in (the `id` of one of the preview's zones); none for a place of its own. */
+  zone?: string;
+  /** The workspace's app it is (for `move_app`); none in a picture of Arrange. */
+  app?: string;
 }
 
 /** An app of a workspace. */
@@ -397,12 +405,21 @@ function isSettings(x: unknown): x is Settings {
   );
 }
 
+const isOptionalString = (v: unknown) => v === undefined || isString(v);
+
 function isPreviewZone(x: unknown): x is PreviewZone {
-  return isObject(x) && isString(x.name) && isString(x.color) && COLORS.has(x.color) && isRect(x.rect);
+  return (
+    isObject(x) &&
+    isOptionalString(x.id) &&
+    isString(x.name) &&
+    isString(x.color) &&
+    COLORS.has(x.color) &&
+    isRect(x.rect)
+  );
 }
 
 function isPreviewTab(x: unknown): x is PreviewTab {
-  return isObject(x) && isString(x.label) && isNullableString(x.icon) && isBoolean(x.shown);
+  return isObject(x) && isString(x.label) && isNullableString(x.icon) && isBoolean(x.shown) && isOptionalString(x.app);
 }
 
 function isPreviewWindow(x: unknown): x is PreviewWindow {
@@ -415,7 +432,9 @@ function isPreviewWindow(x: unknown): x is PreviewWindow {
     (x.then === null || isRect(x.then)) &&
     isBoolean(x.minimized) &&
     (x.starting === undefined || isBoolean(x.starting)) &&
-    (x.tabs === undefined || (Array.isArray(x.tabs) && x.tabs.every(isPreviewTab)))
+    (x.tabs === undefined || (Array.isArray(x.tabs) && x.tabs.every(isPreviewTab))) &&
+    isOptionalString(x.zone) &&
+    isOptionalString(x.app)
   );
 }
 

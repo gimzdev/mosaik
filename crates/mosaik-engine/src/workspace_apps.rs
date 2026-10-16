@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use mosaik_core::editing::{add_app, empty_zone, move_app, remove_app};
+use mosaik_core::editing::{add_app, empty_zone, move_app, remove_app, swap_apps};
 use mosaik_core::layout::{Launch, Place, Slot, SlotId, Workspace};
 use mosaik_core::window::WindowHandle;
 use mosaik_core::zone::ZoneId;
@@ -231,12 +231,33 @@ impl Engine {
         self.apps_reply(&id)
     }
 
-    /// Puts an app of a workspace in one of its zones.
-    pub(crate) fn move_app_to(&mut self, which: &str, slot: &SlotId, zone: &ZoneId) -> Reply {
+    /// Puts an app of a workspace in one of its zones; with `swap_with` (the app in that zone),
+    /// the two trade places (ADR 0031).
+    pub(crate) fn move_app_to(
+        &mut self,
+        which: &str,
+        slot: &SlotId,
+        zone: &ZoneId,
+        swap_with: Option<&SlotId>,
+    ) -> Reply {
         let Some(index) = self.find_workspace(which) else {
             return not_found(which);
         };
-        let updated = match move_app(&self.file.workspaces[index], slot, zone) {
+        let ws = &self.file.workspaces[index];
+        // The zone the app leaves, which the other one takes.
+        let left = ws
+            .layout
+            .slot(slot)
+            .and_then(|s| ws.layout.effective_place(s))
+            .and_then(|p| match p {
+                Place::Zone { zone } => Some(zone.clone()),
+                _ => None,
+            });
+        let moved = match swap_with {
+            Some(other) => swap_apps(ws, slot, other),
+            None => move_app(ws, slot, zone),
+        };
+        let updated = match moved {
             Ok(w) => w,
             Err(e) => return refused(e.to_string(), Some("Look at the list again.")),
         };
@@ -245,13 +266,16 @@ impl Engine {
             if let Err(e) = self.save_workspace(index, updated) {
                 return failed(e);
             }
-            tracing::info!(slot = %slot.0, zone = %zone.0, "app moved");
+            tracing::info!(slot = %slot.0, zone = %zone.0, swap = swap_with.is_some(), "app moved");
             if self.is_open(index) {
                 if let Some(a) = &mut self.active {
-                    // It may have been a tab shown for now: it is no longer one.
-                    a.shown.retain(|_, s| s != slot);
+                    // They may have been tabs shown for now: they are no longer.
+                    a.shown.retain(|_, s| s != slot && Some(&*s) != swap_with);
                 }
                 self.place_in(zone, None);
+                if let Some(left) = left.filter(|l| swap_with.is_some() && l != zone) {
+                    self.place_in(&left, None);
+                }
             }
         }
         self.apps_reply(&id)

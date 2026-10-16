@@ -58,3 +58,10 @@ minimised.
 
 A second click on a picked workspace keeps it picked; Back (or Esc) returns to the screen as it
 is, and a double-click opens the workspace.
+
+## Amended by ADR 0031 (2026-10-15)
+
+The picture draws each zone once, empty ones too, with its windows' title bars in it rather than
+each window where it lands (two of one zone were drawn over each other), and a workspace's apps
+and zones are changed on it, saved at once. A workspace's page lists its apps zone by zone, each
+with Move and ×, instead of a row of dots for each.

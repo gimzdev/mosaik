@@ -8,10 +8,21 @@
   back to your screen. Its ⋯ menu still opens it at once.
 - Easier to read and to click: larger text, every button on Home and a workspace's page at least
   40 px, and Ctrl with + or - zooms Mosaïk's window.
-- Home says what it shows ("Nothing moves until you press Arrange", how to swap two windows in the
-  picture, "Undo swaps"). Smart is now Automatic; Halves, Thirds, Main + side, Half + stack and
-  Quarters show with their names, the other five under More layouts. What an action did shows in
-  one place, under the picture.
+- Home's picture shows each zone once, numbered and in its colour, with the windows it takes listed
+  by their title bars, so two windows of one zone no longer draw over each other; an empty zone
+  keeps its number and colour and says it is empty.
+- On the picture, drag a window onto another (or onto a zone) to swap them, and drag the line
+  between two zones to resize them; "Undo changes" puts the layout back. The lines show only when
+  you point at them. "Arrange my screen" (with Mosaïk's tiles) then puts your windows there.
+- The same on a workspace's picture, on Home and on its page: drag its apps to other zones, or
+  onto each other to trade places, and resize its zones; each change is saved in the workspace at
+  once.
+- Every layout is in view, in two rows beside Automatic: Halves, Thirds, Main + side, Side +
+  main, Half + stack, Stack + half, Quarters and Full screen. Top + bottom and Three rows are gone
+  (split a zone into rows in the zone editor instead), and so is More layouts.
+- Home says what it shows ("Nothing moves yet.", how to change the picture). Smart is now
+  Automatic. What an action did shows in one place, under the picture. No more first-run tip to
+  put away.
 - The workspace on screen is marked "On screen" (it read as a button), in Mosaïk's window, the side
   menu and the switcher. "Save layout" is "Save as workspace".
 - Arrange arranges, Save saves: Arrange no longer makes a workspace ("Workspace 1") or changes the
@@ -37,8 +48,8 @@
 - Zones are numbered 1, 2, 3 by place, top left first, instead of being named after the apps in
   them ("Code", "Browser 2", "Zone"). Your workspaces' zones are numbered the first time 1.0.2
   starts, once.
-- A workspace's page shows how it opens, as Home does, and lists its apps one row each: a dot
-  for every zone, the app's own lit (click another to move it there), and × to take it out.
+- A workspace's page shows how it opens, as Home does, and lists its apps zone by zone: each
+  zone's number in its colour, Move to put an app in another zone, and × to take it out.
 - A group of tabs wears its tab strip in a band above it, every tab with room to be dragged out on
   its own (in a crowded title bar, only one tab and "+1" showed, and dragging took the whole
   group). Its strip follows it into another zone at once.

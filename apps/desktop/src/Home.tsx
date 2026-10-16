@@ -1,12 +1,14 @@
-// Home: the main screen as the chosen layout would leave it, with Arrange beside it, and the
-// workspaces in a column of their own. The automatic layout is chosen first (Arrange reads what
-// the windows are for); any of the ten layouts can be chosen instead, and the picture shows it
-// before anything moves. Windows dragged onto each other in the picture trade places. Arrange
-// does it; Undo puts everything back. A workspace picked in the column shows in the picture as
-// opening it would leave the screen, with Open (the owner: "we shouldnt open the workspace when
-// clicking on it it should show it in the anim as preview and show an open button"); a suggested
-// one shows the apps it starts, with Start these apps. Back, or Esc, shows the screen again.
-// Whatever an action did, here or in the column, is said in one line under the picture.
+// Home: the main screen as the chosen layout would leave it, with Arrange my screen beside it, and
+// the workspaces in a column of their own. The automatic layout is chosen first (Arrange reads
+// what the windows are for); any of the eight layouts can be chosen instead, and the picture shows
+// it before anything moves. On the picture, windows dragged onto each other trade places and the
+// lines between zones resize them (ADR 0031); Undo changes puts the layout's own back. Arrange my
+// screen does it; Undo puts everything back. A workspace picked in the column shows in the picture
+// as opening it would leave the screen, with Open (the owner: "we shouldnt open the workspace when
+// clicking on it it should show it in the anim as preview and show an open button"); its apps and
+// zones can be changed there too, and are saved in it at once. A suggested one shows the apps it
+// starts, with Start these apps. Back, or Esc, shows the screen again. Whatever an action did,
+// here or in the column, is said in one line under the picture.
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -18,19 +20,26 @@ import {
   type ArrangeMove,
   type ArrangePreview,
   type Command,
-  type EdgeSide,
+  type RatioRect,
   TASK_WORDS,
   type Task,
   type WorkspaceSummary,
   errorMessage,
 } from './protocol';
 import { useReads } from './reads';
-import { AppsToStart, Screen, moved, settled } from './Screen';
-import { Button, PageTitle, Status, Tip, useAnnounce } from './ui';
+import { AppsToStart, type PictureEdits, Screen, dropped, moved, settled, stretched } from './Screen';
+import { Button, PageTitle, Status, useAnnounce } from './ui';
+import { type Change, moveApp, resizeZones } from './workspacePicture';
 import { type Shown, type Sorted, type Target, Workspaces } from './Workspaces';
 
 /** No window put elsewhere: one list, so the pictures asked for do not change with each render. */
 const NO_MOVES: ArrangeMove[] = [];
+/** No zone resized on the picture: the layout's own. */
+const NO_AREAS: RatioRect[] = [];
+
+/** Areas in a few words, to tell one picture asked for from another. */
+const areasKey = (areas: readonly RatioRect[]) =>
+  areas.map((a) => [a.left, a.top, a.right, a.bottom].map((n) => n.toFixed(4)).join(',')).join(';');
 
 /** "Slack", "Slack and Teams", "Slack, Teams and Mail"; the windows of one app counted once,
  * in the place of its first ("2 File Explorer windows and Google Chrome"). */
@@ -105,18 +114,12 @@ interface Outcome {
 export function Home({
   onEditWorkspace,
   onEditZones,
-  welcome = null,
-  onWelcomeRead,
   sorted = null,
   onSortedRead,
   startsApps = true,
 }: {
   onEditWorkspace: (workspace: string) => void;
   onEditZones: (workspace: string) => void;
-  /** The first run's welcome, until it is put away, with the edge the side menu's line is on
-   * (none when it is off). */
-  welcome?: { sideMenu: EdgeSide | null } | null;
-  onWelcomeRead?: () => void;
   /** The first run's sorting of the windows into workspaces, until its note is put away. */
   sorted?: Sorted | null;
   onSortedRead?: () => void;
@@ -127,6 +130,8 @@ export function Home({
   const [choice, setChoice] = useState<Choice>('auto');
   /** The windows put elsewhere on the picture, in order, for the layout chosen. */
   const [moves, setMoves] = useState<ArrangeMove[]>(NO_MOVES);
+  /** The zones as resized on the picture, in its order, for the layout chosen. */
+  const [areas, setAreas] = useState<RatioRect[]>(NO_AREAS);
   /** A workspace or a suggested set picked in the column, shown instead of the screen. */
   const [shown, setShown] = useState<Shown | null>(null);
   /** The screen as Arrange would leave it, as Mosaïk last said. */
@@ -142,7 +147,8 @@ export function Home({
   /** What the last action did, said under the picture. */
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [undoable, setUndoable] = useState(false);
-  /** The picture right after a window is put elsewhere, until Mosaïk's answer comes. */
+  /** The picture right after a window is put elsewhere or a zone resized, until Mosaïk's answer
+   * comes. */
   const [early, setEarly] = useState<ArrangePreview | null>(null);
   /** The window picked on the picture (its app's name), waiting to be put elsewhere. */
   const [picking, setPicking] = useState<string | null>(null);
@@ -160,7 +166,7 @@ export function Home({
   // command that worked needs no read of its own; one refused says nothing, so it asks for one.
   const what = shown
     ? `${shown.kind}:${target(shown).id}`
-    : `arrange:${choice}:${moves.map((m) => `${String(m.window)}>${String(m.zone)}`).join(',')}`;
+    : `arrange:${choice}:${moves.map((m) => `${String(m.window)}>${String(m.zone)}`).join(',')}:${areasKey(areas)}`;
   const poke = useReads(async (_why, current) => {
     if (shown?.kind === 'set') return;
     if (shown?.kind === 'workspace') {
@@ -178,6 +184,7 @@ export function Home({
     const command: Command = { cmd: 'preview_arrange' };
     if (choice !== 'auto') command.preset = choice;
     if (moves.length) command.moves = moves;
+    if (areas.length) command.areas = areas;
     const reply = await request(command);
     if (!current()) return;
     if (reply.reply === 'preview') {
@@ -185,6 +192,8 @@ export function Home({
       if (choice === 'auto') setTask(reply.task ?? null);
       setEarly(null);
       setProblem(null);
+      // The zones resized are another layout's now (the windows on screen changed): let go.
+      if (areas.length && reply.zones.length !== areas.length) setAreas(NO_AREAS);
     } else {
       setProblem(errorMessage(reply) ?? 'Mosaïk could not read your screen.');
     }
@@ -220,18 +229,28 @@ export function Home({
     };
   }, [shown, back]);
 
+  /** Puts the layout's own windows and zones back. */
+  const reset = () => {
+    setMoves(NO_MOVES);
+    setAreas(NO_AREAS);
+    setEarly(null);
+    setPicking(null);
+  };
+
   const arrange = () => {
     setArranging(true);
     setOutcome(null);
     const command: Command = { cmd: 'arrange' };
     if (choice !== 'auto') command.preset = choice;
     if (moves.length) command.moves = moves;
+    if (areas.length) command.areas = areas;
     void request(command).then((reply) => {
       setArranging(false);
       if (reply.reply === 'done') {
+        // The windows and zones as put on the picture stay chosen: the picture now shows the
+        // screen as it is, and Undo changes waits for another change.
         say(reply.message);
         setUndoable(true);
-        setMoves(NO_MOVES);
       } else {
         say(errorMessage(reply) ?? 'Your windows could not be arranged.', true);
         // Some windows may have moved all the same.
@@ -261,6 +280,8 @@ export function Home({
       if (reply.reply === 'done') {
         say(reply.message);
         setShown(null);
+        // Other windows are on screen now: the layout starts afresh for them.
+        reset();
         // Opening a workspace can be undone, as Arrange can: it minimised the other windows on
         // its screens (ADR 0029). A set started is not: its apps would stay open.
         setUndoable(it.kind === 'workspace');
@@ -284,12 +305,29 @@ export function Home({
     setOutcome(null);
   };
 
+  /** The zones resized on the picture: they show so at once, then as Mosaïk says. */
+  const stretch = (next: RatioRect[]) => {
+    if (picture) setEarly(stretched(picture, next));
+    setAreas(next);
+    setOutcome(null);
+  };
+
   const choose = (next: Choice) => {
     setChoice(next);
-    setMoves(NO_MOVES);
-    setEarly(null);
+    reset();
     setOutcome(null);
     setShown(null);
+  };
+
+  /** A change made on a workspace's picture, saved in it: said once Mosaïk answers, and the
+   * picture read again. What Arrange or opening a workspace did is no longer undone after it. */
+  const edited = (change: Promise<Change>) => {
+    setOutcome(null);
+    void change.then(({ text, done }) => {
+      say(text, !done);
+      if (done) setUndoable(false);
+      poke(done ? 'own' : 'changed');
+    });
   };
 
   // While a layout's or a workspace's answer is on its way, the last picture stays.
@@ -297,6 +335,36 @@ export function Home({
   const picture = shown?.kind === 'workspace' ? (opening?.preview ?? screenPicture) : screenPicture;
   const hasWindows = (arranged?.windows.length ?? 0) > 0;
   const movable = hasWindows && !arranging && !shown;
+
+  /** What can be changed on the picture: the screen's windows and zones before Arrange, or a
+   * workspace's apps and zones once its own picture is in. */
+  const pictureEdits = ((): PictureEdits | undefined => {
+    if (shown?.kind === 'workspace') {
+      const id = shown.workspace.id;
+      const name = shown.workspace.name;
+      if (opening?.id !== id || launching) return undefined;
+      const now = opening.preview;
+      return {
+        kind: 'workspace',
+        onDrop: (d) => {
+          setOpening({ id, preview: dropped(now, d) });
+          edited(moveApp(id, name, now, d));
+        },
+        onStretch: (next) => {
+          setOpening({ id, preview: stretched(now, next) });
+          edited(resizeZones(id, name, now, next));
+        },
+      };
+    }
+    if (!movable) return undefined;
+    return {
+      kind: 'arrange',
+      onDrop: (d) => {
+        move(d.piece.window, d.zone);
+      },
+      onStretch: stretch,
+    };
+  })();
   const words = task ? TASK_WORDS[task] : null;
   const layout =
     choice === 'auto' ? (words ? `Automatic layout for ${words}` : 'Automatic layout') : choiceName(choice);
@@ -307,22 +375,28 @@ export function Home({
     : problem
       ? 'Your screen could not be read.'
       : hasWindows || !arranged
-        ? `${layout}. Nothing moves until you press Arrange.`
+        ? `${layout}. Nothing moves yet.`
         : 'Open some apps first.';
-  const said = shown
-    ? shown.kind === 'set'
-      ? setNote(shown.set, startsApps)
-      : opening?.id === shown.workspace.id
-        ? openingNote(opening.preview)
-        : null
-    : picking
-      ? `Choose where ${picking} goes. Esc cancels.`
+  const said = picking
+    ? `Choose where ${picking} goes. Esc cancels.`
+    : shown
+      ? shown.kind === 'set'
+        ? setNote(shown.set, startsApps)
+        : opening?.id === shown.workspace.id
+          ? openingNote(opening.preview)
+          : null
       : note(picture, choice);
-  const hint = movable && !said ? 'Drag a window onto another to swap them.' : null;
+  const hint =
+    pictureEdits && !said
+      ? shown
+        ? 'Drag an app onto another to swap them, or a line between zones to resize them.'
+        : 'Drag a window onto another to swap them, or a line between zones to resize them.'
+      : null;
   const busy =
     launching !== null && shown !== null && launching.kind === shown.kind && launching.id === target(shown).id;
 
-  /** The main button: Open for a workspace shown, Start these apps for a set, else Arrange. */
+  /** The main button: Open for a workspace shown, Start these apps for a set, else Arrange my
+   * screen, with Mosaïk's own tiles (Automatic has the spark). */
   const action = () => {
     if (shown?.kind === 'workspace') {
       return (
@@ -360,8 +434,8 @@ export function Home({
     }
     return (
       <Button tone="primary" size="lg" pending={arranging} disabled={!hasWindows || arranging} onClick={arrange}>
-        {arranging ? null : <Glyph name="spark" />}
-        Arrange
+        {arranging ? null : <Glyph name="tiles" />}
+        Arrange my screen
       </Button>
     );
   };
@@ -401,25 +475,9 @@ export function Home({
                 area={arranged?.work_area ?? null}
               />
             ) : (
-              <Screen
-                preview={picture}
-                unread={problem !== null && !shown}
-                onMove={movable ? move : undefined}
-                onPick={setPicking}
-              />
+              <Screen preview={picture} unread={problem !== null && !shown} edit={pictureEdits} onPick={setPicking} />
             )}
           </div>
-
-          {welcome && onWelcomeRead ? (
-            <div className="mt-3">
-              <Tip onDismiss={onWelcomeRead}>
-                Mosaïk tidies your windows. Choose a layout, press Arrange, and Undo puts everything back.
-                {welcome.sideMenu
-                  ? ` The thin line on the ${welcome.sideMenu} edge of your screen opens the same choices.`
-                  : ''}
-              </Tip>
-            </div>
-          ) : null}
 
           <div className="mt-3">
             <LayoutPicker value={shown ? null : choice} disabled={!hasWindows} onChoose={choose} />
@@ -438,17 +496,14 @@ export function Home({
                 Undo
               </Button>
             ) : null}
-            {moves.length && !arranging && !shown ? (
+            {(moves.length || areas.length) && !arranging && !shown && !(picture && settled(picture)) ? (
               <Button
                 tone="quiet"
                 size="sm"
-                hint="Put the windows back where the layout places them"
-                onClick={() => {
-                  setMoves(NO_MOVES);
-                  setEarly(null);
-                }}
+                hint="Put the windows and zones back as the layout has them"
+                onClick={reset}
               >
-                Undo swaps
+                Undo changes
               </Button>
             ) : null}
           </div>

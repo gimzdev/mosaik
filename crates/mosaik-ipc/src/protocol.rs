@@ -26,7 +26,10 @@ use thiserror::Error;
 /// `preview_arrange`), and each preview window's handle (`window`).
 /// 9: what opening a workspace would do (`preview_workspace`), with the apps it would start
 /// (`starting`) and each tab group's tabs (`tabs`); zones are numbered 1, 2, 3 by place.
-pub const PROTOCOL_VERSION: u32 = 9;
+/// 10: the zones of the home page's picture resized (`areas` on `arrange` and
+/// `preview_arrange`), two apps of a workspace trading zones (`swap_with` on `move_app`), and in
+/// a preview each zone's id and the zone and app of each window and tab (`id`, `zone`, `app`).
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -73,14 +76,20 @@ pub enum Command {
         /// order they were moved.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         moves: Vec<ArrangeMove>,
+        /// The main monitor's zones as the user stretched them on that picture, in the order
+        /// of the preview's zones (ADR 0031); ignored unless there is one for each.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        areas: Vec<RatioRect>,
     },
-    /// What `arrange` (with this `preset` and these `moves`, if any) would do now on the main
-    /// monitor, without doing it: the home page shows it.
+    /// What `arrange` (with this `preset`, these `moves` and `areas`, if any) would do now on
+    /// the main monitor, without doing it: the home page shows it.
     PreviewArrange {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         preset: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         moves: Vec<ArrangeMove>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        areas: Vec<RatioRect>,
     },
     /// What `switch` to `workspace` would do now on the main monitor, without doing it: its
     /// zones, its apps' windows from where they are to their places (apps not open start
@@ -152,6 +161,10 @@ pub enum Command {
         workspace: String,
         app: SlotId,
         zone: ZoneId,
+        /// The app in `zone` that takes `app`'s zone in return: the two trade places (one
+        /// dropped on the other in the workspace's picture, ADR 0031).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        swap_with: Option<SlotId>,
     },
     /// Takes an app out of a workspace; its window stays where it is. Answers with `apps`.
     RemoveApp {
@@ -356,6 +369,9 @@ pub struct ArrangeMove {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewZone {
+    /// The zone's id, which `move_app` and the zone editor take.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<ZoneId>,
     pub name: String,
     pub color: ZoneColor,
     pub rect: Rect,
@@ -384,6 +400,12 @@ pub struct PreviewWindow {
     /// The tabs of its tab group, in order, itself among them; empty when it is not a tab.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tabs: Vec<PreviewTab>,
+    /// The zone it goes in (its id in `zones`); `None` for a place of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<ZoneId>,
+    /// The workspace's app it is, which `move_app` takes; `None` in a picture of Arrange.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<SlotId>,
 }
 
 /// A tab of a tab group in a preview.
@@ -396,6 +418,9 @@ pub struct PreviewTab {
     pub icon: Option<String>,
     /// It is the tab that shows.
     pub shown: bool,
+    /// The workspace's app it is, which `move_app` takes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<SlotId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -688,10 +713,12 @@ mod tests {
             Command::Arrange {
                 preset: None,
                 moves: Vec::new(),
+                areas: Vec::new(),
             },
             Command::Arrange {
                 preset: Some("thirds".into()),
                 moves: Vec::new(),
+                areas: Vec::new(),
             },
             Command::PreviewArrange {
                 preset: Some("halves".into()),
@@ -699,6 +726,10 @@ mod tests {
                     window: WindowHandle(42),
                     zone: 1,
                 }],
+                areas: vec![
+                    RatioRect::new(0.0, 0.0, 0.6, 1.0).unwrap(),
+                    RatioRect::new(0.6, 0.0, 1.0, 1.0).unwrap(),
+                ],
             },
             Command::PreviewWorkspace {
                 workspace: "Ship the release".into(),
@@ -764,7 +795,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":9,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":10,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -773,7 +804,7 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":9,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":10,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
     }
 
     #[test]
@@ -785,6 +816,7 @@ mod tests {
             Command::Arrange {
                 preset: Some("thirds".into()),
                 moves: Vec::new(),
+                areas: Vec::new(),
             }
         );
         let line = serde_json::to_string(&Request::new(
@@ -792,10 +824,17 @@ mod tests {
             Command::PreviewArrange {
                 preset: None,
                 moves: Vec::new(),
+                areas: Vec::new(),
             },
         ))
         .unwrap();
-        assert!(!line.contains("moves"), "{line}");
+        assert!(!line.contains("moves") && !line.contains("areas"), "{line}");
+        // Protocol 9 clients move one app at a time: no trade.
+        let r: Request = serde_json::from_str(
+            r#"{"v":9,"id":5,"cmd":"move_app","workspace":"ship","app":"s1","zone":"z2"}"#,
+        )
+        .unwrap();
+        assert!(matches!(r.command, Command::MoveApp { swap_with: None, .. }));
         // A preview window from Mosaïk 7 has no handle: 0, which no window has.
         let w: PreviewWindow = serde_json::from_str(
             r#"{"label":"Code","icon":null,"now":{"left":0,"top":0,"right":9,"bottom":9},"then":null,"minimized":true}"#,
@@ -810,12 +849,12 @@ mod tests {
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":10,"id":1,"cmd":"state"}"#).unwrap_err();
+        let err = decode_request(br#"{"v":11,"id":1,"cmd":"state"}"#).unwrap_err();
         assert_eq!(
             err,
             ProtocolError::UnsupportedVersion {
-                client: 10,
-                server: 9
+                client: 11,
+                server: 10
             }
         );
         // Older clients are understood.
@@ -993,6 +1032,7 @@ mod wire {
             Command::Arrange {
                 preset: None,
                 moves: Vec::new(),
+                areas: Vec::new(),
             },
             Command::Arrange {
                 preset: Some("half-stack".into()),
@@ -1000,10 +1040,12 @@ mod wire {
                     window: WindowHandle(0x0003_04a2),
                     zone: 2,
                 }],
+                areas: Vec::new(),
             },
             Command::PreviewArrange {
                 preset: None,
                 moves: Vec::new(),
+                areas: Vec::new(),
             },
             Command::PreviewArrange {
                 preset: Some("thirds".into()),
@@ -1011,6 +1053,11 @@ mod wire {
                     window: WindowHandle(0x0003_04a2),
                     zone: 0,
                 }],
+                areas: vec![
+                    RatioRect::new(0.0, 0.0, 0.25, 1.0).unwrap_or(RatioRect::FULL),
+                    RatioRect::new(0.25, 0.0, 0.625, 1.0).unwrap_or(RatioRect::FULL),
+                    RatioRect::new(0.625, 0.0, 1.0, 1.0).unwrap_or(RatioRect::FULL),
+                ],
             },
             Command::PreviewWorkspace {
                 workspace: "ship".into(),
@@ -1059,6 +1106,13 @@ mod wire {
                 workspace: "ship".into(),
                 app: SlotId("s1".into()),
                 zone: ZoneId::new("z1"),
+                swap_with: None,
+            },
+            Command::MoveApp {
+                workspace: "ship".into(),
+                app: SlotId("s1".into()),
+                zone: ZoneId::new("z2"),
+                swap_with: Some(SlotId("s3".into())),
             },
             Command::RemoveApp {
                 workspace: "ship".into(),
@@ -1153,11 +1207,13 @@ mod wire {
                 work_area: Rect::new(0, 0, 1920, 1032),
                 zones: vec![
                     PreviewZone {
+                        id: Some(ZoneId::new("z1")),
                         name: "1".into(),
                         color: ZoneColor::Lapis,
                         rect: Rect::new(0, 0, 960, 1032),
                     },
                     PreviewZone {
+                        id: Some(ZoneId::new("z2")),
                         name: "2".into(),
                         color: ZoneColor::Verdigris,
                         rect: Rect::new(960, 0, 1920, 1032),
@@ -1175,6 +1231,8 @@ mod wire {
                         minimized: false,
                         starting: false,
                         tabs: Vec::new(),
+                        zone: Some(ZoneId::new("z1")),
+                        app: Some(SlotId("s1".into())),
                     },
                     PreviewWindow {
                         window: WindowHandle(0x0001_02f8),
@@ -1191,13 +1249,17 @@ mod wire {
                                     r"exe:C:\Program Files\Google\Chrome\Application\chrome.exe".into(),
                                 ),
                                 shown: true,
+                                app: Some(SlotId("s2".into())),
                             },
                             PreviewTab {
                                 label: "Claude".into(),
                                 icon: Some("app:Claude".into()),
                                 shown: false,
+                                app: Some(SlotId("s3".into())),
                             },
                         ],
+                        zone: Some(ZoneId::new("z2")),
+                        app: Some(SlotId("s2".into())),
                     },
                     PreviewWindow {
                         window: WindowHandle(0),
@@ -1208,6 +1270,8 @@ mod wire {
                         minimized: false,
                         starting: true,
                         tabs: Vec::new(),
+                        zone: None,
+                        app: Some(SlotId("s4".into())),
                     },
                     PreviewWindow {
                         window: WindowHandle(0x0005_0c1e),
@@ -1218,6 +1282,8 @@ mod wire {
                         minimized: true,
                         starting: false,
                         tabs: Vec::new(),
+                        zone: None,
+                        app: None,
                     },
                 ],
                 elsewhere: 1,

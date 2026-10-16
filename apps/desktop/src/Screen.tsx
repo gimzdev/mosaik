@@ -1,33 +1,46 @@
-// The picture of the main screen as the chosen layout, or a workspace opened, would leave it:
-// each window in its zone, a thin line of desktop apart, a tile of its zone's colour with its
-// app's icon and name and its zone's number in its title bar, as on screen. A tab group shows its
-// tabs above the tab that shows; an app a workspace starts shows dashed, where it will open. A
-// window the layout has no zone for is not in the picture (Home names it below). When the layout
-// changes, the windows glide to their new places.
+// The picture of the main screen as the chosen layout, or a workspace opened, would leave it: its
+// zones as tiles of their colours, a thin line of desktop apart, each with its number at the top
+// right, as Mosaïk tags windows on screen; in each zone, the windows it takes by their title bars,
+// front first, a tab group as one bar of its tabs, an app a workspace starts drawn dashed. An
+// empty zone shows its colour and number too, and says it is empty. (Each window used to be drawn
+// where it would be, so two windows of one zone were drawn one over the other; the owner, of a
+// workspace's picture: "look at the anim wtf is happening".) When the layout changes, the zones
+// glide to their new places.
 //
-// The windows can be put in other places before anything moves: a window dragged onto another
-// trades places with it, or takes an empty zone (the owner: "we should be able to drag drop apps
-// to permute them"). Without a mouse, Enter (or a click) picks a window and Enter on another
-// window, or on an empty zone, puts it there; Escape lets go. Each window keeps its colour when
-// it moves, as a tile moved in a mosaic; each zone keeps its number, which says where it is.
+// With `edit` (ADR 0031), the picture changes before anything moves: a window dragged onto
+// another trades places with it, or onto a zone goes there; the lines between zones are dragged
+// to resize them, or moved with the arrow keys (`LineHandle`). Without a mouse, Enter (or a click)
+// picks a window, and Enter on another window or on a zone puts it there; Escape lets go. In
+// Arrange's picture a window takes its zone's colour with it, as a tile moved in a mosaic, and a
+// zone keeps its number, which says where it is. In a workspace's, each of its apps moves on its
+// own (a tab leaves its group) and wears the colour of the zone it goes in.
 //
 // A suggested workspace has no zones until it opens: its picture shows the apps it starts.
 
 import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 
+import { LineHandle } from './editor/LineHandle';
+import { type Draft, lines } from './editor/model';
 import { AppIcon } from './icons';
-import type { ArrangePreview, PreviewWindow, PreviewZone, Rect } from './protocol';
+import type { ArrangePreview, PreviewTab, PreviewWindow, RatioRect, Rect, ZoneColor } from './protocol';
 import { zoneChip, zoneTint } from './ui';
 
 /** The main screen's work area when Mosaïk has not said yet: a common one. */
 const SOME_SCREEN: Rect = { left: 0, top: 0, right: 1920, bottom: 1032 };
+/** The monitor of the picture's zones, to the lines between them. */
+const MAIN = 'main';
+/** A title bar's height on the picture, and the room between two, in pixels. */
+const BAR = 24;
+const GAP = 3;
 
 /** The picture's size: as wide as there is room for, and never so tall that what is below it is
  * out of sight in a small window (`tallest`, in percent of the window's height). */
@@ -36,18 +49,30 @@ function deskSize(area: Rect, tallest: number): CSSProperties {
   return { aspectRatio: String(ratio), width: `min(100%, calc(${String(tallest)}vh * ${String(ratio)}))` };
 }
 
-/** Where `r` sits in `area`, as percentages for CSS. */
-function place(r: Rect, area: Rect) {
-  const w = area.right - area.left || 1;
-  const h = area.bottom - area.top || 1;
-  const pc = (v: number) => `${String(Math.round(v * 10000) / 100)}%`;
+const wide = (r: Rect) => r.right - r.left || 1;
+const high = (r: Rect) => r.bottom - r.top || 1;
+
+/** A rectangle of the work area as fractions of it. */
+function ratioOf(r: Rect, area: Rect): RatioRect {
   return {
-    left: pc((r.left - area.left) / w),
-    top: pc((r.top - area.top) / h),
-    width: pc((r.right - r.left) / w),
-    height: pc((r.bottom - r.top) / h),
+    left: (r.left - area.left) / wide(area),
+    top: (r.top - area.top) / high(area),
+    right: (r.right - area.left) / wide(area),
+    bottom: (r.bottom - area.top) / high(area),
   };
 }
+
+/** Fractions of the work area in its pixels, rounded as Mosaïk rounds them. */
+function rectOf(a: RatioRect, area: Rect): Rect {
+  return {
+    left: Math.round(area.left + a.left * wide(area)),
+    top: Math.round(area.top + a.top * high(area)),
+    right: Math.round(area.left + a.right * wide(area)),
+    bottom: Math.round(area.top + a.bottom * high(area)),
+  };
+}
+
+const pc = (v: number) => `${String(Math.round(v * 10000) / 100)}%`;
 
 const inside = (r: Rect, x: number, y: number) => x >= r.left && x < r.right && y >= r.top && y < r.bottom;
 
@@ -58,74 +83,224 @@ const near = (a: Rect, b: Rect) =>
   Math.abs(a.right - b.right) <= 4 &&
   Math.abs(a.bottom - b.bottom) <= 4;
 
-/** The zone a window would fill: the one its new place's middle is in. */
-export function zoneOf(preview: ArrangePreview, w: PreviewWindow): PreviewZone | null {
-  if (!w.then) return null;
+/** The zone a window goes in, by its index in the picture's zones; -1 for none (minimised, left
+ * where it is, or a place of its own, as full screen). Mosaïk says which; a picture that does not
+ * say (an older Mosaïk's) is read by where the window's middle lands. */
+export function zoneIndex(preview: ArrangePreview, w: PreviewWindow): number {
+  if (w.minimized || !w.then) return -1;
+  if (w.zone !== undefined) {
+    const i = preview.zones.findIndex((z) => z.id === w.zone);
+    if (i >= 0) return i;
+  } else if (w.app !== undefined) {
+    return -1;
+  }
   const x = (w.then.left + w.then.right) / 2;
   const y = (w.then.top + w.then.bottom) / 2;
-  return preview.zones.find((z) => inside(z.rect, x, y)) ?? null;
+  return preview.zones.findIndex((z) => inside(z.rect, x, y));
 }
 
 /** Every window is already where the layout would put it (or minimised by it). */
 export const settled = (preview: ArrangePreview) =>
   preview.windows.length > 0 && preview.windows.every((w) => w.minimized || (w.then !== null && near(w.now, w.then)));
 
-/** Where a window is, in words: "Visual Studio Code in zone 1", "Windows Terminal starts in
- * zone 3", with a tab group's other tabs. */
+/** "3", "3 and 4", "2, 3 and 4". */
+function and(list: string[]): string {
+  if (list.length <= 1) return list.join('');
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1] ?? ''}`;
+}
+
+/** Where a window goes, in words: "Visual Studio Code in zone 1", "Windows Terminal starts in zone
+ * 3 with Claude as tabs". */
 function said(preview: ArrangePreview, w: PreviewWindow): string {
   if (w.minimized) return `${w.label} minimized`;
-  const zone = zoneOf(preview, w);
-  const where = zone ? `in zone ${zone.name}` : 'where it is';
+  const zone = preview.zones[zoneIndex(preview, w)];
+  const where = zone ? `in zone ${zone.name}` : w.then ? 'in a place of its own' : 'where it is';
   const others = (w.tabs ?? []).filter((t) => !t.shown).map((t) => t.label);
   const tabs = others.length ? ` with ${others.join(', ')} as tabs` : '';
   return `${w.label} ${w.starting ? 'starts ' : ''}${where}${tabs}`;
 }
 
-/** The picture in words, for screen readers. */
+/** The picture in words, for screen readers: where each window goes, then the zones left empty. */
 export function describe(preview: ArrangePreview): string {
   if (preview.windows.length === 0) return 'Nothing is open on your main screen.';
-  return `${preview.windows.map((w) => said(preview, w)).join(', ')}.`;
+  const windows = `${preview.windows.map((w) => said(preview, w)).join(', ')}.`;
+  const taken = new Set(preview.windows.map((w) => zoneIndex(preview, w)));
+  const empty = preview.zones.filter((_, i) => !taken.has(i)).map((z) => z.name);
+  if (!empty.length) return windows;
+  return `${windows} ${empty.length === 1 ? `Zone ${and(empty)} is` : `Zones ${and(empty)} are`} empty.`;
 }
 
+/** A window put in the place of a zone, as Mosaïk will say it is. */
+const put = (w: PreviewWindow, z: ArrangePreview['zones'][number]): PreviewWindow => ({
+  ...w,
+  then: z.rect,
+  ...(z.id === undefined ? {} : { zone: z.id }),
+});
+
 /**
- * The picture once `window` is put in the `zone`-th zone, before Mosaïk says: it trades places
- * with the window there (or leaves its own zone empty), and the two zones' colours go with their
- * windows; the zones keep their numbers. Mosaïk's own answer follows (it may also make room for a
- * window that needs more).
+ * Arrange's picture once `window` is put in the `zone`-th zone, before Mosaïk says: it trades
+ * places with the windows there (or leaves its own zone empty), and the two zones' colours go with
+ * their windows; the zones keep their numbers. Mosaïk's own answer follows (it may also make room
+ * for a window that needs more).
  */
 export function moved(preview: ArrangePreview, window: number, zone: number): ArrangePreview {
   const target = preview.zones[zone];
   const w = preview.windows.find((x) => x.window === window);
-  const from = w ? zoneOf(preview, w) : null;
-  if (!target || !w || !from || from === target) return preview;
-  const there = preview.windows.find((x) => x !== w && zoneOf(preview, x) === target);
+  const fromIndex = w ? zoneIndex(preview, w) : -1;
+  const from = preview.zones[fromIndex];
+  if (!target || !w || !from || fromIndex === zone) return preview;
+  const there = new Set(preview.windows.filter((x) => x !== w && zoneIndex(preview, x) === zone));
   return {
     ...preview,
-    windows: preview.windows.map((x) =>
-      x === w ? { ...x, then: target.rect } : x === there ? { ...x, then: from.rect } : x,
+    windows: preview.windows.map((x) => (x === w ? put(x, target) : there.has(x) ? put(x, from) : x)),
+    zones: preview.zones.map((z, i) =>
+      i === zone ? { ...z, color: from.color } : i === fromIndex ? { ...z, color: target.color } : z,
     ),
-    zones: preview.zones.map((z) =>
-      z === target ? { ...z, color: from.color } : z === from ? { ...z, color: target.color } : z,
-    ),
+  };
+}
+
+/** A workspace's picture once an app is put elsewhere, before Mosaïk says: it goes in the zone,
+ * and the app it was dropped on takes its old one. A tab leaving its group waits for Mosaïk's
+ * answer, which draws the group again. */
+export function dropped(preview: ArrangePreview, d: Dropped): ArrangePreview {
+  if (d.piece.tab || d.onto?.tab) return preview;
+  const target = preview.zones[d.zone];
+  const w = preview.windows.find((x) => x.app !== undefined && x.app === d.piece.app);
+  if (!target || !w) return preview;
+  const from = preview.zones[zoneIndex(preview, w)];
+  const other = d.onto ? preview.windows.find((x) => x.app !== undefined && x.app === d.onto?.app) : undefined;
+  return {
+    ...preview,
+    windows: preview.windows.map((x) => (x === w ? put(x, target) : x === other && from ? put(x, from) : x)),
+  };
+}
+
+/** The zones' places as fractions of the work area, in the picture's order: where the lines
+ * between them start from. */
+export function areasOf(preview: ArrangePreview): RatioRect[] {
+  return preview.zones.map((z) => ratioOf(z.rect, preview.work_area));
+}
+
+/** The picture with its zones resized to `areas` (in its order), and their windows with them,
+ * before Mosaïk says. */
+export function stretched(preview: ArrangePreview, areas: readonly RatioRect[]): ArrangePreview {
+  if (areas.length !== preview.zones.length) return preview;
+  const rects = areas.map((a) => rectOf(a, preview.work_area));
+  return {
+    ...preview,
+    zones: preview.zones.map((z, i) => ({ ...z, rect: rects[i] ?? z.rect })),
+    windows: preview.windows.map((w) => {
+      const r = rects[zoneIndex(preview, w)];
+      return r && w.then ? { ...w, then: r } : w;
+    }),
   };
 }
 
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** A window being dragged: how far the pointer went, and the zone it is over (not its own). */
-interface Drag {
+/** A window, or a tab of a group, that can be put elsewhere on the picture. */
+export interface Piece {
+  /** The window; 0 for an app not open yet, or a tab behind another. */
   window: number;
-  dx: number;
-  dy: number;
-  over: number | null;
+  /** The workspace's app, in a workspace's picture. */
+  app: string | null;
+  label: string;
+  icon: string | null;
+  /** A tab of a group: put elsewhere, it leaves the group. */
+  tab: boolean;
 }
+
+/** A piece put elsewhere: in the `zone`-th zone of the picture, onto another piece (which takes
+ * its place) or onto the zone itself. */
+export interface Dropped {
+  piece: Piece;
+  zone: number;
+  onto: Piece | null;
+}
+
+export interface PictureEdits {
+  /** `arrange`: a window put in a zone trades places with the window there. `workspace`: an app
+   * dropped onto another trades zones with it, dropped onto a zone joins it. */
+  kind: 'arrange' | 'workspace';
+  onDrop: (dropped: Dropped) => void;
+  /** A line between zones was moved: the zones' areas now, in the picture's order. */
+  onStretch: (areas: RatioRect[]) => void;
+}
+
+/** A title bar in a zone: a window, or a tab group as one bar of its tabs. */
+interface Bar {
+  key: string;
+  window: PreviewWindow;
+  /** Its tabs, when it is a tab group. */
+  tabs: PreviewTab[] | null;
+}
+
+/** The bars of each zone, front first. */
+function barsByZone(preview: ArrangePreview): Bar[][] {
+  const out = preview.zones.map((): Bar[] => []);
+  preview.windows.forEach((w, i) => {
+    const bars = out[zoneIndex(preview, w)];
+    if (!bars) return;
+    const tabs = w.tabs && w.tabs.length > 1 ? w.tabs : null;
+    const id = w.app !== undefined ? `a:${w.app}` : w.window ? `w:${String(w.window)}` : `i:${String(i)}`;
+    bars.push({ key: tabs ? `g:${id}` : id, window: w, tabs });
+  });
+  return out;
+}
+
+const tabKey = (bar: Bar, t: PreviewTab, k: number) => (t.app !== undefined ? `a:${t.app}` : `${bar.key}:${String(k)}`);
+
+/** A target under the pointer, or picked with the keyboard: a zone, and the piece in it dropped
+ * onto (none for the zone itself). */
+interface Target {
+  zone: number;
+  onto: Piece | null;
+  key: string | null;
+}
+
+/** A piece being dragged: where the pointer holds it and its size (the ghost's), the pointer in
+ * the picture's box, and what it is over. */
+interface Drag {
+  key: string;
+  piece: Piece;
+  zone: number;
+  grab: { x: number; y: number; w: number; h: number };
+  x: number;
+  y: number;
+  over: Target | null;
+}
+
+/** Where a piece was last drawn, and in which zone: it flies from there when its zone changes. */
+interface Spot {
+  left: number;
+  top: number;
+  width: number;
+  zone: number;
+}
+
+/** A zone's tile: its colour, lit while something is about to be put in it. */
+function tileLook(color: ZoneColor, empty: boolean, lit: boolean): CSSProperties {
+  const tint = zoneTint(color);
+  return empty
+    ? {
+        borderStyle: 'dashed',
+        borderColor: `color-mix(in srgb, ${tint} 65%, transparent)`,
+        background: `color-mix(in srgb, ${tint} ${lit ? '26%' : '10%'}, transparent)`,
+      }
+    : {
+        borderColor: `color-mix(in srgb, ${tint} ${lit ? '100%' : '70%'}, transparent)`,
+        background: `linear-gradient(180deg, color-mix(in srgb, ${tint} ${lit ? '32%' : '18%'}, var(--desk-window)), var(--desk-window) 75%)`,
+      };
+}
+
+const BAR_TEXT = 'min-w-0 truncate text-left text-[12px] leading-none font-semibold text-[var(--desk-text)]';
 
 export function Screen({
   preview,
   unread = false,
   className = '',
   tallest = 44,
-  onMove,
+  edit,
   onPick,
 }: {
   /** null while Mosaïk is asked, or when it could not say (`unread`). */
@@ -135,134 +310,357 @@ export function Screen({
   /** Mosaïk could not read the screen (safe mode, say): the picture stays empty, and says so. */
   unread?: boolean;
   className?: string;
-  /** A window was put in another zone (its index in `preview.zones`). Without it, the picture
-   * stays as it is. */
-  onMove?: ((window: number, zone: number) => void) | undefined;
-  /** The window picked to be put elsewhere (its app's name), or none any more. */
+  /** What can be changed on it; without it, the picture stays as it is. */
+  edit?: PictureEdits | undefined;
+  /** The piece picked to be put elsewhere (its name), or none any more. */
   onPick?: (label: string | null) => void;
 }) {
   const area = preview?.work_area ?? SOME_SCREEN;
-  const shown = (preview?.windows ?? []).map((w, i) => ({ w, i })).filter(({ w }) => !w.minimized && w.then);
+  const zones = preview?.zones ?? [];
   const empty = preview !== null && preview.windows.length === 0;
-  const movable = onMove !== undefined && preview !== null;
+  const kind = preview ? (edit?.kind ?? null) : null;
   const hint = useId();
 
   const inner = useRef<HTMLDivElement>(null);
-  const tiles = useRef(new Map<number, HTMLElement>());
-  const [chosen, setChosen] = useState<number | null>(null);
-  const [drag, setDrag] = useState<Drag | null>(null);
-  /** Where the pointer went down on a window, until it moves far enough to drag it. */
-  const press = useRef<{ window: number; pointer: number; x: number; y: number } | null>(null);
+  /** Every bar and tab drawn: its element, the piece it is (when it can be moved) and its zone. */
+  const drawn = useRef(new Map<string, { el: HTMLElement; piece: Piece | null; zone: number }>());
+  const zoneEls = useRef(new Map<number, HTMLElement>());
+  const [picked, setPicked] = useState<{ key: string; piece: Piece; zone: number } | null>(null);
+  const [drag, setDragState] = useState<Drag | null>(null);
+  const dragging = useRef<Drag | null>(null);
+  /** Where the pointer went down on a piece, until it moves far enough to drag it. */
+  const press = useRef<{ key: string; pointer: number; x: number; y: number } | null>(null);
   /** A drag just ended: the click that follows is not a pick. */
   const dragged = useRef(false);
-  /** The window let go of, where it was on screen then: it lands from there. */
-  const [landing, setLanding] = useState<{ window: number; from: DOMRect } | null>(null);
+  const last = useRef(new Map<string, Spot>());
+  /** The piece to focus once drawn in its new place (put there with the keyboard). */
+  const focusNext = useRef<string | null>(null);
+  /** The zones as a line between them is being moved, over the picture they started from. */
+  const [stretch, setStretch] = useState<{ from: ArrangePreview; drafts: Draft[] } | null>(null);
+  const stretchLatest = useRef<Draft[] | null>(null);
+  /** The picture's size in pixels, for how many title bars a zone has room for. */
+  const [box, setBox] = useState<{ w: number; h: number } | null>(null);
 
-  // The zone each window is in, by its index in the picture's zones.
-  const zoneIndex = (w: PreviewWindow) => {
-    const z = preview ? zoneOf(preview, w) : null;
-    return z && preview ? preview.zones.indexOf(z) : -1;
-  };
-  const occupied = new Set(shown.map(({ w }) => zoneIndex(w)));
-  const freeZones = (preview?.zones ?? []).map((z, i) => ({ z, i })).filter(({ i }) => !occupied.has(i));
-  // A window picked that is not in the picture any more (another layout, a window closed) is let go.
-  const picked = chosen !== null && shown.some(({ w }) => w.window === chosen) ? chosen : null;
+  const bars = useMemo(() => (preview ? barsByZone(preview) : []), [preview]);
+  const base = useMemo(
+    (): Draft[] =>
+      preview
+        ? preview.zones.map((z, i) => ({
+            key: z.id ?? `z${String(i)}`,
+            id: z.id ?? null,
+            name: z.name,
+            color: z.color,
+            monitor: MAIN,
+            area: ratioOf(z.rect, preview.work_area),
+          }))
+        : [],
+    [preview],
+  );
+  const stretching = stretch !== null && stretch.from === preview;
+  const drafts = stretching ? stretch.drafts : base;
 
-  const pick = (window: number | null) => {
-    setChosen(window);
-    onPick?.(window === null ? null : (preview?.windows.find((w) => w.window === window)?.label ?? null));
-  };
-
-  const put = (window: number, zone: number) => {
-    pick(null);
-    if (zone >= 0) onMove?.(window, zone);
-  };
-
-  /** The zone under the pointer, by its index in the picture's zones. */
-  const zoneAt = (clientX: number, clientY: number) => {
-    const box = inner.current?.getBoundingClientRect();
-    if (!preview || !box || box.width <= 0 || box.height <= 0) return -1;
-    const x = area.left + ((clientX - box.left) / box.width) * (area.right - area.left);
-    const y = area.top + ((clientY - box.top) / box.height) * (area.bottom - area.top);
-    return preview.zones.findIndex((z) => inside(z.rect, x, y));
-  };
-
-  const down = (e: ReactPointerEvent, w: PreviewWindow) => {
-    if (!movable || e.button !== 0) return;
-    press.current = { window: w.window, pointer: e.pointerId, x: e.clientX, y: e.clientY };
-  };
-  const moveTo = (e: ReactPointerEvent, w: PreviewWindow) => {
-    const p = press.current;
-    if (p?.pointer !== e.pointerId || p.window !== w.window) return;
-    const dx = e.clientX - p.x;
-    const dy = e.clientY - p.y;
-    if (!drag && Math.hypot(dx, dy) < 5) return;
-    if (!drag) {
-      e.currentTarget.setPointerCapture(e.pointerId);
-      pick(null);
+  // A piece picked that is not in the picture any more (another layout, a window closed) is let go.
+  const pieceKeys = new Set<string>();
+  if (kind) {
+    for (const list of bars) {
+      for (const b of list) {
+        if (b.tabs && kind === 'workspace') b.tabs.forEach((t, k) => pieceKeys.add(tabKey(b, t, k)));
+        else pieceKeys.add(b.key);
+      }
     }
-    const at = zoneAt(e.clientX, e.clientY);
-    setDrag({ window: w.window, dx, dy, over: at >= 0 && at !== zoneIndex(w) ? at : null });
-  };
-  const up = (e: ReactPointerEvent) => {
-    if (press.current?.pointer !== e.pointerId) return;
-    press.current = null;
-    if (!drag) return;
-    dragged.current = true;
-    const from = tiles.current.get(drag.window)?.getBoundingClientRect();
-    if (from) setLanding({ window: drag.window, from });
-    setDrag(null);
-    if (drag.over !== null) put(drag.window, drag.over);
-  };
-  const cancel = () => {
-    press.current = null;
-    setDrag(null);
+  }
+  const chosen = picked && pieceKeys.has(picked.key) ? picked : null;
+  // Let go that way, the page stops saying where it goes.
+  const lost = picked !== null && chosen === null;
+  useEffect(() => {
+    if (lost) onPick?.(null);
+  }, [lost, onPick]);
+
+  const setDrag = (d: Drag | null) => {
+    dragging.current = d;
+    setDragState(d);
   };
 
-  const choose = (w: PreviewWindow) => {
-    if (dragged.current) {
-      dragged.current = false;
-      return;
-    }
-    if (picked === null) pick(w.window);
-    else if (picked === w.window) pick(null);
-    else put(picked, zoneIndex(w));
+  const pick = (next: { key: string; piece: Piece; zone: number } | null) => {
+    setPicked(next);
+    onPick?.(next ? next.piece.label : null);
   };
 
-  // A window let go of lands from where it was dropped, rather than jumping back first: drawn in
-  // its new place at once (no glide), then moved there from the drop.
-  useLayoutEffect(() => {
-    if (!landing) return;
-    const done = () => {
-      setLanding((now) => (now === landing ? null : now));
+  const putIn = (piece: Piece, t: Target) => {
+    edit?.onDrop({ piece, zone: t.zone, onto: t.onto });
+  };
+
+  /** What is under the pointer: another piece (not in the same zone), else a zone (not its own). */
+  const targetAt = (x: number, y: number, self: string, from: number): Target | null => {
+    const hit = (el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
     };
-    const el = tiles.current.get(landing.window);
-    const to = el?.getBoundingClientRect();
-    if (!el || !to || to.width <= 0 || to.height <= 0 || reducedMotion() || typeof el.animate !== 'function') {
-      requestAnimationFrame(done);
-      return;
+    for (const [key, d] of drawn.current) {
+      if (key !== self && d.piece && hit(d.el)) return d.zone === from ? null : { zone: d.zone, onto: d.piece, key };
     }
-    const dx = landing.from.left - to.left;
-    const dy = landing.from.top - to.top;
-    const sx = landing.from.width / to.width;
-    const sy = landing.from.height / to.height;
-    el.animate(
-      [
-        {
-          transform: `translate(${String(dx)}px, ${String(dy)}px) scale(${String(sx)}, ${String(sy)})`,
-          transformOrigin: '0 0',
-        },
-        { transform: 'none', transformOrigin: '0 0' },
-      ],
-      { duration: 260, easing: 'cubic-bezier(0.2, 0.75, 0.25, 1)' },
-    ).finished.then(done, done);
-  }, [landing]);
+    for (const [zone, el] of zoneEls.current) {
+      if (hit(el)) return zone === from ? null : { zone, onto: null, key: null };
+    }
+    return null;
+  };
+
+  /** Pointer and click handling for a piece: a press that moves 5 pixels drags it (a ghost of it
+   * follows the pointer); a click picks it, or puts the piece picked onto it. */
+  const handle = (key: string, piece: Piece, zone: number) => ({
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+      dragged.current = false;
+      if (e.button !== 0) return;
+      press.current = { key, pointer: e.pointerId, x: e.clientX, y: e.clientY };
+      // Held from the start: a quick drag off a small tab is still this piece's.
+      if (typeof e.currentTarget.setPointerCapture === 'function') e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    onPointerMove: (e: ReactPointerEvent<HTMLElement>) => {
+      const p = press.current;
+      const room = inner.current?.getBoundingClientRect();
+      if (p?.pointer !== e.pointerId || p.key !== key || !room) return;
+      let d = dragging.current;
+      if (!d) {
+        if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < 5) return;
+        pick(null);
+        const r = e.currentTarget.getBoundingClientRect();
+        d = {
+          key,
+          piece,
+          zone,
+          grab: { x: p.x - r.left, y: p.y - r.top, w: r.width, h: r.height },
+          x: 0,
+          y: 0,
+          over: null,
+        };
+      }
+      setDrag({
+        ...d,
+        x: e.clientX - room.left,
+        y: e.clientY - room.top,
+        over: targetAt(e.clientX, e.clientY, key, zone),
+      });
+    },
+    onPointerUp: (e: ReactPointerEvent<HTMLElement>) => {
+      if (press.current?.pointer !== e.pointerId) return;
+      press.current = null;
+      const d = dragging.current;
+      if (!d) return;
+      dragged.current = true;
+      setDrag(null);
+      const room = inner.current?.getBoundingClientRect();
+      if (!d.over || !room) return;
+      // It lands from where it was let go of.
+      last.current.set(key, {
+        left: room.left + d.x - d.grab.x,
+        top: room.top + d.y - d.grab.y,
+        width: d.grab.w,
+        zone: d.zone,
+      });
+      putIn(d.piece, d.over);
+    },
+    onPointerCancel: () => {
+      press.current = null;
+      setDrag(null);
+    },
+    onLostPointerCapture: () => {
+      if (dragging.current?.key === key && !press.current) setDrag(null);
+    },
+    onClick: () => {
+      if (dragged.current) {
+        dragged.current = false;
+        return;
+      }
+      if (!chosen || chosen.key === key || chosen.zone === zone) {
+        pick(chosen?.key === key ? null : { key, piece, zone });
+        return;
+      }
+      focusNext.current = chosen.key;
+      putIn(chosen.piece, { zone, onto: piece, key });
+      pick(null);
+    },
+  });
+
+  /** Keeps track of an element drawn for `key` while it is in the page. */
+  const keep = (key: string, piece: Piece | null, zone: number) => (el: HTMLElement | null) => {
+    if (!el) return;
+    drawn.current.set(key, { el, piece, zone });
+    return () => {
+      if (drawn.current.get(key)?.el === el) drawn.current.delete(key);
+    };
+  };
+
+  // A piece whose zone changed flies from where it was to its new place (and a piece put there
+  // with the keyboard takes the focus there).
+  useLayoutEffect(() => {
+    const before = last.current;
+    const now = new Map<string, Spot>();
+    const still = reducedMotion();
+    for (const [key, d] of drawn.current) {
+      const r = d.el.getBoundingClientRect();
+      now.set(key, { left: r.left, top: r.top, width: r.width, zone: d.zone });
+      const was = before.get(key);
+      if (!was || was.zone === d.zone || still || typeof d.el.animate !== 'function') continue;
+      if (r.width <= 0 || was.width <= 0) continue;
+      d.el.animate(
+        [
+          { transform: `translate(${String(was.left - r.left)}px, ${String(was.top - r.top)}px)` },
+          { transform: 'none' },
+        ],
+        { duration: 300, easing: 'cubic-bezier(0.2, 0.75, 0.25, 1)' },
+      );
+    }
+    last.current = now;
+    const next = focusNext.current;
+    if (next !== null) {
+      drawn.current.get(next)?.el.focus();
+      focusNext.current = null;
+    }
+  });
+
+  useLayoutEffect(() => {
+    const el = inner.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (!r) return;
+      setBox((b) => (b?.w === r.width && b.h === r.height ? b : { w: r.width, h: r.height }));
+    });
+    watch.observe(el);
+    return () => {
+      watch.disconnect();
+    };
+  }, []);
+
+  const stretchTo = (next: Draft[]) => {
+    if (!preview) return;
+    stretchLatest.current = next;
+    setStretch({ from: preview, drafts: next });
+  };
+  const stretchDone = () => {
+    const next = stretchLatest.current;
+    stretchLatest.current = null;
+    setStretch(null);
+    if (!next || !edit) return;
+    const moved = next.some((d, i) => {
+      const was = base[i]?.area;
+      return (
+        !was ||
+        Math.abs(d.area.left - was.left) > 1e-9 ||
+        Math.abs(d.area.top - was.top) > 1e-9 ||
+        Math.abs(d.area.right - was.right) > 1e-9 ||
+        Math.abs(d.area.bottom - was.bottom) > 1e-9
+      );
+    });
+    if (moved) edit.onStretch(next.map((d) => d.area));
+  };
 
   const label = preview
     ? describe(preview)
     : unread
       ? 'Your main screen could not be read.'
       : 'Your main screen, being read.';
+
+  /** A piece's look when it can be moved: picked, dragged (its ghost moves; it stays, faded), or
+   * about to be dropped onto. */
+  const movable = (key: string) =>
+    `touch-none cursor-grab focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)] ${
+      chosen?.key === key || drag?.over?.key === key ? 'outline-2 outline-offset-1 outline-[var(--text)]' : ''
+    } ${drag?.key === key ? 'opacity-40' : ''}`;
+
+  const bar = (b: Bar, zone: number, first: boolean, chip: string) => {
+    const w = b.window;
+    // The first bar leaves room on its right for the zone's number.
+    const room = first ? (chip.length > 1 ? 'pr-8' : 'pr-7') : '';
+    const look = `relative z-[1] flex h-[24px] min-w-0 shrink-0 items-center rounded-[6px] forced-colors:border forced-colors:border-[CanvasText] ${room} ${
+      w.starting ? 'border border-dashed border-[var(--desk-label)]' : 'bg-[var(--desk-bar)]'
+    }`;
+    if (b.tabs && kind === 'workspace') {
+      // A workspace's tab group: each tab is one of its apps, and moves on its own.
+      return (
+        <div key={b.key} className={`${look} gap-px px-[2px]`}>
+          {b.tabs.map((t, k) => {
+            const key = tabKey(b, t, k);
+            const piece: Piece | null =
+              t.app === undefined
+                ? null
+                : { window: t.shown ? w.window : 0, app: t.app, label: t.label, icon: t.icon, tab: true };
+            const seg = `@container flex h-[20px] min-w-0 flex-1 items-center gap-1 rounded-[4px] px-1 ${
+              t.shown ? 'bg-[color-mix(in_srgb,var(--desk-text)_14%,var(--desk-bar))]' : 'opacity-70'
+            }`;
+            const content = (
+              <>
+                <AppIcon icon={t.icon} size={12} />
+                <span className={`hidden @[60px]:block ${BAR_TEXT} text-[11px]`}>{t.label}</span>
+              </>
+            );
+            return piece ? (
+              <button
+                key={key}
+                ref={keep(key, piece, zone)}
+                type="button"
+                aria-label={`${t.label}, a tab in zone ${zones[zone]?.name ?? ''}`}
+                aria-pressed={chosen?.key === key}
+                aria-describedby={hint}
+                className={`${seg} ${movable(key)}`}
+                {...handle(key, piece, zone)}
+              >
+                {content}
+              </button>
+            ) : (
+              <span key={key} ref={keep(key, null, zone)} className={seg}>
+                {content}
+              </span>
+            );
+          })}
+        </div>
+      );
+    }
+    const piece: Piece | null =
+      kind === 'workspace'
+        ? w.app === undefined
+          ? null
+          : { window: w.window, app: w.app, label: w.label, icon: w.icon, tab: false }
+        : kind === 'arrange' && w.window
+          ? { window: w.window, app: null, label: w.label, icon: w.icon, tab: false }
+          : null;
+    const content = (
+      <>
+        <AppIcon icon={w.icon} size={13} />
+        <span className={`flex-1 ${BAR_TEXT}`}>{w.label}</span>
+        {b.tabs ? (
+          <span className="shrink-0 pl-1 text-[11px] leading-none text-[var(--desk-label)]">+{b.tabs.length - 1}</span>
+        ) : null}
+        {w.starting ? (
+          <span className="hidden shrink-0 pl-1 text-[11px] leading-none text-[var(--desk-label)] @[150px]:inline">
+            starts
+          </span>
+        ) : null}
+      </>
+    );
+    return piece && preview ? (
+      <button
+        key={b.key}
+        ref={keep(b.key, piece, zone)}
+        type="button"
+        aria-label={said(preview, w)}
+        aria-pressed={chosen?.key === b.key}
+        aria-describedby={hint}
+        className={`@container ${look} gap-1.5 pl-1.5 ${first ? '' : 'pr-1.5'} text-left ${movable(b.key)}`}
+        {...handle(b.key, piece, zone)}
+      >
+        {content}
+      </button>
+    ) : (
+      <div
+        key={b.key}
+        ref={keep(b.key, null, zone)}
+        className={`@container ${look} gap-1.5 pl-1.5 ${first ? '' : 'pr-1.5'}`}
+      >
+        {content}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -272,180 +670,132 @@ export function Screen({
       aria-label={label}
       aria-busy={(preview === null && !unread) || undefined}
       onKeyDown={(e) => {
-        if (e.key === 'Escape' && (picked !== null || drag)) {
+        if (e.key === 'Escape' && (chosen !== null || dragging.current)) {
+          e.preventDefault();
           e.stopPropagation();
-          cancel();
+          // A drag let go of this way ends with a click on the piece, which is not a pick.
+          if (dragging.current) dragged.current = true;
+          press.current = null;
+          setDrag(null);
           pick(null);
         }
       }}
     >
-      {movable ? (
+      {kind ? (
         <span id={hint} className="sr-only">
-          Drag it onto another window to swap them, or press Enter, then Enter on the other window.
+          {kind === 'arrange'
+            ? 'Drag it onto another window to swap them, or onto a zone. Or press Enter, then Enter on the other window or a zone.'
+            : 'Drag it onto another app to swap them, or onto a zone to put it there. Or press Enter, then Enter on the other app or a zone.'}
         </span>
       ) : null}
       <div ref={inner} className="absolute inset-[6px]">
-        {freeZones.map(({ z, i }) => {
-          const over = drag?.over === i;
-          const style: CSSProperties = {
-            ...place(z.rect, area),
-            borderColor: over ? 'var(--text)' : 'var(--desk-line)',
-          };
-          const box = 'absolute m-[3px] rounded-[9px] border border-dashed';
-          return picked !== null ? (
-            <button
-              key={`free-${String(i)}`}
-              type="button"
-              className={`${box} cursor-pointer hover:border-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)]`}
-              style={{
-                ...style,
-                width: `calc(${style.width ?? '0'} - 6px)`,
-                height: `calc(${style.height ?? '0'} - 6px)`,
-              }}
-              aria-label="Empty zone"
-              onClick={() => {
-                put(picked, i);
-              }}
-            />
-          ) : (
+        {zones.map((z, i) => {
+          const a = drafts[i]?.area ?? ratioOf(z.rect, area);
+          const list = bars[i] ?? [];
+          // As many title bars as there is room for; the rest are counted.
+          // Its inside: less its margins, border and padding.
+          const height = box ? (a.bottom - a.top) * box.h - 15 : Number.POSITIVE_INFINITY;
+          const room = Math.max(0, Math.floor((height + GAP) / (BAR + GAP)));
+          const fits = list.length <= room ? list : list.slice(0, room >= 2 ? room - 1 : room);
+          const more = list.length - fits.length;
+          const lit = drag?.over?.zone === i;
+          return (
             <div
-              key={`free-${String(i)}`}
-              aria-hidden="true"
-              className={box}
-              style={{
-                ...style,
-                width: `calc(${style.width ?? '0'} - 6px)`,
-                height: `calc(${style.height ?? '0'} - 6px)`,
+              key={i}
+              ref={(el) => {
+                if (!el) return;
+                zoneEls.current.set(i, el);
+                return () => {
+                  if (zoneEls.current.get(i) === el) zoneEls.current.delete(i);
+                };
               }}
-            />
-          );
-        })}
-        {shown.map(({ w, i }) => {
-          const zone = preview ? zoneOf(preview, w) : null;
-          const target = w.then ?? w.now;
-          const dragging = drag?.window === w.window;
-          const over = drag !== null && drag.over !== null && drag.over === zoneIndex(w);
-          const lit = picked === w.window || dragging;
-          const look: CSSProperties = {
-            ...place(target, area),
-            transitionDelay: `${String(Math.min(i, 6) * 40)}ms`,
-          };
-          if (dragging) {
-            Object.assign(look, {
-              transform: `translate(${String(drag.dx)}px, ${String(drag.dy)}px)`,
-              transitionProperty: 'none',
-              zIndex: 20,
-            });
-          } else if (landing?.window === w.window) {
-            // Drawn in its new place at once, over the window it traded with, as it lands.
-            look.transitionProperty = 'none';
-            look.zIndex = 20;
-          }
-          // A tab group: its tabs above the one that shows, as its strip is on screen.
-          const tabs = w.tabs && w.tabs.length > 1 ? w.tabs : null;
-          const tile = (
-            <span
-              className={`flex h-full flex-col overflow-hidden rounded-[9px] border forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] ${
-                dragging ? 'shadow-[0_22px_40px_-12px_rgb(0_0_0/0.85)]' : 'shadow-[0_10px_24px_-14px_rgb(0_0_0/0.8)]'
-              } ${lit || over ? 'outline-2 outline-offset-1 outline-[var(--text)]' : ''} ${
-                // An app a workspace starts: where it will open, drawn in outline.
-                w.starting ? 'border-dashed' : ''
-              }`}
+              className="stage-window absolute"
               style={{
-                // Each window a tile lit by its zone's colour, as in a mosaic.
-                borderColor: zone ? `color-mix(in srgb, ${zoneTint(zone.color)} 70%, transparent)` : 'var(--desk-line)',
-                background: w.starting
-                  ? 'transparent'
-                  : zone
-                    ? `linear-gradient(180deg, color-mix(in srgb, ${zoneTint(zone.color)} 18%, var(--desk-window)), var(--desk-window) 75%)`
-                    : 'var(--desk-window)',
+                left: pc(a.left),
+                top: pc(a.top),
+                width: pc(a.right - a.left),
+                height: pc(a.bottom - a.top),
+                ...(stretching
+                  ? { transitionProperty: 'none' }
+                  : { transitionDelay: `${String(Math.min(i, 6) * 30)}ms` }),
               }}
             >
-              {tabs ? (
-                <span className="flex h-[19px] min-w-0 shrink-0 items-end gap-px px-1 pt-[2px]">
-                  {tabs.map((t, k) => (
-                    <span
-                      key={`${t.label}-${String(k)}`}
-                      className={`flex h-full min-w-0 items-center gap-1 rounded-t-[4px] px-1 ${
-                        t.shown ? 'bg-[var(--desk-bar)]' : 'opacity-60'
-                      }`}
-                    >
-                      <AppIcon icon={t.icon} size={11} />
-                      <span className="hidden min-w-0 truncate text-[11px] leading-none font-semibold text-[var(--desk-text)] @[180px]:block">
-                        {t.label}
-                      </span>
-                    </span>
-                  ))}
-                </span>
-              ) : null}
-              <span
-                className={`flex h-[23px] min-w-0 shrink-0 items-center gap-1.5 px-1.5 ${
-                  w.starting ? '' : 'bg-[var(--desk-bar)]'
-                }`}
+              <div
+                className={`relative m-[3px] flex h-[calc(100%-6px)] flex-col gap-[3px] rounded-[10px] border-[1.5px] p-[3px] forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] ${
+                  list.length ? 'shadow-[0_10px_24px_-14px_rgb(0_0_0/0.8)]' : ''
+                } ${lit ? 'outline-2 outline-offset-1 outline-[var(--text)]' : ''}`}
+                style={tileLook(z.color, list.length === 0, lit)}
               >
-                <AppIcon icon={w.icon} size={13} />
-                <span className="min-w-0 flex-1 truncate text-left text-[12px] leading-none font-semibold text-[var(--desk-text)]">
-                  {w.label}
-                </span>
-                {zone ? (
+                {chosen && chosen.zone !== i ? (
+                  <button
+                    type="button"
+                    aria-label={`Zone ${z.name}${list.length ? '' : ', empty'}`}
+                    className="absolute inset-0 z-0 cursor-pointer rounded-[9px] hover:bg-[color-mix(in_srgb,var(--desk-text)_8%,transparent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)]"
+                    onClick={() => {
+                      focusNext.current = chosen.key;
+                      putIn(chosen.piece, { zone: i, onto: null, key: null });
+                      pick(null);
+                    }}
+                  />
+                ) : null}
+                {fits.map((b, k) => bar(b, i, k === 0, z.name))}
+                {more > 0 && room >= 2 ? (
                   <span
-                    className="zone-chip hidden min-w-[17px] shrink-0 rounded-full px-1 text-center text-[11px] leading-[16px] font-bold tabular-nums @[110px]:block"
-                    style={zoneChip(zone.color)}
+                    title={list
+                      .slice(fits.length)
+                      .map((b) => b.window.label)
+                      .join(', ')}
+                    className="relative z-[1] flex h-[24px] shrink-0 items-center px-1.5 text-[11px] leading-none font-semibold text-[var(--desk-label)]"
                   >
-                    {zone.name}
+                    +{more} more
                   </span>
                 ) : null}
-              </span>
-              {w.starting ? (
-                <span className="m-auto truncate px-1 text-center text-[11px] leading-tight text-[var(--desk-label)]">
-                  Opens here
-                </span>
-              ) : null}
-            </span>
-          );
-          return movable ? (
-            <button
-              key={w.window || `${w.label}-${String(i)}`}
-              ref={(el) => {
-                if (el) tiles.current.set(w.window, el);
-                else tiles.current.delete(w.window);
-              }}
-              type="button"
-              aria-label={said(preview, w)}
-              aria-pressed={picked === w.window}
-              aria-describedby={hint}
-              className={`stage-window @container absolute touch-none p-[3px] text-left focus-visible:outline-none [&:focus-visible>span]:outline-2 [&:focus-visible>span]:outline-offset-1 [&:focus-visible>span]:outline-[var(--focus)] ${
-                dragging ? 'cursor-grabbing' : 'cursor-grab'
-              }`}
-              style={look}
-              onPointerDown={(e) => {
-                down(e, w);
-              }}
-              onPointerMove={(e) => {
-                moveTo(e, w);
-              }}
-              onPointerUp={up}
-              onPointerCancel={cancel}
-              onLostPointerCapture={() => {
-                if (drag?.window === w.window && !press.current) setDrag(null);
-              }}
-              onClick={() => {
-                choose(w);
-              }}
-            >
-              {tile}
-            </button>
-          ) : (
-            <div
-              key={w.window || `${w.label}-${String(i)}`}
-              aria-hidden="true"
-              className="stage-window @container absolute p-[3px]"
-              style={look}
-            >
-              {tile}
+                {list.length === 0 && height >= BAR ? (
+                  <span className="pointer-events-none m-auto text-[12px] leading-none font-semibold text-[var(--desk-label)]">
+                    Empty
+                  </span>
+                ) : null}
+                {height >= 18 ? (
+                  <span
+                    aria-hidden="true"
+                    className="zone-chip pointer-events-none absolute top-[6px] right-[6px] z-[2] min-w-[18px] rounded-full px-1 text-center text-[11px] leading-[18px] font-bold tabular-nums"
+                    style={zoneChip(z.color)}
+                  >
+                    {z.name}
+                  </span>
+                ) : null}
+              </div>
             </div>
           );
         })}
+        {kind && !drag && !chosen && zones.length > 1
+          ? lines(drafts, MAIN).map((line) => (
+              <LineHandle
+                key={line.id}
+                line={line}
+                drafts={drafts}
+                monitor={MAIN}
+                area={inner}
+                onChange={stretchTo}
+                onEnd={stretchDone}
+              />
+            ))
+          : null}
+        {drag ? (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute z-30 flex items-center gap-1.5 rounded-[6px] bg-[var(--desk-bar)] px-1.5 shadow-[0_18px_34px_-12px_rgb(0_0_0/0.9)] outline-2 outline-[var(--text)]"
+            style={{
+              left: drag.x - drag.grab.x,
+              top: drag.y - drag.grab.y,
+              width: Math.max(drag.grab.w, 120),
+              height: drag.grab.h,
+            }}
+          >
+            <AppIcon icon={drag.piece.icon} size={13} />
+            <span className={BAR_TEXT}>{drag.piece.label}</span>
+          </span>
+        ) : null}
       </div>
       {empty ? (
         <p className="absolute inset-0 grid place-items-center px-4 text-center text-small font-semibold text-[var(--desk-label)]">

@@ -58,9 +58,6 @@ beforeEach(() => {
 /** Commands after which the engine says the workspaces changed (crates/mosaik-engine/src/thread.rs). */
 const CHANGES: ReadonlySet<Command['cmd']> = new Set(['sort_windows', 'switch', 'save', 'set_zones', 'open_set']);
 
-const WELCOME =
-  'Mosaïk tidies your windows. Choose a layout, press Arrange, and Undo puts everything back. The thin line on the right edge of your screen opens the same choices.';
-
 const shipZones: Reply = {
   reply: 'zones',
   workspace: 'ship',
@@ -153,7 +150,8 @@ describe('Mosaïk’s window', () => {
     );
   });
 
-  it('welcomes the first time, says which workspaces it made of the windows open, and remembers the welcome read', async () => {
+  it('says which workspaces the first run made of the windows open, with no word of welcome to put away', async () => {
+    // The owner, of the welcome Home had: "this shit has to go".
     let sorted = false;
     answer(freshSettings, (c) => {
       if (c.cmd === 'sort_windows') {
@@ -169,41 +167,16 @@ describe('Mosaïk’s window', () => {
       return null;
     });
     render(<App />);
-    expect(await screen.findByText(WELCOME)).toBeInTheDocument();
-    const workspaces = screen.getByRole('region', { name: 'Workspaces' });
+    const workspaces = await screen.findByRole('region', { name: 'Workspaces' });
     expect(
       await within(workspaces).findByText('Made from the windows you had open. Delete any you don’t need.'),
     ).toBeInTheDocument();
-    const [first, second] = screen.getAllByRole('button', { name: 'Got it' });
-    if (!first || !second) throw new Error('two notes, each with its button');
-    await userEvent.click(first);
-    expect(screen.queryByText(WELCOME)).not.toBeInTheDocument();
-    await userEvent.click(second);
+    expect(screen.queryByText(/Mosaïk tidies your windows/)).not.toBeInTheDocument();
+    const [only, ...more] = screen.getAllByRole('button', { name: 'Got it' });
+    expect(more).toHaveLength(0);
+    if (!only) throw new Error('the note of the workspaces made, with its button');
+    await userEvent.click(only);
     expect(screen.queryByRole('button', { name: 'Got it' })).not.toBeInTheDocument();
-    // Put away, it does not come back, even if the first run comes again.
-    cleanup();
-    render(<App />);
-    await screen.findByRole('heading', { name: 'Your screen' });
-    await waitFor(() => {
-      expect(sorted).toBe(true);
-    });
-    expect(screen.queryByText(WELCOME)).not.toBeInTheDocument();
-  });
-
-  it('keeps the welcome until it is put away, and none once set up', async () => {
-    answer(freshSettings);
-    render(<App />);
-    expect(await screen.findByText(WELCOME)).toBeInTheDocument();
-    // The window opens again later, the welcome not read yet.
-    cleanup();
-    answer(setUp);
-    render(<App />);
-    expect(await screen.findByText(WELCOME)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Got it' }));
-    cleanup();
-    render(<App />);
-    await screen.findByRole('heading', { name: 'Your screen' });
-    expect(screen.queryByText(WELCOME)).not.toBeInTheDocument();
   });
 
   it('starts with Windows by itself only when installed: a build run from a folder is left as it is', async () => {

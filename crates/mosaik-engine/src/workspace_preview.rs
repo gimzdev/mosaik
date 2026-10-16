@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use mosaik_core::geometry::Rect;
-use mosaik_core::layout::{Slot, SlotId, Workspace};
+use mosaik_core::layout::{Place, Slot, SlotId, Workspace};
 use mosaik_core::place::{Resolver, Target, fit_size};
 use mosaik_core::window::{WindowFacts, WindowHandle};
 use mosaik_core::workspace::plan_switch;
@@ -58,6 +58,7 @@ impl Engine {
             .filter_map(|z| {
                 let (rect, _) = resolver.zone_rect(&z.id)?;
                 on_main(rect).then(|| PreviewZone {
+                    id: Some(z.id.clone()),
                     name: z.name.clone(),
                     color: z.color,
                     rect,
@@ -79,6 +80,11 @@ impl Engine {
         let facts: HashMap<WindowHandle, &WindowFacts> = candidates.iter().map(|f| (f.handle, *f)).collect();
         let window_of: HashMap<SlotId, WindowHandle> = plan.assigned.iter().cloned().collect();
         let tabs = self.preview_tabs(&ws, &plan.tabs, &window_of);
+        // The zone an app goes in (a tab, its group's).
+        let zone_of = |slot: &SlotId| match ws.layout.effective_place(ws.layout.slot(slot)?)? {
+            Place::Zone { zone } => Some(zone.clone()),
+            _ => None,
+        };
 
         let mut windows = Vec::new();
         let mut elsewhere = 0u32;
@@ -102,6 +108,8 @@ impl Engine {
                 minimized: false,
                 starting: false,
                 tabs: group_tabs(&ws, &m.slot, &tabs),
+                zone: zone_of(&m.slot),
+                app: Some(m.slot.clone()),
             });
             drawn.insert(m.window);
         }
@@ -122,6 +130,8 @@ impl Engine {
                 minimized: false,
                 starting: false,
                 tabs: Vec::new(),
+                zone: None,
+                app: Some(slot.clone()),
             });
         }
         // Apps it starts, in their places. A tab group with a tab open shows that tab; one
@@ -159,6 +169,8 @@ impl Engine {
                 minimized: false,
                 starting: true,
                 tabs: group_tabs(&ws, slot_id, &tabs),
+                zone: zone_of(slot_id),
+                app: Some(shown.id.clone()),
             });
         }
         // The other windows on the main monitor go to the taskbar.
@@ -175,6 +187,8 @@ impl Engine {
                 minimized: true,
                 starting: false,
                 tabs: Vec::new(),
+                zone: None,
+                app: None,
             });
         }
         Reply::Preview(Box::new(ArrangePreview {
@@ -225,6 +239,7 @@ impl Engine {
                     label: self.app_name(slot, window),
                     icon: mosaik_core::icons::of_slot(slot),
                     shown,
+                    app: Some(id.clone()),
                 });
             }
             out.insert(g.id.clone(), tabs);

@@ -1,7 +1,8 @@
 // One workspace, to change: its name, its shortcut, its apps (each in the zone it goes in), its
 // zones, or to delete it. Opened from its card's ⋯ menu on Home. At the top, the picture of the
 // main screen as opening it would leave it, as on Home (the owner: "show visually the zones same
-// as homepage for that workspace specifically with arrangements aswell").
+// as homepage for that workspace specifically with arrangements aswell"), where its apps are
+// dragged to other zones and its zones resized (ADR 0031), saved at once.
 
 import { type SyntheticEvent, useId, useState } from 'react';
 
@@ -12,12 +13,13 @@ import {
   type ArrangePreview,
   type Command,
   MAX_NAME,
+  type WorkspaceApp,
   type WorkspaceApps,
   type WorkspaceSummary,
   errorMessage,
 } from './protocol';
 import { useReads } from './reads';
-import { Screen } from './Screen';
+import { type PictureEdits, Screen, dropped, stretched } from './Screen';
 import { ShortcutRecorder } from './shortcut';
 import {
   Button,
@@ -31,6 +33,7 @@ import {
   zoneChip,
   zoneTint,
 } from './ui';
+import { type Change, moveApp, resizeZones } from './workspacePicture';
 
 /** Whether a window's title says no more than its app's name ("Battle.net" and "Battle․net"). */
 const same = (title: string, label: string) =>
@@ -99,50 +102,27 @@ function Rename({
   );
 }
 
-/** A zone's dot: its number in its colour, 40 pixels across so it is easy to hit. The one an app
- * is in is solid and ringed; the others are rings of their colour, and a click puts the app
- * there. */
-function ZoneDot({
-  zone,
-  on,
-  label,
-  disabled,
-  onPick,
-}: {
-  zone: AppZone;
-  on: boolean;
-  label: string;
-  disabled: boolean;
-  onPick: () => void;
-}) {
+/** A zone's number on its colour, as on the picture. */
+function ZoneNumber({ zone, small = false }: { zone: AppZone; small?: boolean }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={on}
-      disabled={disabled}
-      onClick={() => {
-        if (!on) onPick();
-      }}
-      className={`grid size-10 shrink-0 place-items-center rounded-full border-2 text-small font-bold tabular-nums transition-[background-color,color] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)] disabled:cursor-progress forced-colors:border-[CanvasText] ${
-        on
-          ? 'zone-chip ring-2 ring-[var(--text)] ring-offset-2 ring-offset-[var(--bg)] forced-colors:ring-[Highlight]'
-          : 'cursor-pointer text-[var(--muted)] hover:text-[var(--text)]'
+    <span
+      aria-hidden="true"
+      className={`zone-chip grid shrink-0 place-items-center rounded-full font-bold tabular-nums ${
+        small ? 'size-5 text-[11px]' : 'size-7 text-caption'
       }`}
-      style={
-        on ? { ...zoneChip(zone.color), borderColor: zoneTint(zone.color) } : { borderColor: zoneTint(zone.color) }
-      }
+      style={zoneChip(zone.color)}
     >
       {zone.name}
-    </button>
+    </span>
   );
 }
 
-/** The workspace's apps, one compact row each: its icon and name, a dot for every zone with its
- * own zone's lit (a click on another moves it there), and × at the end of the row, apart from the
- * dots, to take it out (the owner: "show all dots and the selected one is highlighted", "the
- * remove should be a cross"). Then the windows on screen to add. In the open workspace a change
- * moves the window at once. Each change answers with the apps as they are now. */
+/** The workspace's apps, zone by zone as its picture shows them: each zone's number in its colour,
+ * a line of its colour down the apps it takes, a zone left empty said so (the owner, of the row of
+ * zone dots each app had: "the options look like absolute garbage"). Move puts an app in another
+ * zone (as dragging it on the picture does), and × takes it out. Then the windows on screen to
+ * add. In the open workspace a change moves the window at once. Each change answers with the
+ * apps as they are now. */
 function Apps({
   name,
   data,
@@ -164,6 +144,7 @@ function Apps({
   const announce = useAnnounce();
 
   const change = (key: string, command: Command, done: string) => {
+    if (busy !== null) return;
     setBusy(key);
     setOutcome(null);
     void request(command).then((reply) => {
@@ -187,55 +168,106 @@ function Apps({
       </p>
     );
   }
-  // The dots in the zones' order on screen: 1, 2, 3…
+  // The zones in their order on screen: 1, 2, 3…
   const zones = [...data.zones].sort((a, b) => Number(a.name) - Number(b.name) || a.name.localeCompare(b.name));
+  const known = new Set(zones.map((z) => z.id));
+  const loose = data.apps.filter((a) => a.zone === null || !known.has(a.zone));
+
+  const row = (a: WorkspaceApp) => {
+    const elsewhere = zones.filter((z) => z.id !== a.zone);
+    return (
+      <li key={a.id} className="flex min-h-11 items-center gap-2.5">
+        <AppIcon icon={a.icon} size={22} keepSpace />
+        <span className="min-w-0 flex-1 truncate font-semibold">{a.label}</span>
+        {a.tab ? (
+          <span className="shrink-0 rounded-md bg-[var(--hover)] px-1.5 py-0.5 text-caption font-semibold text-[var(--muted)]">
+            Tab
+          </span>
+        ) : null}
+        {elsewhere.length ? (
+          <MenuButton
+            label={`Move ${a.label} to another zone`}
+            items={elsewhere.map((z) => ({
+              key: z.id,
+              label: `Zone ${z.name}`,
+              icon: <ZoneNumber zone={z} small />,
+              onSelect: () => {
+                change(
+                  a.id,
+                  { cmd: 'move_app', workspace: data.workspace, app: a.id, zone: z.id },
+                  `${a.label} goes in zone ${z.name}.`,
+                );
+              },
+            }))}
+          >
+            Move
+            <Glyph name="down" size={14} />
+          </MenuButton>
+        ) : null}
+        <button
+          type="button"
+          aria-label={`Remove ${a.label}`}
+          title={`Remove ${a.label}`}
+          aria-busy={busy === a.id || undefined}
+          disabled={busy !== null}
+          onClick={() => {
+            change(a.id, { cmd: 'remove_app', workspace: data.workspace, app: a.id }, `${a.label} removed.`);
+          }}
+          className="grid size-10 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)] disabled:cursor-progress disabled:opacity-50"
+        >
+          <Glyph name="close" size={16} />
+        </button>
+      </li>
+    );
+  };
+
+  /** One zone and its apps: its number, then a line of its colour down to its last app. */
+  const group = (zone: AppZone | null, apps: WorkspaceApp[]) => (
+    <div
+      key={zone?.id ?? 'none'}
+      role="group"
+      aria-label={zone ? `Zone ${zone.name}` : 'Not in a zone'}
+      className="flex gap-3 py-2"
+    >
+      <div aria-hidden="true" className="flex w-7 shrink-0 flex-col items-center pt-2">
+        {zone ? (
+          <ZoneNumber zone={zone} />
+        ) : (
+          <span className="size-7 rounded-full border-2 border-dashed border-[var(--control)]" />
+        )}
+        {apps.length > 1 ? (
+          <span
+            className="mt-1.5 mb-3 w-0.5 flex-1 rounded-full forced-colors:bg-[CanvasText]"
+            style={{
+              background: zone ? `color-mix(in srgb, ${zoneTint(zone.color)} 55%, transparent)` : 'var(--line)',
+            }}
+          />
+        ) : null}
+      </div>
+      {apps.length ? (
+        <ul className="min-w-0 flex-1">{apps.map(row)}</ul>
+      ) : (
+        <p className="flex min-h-11 flex-1 items-center text-small text-[var(--muted)]">
+          Empty. Drag an app here on the picture, or use Move.
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <div>
-      {data.apps.length === 0 ? (
+      {data.apps.length === 0 && zones.length === 0 ? (
         <p className="py-3.5 text-small text-[var(--muted)]">No apps yet. Add a window that is open now.</p>
       ) : (
-        <ul aria-label={`Apps of “${name}”`} className="divide-y divide-[var(--line)]">
-          {data.apps.map((a) => (
-            <li key={a.id} className="flex items-center gap-3 py-2">
-              <AppIcon icon={a.icon} size={22} keepSpace />
-              <span className="min-w-0 flex-1 truncate font-semibold">{a.label}</span>
-              {zones.length ? (
-                <span role="group" aria-label={`Zone of ${a.label}`} className="flex shrink-0 flex-wrap gap-2">
-                  {zones.map((z) => (
-                    <ZoneDot
-                      key={z.id}
-                      zone={z}
-                      on={a.zone === z.id}
-                      label={a.zone === z.id ? `${a.label} is in zone ${z.name}` : `Put ${a.label} in zone ${z.name}`}
-                      disabled={busy !== null}
-                      onPick={() => {
-                        change(
-                          a.id,
-                          { cmd: 'move_app', workspace: data.workspace, app: a.id, zone: z.id },
-                          `${a.label} goes in zone ${z.name}.`,
-                        );
-                      }}
-                    />
-                  ))}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                aria-label={`Remove ${a.label}`}
-                title={`Remove ${a.label}`}
-                aria-busy={busy === a.id || undefined}
-                disabled={busy !== null}
-                onClick={() => {
-                  change(a.id, { cmd: 'remove_app', workspace: data.workspace, app: a.id }, `${a.label} removed.`);
-                }}
-                // Apart from the dots, so a click meant for a zone never takes the app out.
-                className="ml-3 grid size-10 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)] disabled:cursor-progress disabled:opacity-50"
-              >
-                <Glyph name="close" size={16} />
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div aria-label={`Apps of “${name}”`} role="group" className="divide-y divide-[var(--line)]">
+          {zones.map((z) =>
+            group(
+              z,
+              data.apps.filter((a) => a.zone === z.id),
+            ),
+          )}
+          {loose.length ? group(null, loose) : null}
+        </div>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] py-3">
         {data.windows.length ? (
@@ -290,6 +322,8 @@ export function WorkspacePage({
   /** The picture of it opened, and whether Mosaïk could not say. */
   const [preview, setPreview] = useState<ArrangePreview | null>(null);
   const [unread, setUnread] = useState(false);
+  /** The picture right after a change made on it, until Mosaïk's answer comes. */
+  const [early, setEarly] = useState<ArrangePreview | null>(null);
   const announce = useAnnounce();
 
   // What it is (its name, shortcut, whether it is on screen) changes only by Mosaïk's say-so;
@@ -321,12 +355,43 @@ export function WorkspacePage({
     if (!current()) return;
     setPreview(reply.reply === 'preview' ? reply : null);
     setUnread(reply.reply !== 'preview');
+    setEarly(null);
   }, workspace);
 
   const say = (text: string, error = false) => {
     setOutcome({ text, error });
     if (!error) announce(text);
   };
+
+  /** A change made on the picture, saved at once: said once Mosaïk answers. A move answers with
+   * the apps; a resize may number the zones anew, so everything is read again. */
+  const edited = (change: Promise<Change>) => {
+    setOutcome(null);
+    void change.then(({ reply, text, done }) => {
+      say(text, !done);
+      if (reply.reply === 'apps') {
+        setApps(reply);
+        poke('own');
+      } else {
+        if (!done) setEarly(null);
+        poke('changed');
+      }
+    });
+  };
+  const picture = early ?? preview;
+  const pictureEdits: PictureEdits | undefined = picture
+    ? {
+        kind: 'workspace',
+        onDrop: (d) => {
+          setEarly(dropped(picture, d));
+          edited(moveApp(workspace, null, picture, d));
+        },
+        onStretch: (areas) => {
+          setEarly(stretched(picture, areas));
+          edited(resizeZones(workspace, null, picture, areas));
+        },
+      }
+    : undefined;
 
   if (gone) {
     return (
@@ -428,7 +493,7 @@ export function WorkspacePage({
       </div>
 
       <div className="mt-4">
-        <Screen preview={preview} unread={unread} tallest={38} />
+        <Screen preview={picture} unread={unread} tallest={38} edit={pictureEdits} />
       </div>
 
       <Section title="Apps">

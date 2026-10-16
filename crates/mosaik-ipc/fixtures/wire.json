@@ -38,6 +38,26 @@
       "cmd": "preview_arrange"
     },
     {
+      "areas": [
+        {
+          "bottom": 1.0,
+          "left": 0.0,
+          "right": 0.25,
+          "top": 0.0
+        },
+        {
+          "bottom": 1.0,
+          "left": 0.25,
+          "right": 0.625,
+          "top": 0.0
+        },
+        {
+          "bottom": 1.0,
+          "left": 0.625,
+          "right": 1.0,
+          "top": 0.0
+        }
+      ],
       "cmd": "preview_arrange",
       "moves": [
         {
@@ -170,6 +190,13 @@
       "zone": "z1"
     },
     {
+      "app": "s1",
+      "cmd": "move_app",
+      "swap_with": "s3",
+      "workspace": "ship",
+      "zone": "z2"
+    },
+    {
       "app": "s2",
       "cmd": "remove_app",
       "workspace": "ship"
@@ -188,7 +215,7 @@
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 9,
+      "protocol": 10,
       "reply": "hello"
     },
     {
@@ -353,6 +380,7 @@
       "task": "coding",
       "windows": [
         {
+          "app": "s1",
           "icon": "exe:C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
           "label": "Visual Studio Code",
           "minimized": false,
@@ -368,9 +396,11 @@
             "right": 960,
             "top": 0
           },
-          "window": 197794
+          "window": 197794,
+          "zone": "z1"
         },
         {
+          "app": "s2",
           "icon": "exe:C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
           "label": "Google Chrome",
           "minimized": false,
@@ -382,11 +412,13 @@
           },
           "tabs": [
             {
+              "app": "s2",
               "icon": "exe:C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
               "label": "Google Chrome",
               "shown": true
             },
             {
+              "app": "s3",
               "icon": "app:Claude",
               "label": "Claude",
               "shown": false
@@ -398,9 +430,11 @@
             "right": 1920,
             "top": 0
           },
-          "window": 66296
+          "window": 66296,
+          "zone": "z2"
         },
         {
+          "app": "s4",
           "icon": "app:Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
           "label": "Windows Terminal",
           "minimized": false,
@@ -442,6 +476,7 @@
       "zones": [
         {
           "color": "lapis",
+          "id": "z1",
           "name": "1",
           "rect": {
             "bottom": 1032,
@@ -452,6 +487,7 @@
         },
         {
           "color": "verdigris",
+          "id": "z2",
           "name": "2",
           "rect": {
             "bottom": 1032,

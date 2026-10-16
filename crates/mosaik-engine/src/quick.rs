@@ -855,6 +855,7 @@ impl Engine {
             Action::Arrange => self.handle(Command::Arrange {
                 preset: None,
                 moves: Vec::new(),
+                areas: Vec::new(),
             }),
             Action::Layouts => {
                 let Some(preset) = tile.and_then(|k| LAYOUTS.get(k)) else {
@@ -863,6 +864,7 @@ impl Engine {
                 self.handle(Command::Arrange {
                     preset: Some(preset.id().to_owned()),
                     moves: Vec::new(),
+                    areas: Vec::new(),
                 })
             }
             Action::Workspace(i) => {

@@ -13,6 +13,7 @@ import {
   type SideMenuState,
   type WorkspaceApps,
   type WorkspaceSummary,
+  type ZoneEdit,
   isReply,
 } from './protocol';
 
@@ -74,12 +75,13 @@ export const coding: ArrangePreview = {
 export const preview = (p: ArrangePreview): Reply => ({ reply: 'preview', ...p });
 
 /** A workspace about to open: the editor goes to zone 1, the terminal starts in zone 2 with
- * Claude as a tab behind it, and the browser, not the workspace's, is minimised. */
+ * Claude as a tab behind it, and the browser, not the workspace's, is minimised. Its zones and
+ * apps by their ids, as Mosaïk says them. */
 export const opening: ArrangePreview = {
   work_area: WORK,
   zones: [
-    { name: '1', color: 'lapis', rect: { left: 0, top: 0, right: 1152, bottom: 1032 } },
-    { name: '2', color: 'verdigris', rect: { left: 1152, top: 0, right: 1920, bottom: 1032 } },
+    { id: 'z1', name: '1', color: 'lapis', rect: { left: 0, top: 0, right: 1152, bottom: 1032 } },
+    { id: 'z2', name: '2', color: 'verdigris', rect: { left: 1152, top: 0, right: 1920, bottom: 1032 } },
   ],
   windows: [
     {
@@ -89,6 +91,8 @@ export const opening: ArrangePreview = {
       now: { left: 200, top: 100, right: 1300, bottom: 900 },
       then: { left: 0, top: 0, right: 1152, bottom: 1032 },
       minimized: false,
+      zone: 'z1',
+      app: 's1',
     },
     {
       window: 0,
@@ -99,9 +103,11 @@ export const opening: ArrangePreview = {
       minimized: false,
       starting: true,
       tabs: [
-        { label: 'Windows Terminal', icon: null, shown: true },
-        { label: 'Claude', icon: 'app:Claude', shown: false },
+        { label: 'Windows Terminal', icon: null, shown: true, app: 's2' },
+        { label: 'Claude', icon: 'app:Claude', shown: false, app: 's3' },
       ],
+      zone: 'z2',
+      app: 's2',
     },
     {
       window: 102,
@@ -115,6 +121,23 @@ export const opening: ArrangePreview = {
   elsewhere: 0,
   task: null,
 };
+
+/** The zones of the workspace `opening` opens, as the zone editor reads them (`zones`): on the
+ * main screen, and one on another. */
+export const openingZones: ZoneEdit[] = [
+  { id: 'z1', name: '1', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.6, bottom: 1 } },
+  { id: 'z2', name: '2', color: 'verdigris', monitor: 'm1', area: { left: 0.6, top: 0, right: 1, bottom: 1 } },
+  { id: 'z9', name: '3', color: 'saffron', monitor: 'm2', area: { left: 0, top: 0, right: 1, bottom: 1 } },
+];
+
+export const zonesReply = (zones: ZoneEdit[], revision = '7'): Reply => ({
+  reply: 'zones',
+  workspace: 'ship',
+  name: 'Ship',
+  monitors: [],
+  zones,
+  revision,
+});
 
 export const nothingOpen: ArrangePreview = { work_area: WORK, zones: [], windows: [], elsewhere: 0, task: null };
 

@@ -1,8 +1,8 @@
 // Mosaïk's window: a bar with its two places, Home (the screen, Arrange, the layouts, the
 // workspaces) and Settings (with About at the end), and Mosaïk's notes; under it, the page. A
 // workspace's own page and the zone editor open from Home. The first time Mosaïk opens, it sorts
-// the windows open into workspaces: there is no tour to sit through, Home shows what Arrange will
-// do, with a word of welcome until it is put away.
+// the windows open into workspaces: there is no tour to sit through, and no word of welcome to put
+// away (the owner, of the one there was: "this shit has to go"); Home shows what Arrange will do.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -25,26 +25,6 @@ import { Announcer, Button, Confirm, Keys, Mark } from './ui';
 import { WorkspacePage } from './WorkspacePage';
 import type { Sorted } from './Workspaces';
 import { ZoneEditor } from './ZoneEditor';
-
-/** Whether the first run's welcome is still to be read (`show`) or was put away (`read`): kept by
- * the browser as a convenience, so it may come back empty (or refuse), and then the welcome shows
- * only during the first run. */
-const WELCOME = 'mosaik.welcome';
-function welcomeState(): 'show' | 'read' | null {
-  try {
-    const v = localStorage.getItem(WELCOME);
-    return v === 'show' || v === 'read' ? v : null;
-  } catch {
-    return null;
-  }
-}
-function keepWelcome(state: 'show' | 'read') {
-  try {
-    localStorage.setItem(WELCOME, state);
-  } catch {
-    // Not kept: the welcome may show again, or not after the first run.
-  }
-}
 
 type View =
   | { page: 'home' }
@@ -103,8 +83,6 @@ export function App() {
   const [editorDirty, setEditorDirty] = useState(false);
   /** The first run's work is under way (once per window). */
   const firstRunStarted = useRef(false);
-  /** Home's word of welcome, until it is put away. */
-  const [welcome, setWelcome] = useState(() => welcomeState() === 'show');
   /** The first run's sorting of the windows into workspaces, until its note is put away. */
   const [sorted, setSorted] = useState<Sorted | null>(null);
   /** Where the user asked to go while the zone editor has unsaved changes. */
@@ -215,15 +193,11 @@ export function App() {
 
   // The first run: the windows open now are sorted into a workspace per task (none moves), and
   // Mosaïk as installed starts with Windows from now on (Settings turns that off; a build run
-  // from a folder is left as it is). Home welcomes, and says which workspaces were made.
+  // from a folder is left as it is). Home says which workspaces were made.
   useEffect(() => {
     if (!settings || settings.onboarding_done || readOnly || firstRunStarted.current) return;
     firstRunStarted.current = true;
     void (async () => {
-      if (welcomeState() !== 'read') {
-        keepWelcome('show');
-        setWelcome(true);
-      }
       // The workspaces there are now, to tell the ones the sorting makes.
       const before = await request({ cmd: 'workspaces' });
       const reply = await request({ cmd: 'sort_windows' });
@@ -298,11 +272,6 @@ export function App() {
               }}
               onEditZones={(workspace) => {
                 setView({ page: 'zones', workspace, from: 'home' });
-              }}
-              welcome={welcome ? { sideMenu: sideMenu?.side ?? null } : null}
-              onWelcomeRead={() => {
-                keepWelcome('read');
-                setWelcome(false);
               }}
               sorted={sorted}
               onSortedRead={() => {

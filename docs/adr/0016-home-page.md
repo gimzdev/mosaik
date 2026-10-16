@@ -92,3 +92,9 @@ A workspace clicked is shown in the picture as it would open, with Open in place
 The picture says it is a preview. "Automatic" (was Smart) and five named layouts show, the other
 five under More layouts. A picked workspace or suggested set has Back, and opens with Open (a
 set: Start these apps) or a double-click. What an action did shows under the picture only.
+
+## Amended by ADR 0031 (2026-10-15)
+
+The picture draws each zone once, with its windows' title bars in it, and its lines resize the
+zones; Arrange my screen; the layouts all in view, without Top + bottom and Three rows; no word
+of welcome.

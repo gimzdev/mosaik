@@ -100,7 +100,7 @@ The rest of the submission, for reference (already set by submission 1):
 - **Store listing** (English):
   - *Description*: "Mosaïk gives every project its own workspace: your apps and windows arranged
     and ready in one click. See your screen as it will be before anything moves: Arrange lays
-    it out for what you are doing, or pick one of ten layouts. Carve the screen into named,
+    it out for what you are doing, or pick one of eight layouts. Carve the screen into named,
     coloured zones; drag a window near a zone and it is pulled in, resize it and the zones
     beside it make room. Stack any windows into tabs, browser tabs included, and flip between
     them. Save a workspace once and bring it back from the tray, the side menu at the screen's
@@ -108,7 +108,7 @@ The rest of the submission, for reference (already set by submission 1):
     Free and open source. No account, no telemetry, no network requests: your layouts stay on
     your computer."
   - *Features*: Zones that belong to the project, not the monitor · Arrange: every window in its
-    place in one click, with undo · Ten layouts, shown on your own windows before anything
+    place in one click, with undo · Eight layouts, shown on your own windows before anything
     moves · Sets of the apps you use together, opened in one click · Tabs for any app, not only
     the browser · One shortcut to switch workspaces · Works across monitors and scales · Your
     layouts stay on your computer · A safety net brings back every window, always.

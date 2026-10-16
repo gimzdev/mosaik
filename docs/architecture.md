@@ -140,24 +140,32 @@ the engine gathers windows and applies the result.
   a workspace, a drop, the zone editor, a resize by hand, a tab clicked, an app added or moved.
   A title bar read again later (a window brought forward) moves no window; a tab group's strip
   sits in the band above its visible tab (ADR 0027).
-- **A workspace's apps** (ADR 0018, 0023, 0024, 0028): Home shows them by their icons, and a
-  workspace's page shows how it opens (`preview_workspace`) above its apps, one row each: its
-  icon and name, a dot for every zone with its own lit, and × to take it out; a click on another
-  dot moves it there. Adding a window on screen, moving an app to another zone or removing it is
-  a pure edit (`mosaik_core::editing`), saved, then applied at once in the open workspace.
-- **Home** (ADR 0016, 0024): a picture of the main monitor as the layout chosen would leave it,
-  drawn from `preview_arrange` (the same preparation as Arrange, changing nothing): Automatic
-  first (Arrange's own layout for the task it reads), or one of ten layouts (five named beside
-  it, five under More layouts, ADR 0029); the windows it would
-  minimise are named under it. A window dragged onto another in the picture trades places with
-  it (a click or Enter picks one, a second puts it there); the moves go with the preview and with
-  Arrange (`mosaik_core::arrange::plan_moved`), each window keeping its colour, each zone its
-  number. Arrange does it, changing no workspace, and Undo brings everything back. Beside it, every workspace with its
-  apps' icons: a click shows it in the picture as opening it would leave the screen
-  (`preview_workspace`, the plan opening it follows: its apps glide to their zones, the apps it
-  would start drawn dashed where they open, a tab group with its tabs, the windows it would
-  minimise named below), with Open in place of Arrange (ADR 0028); a double-click opens it, and
-  Back, Esc or a layout chosen goes back to Arrange. A ⋯ menu has Open and the rest, then come
+- **A workspace's apps** (ADR 0018, 0023, 0024, 0028, 0031): Home shows them by their icons, and
+  a workspace's page shows how it opens (`preview_workspace`) above its apps, zone by zone: each
+  zone's number on its colour, a line of its colour down its apps, an empty zone saying so; each
+  app with Move (the other zones) and × to take it out. On its picture, an app dragged onto a
+  zone goes in it, onto another app the two trade zones (`move_app` with `swap_with`,
+  `editing::swap_apps`), and the lines between zones save its zones (`zones`, `set_zones`, only
+  the edges moved changing). Adding a window on screen, moving an app to another zone or removing
+  it is a pure edit (`mosaik_core::editing`), saved, then applied at once in the open workspace.
+- **Home** (ADR 0016, 0024, 0031): a picture of the main monitor as the layout chosen would leave
+  it, drawn from `preview_arrange` (the same preparation as Arrange, changing nothing): Automatic
+  first (Arrange's own layout for the task it reads), or one of eight layouts, all in view in two
+  rows; the windows it would minimise are named under it. The picture (`Screen.tsx`) draws each
+  zone once, numbered and coloured, empty ones too, with the title bars of the windows it takes
+  (Mosaïk says which: each preview zone's `id`, each window's and tab's `zone` and `app`). A
+  window dragged onto another, or onto a zone, trades places with it (a click or Enter picks one,
+  a second puts it there); the lines between zones resize them (`LineHandle`, hidden until
+  pointed at). The moves and the areas go with the preview and with Arrange
+  (`mosaik_core::arrange::plan_moved`, then `editing::stretch_zones` before the zones are
+  numbered), each window keeping its colour, each zone its number. Arrange my screen does it,
+  changing no workspace, and Undo brings everything back; what was changed stays chosen, and
+  Undo changes puts the layout's own back. Beside it, every workspace with its apps' icons: a
+  click shows it in the picture as opening it would leave the screen (`preview_workspace`, the
+  plan opening it follows: the apps it would start drawn dashed, a tab group as one bar of its
+  tabs, the windows it would minimise named below), with Open in place of Arrange my screen (ADR
+  0028), and its apps and zones changed on it are saved in it at once (`workspacePicture.ts`);
+  a double-click opens it, and Back, Esc or a layout chosen goes back to the screen. A ⋯ menu has Open and the rest, then come
   the suggested sets, shown the same way before "Start these apps" (ADR 0029). What an action did
   shows under the picture. The window reads from the engine once per burst (`reads.ts`: focus, a
   change and its own action make one read 150 ms after the last). Mosaïk's window has two

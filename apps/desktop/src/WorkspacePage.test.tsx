@@ -3,7 +3,18 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Command, Reply } from './protocol';
-import { appsOf, done, failed, opening, preview, shown, workspace, workspacesReply } from './test-fixtures';
+import {
+  appsOf,
+  done,
+  failed,
+  opening,
+  openingZones,
+  preview,
+  shown,
+  workspace,
+  workspacesReply,
+  zonesReply,
+} from './test-fixtures';
 import { Announcer } from './ui';
 import { WorkspacePage } from './WorkspacePage';
 
@@ -48,6 +59,7 @@ const CHANGES: ReadonlySet<Command['cmd']> = new Set([
   'add_app',
   'move_app',
   'remove_app',
+  'set_zones',
 ]);
 
 function answer(extra: (c: Command) => Reply | null = () => null, exists = true) {
@@ -76,6 +88,9 @@ function answer(extra: (c: Command) => Reply | null = () => null, exists = true)
         return done('Saved.');
       case 'check_hotkey':
         return { reply: 'hotkey', hotkey: c.hotkey, problem: null, warnings: [] };
+      case 'zones':
+      case 'set_zones':
+        return zonesReply(openingZones);
       case 'move_app':
         return appsOf({
           apps: [
@@ -126,24 +141,23 @@ describe('a workspace’s page', () => {
     expect(screen.getByText('2 apps · 2 zones')).toBeInTheDocument();
   });
 
-  it('shows each app with a dot for every zone, its own lit, and moves, removes and adds them', async () => {
-    // The owner: "show all dots and the selected one is highlighted", "the remove should be a
-    // cross", zones "1 2 3 4 5 6".
+  it('lists its apps zone by zone, and moves, removes and adds them', async () => {
+    // The owner, of a row of zone dots for each app: "the options look like absolute garbage".
     const asked = answer();
     page();
-    const apps = await screen.findByRole('list', { name: 'Apps of “Ship”' });
-    expect(within(apps).getByText('Visual Studio Code')).toBeInTheDocument();
-    const dots = within(screen.getByRole('group', { name: 'Zone of Visual Studio Code' })).getAllByRole('button');
-    expect(dots.map((d) => d.textContent)).toEqual(['1', '2']);
-    expect(screen.getByRole('button', { name: 'Visual Studio Code is in zone 1' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    expect(screen.queryByText('A tab')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Put Visual Studio Code in zone 2' }));
+    const apps = await screen.findByRole('group', { name: 'Apps of “Ship”' });
+    const zone = (n: string) => within(apps).getByRole('group', { name: `Zone ${n}` });
+    expect(within(zone('1')).getByText('Visual Studio Code')).toBeInTheDocument();
+    expect(within(zone('2')).getByText('Google Chrome')).toBeInTheDocument();
+    await userEvent.click(within(zone('1')).getByRole('button', { name: 'Move Visual Studio Code to another zone' }));
+    // Only the other zones are offered.
+    expect(screen.queryByRole('button', { name: 'Zone 1' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Zone 2' }));
     expect(asked).toContainEqual({ cmd: 'move_app', workspace: 'ship', app: 's1', zone: 'z2' });
     expect(await shown('Visual Studio Code goes in zone 2.')).toBeInTheDocument();
+    // A zone left empty says so, with its number.
+    expect(within(zone('1')).getByText('Empty. Drag an app here on the picture, or use Move.')).toBeInTheDocument();
+    expect(within(zone('2')).getByText('Visual Studio Code')).toBeInTheDocument();
     // The picture follows.
     await waitFor(() => {
       expect(asked.filter((c) => c.cmd === 'preview_workspace').length).toBeGreaterThan(1);
@@ -156,10 +170,37 @@ describe('a workspace’s page', () => {
     expect(asked).toContainEqual({ cmd: 'add_app', workspace: 'ship', window: 0x2_04f2, zone: null });
   });
 
+  it('moves its apps and resizes its zones on its picture, saved at once', async () => {
+    const asked = answer();
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in zone 1' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Zone 2' }));
+    expect(asked).toContainEqual({ cmd: 'move_app', workspace: 'ship', app: 's1', zone: 'z2' });
+    expect(await shown('Visual Studio Code goes in zone 2.')).toBeInTheDocument();
+    // The list follows, from the answer.
+    const apps = screen.getByRole('group', { name: 'Apps of “Ship”' });
+    expect(within(within(apps).getByRole('group', { name: 'Zone 2' })).getByText('Visual Studio Code')).toBeVisible();
+    const line = await screen.findByRole('separator', { name: 'Line between zone 1 and zone 2' });
+    line.focus();
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(await shown('Zones resized.')).toBeInTheDocument();
+    const [z1, z2, other] = openingZones;
+    expect(asked).toContainEqual({
+      cmd: 'set_zones',
+      workspace: 'ship',
+      revision: '7',
+      zones: [
+        { ...z1, area: { left: 0, top: 0, right: 28 / 48, bottom: 1 } },
+        { ...z2, area: { left: 28 / 48, top: 0, right: 1, bottom: 1 } },
+        other,
+      ],
+    });
+  });
+
   it('reads again once for a burst of focus events, and uses what a change of its apps answers', async () => {
     const asked = answer();
     page();
-    await screen.findByRole('list', { name: 'Apps of “Ship”' });
+    await screen.findByRole('group', { name: 'Apps of “Ship”' });
     await wait(300);
     const before = { apps: count(asked, 'apps'), preview: count(asked, 'preview_workspace') };
     for (let i = 0; i < 3; i += 1) {
@@ -174,7 +215,8 @@ describe('a workspace’s page', () => {
       preview: count(asked, 'preview_workspace'),
       workspaces: count(asked, 'workspaces'),
     };
-    await userEvent.click(screen.getByRole('button', { name: 'Put Visual Studio Code in zone 2' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Move Visual Studio Code to another zone' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Zone 2' }));
     expect(await shown('Visual Studio Code goes in zone 2.')).toBeInTheDocument();
     await wait(400);
     // The apps came with the answer; the picture and the summary are read once more.

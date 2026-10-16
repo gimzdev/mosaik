@@ -780,8 +780,10 @@ impl Engine {
             Command::Workspaces => self.workspaces(),
             Command::Switch { workspace } => self.switch(&workspace),
             Command::Save { workspace } => self.save(workspace),
-            Command::Arrange { preset, moves } => self.arrange(preset.as_deref(), &moves),
-            Command::PreviewArrange { preset, moves } => self.preview_arrange(preset.as_deref(), &moves),
+            Command::Arrange { preset, moves, areas } => self.arrange(preset.as_deref(), &moves, &areas),
+            Command::PreviewArrange { preset, moves, areas } => {
+                self.preview_arrange(preset.as_deref(), &moves, &areas)
+            }
             Command::PreviewWorkspace { workspace } => self.preview_workspace(&workspace),
             Command::UndoArrange => self.undo_arrange(),
             Command::Rescue => self.rescue(),
@@ -820,7 +822,12 @@ impl Engine {
                 window,
                 zone,
             } => self.add_app_to(&workspace, window, zone),
-            Command::MoveApp { workspace, app, zone } => self.move_app_to(&workspace, &app, &zone),
+            Command::MoveApp {
+                workspace,
+                app,
+                zone,
+                swap_with,
+            } => self.move_app_to(&workspace, &app, &zone, swap_with.as_ref()),
             Command::RemoveApp { workspace, app } => self.remove_app_from(&workspace, &app),
             Command::Sets => self.sets_reply(),
             Command::OpenSet { set } => self.open_set(&set),

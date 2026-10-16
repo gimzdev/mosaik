@@ -3,14 +3,17 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Home } from './Home';
+import { stretched } from './Screen';
 import type { ArrangePreview, Command, Reply } from './protocol';
 import {
   WORK,
+  appsOf,
   coding,
   done,
   failed,
   nothingOpen,
   opening,
+  openingZones,
   preview,
   said,
   set,
@@ -18,6 +21,7 @@ import {
   shown,
   workspace,
   workspacesReply,
+  zonesReply,
 } from './test-fixtures';
 import { Announcer } from './ui';
 
@@ -121,24 +125,33 @@ const CHANGES: ReadonlySet<Command['cmd']> = new Set(['arrange', 'undo_arrange',
 
 function answer(auto: ArrangePreview = coding, extra: (c: Command) => Reply | null = () => null) {
   const asked: Command[] = [];
+  /** Arranged: the windows are where the picture showed them. */
+  let arrangedNow = false;
   engine.request.mockImplementation((c) => {
     asked.push(c);
     const reply = extra(c) ?? usual(c);
     if (CHANGES.has(c.cmd) && reply.reply !== 'error') setTimeout(changed, 0);
     return Promise.resolve(reply);
   });
+  const now = (p: ArrangePreview): ArrangePreview =>
+    arrangedNow ? { ...p, windows: p.windows.map((w) => ({ ...w, now: w.then ?? w.now })) } : p;
+  /** The zones as resized on the picture, as Mosaïk takes them (an area for each). */
+  const resized = (p: ArrangePreview, c: Command) =>
+    c.cmd === 'preview_arrange' && c.areas ? stretched(p, c.areas) : p;
   function usual(c: Command): Reply {
     switch (c.cmd) {
       case 'preview_arrange':
-        if (c.preset === 'full') return preview(full);
-        if (c.preset === 'quarters') return preview(quarters);
-        if (c.preset) return preview(halves);
-        return preview(c.moves?.length ? traded : auto);
+        if (c.preset === 'full') return preview(now(resized(full, c)));
+        if (c.preset === 'quarters') return preview(now(resized(quarters, c)));
+        if (c.preset) return preview(now(resized(halves, c)));
+        return preview(now(resized(c.moves?.length ? traded : auto, c)));
       case 'preview_workspace':
         return preview(opening);
       case 'arrange':
+        arrangedNow = true;
         return done('Arranged 2 windows for coding.');
       case 'undo_arrange':
+        arrangedNow = false;
         return done('Windows are back where they were.');
       case 'switch':
         return done(`Opened “${c.workspace}”.`);
@@ -165,10 +178,9 @@ function home(props: Partial<Parameters<typeof Home>[0]> = {}) {
 
 const picture = () => screen.getByRole('group', { name: /main screen|Visual Studio Code|Nothing is open/ });
 const tile = (name: string) => screen.getByRole('button', { name });
-const arrange = () => screen.getByRole('button', { name: 'Arrange' });
+const arrange = () => screen.getByRole('button', { name: 'Arrange my screen' });
 const title = () => screen.getByRole('heading', { level: 2, name: /Your screen|Preview of/ });
-/** Opens More layouts, for the five layouts it holds. */
-const moreLayouts = () => userEvent.click(screen.getByRole('button', { name: /^More layouts/ }));
+const HINT = 'Drag a window onto another to swap them, or a line between zones to resize them.';
 
 describe('Home', () => {
   it('shows the automatic layout for what is open, each window in its zone, and says nothing moves yet', async () => {
@@ -177,10 +189,12 @@ describe('Home', () => {
     await waitFor(() => {
       expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 1, Google Chrome in zone 2.');
     });
-    expect(screen.getByText('Automatic layout for coding. Nothing moves until you press Arrange.')).toBeInTheDocument();
+    expect(screen.getByText('Automatic layout for coding. Nothing moves yet.')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Automatic' })).toBeChecked();
-    // Nothing else to say: how to swap windows.
-    expect(screen.getByText('Drag a window onto another to swap them.')).toBeInTheDocument();
+    // Nothing else to say: how to change the picture.
+    expect(screen.getByText(HINT)).toBeInTheDocument();
+    // Arrange my screen has Mosaïk's tiles; Automatic keeps the spark.
+    expect(arrange()).toHaveTextContent('Arrange my screen');
     expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
   });
 
@@ -193,16 +207,14 @@ describe('Home', () => {
     });
     expect(asked).toContainEqual({ cmd: 'preview_arrange', preset: 'halves' });
     expect(screen.getByRole('radio', { name: 'Halves' })).toBeChecked();
-    expect(screen.getByText('Halves. Nothing moves until you press Arrange.')).toBeInTheDocument();
+    expect(screen.getByText('Halves. Nothing moves yet.')).toBeInTheDocument();
     expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
   });
 
   it('names the windows a layout with fewer zones would minimise', async () => {
     answer();
     home();
-    await screen.findByRole('radio', { name: 'Halves' });
-    await moreLayouts();
-    await userEvent.click(screen.getByRole('radio', { name: 'Full screen' }));
+    await userEvent.click(await screen.findByRole('radio', { name: 'Full screen' }));
     expect(await screen.findByText('Google Chrome will be minimized.')).toBeInTheDocument();
     expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 1, Google Chrome minimized.');
   });
@@ -228,9 +240,7 @@ describe('Home', () => {
     };
     answer(coding, (c) => (c.cmd === 'preview_arrange' && c.preset === 'full' ? preview(two) : null));
     home();
-    await screen.findByRole('radio', { name: 'Halves' });
-    await moreLayouts();
-    await userEvent.click(screen.getByRole('radio', { name: 'Full screen' }));
+    await userEvent.click(await screen.findByRole('radio', { name: 'Full screen' }));
     expect(await screen.findByText('2 File Explorer windows and Google Chrome will be minimized.')).toBeInTheDocument();
   });
 
@@ -281,9 +291,10 @@ describe('Home', () => {
     expect(await screen.findByText('Open some apps first.')).toBeInTheDocument();
     expect(arrange()).toBeDisabled();
     expect(screen.getByRole('radio', { name: 'Halves' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'More layouts' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Full screen' })).toBeDisabled();
     expect(picture()).toHaveAttribute('aria-label', 'Nothing is open on your main screen.');
-    expect(screen.queryByText('Drag a window onto another to swap them.')).not.toBeInTheDocument();
+    expect(screen.queryByText(HINT)).not.toBeInTheDocument();
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
   });
 
   it('says when Mosaïk cannot read the screen', async () => {
@@ -304,17 +315,21 @@ describe('Home', () => {
     expect(screen.getByText('Choose where Visual Studio Code goes. Esc cancels.')).toBeInTheDocument();
     await userEvent.click(tile('Google Chrome in zone 2'));
     // At once, then as Mosaïk says: the editor on the right, in zone 2, its colour with it.
-    expect(tile('Visual Studio Code in zone 2')).toHaveStyle({ left: '60%' });
-    expect(tile('Google Chrome in zone 1')).toHaveStyle({ left: '0%' });
+    expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 2, Google Chrome in zone 1.');
     await waitFor(() => {
       expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [{ window: 101, zone: 1 }] });
     });
     expect(tile('Visual Studio Code in zone 2')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Undo changes' })).toBeInTheDocument();
     expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
     await userEvent.click(arrange());
     expect(asked).toContainEqual({ cmd: 'arrange', moves: [{ window: 101, zone: 1 }] });
     expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Undo swaps' })).not.toBeInTheDocument();
+    // Arranged as they were put, the picture keeps them there, as the screen now is.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
+    });
+    expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 2, Google Chrome in zone 1.');
   });
 
   it('picks and puts a window with the keyboard alone, and lets go with Escape', async () => {
@@ -328,41 +343,49 @@ describe('Home', () => {
     expect(screen.queryByText('Choose where Visual Studio Code goes. Esc cancels.')).not.toBeInTheDocument();
     expect(tile('Visual Studio Code in zone 1')).toHaveAttribute('aria-pressed', 'false');
     await userEvent.keyboard('{Enter}');
+    // The other zones can be chosen now, before the windows in them.
+    await userEvent.tab();
+    expect(screen.getByRole('button', { name: 'Zone 2' })).toHaveFocus();
     await userEvent.tab();
     expect(tile('Google Chrome in zone 2')).toHaveFocus();
     await userEvent.keyboard('{Enter}');
     await waitFor(() => {
       expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [{ window: 101, zone: 1 }] });
     });
+    // The focus stays with the window put there.
+    expect(tile('Visual Studio Code in zone 2')).toHaveFocus();
   });
 
   it('puts a window in an empty zone of a layout', async () => {
     const asked = answer();
     home();
     await userEvent.click(await screen.findByRole('radio', { name: 'Quarters' }));
+    // An empty zone has its number and colour, and says it is empty.
     await waitFor(() => {
-      expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 1, Google Chrome in zone 2.');
+      expect(picture()).toHaveAttribute(
+        'aria-label',
+        'Visual Studio Code in zone 1, Google Chrome in zone 2. Zones 3 and 4 are empty.',
+      );
     });
-    expect(screen.queryByRole('button', { name: 'Empty zone' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('Empty')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Zone 4, empty' })).not.toBeInTheDocument();
     await userEvent.click(tile('Visual Studio Code in zone 1'));
-    const free = screen.getAllByRole('button', { name: 'Empty zone' });
-    expect(free).toHaveLength(2);
-    const [, last] = free;
-    if (last) await userEvent.click(last);
+    expect(screen.getByRole('button', { name: 'Zone 3, empty' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Zone 4, empty' }));
     await waitFor(() => {
       expect(asked).toContainEqual({ cmd: 'preview_arrange', preset: 'quarters', moves: [{ window: 101, zone: 3 }] });
     });
   });
 
-  it('puts the windows back with Undo swaps, and a layout chosen starts afresh', async () => {
+  it('puts the windows back with Undo changes, and a layout chosen starts afresh', async () => {
     const asked = answer();
     home();
     await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in zone 1' }));
     await userEvent.click(tile('Google Chrome in zone 2'));
-    await userEvent.click(await screen.findByRole('button', { name: 'Undo swaps' }));
-    expect(screen.queryByRole('button', { name: 'Undo swaps' })).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Undo changes' }));
+    expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(tile('Visual Studio Code in zone 1')).toHaveStyle({ left: '0%' });
+      expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 1, Google Chrome in zone 2.');
     });
     await userEvent.click(tile('Visual Studio Code in zone 1'));
     await userEvent.click(tile('Google Chrome in zone 2'));
@@ -371,7 +394,50 @@ describe('Home', () => {
       expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 1, Google Chrome in zone 2.');
     });
     expect(asked.at(-1)).toEqual({ cmd: 'preview_arrange', preset: 'halves' });
-    expect(screen.queryByRole('button', { name: 'Undo swaps' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
+  });
+
+  it('resizes the zones by the line between them, shows it at once, and arranges them so', async () => {
+    // The owner: "for anim homescreen we should be able to stretch zones".
+    const asked = answer();
+    home();
+    const line = await screen.findByRole('separator', { name: 'Line between zone 1 and zone 2' });
+    expect(line).toHaveAttribute('aria-valuenow', '60');
+    line.focus();
+    await userEvent.keyboard('{ArrowLeft}');
+    // A 48th of the screen to the left, on the grid: 28/48.
+    const areas = [
+      { left: 0, top: 0, right: 28 / 48, bottom: 1 },
+      { left: 28 / 48, top: 0, right: 1, bottom: 1 },
+    ];
+    expect(screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' })).toHaveAttribute(
+      'aria-valuenow',
+      '58',
+    );
+    await waitFor(() => {
+      expect(asked).toContainEqual({ cmd: 'preview_arrange', areas });
+    });
+    expect(screen.getByRole('button', { name: 'Undo changes' })).toBeInTheDocument();
+    await userEvent.click(arrange());
+    expect(asked).toContainEqual({ cmd: 'arrange', areas });
+    expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
+  });
+
+  it('lets go of zones resized once the screen has other zones', async () => {
+    const asked = answer();
+    home();
+    const line = await screen.findByRole('separator', { name: 'Line between zone 1 and zone 2' });
+    line.focus();
+    await userEvent.keyboard('{ArrowLeft}');
+    await waitFor(() => {
+      expect(asked.some((c) => c.cmd === 'preview_arrange' && c.areas !== undefined)).toBe(true);
+    });
+    // A third window came: Mosaïk lays out three zones, which the two areas do not fit.
+    answer(quarters);
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
+    });
   });
 
   it('shows a workspace picked as a preview of how it opens, and opens it with Open', async () => {
@@ -391,15 +457,69 @@ describe('Home', () => {
     expect(screen.getByText('Nothing moves until you press Open.')).toBeInTheDocument();
     expect(screen.getByText('Windows Terminal will start. Google Chrome will be minimized.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByRole('button', { name: 'Arrange' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Arrange my screen' })).not.toBeInTheDocument();
     expect(asked.some((c) => c.cmd === 'switch')).toBe(false);
     await userEvent.click(screen.getByRole('button', { name: 'Open “Ship”' }));
     expect(asked).toContainEqual({ cmd: 'switch', workspace: 'ship' });
     expect(await shown('Opened “Ship”; starting 1 app.')).toBeInTheDocument();
-    // Open, it is let go: Arrange is back.
-    expect(screen.getByRole('button', { name: 'Arrange' })).toBeInTheDocument();
+    // Open, it is let go: Arrange my screen is back.
+    expect(arrange()).toBeInTheDocument();
     expect(title()).toHaveTextContent('Your screen');
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('changes a workspace picked on its picture, saving it there at once', async () => {
+    // The owner: "when clicking on a workspace the anim must have those options too (drag drop
+    // and stretch zones)".
+    const asked = answer(coding, (c) =>
+      c.cmd === 'move_app' ? appsOf() : c.cmd === 'zones' || c.cmd === 'set_zones' ? zonesReply(openingZones) : null,
+    );
+    home();
+    await userEvent.click(await screen.findByRole('button', { name: 'Ship' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in zone 1' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Zone 2' }));
+    expect(asked).toContainEqual({ cmd: 'move_app', workspace: 'ship', app: 's1', zone: 'z2' });
+    expect(await shown('Visual Studio Code goes in zone 2 of “Ship”.')).toBeInTheDocument();
+    // Dropped on a tab of a group, the two trade zones; the tab leaves its group.
+    await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in zone 1' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Claude, a tab in zone 2' }));
+    expect(asked).toContainEqual({ cmd: 'move_app', workspace: 'ship', app: 's1', zone: 'z2', swap_with: 's3' });
+    expect(await shown('Visual Studio Code and Claude traded zones in “Ship”.')).toBeInTheDocument();
+    // Its zones resized by the line between them: only the edges moved change.
+    const line = screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' });
+    line.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(await shown('Zones of “Ship” resized.')).toBeInTheDocument();
+    const [z1, z2, other] = openingZones;
+    expect(asked).toContainEqual({
+      cmd: 'set_zones',
+      workspace: 'ship',
+      revision: '7',
+      zones: [
+        { ...z1, area: { left: 0, top: 0, right: 30 / 48, bottom: 1 } },
+        { ...z2, area: { left: 30 / 48, top: 0, right: 1, bottom: 1 } },
+        other,
+      ],
+    });
+    expect(asked.some((c) => c.cmd === 'switch')).toBe(false);
+    // Saved in the workspace, what opening it did can no longer be undone.
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+  });
+
+  it('says why a workspace could not be changed on its picture, and shows it as it is', async () => {
+    const asked = answer(coding, (c) => (c.cmd === 'move_app' ? failed('The workspace could not be saved.') : null));
+    home();
+    await userEvent.click(await screen.findByRole('button', { name: 'Ship' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in zone 1' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Zone 2' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The workspace could not be saved.');
+    await waitFor(() => {
+      expect(count(asked, 'preview_workspace')).toBeGreaterThan(1);
+    });
+    expect(picture()).toHaveAttribute(
+      'aria-label',
+      'Visual Studio Code in zone 1, Windows Terminal starts in zone 2 with Claude as tabs, Google Chrome minimized.',
+    );
   });
 
   it('undoes opening a workspace: the windows it minimised come back', async () => {
@@ -427,7 +547,7 @@ describe('Home', () => {
     expect(screen.getByRole('button', { name: 'Open “Ship”' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Back to my screen' }));
     expect(title()).toHaveTextContent('Your screen');
-    expect(screen.getByRole('button', { name: 'Arrange' })).toBeInTheDocument();
+    expect(arrange()).toBeInTheDocument();
     // Focus goes back to the row it came from, not lost with the Back button.
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Ship' })).toHaveFocus();
@@ -435,11 +555,11 @@ describe('Home', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Ship' }));
     expect(await screen.findByRole('button', { name: 'Open “Ship”' })).toBeInTheDocument();
     await userEvent.keyboard('{Escape}');
-    expect(screen.getByRole('button', { name: 'Arrange' })).toBeInTheDocument();
+    expect(arrange()).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Ship' }));
     expect(await screen.findByRole('button', { name: 'Open “Ship”' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('radio', { name: 'Halves' }));
-    expect(screen.getByRole('button', { name: 'Arrange' })).toBeInTheDocument();
+    expect(arrange()).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Halves' })).toBeChecked();
     expect(asked.some((c) => c.cmd === 'switch')).toBe(false);
   });
@@ -511,26 +631,6 @@ describe('Home', () => {
     expect(asked).toContainEqual({ cmd: 'open_set', set: 'coding' });
   });
 
-  it('welcomes on the first run, with the side menu where it is, until put away', async () => {
-    answer();
-    const onWelcomeRead = vi.fn();
-    home({ welcome: { sideMenu: 'left' }, onWelcomeRead });
-    expect(
-      await screen.findByText(
-        'Mosaïk tidies your windows. Choose a layout, press Arrange, and Undo puts everything back. The thin line on the left edge of your screen opens the same choices.',
-      ),
-    ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Got it' }));
-    expect(onWelcomeRead).toHaveBeenCalled();
-    cleanup();
-    home({ welcome: { sideMenu: null }, onWelcomeRead });
-    expect(
-      await screen.findByText(
-        'Mosaïk tidies your windows. Choose a layout, press Arrange, and Undo puts everything back.',
-      ),
-    ).toBeInTheDocument();
-  });
-
   it('reads the screen once for a burst of focus events, and once after Arrange', async () => {
     // Every read is a scan of every window in the engine, served one at a time: a burst of them
     // holds up drags and shortcuts.
@@ -570,35 +670,24 @@ describe('Home', () => {
     expect(count(asked, 'preview_workspace') - before.workspace).toBe(1);
   });
 
-  it('offers Automatic and five layouts by name, the other five under More layouts, beside the workspaces', async () => {
+  it('offers Automatic and the eight layouts in two rows, all in view, beside the workspaces', async () => {
+    // The owner: "we dont want dropdown menu", "remove the ones that are only rows", "9 left
+    // fitting in 2 lines of options".
     answer();
     home();
     const area = await screen.findByRole('region', { name: 'Your screen' });
     const group = within(area).getByRole('group', { name: 'Layout' });
-    const values = () =>
-      within(group)
-        .getAllByRole('radio')
-        .map((r) => r.getAttribute('value'));
-    expect(values()).toEqual(['auto', 'halves', 'thirds', 'main-side', 'half-stack', 'quarters']);
-    expect(within(group).getByText('Main + side')).toBeVisible();
-    await moreLayouts();
-    const more = within(group).getByRole('group', { name: 'More layouts' });
     expect(
-      within(more)
+      within(group)
         .getAllByRole('radio')
         .map((r) => r.getAttribute('value')),
-    ).toEqual(['side-main', 'stack-half', 'rows', 'three-rows', 'full']);
-    // Chosen there, it shows in More layouts' place, with its name.
-    await userEvent.click(within(more).getByRole('radio', { name: 'Three rows' }));
-    expect(within(group).queryByRole('group', { name: 'More layouts' })).not.toBeInTheDocument();
-    const button = within(group).getByRole('button', { name: 'More layouts: Three rows' });
-    expect(button).toHaveTextContent('Three rows');
-    expect(
-      within(group)
-        .getAllByRole('radio')
-        .some((r) => (r as HTMLInputElement).checked),
-    ).toBe(false);
-    expect(screen.getByText('Three rows. Nothing moves until you press Arrange.')).toBeInTheDocument();
+    ).toEqual(['auto', 'halves', 'thirds', 'main-side', 'side-main', 'half-stack', 'stack-half', 'quarters', 'full']);
+    expect(within(group).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(group).queryByText('Top + bottom')).not.toBeInTheDocument();
+    expect(within(group).queryByText('Three rows')).not.toBeInTheDocument();
+    await userEvent.click(within(group).getByRole('radio', { name: 'Stack + half' }));
+    expect(within(group).getByRole('radio', { name: 'Stack + half' })).toBeChecked();
+    expect(screen.getByText('Stack + half. Nothing moves yet.')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Workspaces' })).toBeInTheDocument();
   });
 });

@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use mosaik_core::arrange::{Chosen, Goes, KeptZone, Kind, Move, Unit, plan_moved};
-use mosaik_core::editing::without_zones;
-use mosaik_core::geometry::Rect;
+use mosaik_core::editing::{stretch_zones, without_zones};
+use mosaik_core::geometry::{RatioRect, Rect};
 use mosaik_core::layout::{Layout, Place, Slot, SlotId, Workspace, WorkspaceId};
 use mosaik_core::place::{Resolver, Target, fit_size};
 use mosaik_core::presets::Preset;
@@ -108,8 +108,14 @@ impl Engine {
 
     /// Works out what Arrange would do now, changing nothing: the plan, the zones as they would
     /// be, and where each window would go. Arrange applies it; the home page shows it.
-    /// `moves` are the windows the user moved on the home page's picture of the main screen.
-    fn prepare_arrange(&mut self, preset: Option<&str>, moves: &[ArrangeMove]) -> Result<Prepared, Reply> {
+    /// `moves` are the windows the user moved on the home page's picture of the main screen,
+    /// `areas` the main screen's zones as the user stretched them there.
+    fn prepare_arrange(
+        &mut self,
+        preset: Option<&str>,
+        moves: &[ArrangeMove],
+        areas: &[RatioRect],
+    ) -> Result<Prepared, Reply> {
         let preset = match preset.map(|id| Preset::from_id(id).ok_or(id)) {
             None => None,
             Some(Ok(p)) => Some(p),
@@ -254,7 +260,17 @@ impl Engine {
             });
             made.push(Some(id));
         }
-        // Numbered with the zones kept, in reading order.
+        // The main monitor's zones as the user stretched them on the picture (ADR 0031): taken
+        // with one area for each, none too small and none over another.
+        if !areas.is_empty()
+            && let Some(m) = topology.monitors().get(main)
+        {
+            let index = ws.layout.monitor_index(m, &topology);
+            if !stretch_zones(&mut ws.layout, index, areas) {
+                tracing::debug!(areas = areas.len(), "stretched zones not taken");
+            }
+        }
+        // Numbered with the zones kept, in reading order, where they are once stretched.
         ws.layout.number_zones();
         let zone_id = |i: usize| made.get(i).cloned().flatten();
 
@@ -357,9 +373,14 @@ impl Engine {
 
     /// Puts every window on screen in the zone that suits it; with `preset` (a layout's id),
     /// the main monitor takes that layout first; `moves` are the windows the user moved on the
-    /// home page's picture.
-    pub(crate) fn arrange(&mut self, preset: Option<&str>, moves: &[ArrangeMove]) -> Reply {
-        let p = match self.prepare_arrange(preset, moves) {
+    /// home page's picture, `areas` its zones as the user stretched them.
+    pub(crate) fn arrange(
+        &mut self,
+        preset: Option<&str>,
+        moves: &[ArrangeMove],
+        areas: &[RatioRect],
+    ) -> Reply {
+        let p = match self.prepare_arrange(preset, moves, areas) {
             Ok(p) => p,
             Err(reply) => return reply,
         };
@@ -449,8 +470,13 @@ impl Engine {
     /// What Arrange would do now on the main monitor, without doing it: where its windows are,
     /// where they would go, and the zones they would fill (the home page shows it, with the
     /// windows the user moved on it).
-    pub(crate) fn preview_arrange(&mut self, preset: Option<&str>, moves: &[ArrangeMove]) -> Reply {
-        let p = match self.prepare_arrange(preset, moves) {
+    pub(crate) fn preview_arrange(
+        &mut self,
+        preset: Option<&str>,
+        moves: &[ArrangeMove],
+        areas: &[RatioRect],
+    ) -> Reply {
+        let p = match self.prepare_arrange(preset, moves, areas) {
             Ok(p) => p,
             Err(reply) => return reply,
         };
@@ -471,12 +497,21 @@ impl Engine {
                 .filter_map(|z| {
                     let (rect, _) = resolver.zone_rect(&z.id)?;
                     on_main(rect).then(|| PreviewZone {
+                        id: Some(z.id.clone()),
                         name: z.name.clone(),
                         color: z.color,
                         rect,
                     })
                 })
                 .collect();
+        // The zone each window goes in, by its slot there.
+        let zone_of = |h: WindowHandle| {
+            let (slot, _) = p.assigned.iter().find(|(_, w)| **w == h)?;
+            match p.ws.layout.effective_place(p.ws.layout.slot(slot)?)? {
+                Place::Zone { zone } => Some(zone.clone()),
+                _ => None,
+            }
+        };
         let target = |i: usize| {
             p.moves
                 .iter()
@@ -501,10 +536,10 @@ impl Engine {
                 elsewhere += 1;
                 continue;
             }
-            let (then, minimized) = match p.goes[i] {
-                Goes::Zone(_) => (target(i), false),
-                Goes::Minimize => (None, true),
-                Goes::Stay => (None, false),
+            let (then, minimized, zone) = match p.goes[i] {
+                Goes::Zone(_) => (target(i), false, zone_of(w.handle)),
+                Goes::Minimize => (None, true, None),
+                Goes::Stay => (None, false, None),
             };
             let path = self.scanner.process_path(w.pid);
             windows.push(PreviewWindow {
@@ -516,6 +551,8 @@ impl Engine {
                 minimized,
                 starting: false,
                 tabs: Vec::new(),
+                zone,
+                app: None,
             });
         }
         Reply::Preview(Box::new(ArrangePreview {

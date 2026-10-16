@@ -58,7 +58,7 @@ mod windows_main {
   zones <workspace>              a workspace's zones, as JSON
   apps <workspace> [--json]      a workspace's apps, and the windows on screen it could take
   add-app <workspace> <window> [<zone>]  add a window's app (its handle, from apps)
-  move-app <workspace> <app> <zone>      put an app in another zone
+  move-app <workspace> <app> <zone> [<app>]  put an app in another zone (trading places with the app given)
   remove-app <workspace> <app>   take an app out (its window stays)
   sets [--json]                  sets of your apps that go together for a task
   open-set <set>                 open a set (its id, from sets): its apps start, laid out
@@ -125,10 +125,11 @@ A <workspace> is its name or its id.";
                     zone: zone.first().map(|z| ZoneId::new(*z)),
                 }
             }
-            ("move-app", [w, app, zone]) => Command::MoveApp {
+            ("move-app", [w, app, zone, with @ ..]) if with.len() <= 1 => Command::MoveApp {
                 workspace: (*w).to_owned(),
                 app: SlotId((*app).to_owned()),
                 zone: ZoneId::new(*zone),
+                swap_with: with.first().map(|s| SlotId((*s).to_owned())),
             },
             ("remove-app", [w, app]) => Command::RemoveApp {
                 workspace: (*w).to_owned(),
@@ -137,18 +138,22 @@ A <workspace> is its name or its id.";
             ("arrange", []) => Command::Arrange {
                 preset: None,
                 moves: Vec::new(),
+                areas: Vec::new(),
             },
             ("arrange", [layout]) => Command::Arrange {
                 preset: Some((*layout).to_owned()),
                 moves: Vec::new(),
+                areas: Vec::new(),
             },
             ("preview", []) => Command::PreviewArrange {
                 preset: None,
                 moves: Vec::new(),
+                areas: Vec::new(),
             },
             ("preview", [layout]) => Command::PreviewArrange {
                 preset: Some((*layout).to_owned()),
                 moves: Vec::new(),
+                areas: Vec::new(),
             },
             ("preview-workspace", [w]) => Command::PreviewWorkspace {
                 workspace: (*w).to_owned(),

@@ -191,7 +191,12 @@ mod tests {
         let ids: std::collections::HashSet<&str> = Preset::ALL.iter().map(|p| p.id()).collect();
         assert_eq!(ids.len(), Preset::ALL.len());
         // The ids the zone editor and the home page send, and the names they show, read from
-        // the interface's own list: `{ id: 'halves', label: 'Halves' }`.
+        // the interface's own list: `{ id: 'halves', label: 'Halves' }`. It offers every preset
+        // but the two of rows only, which stay for `mosaikctl arrange` (ADR 0031).
+        let offered: Vec<Preset> = Preset::ALL
+            .into_iter()
+            .filter(|p| !matches!(p, Preset::Rows | Preset::ThreeRows))
+            .collect();
         let model = include_str!("../../../apps/desktop/src/editor/model.ts");
         let listed: Vec<(&str, &str)> = model
             .lines()
@@ -202,9 +207,10 @@ mod tests {
                 Some((id, label))
             })
             .collect();
-        assert_eq!(listed.len(), Preset::ALL.len(), "{listed:?}");
+        assert_eq!(listed.len(), offered.len(), "{listed:?}");
         for (id, label) in listed {
             let preset = Preset::from_id(id).unwrap_or_else(|| panic!("{id}"));
+            assert!(offered.contains(&preset), "{id}");
             assert_eq!(preset.label(), label, "{id}");
         }
     }

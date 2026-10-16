@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::geometry::RatioRect;
-use crate::layout::{Launch, Place, Slot, SlotId, Workspace};
+use crate::layout::{Launch, Layout, Place, Slot, SlotId, Workspace};
 use crate::place::Resolver;
 use crate::topology::{MonitorId, Topology, fnv1a64, map_monitors};
 use crate::window::WindowFacts;
@@ -65,6 +65,8 @@ pub enum EditError {
     GoneApp,
     #[error("This zone is not in the workspace any more.")]
     GoneZone,
+    #[error("This app is not in a zone: pick a zone for it instead.")]
+    NotInZone,
 }
 
 /// Checks a workspace name, returning it trimmed.
@@ -317,6 +319,59 @@ pub fn move_app(ws: &Workspace, slot: &SlotId, zone: &ZoneId) -> Result<Workspac
         s.place = place;
     }
     Ok(out)
+}
+
+/// The workspace with its apps `a` and `b` trading zones (one dropped on the other in its
+/// picture, ADR 0031). A tab leaves its group for the other zone; two apps of one zone stay.
+pub fn swap_apps(ws: &Workspace, a: &SlotId, b: &SlotId) -> Result<Workspace, EditError> {
+    let zone_of = |slot: &SlotId| -> Result<ZoneId, EditError> {
+        let s = ws.layout.slot(slot).ok_or(EditError::GoneApp)?;
+        match ws.layout.effective_place(s) {
+            Some(Place::Zone { zone }) => Ok(zone.clone()),
+            _ => Err(EditError::NotInZone),
+        }
+    };
+    let (za, zb) = (zone_of(a)?, zone_of(b)?);
+    if za == zb {
+        return Ok(ws.clone());
+    }
+    let out = move_app(ws, a, &zb)?;
+    move_app(&out, b, &za)
+}
+
+/// The zones of the layout's monitor `monitor` (an index in its monitors) take `areas`, in
+/// their order: the lines between them dragged on Home's picture (ADR 0031). Refused, leaving
+/// the layout as it was, when the counts differ, an area is under [`MIN_ZONE`] either way, or
+/// two areas cover each other. Returns whether they were taken.
+pub fn stretch_zones(layout: &mut Layout, monitor: usize, areas: &[RatioRect]) -> bool {
+    let here: Vec<usize> = layout
+        .zones
+        .iter()
+        .enumerate()
+        .filter(|(_, z)| z.monitor == monitor)
+        .map(|(i, _)| i)
+        .collect();
+    if here.is_empty() || here.len() != areas.len() {
+        return false;
+    }
+    let small = |a: &RatioRect| a.width() < MIN_ZONE - 1e-9 || a.height() < MIN_ZONE - 1e-9;
+    let over = |a: &RatioRect, b: &RatioRect| {
+        let w = a.right().min(b.right()) - a.left().max(b.left());
+        let h = a.bottom().min(b.bottom()) - a.top().max(b.top());
+        w > 1e-6 && h > 1e-6
+    };
+    if areas.iter().any(small)
+        || areas
+            .iter()
+            .enumerate()
+            .any(|(i, a)| areas[i + 1..].iter().any(|b| over(a, b)))
+    {
+        return false;
+    }
+    for (i, area) in here.into_iter().zip(areas) {
+        layout.zones[i].area = *area;
+    }
+    true
 }
 
 /// The workspace without its app `slot` (a tab leaves its group first). Its window, when open,
@@ -853,6 +908,81 @@ mod tests {
             rename(&a, "w", std::slice::from_ref(&a)).unwrap().name,
             "w",
             "its own name is free"
+        );
+    }
+
+    #[test]
+    fn a_monitors_zones_take_the_areas_stretched_on_the_picture() {
+        // ADR 0031: lines between zones dragged on Home's picture: the zones of the main monitor
+        // take the areas the picture sends, in their order; anything else is refused, unchanged.
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let mut layout = workspace(&t).layout;
+        let wide = [ratio(0.0, 0.0, 0.6, 1.0), ratio(0.6, 0.0, 1.0, 1.0)];
+        assert!(stretch_zones(&mut layout, 0, &wide));
+        assert_eq!(layout.zones[0].area, wide[0]);
+        assert_eq!(layout.zones[1].area, wide[1]);
+        assert_eq!(
+            layout.zones[2].area,
+            RatioRect::FULL,
+            "the other monitor's zone stays"
+        );
+        let before = layout.clone();
+        assert!(!stretch_zones(&mut layout, 0, &wide[..1]), "another count");
+        assert!(
+            !stretch_zones(
+                &mut layout,
+                0,
+                &[ratio(0.0, 0.0, 0.97, 1.0), ratio(0.97, 0.0, 1.0, 1.0)]
+            ),
+            "a zone under a twentieth of the screen"
+        );
+        assert!(
+            !stretch_zones(
+                &mut layout,
+                0,
+                &[ratio(0.0, 0.0, 0.7, 1.0), ratio(0.6, 0.0, 1.0, 1.0)]
+            ),
+            "two zones over each other"
+        );
+        assert!(
+            !stretch_zones(&mut layout, 5, &wide),
+            "a monitor it has no zones on"
+        );
+        assert_eq!(layout, before);
+    }
+
+    #[test]
+    fn two_apps_trade_zones() {
+        // ADR 0031: an app dropped on another in a workspace's picture: they trade zones.
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let ws = workspace(&t);
+        let sid = |s: &str| SlotId(s.into());
+        let zone_of = |w: &Workspace, s: &str| {
+            w.layout
+                .slot(&sid(s))
+                .and_then(|x| w.layout.effective_place(x))
+                .cloned()
+        };
+        let z = |id: &str| {
+            Some(Place::Zone {
+                zone: ZoneId::new(id),
+            })
+        };
+        // s1 alone in z1; s2 and s3 tabs of a group in z2: s1 and s2 trade, s2 leaving its group.
+        let out = swap_apps(&ws, &sid("s1"), &sid("s2")).unwrap();
+        assert_eq!(zone_of(&out, "s1"), z("z2"));
+        assert_eq!(zone_of(&out, "s2"), z("z1"));
+        assert_eq!(zone_of(&out, "s3"), z("z2"), "the other tab stays");
+        assert_eq!(out.layout.problems(), vec![]);
+        // Two apps of one zone: nothing to trade.
+        assert_eq!(swap_apps(&ws, &sid("s2"), &sid("s3")).unwrap(), ws);
+        assert_eq!(swap_apps(&ws, &sid("s1"), &sid("gone")), Err(EditError::GoneApp));
+        // An app with a place of its own, not a zone: refused.
+        let mut free = ws.clone();
+        free.layout.slots[0].place = Place::Maximized { monitor: 0 };
+        assert_eq!(
+            swap_apps(&free, &sid("s1"), &sid("s2")),
+            Err(EditError::NotInZone)
         );
     }
 }

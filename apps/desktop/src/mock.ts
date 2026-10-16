@@ -18,7 +18,6 @@ import {
   type MiniZone,
   type MonitorState,
   type Notice,
-  type PreviewTab,
   type PreviewWindow,
   type PreviewZone,
   type RatioRect,
@@ -126,6 +125,40 @@ const workspaces: Workspace[] =
           ],
         },
         {
+          // As the owner's own "Coding" (job 0158's picture): two apps and a tab group in one zone,
+          // and a zone left empty.
+          id: 'checks',
+          name: 'Release checks',
+          windows: 6,
+          zones: 3,
+          hotkey: null,
+          appList: [
+            { id: 's1', label: 'Visual Studio Code', icon: null, zone: 'z1', tab: false },
+            { id: 's2', label: 'Windows Terminal', icon: null, zone: 'z1', tab: true },
+            { id: 's3', label: 'File Explorer', icon: null, zone: 'z1', tab: true },
+            { id: 's4', label: 'MSYS2', icon: null, zone: 'z2', tab: false },
+            { id: 's5', label: 'Google Chrome', icon: null, zone: 'z2', tab: true },
+            { id: 's6', label: 'Claude', icon: null, zone: 'z2', tab: true },
+          ],
+          zoneList: [
+            { id: 'z1', name: '1', color: 'lapis', monitor: 'm1', area: { left: 0, top: 0, right: 0.5, bottom: 1 } },
+            {
+              id: 'z2',
+              name: '2',
+              color: 'verdigris',
+              monitor: 'm1',
+              area: { left: 0.5, top: 0, right: 1, bottom: 0.5 },
+            },
+            {
+              id: 'z3',
+              name: '3',
+              color: 'saffron',
+              monitor: 'm1',
+              area: { left: 0.5, top: 0.5, right: 1, bottom: 1 },
+            },
+          ],
+        },
+        {
           id: 'brand',
           name: 'Brand refresh',
           windows: 2,
@@ -213,7 +246,6 @@ function openSet(id: string): Reply {
     workspaces.push(w);
   }
   active = w.id;
-  arrangedWith = null;
   return done(`Opened “${w.name}”.`);
 }
 
@@ -276,10 +308,16 @@ let onScreen: OnScreen[] =
 let beforeArrange: OnScreen[] | null = null;
 /** The workspace open before the last Arrange or workspace opened, for Undo. */
 let activeBefore: string | null = null;
-/** The last Arrange, with the windows the user moved: as in the engine, where the zones Arrange
- * put on screen stay there, arranging the same way again moves nothing (`arrange::steady`), so
- * the picture keeps the windows where they were put. Forgotten once anything else moves them. */
-let arrangedWith: { preset: Preset | undefined; moves: ArrangeMove[] } | null = null;
+
+/** Fractions of the work area in its pixels. */
+function px(a: RatioRect, work: Rect): Rect {
+  return {
+    left: Math.round(work.left + a.left * (work.right - work.left)),
+    top: Math.round(work.top + a.top * (work.bottom - work.top)),
+    right: Math.round(work.left + a.right * (work.right - work.left)),
+    bottom: Math.round(work.top + a.bottom * (work.bottom - work.top)),
+  };
+}
 
 /** The layout Arrange gives a screen of windows of no particular task (`task::layout`): the
  * window used last takes the most room, up to three sit beside it. */
@@ -331,26 +369,21 @@ function autoLayout(): { task: Task; shape: RatioRect[]; takes: (number | undefi
   return { task: 'coding', shape, takes };
 }
 
-/** What Arrange would do with `preset` (or its own choice), with the windows the user moved, as
- * the engine reports it (`arrange::plan_moved`): a window moved trades places with the window in
- * the zone it was put in, and keeps its zone's name and colour. */
-function preview(preset: Preset | undefined, asked: ArrangeMove[] = []): ArrangePreview {
-  // The same layout as the last Arrange starts from where it put the windows.
-  const moves = arrangedWith && arrangedWith.preset === preset ? [...arrangedWith.moves, ...asked] : asked;
+/** What Arrange would do with `preset` (or its own choice), with the windows the user moved and
+ * the zones as resized on the picture (`areas`, taken when there is one for each zone), as the
+ * engine reports it (`arrange::plan_moved`, `editing::stretch_zones`): a window moved trades
+ * places with the window in the zone it was put in, and keeps its zone's colour. */
+function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: RatioRect[] = []): ArrangePreview {
   const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
-  const w = work.right - work.left;
-  const h = work.bottom - work.top;
   // Arrange makes no zones on a screen without windows; a picked layout always has its own.
   const auto = preset || onScreen.length === 0 ? null : autoLayout();
-  const shape = preset ? presetShape(preset) : (auto?.shape ?? []);
-  const rects = shape.map((a) => ({
-    left: Math.round(work.left + a.left * w),
-    top: Math.round(work.top + a.top * h),
-    right: Math.round(work.left + a.right * w),
-    bottom: Math.round(work.top + a.bottom * h),
-  }));
-  // A picked layout: the windows used last take the largest zones; the rest are minimised.
-  const order = rects
+  const made = preset ? presetShape(preset) : (auto?.shape ?? []);
+  const shape = areas.length > 0 && areas.length === made.length ? areas : made;
+  const rects = shape.map((a) => px(a, work));
+  // A picked layout: the windows used last take the largest zones (as the layout made them); the
+  // rest are minimised.
+  const order = made
+    .map((a) => px(a, work))
     .map((r, i) => ({ i, area: (r.right - r.left) * (r.bottom - r.top) }))
     .sort((a, b) => b.area - a.area || a.i - b.i)
     .map((x) => x.i);
@@ -372,14 +405,23 @@ function preview(preset: Preset | undefined, asked: ArrangeMove[] = []): Arrange
   const windows: PreviewWindow[] = onScreen.map((s, n): PreviewWindow => {
     const zone = zoneOf[n];
     const rect = zone === undefined ? undefined : rects[zone];
-    return rect === undefined
+    return rect === undefined || zone === undefined
       ? { window: s.window, label: s.label, icon: null, now: s.now, then: null, minimized: true }
-      : { window: s.window, label: s.label, icon: null, now: s.now, then: rect, minimized: false };
+      : {
+          window: s.window,
+          label: s.label,
+          icon: null,
+          now: s.now,
+          then: rect,
+          minimized: false,
+          zone: `a${String(zone + 1)}`,
+        };
   });
   const numbers = readingNumbers(shape);
   return {
     work_area: work,
     zones: rects.map((rect, i) => ({
+      id: `a${String(i + 1)}`,
       name: numbers[i] ?? String(i + 1),
       color: ZONE_COLORS[(colorOf[i] ?? i) % ZONE_COLORS.length] ?? 'slate',
       rect,
@@ -413,39 +455,68 @@ function numberZones(zones: ZoneEdit[]): ZoneEdit[] {
   );
 }
 
-/** What opening `w` would do on the main screen: its zones, its apps from where they are to
- * their zones (an app not on screen starts there; a tab group shows its first tab, with its
- * tabs), the other windows minimised. */
+/** What opening `w` would do on the main screen, as the engine reports it: its zones; each of its
+ * apps from where it is to its zone (an app not on screen starts there), the tabs of a zone as
+ * one group, which shows its first tab; an app in no zone in a place of its own (full screen
+ * here); the other windows minimised. */
 function previewWorkspace(w: Workspace): ArrangePreview {
   const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
-  const px = (a: RatioRect): Rect => ({
-    left: Math.round(work.left + a.left * (work.right - work.left)),
-    top: Math.round(work.top + a.top * (work.bottom - work.top)),
-    right: Math.round(work.left + a.right * (work.right - work.left)),
-    bottom: Math.round(work.top + a.bottom * (work.bottom - work.top)),
-  });
   const here = w.zoneList.filter((z) => z.monitor === 'm1');
-  const zones: PreviewZone[] = here.map((z) => ({ name: z.name, color: z.color, rect: px(z.area) }));
+  const zones: PreviewZone[] = here.map((z) => ({
+    ...(z.id ? { id: z.id } : {}),
+    name: z.name,
+    color: z.color,
+    rect: px(z.area, work),
+  }));
+  const openOf = (label: string) => onScreen.find((o) => o.label === label);
   const windows: PreviewWindow[] = [];
   for (const z of here) {
-    const inZone = w.appList.filter((a) => a.zone === z.id);
-    const shown = inZone[0];
-    if (!shown) continue;
-    const rect = px(z.area);
-    const open = onScreen.find((o) => o.label === shown.label);
-    const tabs: PreviewTab[] =
-      inZone.length > 1 && inZone.every((a) => a.tab)
-        ? inZone.map((a) => ({ label: a.label, icon: a.icon, shown: a === shown }))
-        : [];
+    const rect = px(z.area, work);
+    // The zone's apps, in order; its tabs as one group, where the first of them is.
+    const units: WorkspaceApp[][] = [];
+    let group: WorkspaceApp[] | null = null;
+    for (const a of w.appList.filter((x) => x.zone === z.id)) {
+      if (!a.tab) {
+        units.push([a]);
+        continue;
+      }
+      if (!group) {
+        group = [];
+        units.push(group);
+      }
+      group.push(a);
+    }
+    for (const unit of units) {
+      const shown = unit[0];
+      if (!shown) continue;
+      const open = openOf(shown.label);
+      windows.push({
+        window: open?.window ?? 0,
+        label: shown.label,
+        icon: shown.icon,
+        now: open?.now ?? rect,
+        then: rect,
+        minimized: false,
+        starting: !open,
+        tabs: unit.length > 1 ? unit.map((a) => ({ label: a.label, icon: a.icon, shown: a === shown, app: a.id })) : [],
+        ...(z.id ? { zone: z.id } : {}),
+        app: shown.id,
+      });
+    }
+  }
+  for (const a of w.appList) {
+    if (a.zone !== null && here.some((z) => z.id === a.zone)) continue;
+    const open = openOf(a.label);
     windows.push({
       window: open?.window ?? 0,
-      label: shown.label,
-      icon: shown.icon,
-      now: open?.now ?? rect,
-      then: rect,
+      label: a.label,
+      icon: a.icon,
+      now: open?.now ?? work,
+      then: work,
       minimized: false,
       starting: !open,
-      tabs,
+      tabs: [],
+      app: a.id,
     });
   }
   for (const o of onScreen) {
@@ -455,7 +526,7 @@ function previewWorkspace(w: Workspace): ArrangePreview {
   return { work_area: work, zones, windows, elsewhere: 0, task: null };
 }
 
-function arrange(preset: string | undefined, moves: ArrangeMove[] = []): Reply {
+function arrange(preset: string | undefined, moves: ArrangeMove[] = [], areas: RatioRect[] = []): Reply {
   const known = PRESETS.find((p) => p.id === preset);
   if (preset !== undefined && !known) {
     return {
@@ -473,11 +544,7 @@ function arrange(preset: string | undefined, moves: ArrangeMove[] = []): Reply {
       hint: 'Open the apps you work with, then arrange them.',
     };
   }
-  const p = preview(known?.id, moves);
-  arrangedWith = {
-    preset: known?.id,
-    moves: arrangedWith && arrangedWith.preset === known?.id ? [...arrangedWith.moves, ...moves] : moves,
-  };
+  const p = preview(known?.id, moves, areas);
   beforeArrange = onScreen;
   activeBefore = active;
   // Minimised windows leave the screen, as they leave the picture.
@@ -598,7 +665,7 @@ const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.0.2-dev', protocol: 9 };
+      return { reply: 'hello', app_version: '1.0.2-dev', protocol: 10 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -629,7 +696,6 @@ function answer(command: Command): Reply {
       beforeArrange = onScreen;
       activeBefore = active;
       active = w.id;
-      arrangedWith = null;
       return done(`Opened “${w.name}”.`);
     }
     case 'zones': {
@@ -735,14 +801,34 @@ function answer(command: Command): Reply {
           hint: 'Look at the list again.',
         };
       }
-      if (command.cmd === 'remove_app') w.appList.splice(w.appList.indexOf(app), 1);
-      else Object.assign(app, { zone: command.zone, tab: false });
+      if (command.cmd === 'remove_app') {
+        w.appList.splice(w.appList.indexOf(app), 1);
+        return apps(w);
+      }
+      // Dropped on another app, the two trade zones (`editing::swap_apps`); else it goes in the
+      // zone. A tab leaves its group, unless it stays in the group's zone.
+      const other = command.swap_with === undefined ? null : w.appList.find((a) => a.id === command.swap_with);
+      if (other === undefined) {
+        return {
+          reply: 'error',
+          code: 'bad_request',
+          message: 'This app is not in the workspace any more.',
+          hint: 'Look at the list again.',
+        };
+      }
+      if (other && other.zone !== app.zone) {
+        const was = app.zone;
+        Object.assign(app, { zone: other.zone, tab: false });
+        Object.assign(other, { zone: was, tab: false });
+      } else if (!other && app.zone !== command.zone) {
+        Object.assign(app, { zone: command.zone, tab: false });
+      }
       return apps(w);
     }
     case 'rescue':
       return done('Nothing was hidden: every window is already on screen.');
     case 'arrange':
-      return arrange(command.preset, command.moves);
+      return arrange(command.preset, command.moves, command.areas);
     case 'preview_workspace': {
       const w = find(command.workspace);
       return w ? { reply: 'preview', ...previewWorkspace(w) } : missing(command.workspace);
@@ -750,7 +836,7 @@ function answer(command: Command): Reply {
     case 'preview_arrange': {
       const known = PRESETS.find((p) => p.id === command.preset);
       if (command.preset !== undefined && !known) return arrange(command.preset);
-      return { reply: 'preview', ...preview(known?.id, command.moves) };
+      return { reply: 'preview', ...preview(known?.id, command.moves, command.areas) };
     }
     case 'undo_arrange':
       if (!beforeArrange) {
@@ -764,13 +850,12 @@ function answer(command: Command): Reply {
       onScreen = beforeArrange;
       active = activeBefore;
       beforeArrange = null;
-      arrangedWith = null;
       return done('Windows are back where they were.');
     case 'state':
       return {
         reply: 'state',
         app_version: '1.0.2-dev',
-        protocol: 9,
+        protocol: 10,
         safe_mode: false,
         watchdog: true,
         monitors,

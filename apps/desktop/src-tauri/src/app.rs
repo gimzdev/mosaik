@@ -641,6 +641,7 @@ fn build_tray(app: &AppHandle, engine: &Engine) -> tauri::Result<()> {
                 Command::Arrange {
                     preset: None,
                     moves: Vec::new(),
+                    areas: Vec::new(),
                 },
             ),
             "switcher" => ask_engine(app, Command::ShowSwitcher),
