@@ -317,7 +317,6 @@ impl Engine {
             && a.from.as_ref() == Some(&ws.id)
         {
             a.from = None;
-            self.file.active = None;
         }
         if self.active.as_ref().is_some_and(|a| a.id == ws.id) {
             self.active = None;

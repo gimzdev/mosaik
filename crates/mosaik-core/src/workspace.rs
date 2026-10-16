@@ -405,24 +405,40 @@ pub fn capture(
     }
 }
 
-/// What a save builds on (`capture`'s `previous`): the zones on screen (what Arrange put there,
-/// or the open workspace's) under the id, name and shortcut of the workspace saved over, none for
-/// a new one (ADR 0030). Saving keeps what the user sees: Arrange's zones are saved nowhere
-/// else, and a workspace saved over keeps none of its old zones that are not on screen. With
-/// nothing on screen, the workspace saved over keeps its own.
-pub fn saved_over(target: Option<&Workspace>, on_screen: Option<&Workspace>) -> Option<Workspace> {
-    let Some(screen) = on_screen else {
+/// What a save builds on (`capture`'s `previous`; ADR 0030). Without Arrange's zones on screen,
+/// the workspace saved over, if any, as always. With them (`arranged`), which are saved nowhere
+/// else: saved over a workspace, they take the place of its zones, under its id, name and
+/// shortcut, as when Arrange changed the workspace itself; saved as a new one, only those a
+/// window on screen (`windows`) sits in go with it, without a shortcut: an empty zone on another
+/// monitor would have that monitor's windows minimised whenever it opens.
+pub fn saved_over(
+    target: Option<&Workspace>,
+    arranged: Option<&Workspace>,
+    windows: &[WindowFacts],
+    topology: &Topology,
+    style: FrameStyle,
+) -> Option<Workspace> {
+    let Some(arranged) = arranged else {
         return target.cloned();
     };
-    Some(match target {
-        Some(t) => Workspace {
-            layout: screen.layout.clone(),
+    if let Some(t) = target {
+        return Some(Workspace {
+            layout: arranged.layout.clone(),
             ..t.clone()
-        },
-        None => Workspace {
-            hotkey: None,
-            ..screen.clone()
-        },
+        });
+    }
+    let live = live_zones(&arranged.layout, topology, style);
+    let held: HashSet<ZoneId> = windows
+        .iter()
+        .filter(|w| !w.maximized)
+        .filter_map(|w| zone_holding(w.frame_rect, w.resizable, &live, style))
+        .collect();
+    let mut layout = arranged.layout.clone();
+    layout.zones.retain(|z| held.contains(&z.id));
+    Some(Workspace {
+        hotkey: None,
+        layout,
+        ..arranged.clone()
     })
 }
 
@@ -1117,7 +1133,7 @@ mod tests {
         let now = placed_in(&arranged, &halves, &t);
         let seen_now: Vec<Seen> = now.iter().map(|w| seen(w, "App")).collect();
 
-        let base = saved_over(Some(&email), Some(&arranged));
+        let base = saved_over(Some(&email), Some(&arranged), &now, &t, style());
         let saved = capture(
             email.id.clone(),
             email.name.clone(),
@@ -1147,29 +1163,74 @@ mod tests {
     }
 
     #[test]
-    fn a_new_workspace_takes_the_zones_on_screen_but_no_shortcut() {
-        let t = fixtures::single_1080p_100();
-        let three = snapped();
-        let seen3: Vec<Seen> = three.iter().map(|w| seen(w, "App")).collect();
-        let mut coding = capture(
-            WorkspaceId("coding".into()),
-            "Coding".into(),
+    fn a_new_workspace_takes_the_arranged_zones_a_window_is_in_and_no_shortcut() {
+        // Saved as a new workspace, Arrange's zones go with it only where a window sits now: an
+        // empty zone on the monitor at the right would have that monitor's windows minimised
+        // whenever the workspace opens (`plan_switch`).
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let (big, right) = (t.monitors()[0].work_area, t.monitors()[1].work_area);
+        let middle = big.left + big.width() / 2;
+        let windows = vec![
+            win(
+                1,
+                "code.exe",
+                "a - Visual Studio Code",
+                Rect::new(big.left, big.top, middle, big.bottom),
+            ),
+            win(
+                2,
+                "chrome.exe",
+                "b - Google Chrome",
+                Rect::new(middle, big.top, big.right, big.bottom),
+            ),
+            win(3, "slack.exe", "Slack", right),
+        ];
+        let seen3: Vec<Seen> = windows.iter().map(|w| seen(w, "App")).collect();
+        let mut arranged = capture(
+            WorkspaceId::arranged(),
+            "Arranged".into(),
             &seen3,
             &t,
             style(),
             None,
         );
-        coding.hotkey = "Win+Alt+C".parse().ok();
-        let base = saved_over(None, Some(&coding));
-        assert_eq!(base.as_ref().map(|b| &b.layout), Some(&coding.layout));
+        assert_eq!(arranged.layout.zones.len(), 3);
+        arranged.hotkey = "Win+Alt+A".parse().ok();
+        // Slack closed since: two windows on screen, in the zones of the big monitor.
+        let now = placed_in(&arranged, &windows, &t)[..2].to_vec();
+        let base = saved_over(None, Some(&arranged), &now, &t, style()).expect("Arrange's zones");
+        assert_eq!(base.hotkey, None, "a shortcut opens one workspace");
+        let r = Resolver::new(&base.layout, &t, style());
+        let monitors: Vec<MonitorId> = base
+            .layout
+            .zones
+            .iter()
+            .filter_map(|z| r.zone_rect(&z.id))
+            .map(|(rect, _)| t.monitor_for_rect(rect).id.clone())
+            .collect();
         assert_eq!(
-            base.and_then(|b| b.hotkey),
-            None,
-            "a shortcut opens one workspace"
+            monitors,
+            vec![t.monitors()[0].id.clone(); 2],
+            "the empty zone stays behind"
         );
-        // Nothing on screen: a workspace saved over keeps its own zones; a new one starts afresh.
-        assert_eq!(saved_over(Some(&coding), None), Some(coding.clone()));
-        assert_eq!(saved_over(None, None), None);
+        // Saved over a workspace, Arrange's zones take the place of all of its own, as when
+        // Arrange changed the workspace itself.
+        let coding = Workspace {
+            id: WorkspaceId("coding".into()),
+            name: "Coding".into(),
+            hotkey: "Win+Alt+C".parse().ok(),
+            layout: Layout::default(),
+        };
+        let over = saved_over(Some(&coding), Some(&arranged), &now, &t, style()).expect("a base");
+        assert_eq!(over.layout.zones, arranged.layout.zones);
+        assert_eq!((over.id.0.as_str(), over.hotkey), ("coding", coding.hotkey));
+        // Without Arrange's zones on screen, a save builds on the workspace saved over, as
+        // before; a new one starts afresh.
+        assert_eq!(
+            saved_over(Some(&coding), None, &now, &t, style()),
+            Some(coding.clone())
+        );
+        assert_eq!(saved_over(None, None, &now, &t, style()), None);
     }
 
     #[test]

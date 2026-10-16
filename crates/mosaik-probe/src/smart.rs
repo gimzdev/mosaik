@@ -184,8 +184,8 @@ pub fn run(args: &[String]) -> Result<Value, String> {
 }
 
 /// `mosaik-probe menu-shot --shots DIR`: the side menu open, then a toast, pictured in the light
-/// and the dark theme, with a workspace open (two probe windows arranged), for the eye. Moves the
-/// mouse.
+/// and the dark theme, with a workspace open (two probe windows arranged, then saved), for the
+/// eye. Moves the mouse.
 pub fn menu_shot(args: &[String]) -> Result<Value, String> {
     let shots = args
         .iter()
@@ -233,6 +233,16 @@ pub fn menu_shot(args: &[String]) -> Result<Value, String> {
                 Command::Arrange {
                     preset: None,
                     moves: Vec::new(),
+                },
+            )
+            .0,
+        )?;
+        // Arrange makes no workspace (ADR 0030): saved, the menu lists it as on screen.
+        done(
+            &ask(
+                &engine,
+                Command::Save {
+                    workspace: Some(SAVED.into()),
                 },
             )
             .0,
@@ -1232,7 +1242,6 @@ fn drop_tall(
     }))
 }
 
-/// A workspace's apps (`apps`), as the Workspaces page asks for them.
 /// 3f2. What Arrange put on screen, saved as a workspace (ADR 0030: only Save makes one): it
 /// takes the zones on screen, no window moves, and it is the one in use.
 fn save_arranged(engine: &Engine, work: Rect, w: &[HWND]) -> Result<Value, String> {
@@ -1271,6 +1280,7 @@ fn save_arranged(engine: &Engine, work: Rect, w: &[HWND]) -> Result<Value, Strin
     }))
 }
 
+/// A workspace's apps (`apps`), as the Workspaces page asks for them.
 fn apps_of(engine: &Engine, command: Command) -> Result<WorkspaceApps, String> {
     match engine.request(command, TIMEOUT) {
         Reply::Apps(a) => Ok(*a),
@@ -1864,8 +1874,8 @@ fn glide(from: Point, to: Point) {
     }
 }
 
-/// Part 4: the quick menu, with the workspace Arrange made open and its three windows (`w`, the
-/// last of a fixed size).
+/// Part 4: the quick menu, with the arranged windows saved as a workspace, open, and its three
+/// windows (`w`, the last of a fixed size).
 fn quick_menu(
     engine: &Engine,
     styles: Styles,

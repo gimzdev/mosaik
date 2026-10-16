@@ -101,8 +101,7 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 }
 
 impl Engine {
-    /// A workspace was saved or edited: what Arrange, or opening a workspace, did is that
-    /// workspace's now.
+    /// A workspace was saved or edited: what Arrange, or opening a workspace, did stays done.
     pub(crate) fn forget_undo(&mut self) {
         self.undo = None;
     }
@@ -130,13 +129,8 @@ impl Engine {
                 Some("Restart Mosaïk normally to arrange windows."),
             ));
         }
-        if let Some(problem) = &self.file_problem {
-            return Err(error(
-                ErrorCode::Failed,
-                format!("Workspaces cannot be saved: {problem}"),
-                None,
-            ));
-        }
+        // Arrange saves nothing (ADR 0030): a workspaces file that cannot be written does not
+        // stop it.
         let Some(topology) = self.read_topology() else {
             return Err(error(
                 ErrorCode::Failed,

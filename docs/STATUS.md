@@ -1385,6 +1385,42 @@ workspace?", the owner: "arrange should arrange, save should save. yes". ADR 003
   arranged" (the same zones, no window moved, one workspace, open) before editing its apps.
 - Checks here: fmt; clippy -D warnings for Windows on every crate; core 260, ipc 11; interface
   119; Playwright 30.
+- **Job 0155** (6988ddd, the probes job 0154 could not run): Smart App Control refused the same
+  probe file ten times a minute apart, then three more; no probe ran. A verdict sticks to a file:
+  job 0156 makes the probe again when it is refused.
+- **On the owner's PC** (job 0156, at 7c8fd7e): build 2 min 41 s; `mosaik.ps1 test` passing
+  (interface 119, the publish script's checks). The release probe stayed refused (deleting it did
+  not make cargo link it again), so its debug build ran, and that build's watchdog was refused
+  too: the probe's engine hid no tab ("tabs will not hide windows"), so the steps about hidden
+  tabs did not apply (a tab clicked left the other showing; drops onto the strip with tags above
+  windows made no tab); the next job runs a release probe again. Everything else, with a debug
+  build's times:
+  - `smart`: **Arrange made no workspace** ("Arranged 3 windows.", 0 workspaces, none open, on
+    screen `~arranged`), laid out for the task, every window 0 px from its zone; Undo 0 px with
+    still none; twice moved nothing; a fourth window minimised and brought back 0 px; the
+    arranged screen **saved as "Probe arranged"**: 3 windows, 3 zones, the same zones, no window
+    moved, 1 workspace, open; its apps added, moved and taken out 0 px; zones that make room as
+    before. The side menu opened in 50 ms with "Probe arranged" and "Update “Probe arranged”"; a
+    press as it opened did nothing. No check failing.
+  - `workspace --drag`: saved in 5.9 ms, opened in 17.9 ms, every window 0 px from its zone and
+    from the preview; opening undone in 11.3 ms, the window it minimised back 0 px; a zone split
+    0 px. The scan: 306 windows, the engine's 0.7 ms, every window 4.3 ms.
+  - The UI tour: 31 pictures, Automatic, Undo swaps, Back to my screen and More settings found.
+- **A review of 7c8fd7e** by a second agent found no bug in the scratch arrangement's life
+  (Arrange, Undo, opening, saving, deleting, tabs, resizes, room made) and three smaller points,
+  now handled (test first where they are code):
+  - Arrange was still refused when the workspaces file cannot be written, though it writes
+    nothing: refused no more. Engine test, written before the change (Windows, so it runs on the
+    PC): with a file from a newer Mosaïk, Arrange and its preview go on and only Save is refused
+    (the check removed answered "Workspaces cannot be saved" to both).
+  - Saving with a saved workspace open took that workspace's zones, empty ones and other
+    monitors' included, also under a new name: saving without Arrange's zones on screen is as
+    before again, and a new workspace saved after Arrange takes only the zones a window is in
+    (core test on two monitors: the empty zone stays behind; it failed to build before).
+  - Opening a suggested set after Arrange leaves Arrange's zones behind, as a set started is not
+    undone (ADR 0029): kept so, and said in ADR 0030.
+  - The probe's notes follow; `menu-shot` saves the arranged windows so the picture lists a
+    workspace.
 
 ## Owner decisions
 

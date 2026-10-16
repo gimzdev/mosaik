@@ -424,7 +424,7 @@ impl Engine {
 
     /// Saves the windows on screen as the workspace `name` (updating the one with that name, if
     /// any; without a name, the one in use), makes it the open one and puts its windows in their
-    /// zones. The zones on screen are saved with them (`saved_over`), Arrange's included.
+    /// zones. Arrange's zones on screen are saved with them (`saved_over`).
     pub(crate) fn save(&mut self, name: Option<String>) -> Reply {
         if self.config.safe_mode {
             return error(
@@ -507,7 +507,14 @@ impl Engine {
         );
         let name = previous.as_ref().map_or(name, |p| p.name.clone());
         let style = self.style();
-        let base = saved_over(previous.as_ref(), self.on_screen());
+        // Arrange's zones on screen are saved with the windows (ADR 0030); else, as always, the
+        // zones of the workspace saved over are kept.
+        let arranged = self
+            .arranged
+            .as_ref()
+            .map(|a| &a.ws)
+            .filter(|_| self.arranged_on_screen());
+        let base = saved_over(previous.as_ref(), arranged, &windows, &topology, style);
         let mut ws = capture(id.clone(), name.clone(), &seen, &topology, style, base.as_ref());
         // Tab groups on screen stay tab groups, where their visible tab is. Their hidden tabs
         // (minimised ones too, when tabs are minimised) come from Mosaïk's own list.
