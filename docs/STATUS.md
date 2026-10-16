@@ -1696,6 +1696,34 @@ simetric and appealing". ADR 0032.
   without a tab group, any Start menu app), ipc 12, interface 142, Playwright 38 (a join kept by
   Move windows, the workspace with the most apps on every layout and Undo, apps dragged in their
   list, Add an app with axe).
+- **On the owner's PC** (job 0171, at 6e0ff6e): build and every test passing (interface 142);
+  the engine's arrange test ok; the scan 0.4 ms (302 windows); `smart`: its workspace pictured on
+  all ten layouts with its three apps in zones (nothing saved, nothing moved), then laid out in
+  Quarters and undone, zones and windows back; a window dropped onto the other half joined it,
+  behind the window there, on the picture and on screen, and Undo put it back; but the half it
+  left changed colour (the one check not passing, fixed below); the side menu. Mosaïk left in the
+  tray (1.0.2, protocol 12, watchdog, Win+Alt+Space). The owner's "Coding" (6 apps, 3 zones)
+  pictured on all ten layouts (`preview-workspace`): on each, the six apps in zones, none
+  minimised, no zone empty while another holds two, nothing saved. Packed (293 files); both files
+  beside the repository brought up to date (the key line kept). The tour stopped after 10
+  pictures: a click on Edit in a workspace's menu did not take (the menu stayed open; the three
+  tours before took it).
+- **The owner's note of 11:52**, with a picture of the tour's window: of the note the first run
+  left above the workspaces ("Made from the windows you had open. Delete any you don't need.",
+  with Got it), "this shit has to go lets not flood with useless infos". The first run says
+  nothing now: the workspaces it makes are in Home's column like any other; a sorting that failed
+  says why in Mosaïk's notes, with Save as workspace as the way forward. `Tip`, its last use
+  gone, went too. Tests first: interface 141 (the first run with nothing to read or put away; a
+  failure kept in the notes), Playwright 38 (the first run).
+- **Zones keep their colours through the picture's moves** (job 0171's failing check): each zone
+  took the colour its own window wears, so a zone a window left took the colour of the window
+  then in front of it (on 3987 random drops on screens wearing colours, 1164 changed a zone's
+  colour). The colours of a picture with moves are now those of the picture without them, as the
+  moves left them: only two zones whose own windows trade places, or a zone and the empty zone
+  its own window takes, trade colours (ADR 0033). Tests first: core 306 (a join and trades on
+  windows wearing colours; the random drops, none changing a colour now), interface 142 (the
+  stand-in's joins), Playwright 38. The tour now says a menu click the page did not take, with
+  where the item was and is, and clicks it once more.
 
 ## Owner decisions
 
@@ -1766,3 +1794,6 @@ simetric and appealing". ADR 0032.
   "Add an app", every app open or not in one list ("why even specify "not open""); a workspace's
   apps are dragged in their list; Like Windows made to work ("either make it work or make it go").
   ADR 0033.
+- 2026-10-16: the first run leaves no note of the workspaces it made ("this shit has to go lets
+  not flood with useless infos"), as there is no welcome (2026-10-15): they are simply in Home's
+  column. ADR 0033.
