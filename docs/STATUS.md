@@ -1724,6 +1724,23 @@ simetric and appealing". ADR 0032.
   windows wearing colours; the random drops, none changing a colour now), interface 142 (the
   stand-in's joins), Playwright 38. The tour now says a menu click the page did not take, with
   where the item was and is, and clicks it once more.
+- **On the owner's PC** (job 0172, at 86717d8): build and every test passing (interface 142);
+  the engine's arrange test ok; the scan 0.4 ms (302 windows); `smart`, every check passing: a
+  window dropped onto the other half joins it and every zone keeps its colour, on the picture and
+  on screen; its workspace on all ten layouts, then Quarters and Undo; the side menu. The tour:
+  32 pictures, no click missed, the first run with no note, Like Windows following Windows (light)
+  after Light and after Dark. Mosaïk left in the tray (1.0.2, protocol 12, watchdog,
+  Win+Alt+Space); the owner's "Coding" on all ten layouts: the six apps in zones on each, none
+  minimised, nothing saved. Packed (293 files); both files beside the repository brought up to
+  date (the key line kept).
+- **What the tour's pictures showed** (job 0172): Add an app lists every app of the Start menu
+  (over 200 on the owner's PC), and the window asked for all their icons in one read, which
+  Mosaïk cuts at 96 keys: the others were taken for apps with no icon for as long as the window
+  stayed open. The window reads icons 24 at a time now, one read after another, the first on the
+  page first. A workspace with no app said "Empty. Drag an app here, or use Move." in each zone,
+  with nothing to drag or move: it says Empty. Tests first: interface 144. The test of the dark
+  theme now waits for the effect that sets it (it had read it before, once in a run of all the
+  tests).
 
 ## Owner decisions
 
