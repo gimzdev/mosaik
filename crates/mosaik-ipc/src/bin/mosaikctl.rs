@@ -50,7 +50,7 @@ mod windows_main {
   preview [<layout>]             what arrange would do on the main screen, without doing it
                                  (as JSON)
   preview-workspace <workspace>  what opening a workspace would do there (as JSON)
-  undo-arrange                   put back what the last arrange changed
+  undo-arrange                   put back what the last arrange, or workspace opened, changed
   rename <workspace> <name>      rename a workspace
   delete <workspace>             delete a workspace (its windows stay)
   hotkey <workspace> <shortcut>  give a workspace its own shortcut (`none` removes it)

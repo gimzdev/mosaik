@@ -16,6 +16,8 @@
   menu and the switcher. "Save layout" is "Save as workspace"; Arrange says which workspace now
   opens its way, or the new one it was saved as.
 - A suggested set shows the apps it will start before it starts them: "Start these apps".
+- Opening a workspace can be undone, as Arrange can: the windows it minimised come back where
+  they were. Home offers Undo after Open.
 - Settings start with what most people change; where tags go, what hidden tabs do and what Shift
   does while dragging are under More settings.
 - The side menu ignores a click made as it opens by itself (a browser's scroll bar runs along the

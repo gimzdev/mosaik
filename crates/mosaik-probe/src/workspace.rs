@@ -465,6 +465,7 @@ fn scenario(
         Reply::Preview(p) => Some(p),
         _ => None,
     };
+    let other_before = frame_rect(other);
     let (reply, switch_ms) = ask(
         engine,
         Command::Switch {
@@ -474,6 +475,32 @@ fn scenario(
     let switched = done(&reply)?;
     pump_until(900, || false);
     let other_minimized = mosaik_win::window::geometry(other).is_some_and(|g| g.minimized);
+    // Opening it is undone as Arrange is (ADR 0029): the window it minimised comes back where it
+    // was. Then it opens again, for what follows.
+    let (undo_reply, undo_ms) = ask(engine, Command::UndoArrange);
+    pump_until(900, || false);
+    let other_back = mosaik_win::window::geometry(other).is_some_and(|g| !g.minimized);
+    let other_back_px = frame_rect(other)
+        .zip(other_before)
+        .map(|(now, was)| edge_error(now, was));
+    let undo_open = json!({
+        "reply": format!("{undo_reply:?}"),
+        "ms": undo_ms,
+        "other_back": other_back,
+        "other_back_px": other_back_px,
+        "ok": matches!(undo_reply, Reply::Done { .. }) && other_back && other_back_px == Some(0),
+    });
+    println!("undo open: {undo_open}");
+    done(
+        &ask(
+            engine,
+            Command::Switch {
+                workspace: "Probe workspace".into(),
+            },
+        )
+        .0,
+    )?;
+    pump_until(900, || false);
     crate::apps::close(other);
     if !other_process.wait(3000) {
         let _ = other_process.kill();
@@ -614,6 +641,7 @@ fn scenario(
         "zone_names": zone_names,
         "preview": previewed,
         "other_window_minimized": other_minimized,
+        "undo_open": undo_open,
         "after_switch": after_switch,
         "windows_in_zones": in_zones,
         "drag": dragged,

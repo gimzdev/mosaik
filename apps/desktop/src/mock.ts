@@ -274,6 +274,8 @@ let onScreen: OnScreen[] =
       ];
 /** Where the windows were before the last Arrange, for Undo. */
 let beforeArrange: OnScreen[] | null = null;
+/** The workspace open before the last Arrange or workspace opened, for Undo. */
+let activeBefore: string | null = null;
 /** The last Arrange, with the windows the user moved: as in the engine, where what Arrange did
  * becomes the open workspace's, arranging the same way again moves nothing (`arrange::steady`),
  * so the picture keeps the windows where they were put. Forgotten once anything else moves them. */
@@ -477,6 +479,7 @@ function arrange(preset: string | undefined, moves: ArrangeMove[] = []): Reply {
     moves: arrangedWith && arrangedWith.preset === known?.id ? [...arrangedWith.moves, ...moves] : moves,
   };
   beforeArrange = onScreen;
+  activeBefore = active;
   // Minimised windows leave the screen, as they leave the picture.
   onScreen = onScreen.flatMap((s, i) => {
     const w = p.windows[i];
@@ -624,6 +627,9 @@ function answer(command: Command): Reply {
     case 'switch': {
       const w = find(command.workspace);
       if (!w) return missing(command.workspace);
+      // Undone as the engine undoes it: the screen and the workspace open as they were.
+      beforeArrange = onScreen;
+      activeBefore = active;
       active = w.id;
       arrangedWith = null;
       return done(`Opened “${w.name}”.`);
@@ -753,11 +759,12 @@ function answer(command: Command): Reply {
         return {
           reply: 'error',
           code: 'not_found',
-          message: 'There is no Arrange to undo.',
-          hint: 'Arrange can be undone for ten minutes, until a workspace is opened, saved or edited.',
+          message: 'There is nothing to undo.',
+          hint: 'Arrange, and opening a workspace, can be undone for ten minutes, until a workspace is saved or edited.',
         };
       }
       onScreen = beforeArrange;
+      active = activeBefore;
       beforeArrange = null;
       arrangedWith = null;
       return done('Windows are back where they were.');

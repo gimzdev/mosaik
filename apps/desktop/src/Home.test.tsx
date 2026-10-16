@@ -375,6 +375,20 @@ describe('Home', () => {
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('undoes opening a workspace: the windows it minimised come back', async () => {
+    // Opening a workspace minimises the other windows on its screens; a person new to Mosaïk
+    // would otherwise bring them back one by one (ADR 0029). A set started is not undone.
+    const asked = answer();
+    home();
+    await userEvent.click(await screen.findByRole('button', { name: 'Ship' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Open “Ship”' }));
+    expect(await shown('Opened “ship”.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(asked).toContainEqual({ cmd: 'undo_arrange' });
+    expect(await shown('Windows are back where they were.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+  });
+
   it('keeps a workspace shown when its row is clicked again; Back, Esc or a layout show the screen again', async () => {
     const asked = answer();
     home();

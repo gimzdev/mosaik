@@ -1311,6 +1311,9 @@ speed, 27 on the code); what they found and what changed is ADR 0029.
   waits for the move, hide and follow threads, no `DwmFlush` when the switcher opens, previews
   that no longer keep the monitors they read, the Start menu never waited for by Home (suggestions
   follow once it is read), other arrangers looked for at most every 5 minutes.
+- **Opening a workspace undone** as Arrange is (the windows it minimised back where they were,
+  the workspace open before open again): Home's test failed before (no Undo after Open) and
+  passes; the workspace probe's new `undo_open` step waits for the PC.
 - **Files**: settings out of range mended on load with one note (the test failed before: 500 px
   kept); damaged workspaces said in words (the test failed before: Rust's debug output).
 - **Code**: the strip's title-bar leftovers, a dead field, an untrue notice, the planner's unused
@@ -1318,7 +1321,7 @@ speed, 27 on the code); what they found and what changed is ADR 0029.
   one place, key state read through mosaik-win; ADRs 0011, 0014 to 0019, 0022, 0024 and 0028
   marked as amended; architecture and README brought up to date.
 - Checks here: fmt; clippy -D warnings for Windows on every crate; core 251, ipc 11; interface
-  117; Playwright 30; the site type-checks; shellcheck.
+  118; Playwright 30; the site type-checks; shellcheck.
 
 ## Owner decisions
 

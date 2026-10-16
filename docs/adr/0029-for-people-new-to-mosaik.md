@@ -81,6 +81,11 @@ without a way to quit.
 - The UI tour finds Automatic, Undo swaps, More settings and Back to my screen; the probes check a
   press as the side menu opens (`smart`: nothing moves, the menu stays) and measure both scans
   (`classify`: the engine's and every window's).
+- Opening a workspace can be undone as Arrange can (the same `undo_arrange`, for ten minutes,
+  until a workspace is saved or edited): every window it moved or minimised goes back, the ones it
+  brought back from the taskbar to it, and the workspace open before is open again. Home offers
+  Undo after Open; a set started is not undone. The workspace probe checks that the window it
+  minimised comes back where it was.
 - Not done here: Arrange still keeps its zones in a workspace (the open one, or a new one), as
   ADR 0014 decided; it now says so. Windows' own text size is not applied to the window (Ctrl and
-  + is); an Undo for opening a workspace, and making tabs from a workspace's page, are next.
+  + is); making tabs from a workspace's page is next.

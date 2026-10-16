@@ -242,7 +242,7 @@ export function Home({
       if (reply.reply === 'done') {
         say(reply.message);
       } else {
-        say(errorMessage(reply) ?? 'Arrange could not be undone.', true);
+        say(errorMessage(reply) ?? 'This could not be undone.', true);
         poke('changed');
       }
     });
@@ -257,8 +257,9 @@ export function Home({
       if (reply.reply === 'done') {
         say(reply.message);
         setShown(null);
-        // What Undo would undo is not on screen any more.
-        setUndoable(false);
+        // Opening a workspace can be undone, as Arrange can: it minimised the other windows on
+        // its screens (ADR 0029). A set started is not: its apps would stay open.
+        setUndoable(it.kind === 'workspace');
       } else {
         say(errorMessage(reply) ?? failed, true);
         poke('changed');

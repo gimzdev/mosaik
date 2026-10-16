@@ -596,6 +596,29 @@ impl Engine {
             self.style(),
             self.settings.switching,
         );
+        // What undoes it (ADR 0029): opening a workspace minimises the other windows on its
+        // screens, which a person new to Mosaïk would otherwise bring back one by one. Each
+        // window it moves or minimises goes back where it was; one it brought back from the
+        // taskbar goes back there.
+        let touched: Vec<&WindowFacts> = plan
+            .moves
+            .iter()
+            .map(|m| m.window)
+            .chain(plan.minimize.iter().copied())
+            .filter_map(|h| all.iter().find(|f| f.handle == h))
+            .collect();
+        let undo = crate::arranging::Undo {
+            at: Instant::now(),
+            workspace: Some(ws.clone()),
+            workspace_id: ws.id.clone(),
+            active: self.active.as_ref().map(|a| (a.id.clone(), a.windows.clone())),
+            windows: touched
+                .iter()
+                .filter(|f| !f.minimized)
+                .map(|f| (f.handle, f.frame_rect, f.maximized))
+                .collect(),
+            minimized: touched.iter().filter(|f| f.minimized).map(|f| f.handle).collect(),
+        };
 
         self.hide_frames();
         let moves = self.to_moves(&plan.moves, &topology);
@@ -688,6 +711,7 @@ impl Engine {
         }
         self.set_timer(timer::SETTLE, 400);
         self.persist();
+        self.undo = Some(undo);
         tracing::info!(
             ms = format!("{:.1}", started.elapsed().as_secs_f64() * 1000.0),
             moved = plan.moves.len() - trouble.len().min(plan.moves.len()),

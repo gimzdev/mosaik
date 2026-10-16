@@ -88,8 +88,8 @@ pub enum Command {
     PreviewWorkspace {
         workspace: String,
     },
-    /// Put back what the last `arrange` changed (for ten minutes, until a workspace is opened,
-    /// saved or edited).
+    /// Put back what the last `arrange`, or the last workspace opened (`switch`), changed: for
+    /// ten minutes, until a workspace is saved or edited.
     UndoArrange,
     ShowSwitcher,
     /// Open the settings window (what a second launch of Mosaïk asks the running one).

@@ -30,19 +30,22 @@ use crate::mover::{self, To};
 use crate::thread::{Engine, timer};
 use crate::workspace::live_zones;
 
-/// How long Arrange can be undone.
+/// How long Arrange, or opening a workspace, can be undone.
 const UNDO_FOR: Duration = Duration::from_secs(10 * 60);
 
-/// What Arrange changed, to put it back.
+/// What Arrange, or opening a workspace, changed, to put it back.
 pub(crate) struct Undo {
-    at: Instant,
+    pub(crate) at: Instant,
     /// The workspace as it was (`None`: Arrange made it).
-    workspace: Option<Workspace>,
-    workspace_id: WorkspaceId,
+    pub(crate) workspace: Option<Workspace>,
+    pub(crate) workspace_id: WorkspaceId,
     /// The workspace open before, with the windows in its slots.
-    active: Option<(WorkspaceId, HashMap<SlotId, WindowHandle>)>,
-    /// Where each window Arrange moved was, and whether it was maximised.
-    windows: Vec<(WindowHandle, Rect, bool)>,
+    pub(crate) active: Option<(WorkspaceId, HashMap<SlotId, WindowHandle>)>,
+    /// Where each window moved or minimised was, and whether it was maximised.
+    pub(crate) windows: Vec<(WindowHandle, Rect, bool)>,
+    /// Windows that were minimised before (opening a workspace brings its own back): minimised
+    /// again.
+    pub(crate) minimized: Vec<WindowHandle>,
 }
 
 /// What Arrange is about to do, worked out without changing anything.
@@ -96,8 +99,9 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 }
 
 impl Engine {
-    /// A workspace was opened, saved or edited: what Arrange did is that workspace's now.
-    pub(crate) fn forget_arrange(&mut self) {
+    /// A workspace was saved or edited: what Arrange, or opening a workspace, did is that
+    /// workspace's now.
+    pub(crate) fn forget_undo(&mut self) {
         self.undo = None;
     }
 
@@ -384,6 +388,7 @@ impl Engine {
                 .iter()
                 .map(|w| (w.handle, w.frame_rect, w.maximized))
                 .collect(),
+            minimized: Vec::new(),
         });
         let (id, name) = (p.ws.id.clone(), p.ws.name.clone());
         match p.index {
@@ -537,14 +542,16 @@ impl Engine {
         }))
     }
 
-    /// Puts back what Arrange changed: the workspace as it was, the one open before, and every
-    /// window it moved where it was.
+    /// Puts back what Arrange, or opening a workspace, changed: the workspace as it was, the
+    /// one open before, and every window it moved or minimised where it was.
     pub(crate) fn undo_arrange(&mut self) -> Reply {
         let Some(undo) = self.undo.take().filter(|u| u.at.elapsed() < UNDO_FOR) else {
             return error(
                 ErrorCode::NotFound,
-                "There is no Arrange to undo.",
-                Some("Arrange can be undone for ten minutes, until a workspace is opened, saved or edited."),
+                "There is nothing to undo.",
+                Some(
+                    "Arrange, and opening a workspace, can be undone for ten minutes, until a workspace is saved or edited.",
+                ),
             );
         };
         let at = self
@@ -584,6 +591,12 @@ impl Engine {
         for o in mover::move_all(&moves, mover::WAIT) {
             if let Err(e) = o.result {
                 tracing::debug!(error = %e, "window not put back");
+            }
+        }
+        for h in &undo.minimized {
+            let hwnd = window::hwnd(*h);
+            if window::exists(hwnd) {
+                mosaik_win::arrange::minimize(hwnd);
             }
         }
         if let (Some(t), Some(a)) = (&topology, &self.active)

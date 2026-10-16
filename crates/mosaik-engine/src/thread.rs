@@ -197,7 +197,7 @@ pub(crate) struct Engine {
     pub(crate) titles: Titles,
     /// Notices given once per session, by key.
     pub(crate) told: HashSet<&'static str>,
-    /// What the last Arrange changed, to undo it.
+    /// What the last Arrange, or the workspace last opened, changed, to undo it.
     pub(crate) undo: Option<crate::arranging::Undo>,
     /// The quick menu at the screen's edge.
     pub(crate) quick: crate::quick::Quick,
@@ -717,15 +717,19 @@ impl Engine {
                 | Command::OpenSet { .. }
                 | Command::SortWindows
         );
-        // Once a workspace is opened, saved or edited, what Arrange did is part of it.
-        let keeps_arrange = matches!(
+        // Once a workspace is saved or edited, what Arrange or opening one did is part of it;
+        // Arrange and opening a workspace each keep what undoes them.
+        let keeps_undo = matches!(
             command,
-            Command::Arrange { .. } | Command::UndoArrange | Command::SetWorkspaceHotkey { .. }
+            Command::Arrange { .. }
+                | Command::Switch { .. }
+                | Command::UndoArrange
+                | Command::SetWorkspaceHotkey { .. }
         );
         let reply = self.dispatch(command);
         if changes_workspaces && !matches!(reply, Reply::Error { .. }) {
-            if !keeps_arrange {
-                self.forget_arrange();
+            if !keeps_undo {
+                self.forget_undo();
             }
             (self.ui)(UiEvent::WorkspacesChanged);
         }
