@@ -850,8 +850,8 @@ pub fn plan_moved(
         l.placed
             .retain(|p| here.iter().any(|&u| fits(&units[u], p.area.to_rect(*work))));
         steady(&mut l.placed, here, units, *work);
-        // The zones as stretched on the picture; room is made in them once the windows that are
-        // in them already are known (step 3), else the layout's own are kept.
+        // The zones as stretched on the picture; room is made in them for the windows the layout
+        // gives them before step 3, else the layout's own are kept.
         if let Some(areas) = Stretched::for_zones(stretched, m, l.placed.len()) {
             own_areas.push((m, l.placed.iter().map(|p| p.area).collect()));
             for (p, area) in l.placed.iter_mut().zip(areas) {
@@ -968,6 +968,33 @@ pub fn plan_moved(
         made_areas = new_zones.iter().map(|z| z.area).collect();
     }
 
+    // The zones of a task's layout as stretched on the picture make room for their windows, as
+    // a layout picked does; else they are the layout's own. Before windows are found in them
+    // (step 3), which must fit them: so no zone goes back to the layout's own after windows were
+    // found in it as stretched (the seventh review of ADR 0032: a zone stayed empty).
+    for (m, own) in own_areas {
+        let Some(work) = monitors.get(m) else {
+            continue;
+        };
+        let here: Vec<usize> = (0..new_zones.len())
+            .filter(|&r| new_zones[r].monitor == m)
+            .collect();
+        let areas: Vec<RatioRect> = here.iter().map(|&r| new_zones[r].area).collect();
+        let least: Vec<Size> = here
+            .iter()
+            .map(|&r| new_zone_window[r].map_or_else(Size::default, |u| units[u].least))
+            .collect();
+        let fitted = fit::make_room(&areas, &least, work.width(), work.height());
+        let taken = fitted.is_some();
+        for (&r, area) in here.iter().zip(fitted.unwrap_or(own)) {
+            new_zones[r].area = area;
+            // The areas the moves start from: the stretched ones, or the layout's own.
+            if !taken && let Some(made) = made_areas.get_mut(r) {
+                *made = area;
+            }
+        }
+    }
+
     // 3. Windows already in a zone of the layout stay as they are on screen (ADR 0032): of the
     //    windows filling a zone, the one in front is its own window. So arranging again moves
     //    nothing, and a window the user brought in front of another stays there.
@@ -1015,31 +1042,6 @@ pub fn plan_moved(
         }
         if let Some(g) = given {
             goes[g] = Some(left.map_or(Goes::Minimize, Goes::Zone));
-        }
-    }
-
-    // The zones of a task's layout as stretched on the picture make room for their windows, as
-    // a layout picked does; else they are the layout's own.
-    for (m, own) in own_areas {
-        let Some(work) = monitors.get(m) else {
-            continue;
-        };
-        let here: Vec<usize> = (0..new_zones.len())
-            .filter(|&r| new_zones[r].monitor == m)
-            .collect();
-        let areas: Vec<RatioRect> = here.iter().map(|&r| new_zones[r].area).collect();
-        let least: Vec<Size> = here
-            .iter()
-            .map(|&r| new_zone_window[r].map_or_else(Size::default, |u| units[u].least))
-            .collect();
-        let fitted = fit::make_room(&areas, &least, work.width(), work.height());
-        let taken = fitted.is_some();
-        for (&r, area) in here.iter().zip(fitted.unwrap_or(own)) {
-            new_zones[r].area = area;
-            // The areas the moves start from: the stretched ones, or the layout's own.
-            if !taken && let Some(made) = made_areas.get_mut(r) {
-                *made = area;
-            }
         }
     }
 
@@ -1096,10 +1098,13 @@ pub fn plan_moved(
             Some(b) => placed.trade(a, b),
             None => placed.take_empty(a, r),
         }
-        // The picture shows the screen so before the next move: the zones made room in again.
+        // The picture shows the screen so before the next move: the zones made room in again,
+        // the windows stacked again where they fit, each zone's own window in front (the
+        // seventh review of ADR 0032: the next move acted on windows in an order of their own).
         placed.settle(mv.monitor, work, units, &made_areas);
         stack_the_rest(&mut goes, &on, &new_zones, units, monitors, &mut stacked);
         own_the_lone(&goes, &order, &mut new_zone_window, &mut stacked);
+        order.sort_by_key(|&u| stacked[u]);
     }
     // 6. A window in a zone it no longer fits, the windows a move or the want of room sent to
     //    the taskbar: stacked again where they fit, as in step 4.
@@ -2761,6 +2766,11 @@ mod tests {
     /// zone a colour of its own, every window in a zone of its monitor and fitting it, and no
     /// zone of a task's layout left without a window.
     fn broken(units: &[Unit], plan: &Plan, laid_out: bool) -> Option<String> {
+        broken_on(units, plan, laid_out, WORK)
+    }
+
+    /// [`broken`], on a monitor whose work area is `work`.
+    fn broken_on(units: &[Unit], plan: &Plan, laid_out: bool, work: Rect) -> Option<String> {
         let mut seen = plan.order.clone();
         seen.sort_unstable();
         if seen != (0..units.len()).collect::<Vec<_>>() {
@@ -2774,7 +2784,7 @@ mod tests {
         for (u, g) in plan.goes.iter().enumerate() {
             if let Goes::Zone(r) = g {
                 let z = &plan.new_zones[*r];
-                if z.monitor != units[u].monitor || !fits(&units[u], z.area.to_rect(WORK)) {
+                if z.monitor != units[u].monitor || !fits(&units[u], z.area.to_rect(work)) {
                     return Some(format!(
                         "unit {u} (least {:?}) in zone {r} {:?}",
                         units[u].least, z.area
@@ -3924,5 +3934,107 @@ mod tests {
         assert_eq!(p.goes[0], Goes::Minimize);
         assert!(matches!(p.goes[1], Goes::Zone(_)));
         assert!((0..p.new_zones.len()).all(|r| p.goes.contains(&Goes::Zone(r))));
+    }
+
+    #[test]
+    fn a_window_that_fits_no_zone_dropped_onto_one_changes_nothing() {
+        // The seventh review of ADR 0032: Windows Terminal, of a size of its own as wide as the
+        // screen, fits no zone of its task's layout and waits in the taskbar. Dropped onto the
+        // other Terminal, stacked behind the browser, then onto the browser's zone, it goes back
+        // to the taskbar each time; the second drop brought the Terminal stacked behind to the
+        // front of the zone, which the picture never showed: the moves acted on windows in an
+        // order of their own, not the picture's.
+        let work = Rect::new(0, 0, 1920, 1020);
+        let mut wide = unit(
+            "windowsterminal.exe",
+            "Windows Terminal",
+            Rect::new(0, 510, 1920, 1020),
+        );
+        wide.resizable = false;
+        wide.least = Size::new(1920, 510);
+        let mut terminal = unit(
+            "windowsterminal.exe",
+            "Windows Terminal",
+            Rect::new(0, 510, 1920, 1020),
+        );
+        terminal.least = Size::new(704, 846);
+        let mut chat = unit("slack.exe", "Slack", Rect::new(366, 172, 743, 522));
+        chat.least = Size::new(543, 522);
+        let units = [
+            wide,
+            terminal,
+            unit(
+                "windowsterminal.exe",
+                "Windows Terminal",
+                Rect::new(835, 34, 1876, 697),
+            ),
+            unit("chrome.exe", "Google Chrome", Rect::new(46, 216, 1574, 985)),
+            chat,
+        ];
+        let base = plan(&units, &[], &[work]);
+        assert_eq!(base.goes[0], Goes::Minimize);
+        let zone = zone_of(&base, 3);
+        assert_eq!(in_zone(&base, zone), vec![3, 1], "Terminal stacked behind Chrome");
+        let k = on_main(&base).iter().position(|&x| x == zone).unwrap();
+        let onto_terminal = Move {
+            unit: 0,
+            monitor: 0,
+            zone: k,
+            onto: Some(1),
+        };
+        let first = plan_moved(&units, &[], &[work], None, &[onto_terminal], None);
+        assert_eq!(in_zone(&first, zone), vec![3, 1]);
+        let onto_zone = Move {
+            unit: 0,
+            monitor: 0,
+            zone: k,
+            onto: None,
+        };
+        let second = plan_moved(&units, &[], &[work], None, &[onto_terminal, onto_zone], None);
+        assert_eq!(second.goes, first.goes);
+        assert_eq!(
+            in_zone(&second, zone),
+            vec![3, 1],
+            "the drops changed the zone's order"
+        );
+    }
+
+    #[test]
+    fn a_line_dragged_on_a_tasks_layout_leaves_no_zone_empty() {
+        // The seventh review of ADR 0032: an ultrawide screen with a browser and a design app of
+        // fixed sizes about two thirds of it wide, and a browser of any size. The line between
+        // the two zones of their task's layout dragged to 85%: windows were found in the zones as
+        // stretched, then the zones went back to the layout's own, too small for those windows,
+        // and a zone stayed empty. The zones make room before windows are found in them.
+        let work = Rect::new(0, 0, 3440, 1392);
+        let mut fixed = unit("chrome.exe", "Google Chrome", Rect::new(0, 0, 2293, 1392));
+        fixed.resizable = false;
+        fixed.least = Size::new(2293, 1392);
+        let mut design = unit("figma.exe", "Figma", Rect::new(242, 19, 2663, 1377));
+        design.resizable = false;
+        design.least = Size::new(2421, 1358);
+        let units = [
+            fixed,
+            design,
+            unit("chrome.exe", "Google Chrome", Rect::new(1720, 0, 3440, 1392)),
+        ];
+        let base = plan(&units, &[], &[work]);
+        assert_eq!(base.new_zones.len(), 2, "{:?}", base.new_zones);
+        let drawn = [
+            RatioRect::new(0.0, 0.0, 0.84672, 1.0).unwrap(),
+            RatioRect::new(0.84672, 0.0, 1.0, 1.0).unwrap(),
+        ];
+        let p = plan_moved(
+            &units,
+            &[],
+            &[work],
+            None,
+            &[],
+            Some(Stretched {
+                monitor: 0,
+                areas: &drawn,
+            }),
+        );
+        assert_eq!(broken_on(&units, &p, true, work), None, "{:?}", p.goes);
     }
 }

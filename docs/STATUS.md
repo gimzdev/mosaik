@@ -1668,6 +1668,11 @@ simetric and appealing". ADR 0032.
   windows finding every window where it is, first where it was, in its colour; Undo stacking them
   as they were); the side menu; the tour: 32 pictures. Mosaïk left in the tray (1.0.2, protocol
   11, watchdog, Win+Alt+Space); packed (289 files).
+- **A seventh review** (of d522d00, ADR 0032, Seventh review): nothing introduced by it (31055
+  random plans the parent's or better; before each of 50861 random drops, the plan was the
+  picture so far). Two older faults fixed, tests first (core 297): a later move could act on an
+  order front to back the picture did not show (113 of 29970 runs of several moves); a line
+  dragged on a task's layout could leave a zone empty (2 of 31055).
 
 ## Owner decisions
 

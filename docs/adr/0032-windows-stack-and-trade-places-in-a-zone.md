@@ -224,3 +224,17 @@ the moves too (`Placed::restack`, steps 4 and 6). Also: a window larger than its
 there, no longer gets a zone it cannot fit, which stayed empty. On 20000 random screens on one
 and two monitors, with bands, gaps, tab groups, least, fixed and kept sizes, moves and stretched
 zones, the plan keeps its rules, and the next plan finds every window where it is.
+
+## Seventh review (2026-10-16)
+
+A seventh agent reviewed d522d00 and found nothing it introduced: on 31055 random plans without
+moves, the plan was the parent's or better by every rule of this record, and before each of
+50861 random drops the plan was the picture with the moves so far. It found two older faults,
+now caught by tests written first: after a move, the windows' order front to back was sorted
+again only at the end, so a later move could act on a window in front that the picture did not
+show (113 of 29970 random runs of several moves; a window that fits no zone, dropped onto a zone,
+brought the window stacked behind to the front); and in a task's layout with a line dragged,
+windows were found in the zones as stretched before the zones made room, and when they could
+not, the zones went back to the layout's own, too small for those windows, leaving a zone empty
+(2 of 31055). The order is sorted after each move, and the zones make room before windows are
+found in them (step 3).
