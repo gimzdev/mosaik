@@ -97,6 +97,7 @@ export type Command =
   | { cmd: 'hold_hotkeys'; hold: boolean }
   | { cmd: 'apps'; workspace: string }
   | { cmd: 'add_app'; workspace: string; window: number; zone: string | null }
+  | { cmd: 'add_installed_app'; workspace: string; app: string; zone: string | null }
   | { cmd: 'move_app'; workspace: string; app: string; zone: string; swap_with?: string }
   | { cmd: 'remove_app'; workspace: string; app: string }
   | { cmd: 'sets' }
@@ -220,13 +221,23 @@ export interface OpenWindow {
   icon: string | null;
 }
 
-/** A workspace's apps, its zones, and the windows on screen it could take (`apps`). */
+/** An app of the Start menu that is not open, to add to a workspace (protocol 12). */
+export interface InstalledApp {
+  /** Its id in the Start menu, for `add_installed_app`. */
+  app: string;
+  label: string;
+  icon: string | null;
+}
+
+/** A workspace's apps, its zones, the windows on screen it could take, and the apps of the Start
+ * menu not open it could take (`apps`; none from a Mosaïk before protocol 12). */
 export interface WorkspaceApps {
   workspace: string;
   name: string;
   apps: WorkspaceApp[];
   zones: AppZone[];
   windows: OpenWindow[];
+  installed?: InstalledApp[];
 }
 
 /** What a screen's windows say the user is doing (`task::Task`). */
@@ -464,6 +475,10 @@ function isOpenWindow(x: unknown): x is OpenWindow {
   return isObject(x) && isNumber(x.window) && isString(x.label) && isString(x.title) && isNullableString(x.icon);
 }
 
+function isInstalledApp(x: unknown): x is InstalledApp {
+  return isObject(x) && isString(x.app) && isString(x.label) && isNullableString(x.icon);
+}
+
 function isHotkeyState(x: unknown): x is HotkeyState {
   return isObject(x) && isString(x.shortcut) && isBoolean(x.registered) && isNullableString(x.problem);
 }
@@ -558,7 +573,8 @@ export function isReply(x: unknown): x is Reply {
         Array.isArray(x.zones) &&
         x.zones.every(isAppZone) &&
         Array.isArray(x.windows) &&
-        x.windows.every(isOpenWindow)
+        x.windows.every(isOpenWindow) &&
+        (x.installed === undefined || (Array.isArray(x.installed) && x.installed.every(isInstalledApp)))
       );
     default:
       return false;

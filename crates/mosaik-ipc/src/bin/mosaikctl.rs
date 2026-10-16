@@ -58,6 +58,7 @@ mod windows_main {
   zones <workspace>              a workspace's zones, as JSON
   apps <workspace> [--json]      a workspace's apps, and the windows on screen it could take
   add-app <workspace> <window> [<zone>]  add a window's app (its handle, from apps)
+  add-installed-app <workspace> <app> [<zone>]  add an app that is not open (its id, from apps)
   move-app <workspace> <app> <zone> [<app>]  put an app in another zone (trading places with the app given)
   remove-app <workspace> <app>   take an app out (its window stays)
   sets [--json]                  sets of your apps that go together for a task
@@ -125,6 +126,11 @@ A <workspace> is its name or its id.";
                     zone: zone.first().map(|z| ZoneId::new(*z)),
                 }
             }
+            ("add-installed-app", [w, app, zone @ ..]) if zone.len() <= 1 => Command::AddInstalledApp {
+                workspace: (*w).to_owned(),
+                app: (*app).to_owned(),
+                zone: zone.first().map(|z| ZoneId::new(*z)),
+            },
             ("move-app", [w, app, zone, with @ ..]) if with.len() <= 1 => Command::MoveApp {
                 workspace: (*w).to_owned(),
                 app: SlotId((*app).to_owned()),
@@ -231,6 +237,7 @@ A <workspace> is its name or its id.";
             | Command::Zones { workspace }
             | Command::Apps { workspace }
             | Command::AddApp { workspace, .. }
+            | Command::AddInstalledApp { workspace, .. }
             | Command::MoveApp { workspace, .. }
             | Command::RemoveApp { workspace, .. }
             | Command::RenameWorkspace { workspace, .. }
@@ -378,6 +385,7 @@ A <workspace> is its name or its id.";
                     apps,
                     zones,
                     windows,
+                    installed,
                     ..
                 } = list.as_ref();
                 println!("{}", printable(name));
@@ -410,6 +418,12 @@ A <workspace> is its name or its id.";
                             printable(&w.label),
                             printable(&w.title)
                         );
+                    }
+                }
+                if !installed.is_empty() {
+                    println!("Apps not open it could take:");
+                    for a in installed {
+                        println!("  {:<28} {}", printable(&a.label), printable(&a.app));
                     }
                 }
                 0

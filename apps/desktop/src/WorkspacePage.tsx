@@ -6,6 +6,7 @@
 
 import { type SyntheticEvent, useId, useState } from 'react';
 
+import { AddApp } from './AddApp';
 import { request } from './engine';
 import { AppIcon, Glyph } from './icons';
 import {
@@ -34,10 +35,6 @@ import {
   zoneTint,
 } from './ui';
 import { type Change, moveApp, resizeZones } from './workspacePicture';
-
-/** Whether a window's title says no more than its app's name ("Battle.net" and "Battle․net"). */
-const same = (title: string, label: string) =>
-  !title.trim() || title.normalize('NFKC').trim().toLowerCase() === label.normalize('NFKC').trim().toLowerCase();
 
 function Rename({
   workspace,
@@ -170,6 +167,7 @@ function Apps({
   }
   // The zones in their order on screen: 1, 2, 3…
   const zones = [...data.zones].sort((a, b) => Number(a.name) - Number(b.name) || a.name.localeCompare(b.name));
+  const installed = data.installed ?? [];
   const known = new Set(zones.map((z) => z.id));
   const loose = data.apps.filter((a) => a.zone === null || !known.has(a.zone));
 
@@ -257,7 +255,7 @@ function Apps({
   return (
     <div>
       {data.apps.length === 0 && zones.length === 0 ? (
-        <p className="py-3.5 text-small text-[var(--muted)]">No apps yet. Add a window that is open now.</p>
+        <p className="py-3.5 text-small text-[var(--muted)]">No apps yet. Add one below.</p>
       ) : (
         <div aria-label={`Apps of “${name}”`} role="group" className="divide-y divide-[var(--line)]">
           {zones.map((z) =>
@@ -270,28 +268,26 @@ function Apps({
         </div>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] py-3">
-        {data.windows.length ? (
-          <MenuButton
-            label={`Add a window to “${name}”`}
-            align="left"
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-small font-semibold text-[var(--accent)] hover:bg-[var(--hover)]"
-            items={data.windows.map((w) => ({
-              key: String(w.window),
-              label: w.label,
-              detail: same(w.title, w.label) ? undefined : w.title,
-              icon: <AppIcon icon={w.icon} size={18} keepSpace />,
-              onSelect: () => {
-                change(
-                  'add',
-                  { cmd: 'add_app', workspace: data.workspace, window: w.window, zone: null },
-                  `${w.label} added.`,
-                );
-              },
-            }))}
-          >
-            <Glyph name="plus" size={14} />
-            Add an open window
-          </MenuButton>
+        {data.windows.length || installed.length ? (
+          <AddApp
+            name={name}
+            windows={data.windows}
+            installed={installed}
+            onWindow={(w) => {
+              change(
+                'add',
+                { cmd: 'add_app', workspace: data.workspace, window: w.window, zone: null },
+                `${w.label} added.`,
+              );
+            }}
+            onInstalled={(a) => {
+              change(
+                'add',
+                { cmd: 'add_installed_app', workspace: data.workspace, app: a.app, zone: null },
+                `${a.label} added. It starts when the workspace opens.`,
+              );
+            }}
+          />
         ) : (
           <p className="text-small text-[var(--muted)]">Open a window to add it here.</p>
         )}

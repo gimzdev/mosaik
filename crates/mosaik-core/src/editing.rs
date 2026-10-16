@@ -13,6 +13,7 @@ use thiserror::Error;
 
 use crate::geometry::RatioRect;
 use crate::layout::{Launch, Place, Slot, SlotId, Workspace};
+use crate::matching::AppMatch;
 use crate::place::Resolver;
 use crate::topology::{MonitorId, Topology, fnv1a64, map_monitors};
 use crate::window::WindowFacts;
@@ -296,6 +297,65 @@ pub fn add_app(
         label: Some(label.trim().to_owned()).filter(|l| !l.is_empty()),
         app: app_match(facts),
         launch,
+        place,
+    });
+    Ok((out, id))
+}
+
+/// The zone of `ws` with the fewest apps, the first by number on a tie: where an app with no
+/// window goes when no zone is empty, behind the apps there.
+fn quietest_zone(ws: &Workspace) -> Option<ZoneId> {
+    let layout = &ws.layout;
+    let count = |z: &ZoneId| {
+        layout
+            .slots
+            .iter()
+            .filter(|s| matches!(layout.effective_place(s), Some(Place::Zone { zone }) if zone == z))
+            .count()
+    };
+    let number = |name: &str| name.parse::<u32>().unwrap_or(u32::MAX);
+    layout
+        .zones
+        .iter()
+        .min_by(|a, b| {
+            count(&a.id)
+                .cmp(&count(&b.id))
+                .then(number(&a.name).cmp(&number(&b.name)))
+        })
+        .map(|z| z.id.clone())
+}
+
+/// The workspace with an app of the Start menu that is not open (ADR 0033: "Add an app"), called
+/// `label`, its windows found by `found` and started by `launch`, as a new app: in `zone`, else
+/// its first empty zone, else the zone with the fewest apps, behind them; with no zones, on the
+/// whole main monitor. It starts when the workspace opens. Returns it with the new app's id.
+pub fn add_installed_app(
+    ws: &Workspace,
+    label: &str,
+    found: AppMatch,
+    launch: Launch,
+    zone: Option<&ZoneId>,
+    topology: &Topology,
+) -> Result<(Workspace, SlotId), EditError> {
+    let mut out = ws.clone();
+    let place = match zone
+        .cloned()
+        .or_else(|| empty_zone(ws))
+        .or_else(|| quietest_zone(ws))
+    {
+        Some(z) if out.layout.zone(&z).is_none() => return Err(EditError::GoneZone),
+        Some(z) => Place::Zone { zone: z },
+        None => Place::Maximized {
+            monitor: out.layout.monitor_index(topology.primary(), topology),
+        },
+    };
+    let taken: HashSet<String> = out.layout.slots.iter().map(|s| s.id.0.clone()).collect();
+    let id = SlotId(next_id("s", &taken));
+    out.layout.slots.push(Slot {
+        id: id.clone(),
+        label: Some(label.trim().to_owned()).filter(|l| !l.is_empty()),
+        app: found,
+        launch: Some(launch),
         place,
     });
     Ok((out, id))
@@ -805,6 +865,60 @@ mod tests {
 
     fn sid(id: &str) -> SlotId {
         SlotId(id.into())
+    }
+
+    #[test]
+    fn an_app_not_open_is_added_in_a_zone_behind_the_apps_there() {
+        // ADR 0033 ("Add an app", apps not open too): an app of the Start menu joins the
+        // workspace in the zone asked, else the first empty one, else the one with the fewest
+        // apps, behind them; with no zones, on the whole main monitor. It starts when the
+        // workspace opens.
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let ws = workspace(&t);
+        let found = AppMatch::exe("code.exe");
+        let launch = Launch::Program {
+            path: "shell:AppsFolder\\Microsoft.VisualStudioCode".into(),
+            args: Vec::new(),
+            working_dir: None,
+        };
+        let add = |ws: &Workspace, zone: Option<&str>| {
+            add_installed_app(
+                ws,
+                " Visual Studio Code ",
+                found.clone(),
+                launch.clone(),
+                zone.map(ZoneId::new).as_ref(),
+                &t,
+            )
+        };
+        let place = |ws: &Workspace, id: &SlotId| ws.layout.slot(id).unwrap().place.clone();
+        let in_zone = |z: &str| Place::Zone { zone: ZoneId::new(z) };
+        let (asked, id) = add(&ws, Some("z2")).unwrap();
+        assert_eq!(asked.layout.problems(), vec![]);
+        let s = asked.layout.slot(&id).unwrap();
+        assert_eq!(s.name(), "Visual Studio Code");
+        assert_eq!(s.app, found);
+        assert_eq!(s.launch.as_ref(), Some(&launch));
+        assert_eq!(s.place, in_zone("z2"));
+        assert_eq!(
+            asked.layout.slots.last().map(|s| &s.id),
+            Some(&id),
+            "behind its zone's apps"
+        );
+        // No zone asked: the empty one, then the one with the fewest apps, the first by number.
+        let (first, a) = add(&ws, None).unwrap();
+        assert_eq!(place(&first, &a), in_zone("z3"));
+        let (second, b) = add(&first, None).unwrap();
+        assert_eq!(place(&second, &b), in_zone("z1"));
+        // No zones at all: the whole main monitor.
+        let mut bare = ws.clone();
+        bare.layout.zones.clear();
+        bare.layout.slots.clear();
+        bare.layout.tab_groups.clear();
+        let (alone, c) = add(&bare, None).unwrap();
+        assert!(matches!(place(&alone, &c), Place::Maximized { .. }));
+        assert_eq!(alone.layout.problems(), vec![]);
+        assert_eq!(add(&ws, Some("gone")), Err(EditError::GoneZone));
     }
 
     #[test]

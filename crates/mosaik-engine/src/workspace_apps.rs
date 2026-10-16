@@ -5,11 +5,12 @@
 
 use std::collections::HashSet;
 
-use mosaik_core::editing::{add_app, empty_zone, move_app, remove_app, swap_apps};
+use mosaik_core::editing::{add_app, add_installed_app, empty_zone, move_app, remove_app, swap_apps};
 use mosaik_core::layout::{Launch, Place, Slot, SlotId, Workspace};
+use mosaik_core::sets::{Installed, startable};
 use mosaik_core::window::WindowHandle;
 use mosaik_core::zone::ZoneId;
-use mosaik_ipc::protocol::{AppZone, OpenWindow, Reply, WorkspaceApp, WorkspaceApps};
+use mosaik_ipc::protocol::{AppZone, InstalledApp, OpenWindow, Reply, WorkspaceApp, WorkspaceApps};
 use mosaik_win::{apps, window};
 
 use crate::editing::{failed, no_monitors, not_found, refused};
@@ -117,6 +118,36 @@ impl Engine {
             })
             .collect();
         let ws: Workspace = self.file.workspaces[index].clone();
+        // The apps of the Start menu it could take that are not open (ADR 0033): not its own
+        // already, nor open now (offered by their windows), by name, each once. Before the Start
+        // menu is first read there are none; the interface is told when it is.
+        let open_now: Vec<_> = self
+            .scan_marked()
+            .into_iter()
+            .filter(|f| self.addable(f))
+            .collect();
+        let mut installed: Vec<InstalledApp> = self
+            .start_apps
+            .now()
+            .into_iter()
+            .filter_map(|a| {
+                let entry = Installed {
+                    name: a.name.trim().to_owned(),
+                    id: a.id,
+                    path: a.path,
+                };
+                let (found, launch) = startable(&entry)?;
+                let have = ws.layout.slots.iter().any(|s| s.app.same_app(&found));
+                let open = open_now.iter().any(|f| found.score(f).is_some());
+                (!have && !open && !entry.name.is_empty()).then(|| InstalledApp {
+                    icon: mosaik_core::icons::of_app(&found, Some(&launch)),
+                    app: entry.id,
+                    label: entry.name,
+                })
+            })
+            .collect();
+        installed.sort_by_key(|a| a.label.to_lowercase());
+        installed.dedup_by(|a, b| a.label.eq_ignore_ascii_case(&b.label));
         let apps = ws
             .layout
             .slots
@@ -148,6 +179,7 @@ impl Engine {
             apps,
             zones,
             windows,
+            installed,
         }))
     }
 
@@ -229,6 +261,49 @@ impl Engine {
                 None => self.refresh_frames(),
             }
         }
+        self.apps_reply(&id)
+    }
+
+    /// Adds an app of the Start menu that is not open (`app`, its id there) to a workspace (ADR
+    /// 0033): in `zone`, else its first empty zone, else the zone with the fewest apps. Nothing
+    /// starts now: it starts when the workspace opens.
+    pub(crate) fn add_installed_app_to(&mut self, which: &str, app: &str, zone: Option<ZoneId>) -> Reply {
+        let Some(index) = self.find_workspace(which) else {
+            return not_found(which);
+        };
+        let Some(topology) = self.read_topology() else {
+            return no_monitors();
+        };
+        let Some(entry) = self
+            .start_apps
+            .waiting()
+            .into_iter()
+            .find(|a| a.id == app)
+            .map(|a| Installed {
+                name: a.name.trim().to_owned(),
+                id: a.id,
+                path: a.path,
+            })
+        else {
+            return refused(
+                "This app is not in the Start menu any more.",
+                Some("Pick it again from the list."),
+            );
+        };
+        let Some((found, launch)) = startable(&entry) else {
+            return refused("Mosaïk cannot start this app.", None);
+        };
+        let ws = &self.file.workspaces[index];
+        let (updated, slot) =
+            match add_installed_app(ws, &entry.name, found, launch, zone.as_ref(), &topology) {
+                Ok(x) => x,
+                Err(e) => return refused(e.to_string(), None),
+            };
+        let id = updated.id.0.clone();
+        if let Err(e) = self.save_workspace(index, updated) {
+            return failed(e);
+        }
+        tracing::info!(slot = %slot.0, zone = ?zone, "app added, not open");
         self.apps_reply(&id)
     }
 

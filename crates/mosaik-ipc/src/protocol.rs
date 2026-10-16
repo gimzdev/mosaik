@@ -33,7 +33,9 @@ use thiserror::Error;
 /// 11: two windows of one zone of the home page's picture trading places front to back (`onto`
 /// on a move); two apps of one zone of a workspace trade places in it (`move_app` with
 /// `swap_with`), and its preview lists them front to back.
-pub const PROTOCOL_VERSION: u32 = 11;
+/// 12: apps of the Start menu that are not open, offered to a workspace (`installed` in `apps`)
+/// and added to it (`add_installed_app`); a move onto a zone itself joins it (ADR 0033).
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
 /// Mosaïk allocate without bound. A `state` reply for a few hundred windows is about 200 KB.
@@ -156,6 +158,15 @@ pub enum Command {
     AddApp {
         workspace: String,
         window: WindowHandle,
+        #[serde(default)]
+        zone: Option<ZoneId>,
+    },
+    /// Adds an app of the Start menu that is not open (`app`, its id in `installed`) to a
+    /// workspace, in `zone`; without one, in its first empty zone, else the zone with the fewest
+    /// apps, behind them. It starts when the workspace opens. Answers with `apps`.
+    AddInstalledApp {
+        workspace: String,
+        app: String,
         #[serde(default)]
         zone: Option<ZoneId>,
     },
@@ -308,6 +319,22 @@ pub struct WorkspaceApps {
     pub apps: Vec<WorkspaceApp>,
     pub zones: Vec<AppZone>,
     pub windows: Vec<OpenWindow>,
+    /// The apps of the Start menu it could take that are not open (an app open is offered by
+    /// its window), by name.
+    #[serde(default)]
+    pub installed: Vec<InstalledApp>,
+}
+
+/// An app of the Start menu that is not open, to add to a workspace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstalledApp {
+    /// Its id in the Start menu, for `add_installed_app`.
+    pub app: String,
+    /// Its name in the Start menu.
+    pub label: String,
+    /// Its icon key (`mosaik_core::icons`).
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 /// An app of a workspace.
@@ -808,7 +835,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             json,
-            "{\"v\":11,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
+            "{\"v\":12,\"id\":1,\"cmd\":\"switch\",\"workspace\":\"Brand\"}\n"
         );
         let err = Response::error(
             2,
@@ -817,7 +844,7 @@ mod tests {
             Some("mosaikctl workspaces lists them"),
         );
         let json = String::from_utf8(encode(&err).unwrap()).unwrap();
-        assert!(json.starts_with("{\"v\":11,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
+        assert!(json.starts_with("{\"v\":12,\"id\":2,\"reply\":\"error\",\"code\":\"not_found\""));
     }
 
     #[test]
@@ -878,12 +905,12 @@ mod tests {
 
     #[test]
     fn newer_clients_are_refused_plainly() {
-        let err = decode_request(br#"{"v":12,"id":1,"cmd":"state"}"#).unwrap_err();
+        let err = decode_request(br#"{"v":13,"id":1,"cmd":"state"}"#).unwrap_err();
         assert_eq!(
             err,
             ProtocolError::UnsupportedVersion {
-                client: 12,
-                server: 11
+                client: 13,
+                server: 12
             }
         );
         // Older clients are understood.
@@ -1140,6 +1167,11 @@ mod wire {
                 window: WindowHandle(0x2_04F2),
                 zone: Some(ZoneId::new("z2")),
             },
+            Command::AddInstalledApp {
+                workspace: "ship".into(),
+                app: "Microsoft.VisualStudioCode".into(),
+                zone: Some(ZoneId::new("z1")),
+            },
             Command::MoveApp {
                 workspace: "ship".into(),
                 app: SlotId("s1".into()),
@@ -1360,6 +1392,11 @@ mod wire {
                     label: "Google Chrome".into(),
                     title: "Release notes - Google Chrome".into(),
                     icon: Some(r"exe:C:\Program Files\Google\Chrome\Application\chrome.exe".into()),
+                }],
+                installed: vec![InstalledApp {
+                    app: "com.squirrel.AnthropicClaude.claude".into(),
+                    label: "Claude".into(),
+                    icon: Some("app:com.squirrel.AnthropicClaude.claude".into()),
                 }],
             })),
             Reply::Sets {

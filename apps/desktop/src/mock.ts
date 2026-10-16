@@ -826,9 +826,24 @@ function zones(w: Workspace): Reply {
   };
 }
 
-/** A workspace's apps, and the windows on screen it does not have yet (by name, here). */
+/** The apps of a developer's Start menu, as the stand-in has it (`apps::start_apps`), by id. */
+const START_MENU: readonly { app: string; label: string }[] = [
+  { app: 'Microsoft.VisualStudioCode', label: 'Visual Studio Code' },
+  { app: 'Microsoft.WindowsTerminal_8wekyb3d8bbwe!App', label: 'Windows Terminal' },
+  { app: 'Chrome', label: 'Google Chrome' },
+  { app: 'com.squirrel.slack.slack', label: 'Slack' },
+  { app: 'com.squirrel.AnthropicClaude.claude', label: 'Claude' },
+  { app: 'Microsoft.Windows.Explorer', label: 'File Explorer' },
+  { app: 'Figma', label: 'Figma' },
+  { app: 'Spotify', label: 'Spotify' },
+  { app: 'Microsoft.WindowsNotepad_8wekyb3d8bbwe!App', label: 'Notepad' },
+];
+
+/** A workspace's apps, the windows on screen it does not have yet, and the apps of the Start
+ * menu not open it does not have (by name, here, as the engine finds them by program). */
 function apps(w: Workspace): Reply {
   w.windows = w.appList.length;
+  const has = (label: string) => w.appList.some((a) => a.label === label);
   return {
     reply: 'apps',
     workspace: w.id,
@@ -837,8 +852,32 @@ function apps(w: Workspace): Reply {
     zones: w.zoneList.flatMap((z) => (z.id ? [{ id: z.id, name: z.name, color: z.color }] : [])),
     windows: onScreen
       .map((s, i) => ({ window: 0x10000 + i, label: s.label, title: `${s.label} window`, icon: null }))
-      .filter((o) => !w.appList.some((a) => a.label === o.label)),
+      .filter((o) => !has(o.label)),
+    installed: START_MENU.filter((a) => !has(a.label) && !onScreen.some((s) => s.label === a.label))
+      .map((a) => ({ ...a, icon: null }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   };
+}
+
+/** The workspace's next app id: s1, s2… */
+function nextSlot(w: Workspace): string {
+  let n = w.appList.length;
+  do {
+    n += 1;
+  } while (w.appList.some((a) => a.id === `s${String(n)}`));
+  return `s${String(n)}`;
+}
+
+/** Where an app with no window goes in `w` (`editing::add_installed_app`): the zone asked, else
+ * the first empty one, else the one with the fewest apps, the first by number. */
+function zoneForNew(w: Workspace, asked: string | null): string | null {
+  if (asked !== null) return asked;
+  const count = (id: string | null) => w.appList.filter((a) => a.zone === id).length;
+  const byNumber = [...w.zoneList].sort((a, b) => Number(a.name) - Number(b.name));
+  const empty = byNumber.find((z) => count(z.id) === 0);
+  if (empty) return empty.id;
+  const [quietest] = [...byNumber].sort((a, b) => count(a.id) - count(b.id));
+  return quietest?.id ?? null;
 }
 
 function checkHotkey(text: string): Reply {
@@ -878,6 +917,7 @@ const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
   'arrange',
   'undo_arrange',
   'add_app',
+  'add_installed_app',
   'move_app',
   'remove_app',
   'open_set',
@@ -887,7 +927,7 @@ const CHANGES_WORKSPACES: ReadonlySet<Command['cmd']> = new Set([
 function answer(command: Command): Reply {
   switch (command.cmd) {
     case 'hello':
-      return { reply: 'hello', app_version: '1.0.2-dev', protocol: 11 };
+      return { reply: 'hello', app_version: '1.0.2-dev', protocol: 12 };
     case 'workspaces':
       return summary();
     case 'settings':
@@ -1000,17 +1040,22 @@ function answer(command: Command): Reply {
         };
       }
       const empty = w.zoneList.find((z) => !w.appList.some((a) => a.zone === z.id))?.id ?? null;
-      let n = w.appList.length;
-      do {
-        n += 1;
-      } while (w.appList.some((a) => a.id === `s${String(n)}`));
-      w.appList.push({
-        id: `s${String(n)}`,
-        label: s.label,
-        icon: null,
-        zone: command.zone ?? empty,
-        tab: false,
-      });
+      w.appList.push({ id: nextSlot(w), label: s.label, icon: null, zone: command.zone ?? empty, tab: false });
+      return apps(w);
+    }
+    case 'add_installed_app': {
+      const w = find(command.workspace);
+      if (!w) return missing(command.workspace);
+      const a = START_MENU.find((x) => x.app === command.app);
+      if (!a) {
+        return {
+          reply: 'error',
+          code: 'bad_request',
+          message: 'This app is not in the Start menu any more.',
+          hint: 'Pick it again from the list.',
+        };
+      }
+      w.appList.push({ id: nextSlot(w), label: a.label, icon: null, zone: zoneForNew(w, command.zone), tab: false });
       return apps(w);
     }
     case 'move_app':
@@ -1101,7 +1146,7 @@ function answer(command: Command): Reply {
       return {
         reply: 'state',
         app_version: '1.0.2-dev',
-        protocol: 11,
+        protocol: 12,
         safe_mode: false,
         watchdog: true,
         monitors,

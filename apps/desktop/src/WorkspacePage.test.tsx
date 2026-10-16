@@ -57,6 +57,7 @@ const CHANGES: ReadonlySet<Command['cmd']> = new Set([
   'delete_workspace',
   'set_workspace_hotkey',
   'add_app',
+  'add_installed_app',
   'move_app',
   'remove_app',
   'set_zones',
@@ -165,9 +166,51 @@ describe('a workspace’s page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Remove Visual Studio Code' }));
     expect(asked).toContainEqual({ cmd: 'remove_app', workspace: 'ship', app: 's1' });
     expect(await shown('Visual Studio Code removed.')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Add a window to “Ship”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add an app to “Ship”' }));
     await userEvent.click(screen.getByRole('button', { name: /^Slack/ }));
     expect(asked).toContainEqual({ cmd: 'add_app', workspace: 'ship', window: 0x2_04f2, zone: null });
+  });
+
+  it('adds an app open now, or one of the Start menu that is not open, found by its name', async () => {
+    // The owner: "add an open window" becomes "add an app" and proposes even apps that are not
+    // open (ADR 0033).
+    const installed = [
+      { app: 'com.squirrel.AnthropicClaude.claude', label: 'Claude', icon: null },
+      { app: 'Spotify.exe', label: 'Spotify', icon: null },
+    ];
+    const asked = answer((c) =>
+      c.cmd === 'apps'
+        ? appsOf({ installed })
+        : c.cmd === 'add_installed_app'
+          ? appsOf({ installed: installed.slice(1) })
+          : null,
+    );
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'Add an app to “Ship”' }));
+    const find = screen.getByRole('searchbox', { name: 'Find an app' });
+    expect(find).toHaveFocus();
+    const names = (group: string) =>
+      within(screen.getByRole('group', { name: group }))
+        .getAllByRole('button')
+        .map((b) => b.textContent);
+    expect(names('Open now')).toEqual(['Slackreleases - Slack']);
+    expect(names('Not open')).toEqual(['Claude', 'Spotify']);
+    await userEvent.type(find, 'CLA');
+    expect(screen.queryByRole('group', { name: 'Open now' })).not.toBeInTheDocument();
+    expect(names('Not open')).toEqual(['Claude']);
+    // The arrow keys go from the box to the apps; Enter adds one.
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(asked).toContainEqual({
+      cmd: 'add_installed_app',
+      workspace: 'ship',
+      app: 'com.squirrel.AnthropicClaude.claude',
+      zone: null,
+    });
+    expect(await shown('Claude added. It starts when the workspace opens.')).toBeInTheDocument();
+    // None by that name: it says so.
+    await userEvent.click(screen.getByRole('button', { name: 'Add an app to “Ship”' }));
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Find an app' }), 'zzz');
+    expect(screen.getByText('No app called “zzz”.')).toBeInTheDocument();
   });
 
   it('resizes a zone down to the smallest Mosaïk takes, from where its zones are exactly', async () => {

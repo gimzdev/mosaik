@@ -743,6 +743,7 @@ impl Engine {
                 | Command::Arrange { .. }
                 | Command::UndoArrange
                 | Command::AddApp { .. }
+                | Command::AddInstalledApp { .. }
                 | Command::MoveApp { .. }
                 | Command::RemoveApp { .. }
                 | Command::OpenSet { .. }
@@ -822,6 +823,9 @@ impl Engine {
                 window,
                 zone,
             } => self.add_app_to(&workspace, window, zone),
+            Command::AddInstalledApp { workspace, app, zone } => {
+                self.add_installed_app_to(&workspace, &app, zone)
+            }
             Command::MoveApp {
                 workspace,
                 app,

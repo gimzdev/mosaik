@@ -189,6 +189,12 @@
       "zone": "z2"
     },
     {
+      "app": "Microsoft.VisualStudioCode",
+      "cmd": "add_installed_app",
+      "workspace": "ship",
+      "zone": "z1"
+    },
+    {
       "app": "s1",
       "cmd": "move_app",
       "workspace": "ship",
@@ -220,7 +226,7 @@
   "replies": [
     {
       "app_version": "1.0.0",
-      "protocol": 11,
+      "protocol": 12,
       "reply": "hello"
     },
     {
@@ -530,6 +536,13 @@
           "label": "Windows Terminal",
           "tab": false,
           "zone": null
+        }
+      ],
+      "installed": [
+        {
+          "app": "com.squirrel.AnthropicClaude.claude",
+          "icon": "app:com.squirrel.AnthropicClaude.claude",
+          "label": "Claude"
         }
       ],
       "name": "Ship the release",

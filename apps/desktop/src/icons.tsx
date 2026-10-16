@@ -150,6 +150,18 @@ const GLYPHS = {
     </g>
   ),
   bell: <path d="M4 11V7a4 4 0 0 1 8 0v4l1 1.5H3zM6.5 14h3" />,
+  search: <path d="M7 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM10.6 10.6L14 14" />,
+  // Six dots: what can be dragged.
+  grip: (
+    <g fill="currentColor" stroke="none">
+      <circle cx="6" cy="3.5" r="1.2" />
+      <circle cx="10" cy="3.5" r="1.2" />
+      <circle cx="6" cy="8" r="1.2" />
+      <circle cx="10" cy="8" r="1.2" />
+      <circle cx="6" cy="12.5" r="1.2" />
+      <circle cx="10" cy="12.5" r="1.2" />
+    </g>
+  ),
 } satisfies Record<string, ReactNode>;
 
 export function Glyph({

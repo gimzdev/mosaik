@@ -30,6 +30,7 @@ const COMMANDS = [
   'hold_hotkeys',
   'apps',
   'add_app',
+  'add_installed_app',
   'move_app',
   'remove_app',
   'sets',

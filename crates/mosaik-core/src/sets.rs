@@ -195,9 +195,21 @@ fn second_tool(key: &str) -> bool {
     SECOND_TOOLS.contains(&key)
 }
 
-/// What an entry of the Start menu is, how its windows are found and how it is started, when it
-/// is an app Mosaïk knows the kind of.
-fn known(app: &Installed) -> Option<(Kind, usize, AppMatch, Launch)> {
+/// Whether an entry of the Start menu uninstalls an app rather than starts one.
+fn uninstaller(app: &Installed) -> bool {
+    let program = key_of(app);
+    app.name.to_lowercase().contains("uninstall")
+        || program.starts_with("unins")
+        || program.starts_with("uninstall")
+}
+
+/// How the windows of an entry of the Start menu are found and how it is started, whatever the
+/// app (a workspace's "Add an app", ADR 0033): File Explorer; a packaged app by its id; a
+/// desktop app by the program it starts, through the entry itself, as its shortcut starts it.
+/// `None` for an entry whose windows Mosaïk cannot know or that is no app: one that starts no
+/// program (a website, a document), opens a folder with File Explorer, uninstalls an app, or is
+/// Mail's Calendar.
+pub fn startable(app: &Installed) -> Option<(AppMatch, Launch)> {
     if app.id.eq_ignore_ascii_case(EXPLORER_ID) {
         let found = AppMatch {
             exe: Some("explorer.exe".into()),
@@ -209,20 +221,18 @@ fn known(app: &Installed) -> Option<(Kind, usize, AppMatch, Launch)> {
             args: Vec::new(),
             working_dir: None,
         };
-        return Some((Kind::Files, 0, found, launch));
+        return Some((found, launch));
     }
     let packaged = app.id.contains('!');
     if packaged && app.id.to_lowercase().ends_with(CALENDAR_ENTRY) {
         return None;
     }
-    let key = key_of(app);
     // An entry that has explorer.exe open a folder or a document is not File Explorer.
-    if key == "explorer.exe" {
+    if key_of(app) == "explorer.exe" || uninstaller(app) {
         return None;
     }
-    let (kind, rank) = Kind::listed(&key)?;
-    let (found, launch) = if packaged {
-        (
+    if packaged {
+        return Some((
             AppMatch {
                 aumid: Some(app.id.clone()),
                 ..AppMatch::default()
@@ -230,22 +240,31 @@ fn known(app: &Installed) -> Option<(Kind, usize, AppMatch, Launch)> {
             Launch::Packaged {
                 aumid: app.id.clone(),
             },
-        )
-    } else {
-        let exe = exe_of(app)?;
-        (
-            AppMatch {
-                exe: Some(exe),
-                ..AppMatch::default()
-            },
-            // Through the Start menu's own entry: it starts the app as its shortcut does.
-            Launch::Program {
-                path: format!("shell:AppsFolder\\{}", app.id),
-                args: Vec::new(),
-                working_dir: None,
-            },
-        )
-    };
+        ));
+    }
+    let exe = exe_of(app)?;
+    Some((
+        AppMatch {
+            exe: Some(exe),
+            ..AppMatch::default()
+        },
+        // Through the Start menu's own entry: it starts the app as its shortcut does.
+        Launch::Program {
+            path: format!("shell:AppsFolder\\{}", app.id),
+            args: Vec::new(),
+            working_dir: None,
+        },
+    ))
+}
+
+/// What an entry of the Start menu is, how its windows are found and how it is started, when it
+/// is an app Mosaïk knows the kind of.
+fn known(app: &Installed) -> Option<(Kind, usize, AppMatch, Launch)> {
+    let (found, launch) = startable(app)?;
+    if app.id.eq_ignore_ascii_case(EXPLORER_ID) {
+        return Some((Kind::Files, 0, found, launch));
+    }
+    let (kind, rank) = Kind::listed(&key_of(app))?;
     Some((kind, rank, found, launch))
 }
 
@@ -641,6 +660,48 @@ mod tests {
         assert!(!sets.iter().any(|s| s.task == Task::Writing), "{sets:?}");
         // Discord alone is not a set for chat: coding and games.
         assert_eq!(sets.len(), 2, "{sets:?}");
+    }
+
+    #[test]
+    fn any_app_of_the_start_menu_can_be_added_to_a_workspace_but_what_is_no_app() {
+        // ADR 0033 (the owner: "Add an open window" becomes "Add an app", and proposes apps not
+        // open too): every entry that starts an app can join a workspace, found by its program
+        // or its package, started through its entry; uninstallers, folders, websites cannot.
+        let all = owner();
+        let entry = |name: &str| all.iter().find(|a| a.name == name).unwrap();
+        let found = |a: &Installed| startable(a).map(|(found, _)| found);
+        assert_eq!(
+            found(entry("Visual Studio Code")).and_then(|f| f.exe).as_deref(),
+            Some("code.exe")
+        );
+        assert_eq!(
+            found(entry("Terminal")).and_then(|f| f.aumid).as_deref(),
+            Some("Microsoft.WindowsTerminal_8wekyb3d8bbwe!App")
+        );
+        assert_eq!(
+            found(entry("Claude")).and_then(|f| f.exe).as_deref(),
+            Some("claude.exe")
+        );
+        assert_eq!(found(entry("Uninstall Visual Studio Code")), None);
+        assert_eq!(found(entry("Windows Software Development Kit")), None);
+        // An app Mosaïk knows no kind of is offered too.
+        let paint = app(
+            "Paint.NET",
+            "dotPDN.PaintDotNet",
+            Some("C:\\Program Files\\paint.net\\paintdotnet.exe"),
+        );
+        let (by, launch) = startable(&paint).unwrap();
+        assert_eq!(by.exe.as_deref(), Some("paintdotnet.exe"));
+        assert_eq!(
+            launch,
+            Launch::Program {
+                path: "shell:AppsFolder\\dotPDN.PaintDotNet".into(),
+                args: Vec::new(),
+                working_dir: None
+            }
+        );
+        // A website's entry starts no program.
+        assert_eq!(startable(&app("Mosaïk", "https://gimz.dev/mosaik", None)), None);
     }
 
     #[test]

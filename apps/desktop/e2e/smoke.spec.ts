@@ -444,12 +444,19 @@ test.describe('a workspace’s page', () => {
     await expect(apps.getByRole('group', { name: 'Zone 2', exact: true }).getByText('Slack')).toBeVisible();
     await page.getByRole('button', { name: 'Remove Slack' }).click();
     await expect(apps.getByRole('listitem')).toHaveCount(3);
-    await page.getByRole('button', { name: 'Add a window to “Website”' }).click();
-    const slack = page.getByRole('button', { name: 'Slack Slack window' });
+    await page.getByRole('button', { name: 'Add an app to “Website”' }).click();
+    const slack = page.getByRole('group', { name: 'Open now' }).getByRole('button', { name: 'Slack Slack window' });
     await expect(slack).toBeInViewport({ ratio: 1 });
+    await accessible(page);
     await slack.click();
     await expect(shown(page, 'Slack added.')).toBeVisible();
     await expect(apps.getByRole('listitem')).toHaveCount(4);
+    // An app that is not open, found by its name (ADR 0033): it starts when the workspace opens.
+    await page.getByRole('button', { name: 'Add an app to “Website”' }).click();
+    await page.getByRole('searchbox', { name: 'Find an app' }).fill('spot');
+    await page.getByRole('group', { name: 'Not open' }).getByRole('button', { name: 'Spotify' }).click();
+    await expect(shown(page, 'Spotify added. It starts when the workspace opens.')).toBeVisible();
+    await expect(apps.getByRole('listitem')).toHaveCount(5);
     await accessible(page);
     await windowDoesNotScroll(page);
     await page.getByRole('button', { name: 'Back to Home' }).click();
