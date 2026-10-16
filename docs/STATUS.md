@@ -1656,6 +1656,13 @@ simetric and appealing". ADR 0032.
   core 293 (a window kept taller than its part; drops onto zones shown empty in Half and stack
   and Quarters; windows snapped into rows below bands and into quarters with gaps; the random
   screens with bands now placing windows as the mover does).
+- **A sixth review** (of d20dd3a, ADR 0032, Sixth review): nothing new in it; on an arranged
+  screen or a task's layout with a line dragged, a window stacked again for want of room was
+  stacked again only after the moves, so a drop onto it acted on it where it had been. Fixed,
+  tests first (core 295: a drop onto a window restacked by a stretch; a window wider than its
+  portrait monitor leaves no zone empty). Its random runs: no window in two zones in 349348
+  checks; the plan's rules kept and every window found where it is on 20000 screens on one and
+  two monitors, and in 18204 runs of Move windows, then a stretch and moves, then Move windows.
 
 ## Owner decisions
 

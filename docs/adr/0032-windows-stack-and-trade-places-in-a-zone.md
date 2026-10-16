@@ -210,3 +210,17 @@ that cannot be hidden were measured without their strip's band. Now a window is 
 fills its part, sits where the mover puts it at the size it keeps, or fills the zone itself; in
 a layout picked, that window is stacked where it fits and the zone left stays empty; every tab of
 a group is measured below its strip.
+
+## Sixth review (2026-10-16)
+
+A sixth agent reviewed d20dd3a and found nothing new in it, and one older fault, now caught by a
+test written first: on an arranged screen, or in a task's layout, with a line dragged on the
+picture, the zones made room for their own windows only, and a window stacked in a zone it no
+longer fit was stacked again only after the user's moves: the picture showed it in its new zone,
+but a drop onto it acted on it where it had been, trading with another window (2612 of 47914
+random drops onto a window of another zone moved a third window shown there, 874 with the fix,
+those the zones' room decides). The windows in a zone they do not fit are stacked again before
+the moves too (`Placed::restack`, steps 4 and 6). Also: a window larger than its monitor, alone
+there, no longer gets a zone it cannot fit, which stayed empty. On 20000 random screens on one
+and two monitors, with bands, gaps, tab groups, least, fixed and kept sizes, moves and stretched
+zones, the plan keeps its rules, and the next plan finds every window where it is.
