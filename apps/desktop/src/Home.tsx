@@ -4,14 +4,14 @@
 // it before anything moves. On the picture, a window dragged into another zone joins it, behind
 // its windows (ADR 0033), windows dragged onto each other trade places (in one zone, front to
 // back: ADR 0032), and the lines between zones resize them, the windows staying in their zones
-// (ADR 0031, 0033); Undo changes
-// puts the layout's own back. Move windows does it; Undo puts everything back. A workspace picked
-// in the column shows in the picture as opening it would leave the screen, with Open (the owner:
-// "we shouldnt open the workspace when clicking on it it should show it in the anim as preview and
-// show an open button"); its apps and zones can be changed there too, and are saved in it at
-// once. A suggested one shows the apps it starts, with Start these apps. Back, or Esc, shows the
-// screen again. Whatever an action did, here or in the column, is said in one line under the
-// picture.
+// (ADR 0031, 0033); Undo changes puts the layout's own back. Move windows does it; Undo puts
+// everything back. A workspace picked in the column shows in the picture as opening it would
+// leave the screen, with Open (the owner: "we shouldnt open the workspace when clicking on it it
+// should show it in the anim as preview and show an open button"); its apps and zones can be
+// changed there too, and a layout chosen lays it out, every app kept in a zone (ADR 0033), each
+// saved in it at once. A suggested one shows the apps it starts, with Start these apps. Back, or
+// Esc, shows the screen again. Whatever an action did, here or in the column, is said in one line
+// under the picture.
 
 import { useCallback, useEffect, useState } from 'react';
 
