@@ -11,9 +11,10 @@
 - Home's picture shows each zone once, numbered and in its colour, with the windows it takes listed
   by their title bars, so two windows of one zone no longer draw over each other; an empty zone
   keeps its number and colour and says it is empty.
-- On the picture, drag a window onto another (or onto a zone) to swap them, and drag the line
-  between two zones to resize them; "Undo changes" puts the layout back. The lines show only when
-  you point at them. "Move windows" (with Mosaïk's tiles) then puts your windows there.
+- On the picture, drag a window into another zone to add it there, behind the windows there, or
+  onto another window to swap them, and drag the line between two zones to resize them, every
+  window staying in its zone; "Undo changes" puts the layout back. The lines show only when you
+  point at them. "Move windows" (with Mosaïk's tiles) then puts your windows there.
 - A layout with fewer zones than windows stacks the rest in its zones, behind a window of their
   kind, instead of minimising them. Drag a window onto another of its zone to bring it to the
   front.
@@ -22,7 +23,13 @@
   and every window keeps its colour, on screen and in the picture.
 - The same on a workspace's picture, on Home and on its page: drag its apps to other zones, or
   onto each other to trade places (in one zone: which is in front, or the order of its tabs), and
-  resize its zones; each change is saved in the workspace at once.
+  resize its zones; each change is saved in the workspace at once. Choose a layout while a
+  workspace is shown on Home to lay it out so: every app stays, the extras stacked, and Undo puts
+  it back.
+- A workspace's page: Add an app lists every app you could add, open or not, with a box to find
+  one by name (one not open starts when the workspace opens), and its apps are dragged in their
+  list onto a zone or onto another app.
+- Like Windows follows Windows' light or dark mode again.
 - Home's title, picture and layouts are one width, the button ending where the picture does.
 - Every layout is in view, in two rows beside Automatic: Halves, Thirds, Main + side, Side +
   main, Half + stack, Stack + half, Quarters and Full screen. Top + bottom and Three rows are gone

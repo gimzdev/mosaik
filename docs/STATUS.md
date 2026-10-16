@@ -1680,6 +1680,22 @@ simetric and appealing". ADR 0032.
   Mosaïk left in the tray (1.0.2, protocol 11, watchdog, Win+Alt+Space); packed (289 files); both
   files beside the repository brought up to date (the key line kept), and again by job 0168 at
   the commit recording this.
+- **The owner's next notes** (2026-10-16, ADR 0033): on Home's picture a window dropped onto a
+  zone traded with the zone's window, and a line dragged could move windows to other zones (9918
+  of 20000 random screens with a layout picked); a layout clicked while a workspace was shown went
+  back to the screen, which had fewer windows open than the workspace has apps (read-only checks
+  on the owner's PC, jobs 0169 and 0170: on his screen, Quarters gave each of his four windows a
+  quarter; least sizes 600 x 392 at most); "Add an open window" offered only windows open; a
+  workspace's list of apps took no drops; Like Windows stayed as the theme chosen before. Now a
+  window dropped onto a zone joins it behind its windows, moving no other; a line dragged moves
+  no window to another zone (the zones made to hold every window in them, those stacked too); a
+  layout chosen for a workspace shown lays it out, every app kept in a zone, with Undo (protocol
+  12); Add an app lists every app, open or not, in one list found by name; a workspace's apps are
+  dragged in their list; Like Windows leaves the window's theme to Windows. Tests first: core 304
+  (joins, random lines dragged on 6000 screens, the owner's Coding on every layout with and
+  without a tab group, any Start menu app), ipc 12, interface 142, Playwright 38 (a join kept by
+  Move windows, the workspace with the most apps on every layout and Undo, apps dragged in their
+  list, Add an app with axe).
 
 ## Owner decisions
 
@@ -1744,3 +1760,9 @@ simetric and appealing". ADR 0032.
 - 2026-10-14: the site has no section "One desktop, many kinds of work." ("Who it's for", the
   four workspaces as desktops in small): "it looks stacked and is redundant with first section";
   asked before, so it does not come back (ADR 0024).
+- 2026-10-16: on Home's picture a window dragged into another zone is added to it, not swapped
+  with the window there ("instead of just adding it"); a line dragged moves no window to another
+  zone; a layout clicked on a workspace's preview keeps all its apps; "Add an open window" is
+  "Add an app", every app open or not in one list ("why even specify "not open""); a workspace's
+  apps are dragged in their list; Like Windows made to work ("either make it work or make it go").
+  ADR 0033.
