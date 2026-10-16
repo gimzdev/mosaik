@@ -1351,6 +1351,14 @@ speed, 27 on the code); what they found and what changed is ADR 0029.
     dragged onto another traded places and was put back; a workspace picked showed Open, and Back
     returned to Arrange. On Windows, the larger type and the controls read as in the pictures
     taken here.
+- **On the owner's PC** (job 0153, at 16241e3): build and `mosaik.ps1 test` passing (interface
+  119); **taskkill without /F quit the build in 0.3 s** ("asked to close through another
+  window", then "Mosaïk stopped"); **opening a workspace undone in 14.8 ms**, the window it had
+  minimised back 0 px from where it was; workspace saved in 6.6 ms, opened in 20.4 ms, every
+  window 0 px from its zone; smart's arrange and side-menu parts with no check failing (the menu
+  dragged 120 px by its first line, kept at 416 of 1000). The dialog the Store's old watchdog
+  left on screen when job 0151 stopped its Mosaïk ("Mosaïk has stopped") was closed, and that
+  watchdog ended.
 
 ## Owner decisions
 
