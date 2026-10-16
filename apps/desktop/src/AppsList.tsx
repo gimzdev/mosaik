@@ -1,11 +1,13 @@
 // A workspace's apps on its page, zone by zone as its picture shows them: each zone's number in
 // its colour, a line of its colour down the apps it takes, a zone left empty said so (the owner,
 // of the row of zone dots each app had: "the options look like absolute garbage"). An app is
-// dragged by its row onto another app, the two trading places, or onto a zone, which it joins
-// (ADR 0033; the owner: "the apps in image 1 must be able to be dragged and droped from zones");
-// with the keyboard, Move puts it in another zone, and on the picture above Enter picks it and
-// Enter on another app trades them. × takes it out. Then Add an app. In the open workspace a
-// change moves the window at once. Each change answers with the apps as they are now.
+// dragged by its row into a zone, which it joins, or onto another app (its icon and name, as the
+// picture's title bars), the two trading places (ADR 0033; the owner: "the apps in image 1 must
+// be able to be dragged and droped from zones", then "permute when specifically dropped on
+// another app otherwise just add", ADR 0034); with the keyboard, Move puts it in another zone,
+// and on the picture above Enter picks it and Enter on another app trades them. × takes it out.
+// Then Add an app. In the open workspace a change moves the window at once. Each change answers
+// with the apps as they are now.
 
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
 
@@ -99,7 +101,8 @@ export function AppsList({
   const dragging = useRef<Drag | null>(null);
   /** Where the pointer went down on a row, until it moves far enough to drag it. */
   const press = useRef<{ app: WorkspaceApp; pointer: number; x: number; y: number } | null>(null);
-  const rows = useRef(new Map<string, HTMLElement>());
+  /** Each app's icon and name: a drop there is onto the app. */
+  const chips = useRef(new Map<string, HTMLElement>());
   const groups = useRef(new Map<string, HTMLElement>());
 
   const setDrag = (d: Drag | null) => {
@@ -163,13 +166,14 @@ export function AppsList({
   const known = new Set(zones.map((z) => z.id));
   const loose = data.apps.filter((a) => a.zone === null || !known.has(a.zone));
 
-  /** What is under the pointer: another app of a zone, else a zone. */
+  /** What is under the pointer: the icon and name of another app of a zone, else a zone (the rest
+   * of its rows too, as the picture's zones beside their title bars). */
   const targetAt = (x: number, y: number, self: string): ListTarget | null => {
     const hit = (el: HTMLElement) => {
       const r = el.getBoundingClientRect();
       return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
     };
-    for (const [id, el] of rows.current) {
+    for (const [id, el] of chips.current) {
       const a = data.apps.find((x) => x.id === id);
       if (id !== self && a && a.zone !== null && known.has(a.zone) && hit(el)) return { app: a };
     }
@@ -225,33 +229,41 @@ export function AppsList({
     return (
       <li
         key={a.id}
-        ref={(el) => {
-          if (!el) return;
-          rows.current.set(a.id, el);
-          return () => {
-            if (rows.current.get(a.id) === el) rows.current.delete(a.id);
-          };
-        }}
-        title="Drag it onto another app or zone"
         className={`group/row -mx-1.5 flex min-h-11 cursor-grab items-center gap-2.5 rounded-lg px-1.5 select-none ${
-          overApp(a) ? 'outline-2 outline-offset-1 outline-[var(--text)]' : ''
-        } ${drag?.app.id === a.id ? 'opacity-40' : ''}`}
+          drag?.app.id === a.id ? 'opacity-40' : ''
+        }`}
         {...handle(a)}
       >
+        {/* Its icon and name: dropped there, an app trades places with it. */}
         <span
-          data-grip
-          aria-hidden="true"
-          className="-mr-1 grid w-4 shrink-0 touch-none place-items-center text-[var(--muted)] opacity-60 group-hover/row:opacity-100"
+          ref={(el) => {
+            if (!el) return;
+            chips.current.set(a.id, el);
+            return () => {
+              if (chips.current.get(a.id) === el) chips.current.delete(a.id);
+            };
+          }}
+          className={`-my-1 flex min-w-0 items-center gap-2.5 rounded-md py-1 pr-1.5 ${
+            overApp(a) ? 'outline-2 outline-offset-1 outline-[var(--text)]' : ''
+          }`}
         >
-          <Glyph name="grip" size={14} />
-        </span>
-        <AppIcon icon={a.icon} size={22} keepSpace />
-        <span className="min-w-0 flex-1 truncate font-semibold">{a.label}</span>
-        {a.tab ? (
-          <span className="shrink-0 rounded-md bg-[var(--hover)] px-1.5 py-0.5 text-caption font-semibold text-[var(--muted)]">
-            Tab
+          <span
+            data-grip
+            aria-hidden="true"
+            title="Drag it into another zone, or onto another app to swap them"
+            className="-mr-1 grid w-4 shrink-0 touch-none place-items-center text-[var(--muted)] opacity-60 group-hover/row:opacity-100"
+          >
+            <Glyph name="grip" size={14} />
           </span>
-        ) : null}
+          <AppIcon icon={a.icon} size={22} keepSpace />
+          <span className="min-w-0 truncate font-semibold">{a.label}</span>
+          {a.tab ? (
+            <span className="shrink-0 rounded-md bg-[var(--hover)] px-1.5 py-0.5 text-caption font-semibold text-[var(--muted)]">
+              Tab
+            </span>
+          ) : null}
+        </span>
+        <span aria-hidden="true" className="flex-1" />
         {elsewhere.length ? (
           <MenuButton
             label={`Move ${a.label} to another zone`}

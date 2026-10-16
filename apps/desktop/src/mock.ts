@@ -1196,7 +1196,14 @@ function answer(command: Command): Reply {
         w.appList[i] = other;
         w.appList[j] = app;
       } else if (!other && app.zone !== command.zone) {
+        // Behind the apps of the zone (`editing::move_app`, ADR 0034).
         Object.assign(app, { zone: command.zone, tab: false });
+        const last = w.appList.reduce((at, a, i) => (a !== app && a.zone === command.zone ? i : at), -1);
+        const from = w.appList.indexOf(app);
+        if (last > from) {
+          w.appList.splice(from, 1);
+          w.appList.splice(last, 0, app);
+        }
       }
       return apps(w);
     }

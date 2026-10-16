@@ -36,13 +36,16 @@ async function still(page: Page, l: Locator) {
 }
 
 /** Drags one bar or tab of a picture onto another, as a person does: a press, a few pixels to
- * start the drag, then the rest of the way. */
-async function dragOnto(page: Page, from: Locator, to: Locator) {
+ * start the drag, then the rest of the way, to the point of `to` at fractions `fx` and `fy` of its
+ * width and height (its middle unless said). `from` is brought into view first, as a person
+ * scrolls to what they take. */
+async function dragOnto(page: Page, from: Locator, to: Locator, fx = 0.5, fy = 0.5) {
+  await from.scrollIntoViewIfNeeded();
   const [a, b] = [await still(page, from), await still(page, to)];
   await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
   await page.mouse.down();
   await page.mouse.move(a.x + a.width / 2 + 10, a.y + a.height / 2 + 6, { steps: 4 });
-  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+  await page.mouse.move(b.x + b.width * fx, b.y + b.height * fy, { steps: 12 });
   await page.mouse.up();
 }
 
@@ -509,25 +512,33 @@ test.describe('a workspace’s page', () => {
     await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
   });
 
-  test('its apps are dragged in their list onto a zone, which they join, or onto another app, trading places', async ({
+  test('its apps are dragged in their list into a zone, which they join, or onto another app, trading places', async ({
     page,
   }) => {
-    // The owner: "the apps in image 1 must be able to be dragged and droped from zones" (ADR 0033).
+    // The owner: "the apps in image 1 must be able to be dragged and droped from zones" (ADR 0033);
+    // then, as an app dropped in a zone traded with the app there: "permute when specifically
+    // dropped on another app otherwise just add", as on the picture (ADR 0034).
     await page.goto('/');
     await editWorkspace(page, 'Backend');
     const apps = page.getByRole('group', { name: 'Apps of “Backend”' });
     const zone = (n: string) => apps.getByRole('group', { name: `Zone ${n}`, exact: true });
     const row = (label: string) => apps.getByRole('listitem').filter({ hasText: label });
+    const name = (label: string) => row(label).getByText(label, { exact: true });
     await expect(zone('3').getByText('Empty. Drag an app here, or use Move.')).toBeVisible();
     await dragOnto(page, row('MSYS2'), zone('3'));
     await expect(shown(page, 'MSYS2 goes in zone 3.')).toBeVisible();
     await expect(zone('3').getByText('MSYS2')).toBeVisible();
-    await dragOnto(page, row('Visual Studio Code'), row('MSYS2'));
-    await expect(shown(page, 'Visual Studio Code and MSYS2 traded zones.')).toBeVisible();
-    await expect(zone('3').getByText('Visual Studio Code')).toBeVisible();
-    await expect(zone('1').getByText('MSYS2')).toBeVisible();
+    // Into zone 3 over MSYS2's row, beside its name: added there, behind it.
+    await dragOnto(page, row('Visual Studio Code'), row('MSYS2'), 0.55);
+    await expect(shown(page, 'Visual Studio Code goes in zone 3.')).toBeVisible();
+    await expect(zone('3').getByRole('listitem')).toHaveText([/MSYS2/, /Visual Studio Code/]);
+    // Onto Google Chrome's name: the two trade zones.
+    await dragOnto(page, row('Visual Studio Code'), name('Google Chrome'));
+    await expect(shown(page, 'Visual Studio Code and Google Chrome traded zones.')).toBeVisible();
+    await expect(zone('2').getByText('Visual Studio Code')).toBeVisible();
+    await expect(zone('3').getByText('Google Chrome')).toBeVisible();
     // The picture follows.
-    await expect(page.getByRole('group', { name: /MSYS2 starts in zone 1/ })).toBeVisible();
+    await expect(page.getByRole('group', { name: /Visual Studio Code in zone 2/ })).toBeVisible();
     await accessible(page);
   });
 

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::geometry::RatioRect;
-use crate::layout::{Launch, Place, Slot, SlotId, Workspace};
+use crate::layout::{Launch, Layout, Place, Slot, SlotId, Workspace};
 use crate::matching::AppMatch;
 use crate::place::Resolver;
 use crate::topology::{MonitorId, Topology, fnv1a64, map_monitors};
@@ -545,16 +545,27 @@ pub fn with_layout(ws: &Workspace, monitor: usize, areas: &[RatioRect]) -> Works
     out
 }
 
-/// The workspace with its app `slot` in the zone `zone`. A tab leaves its group for it, unless
-/// the group is in that zone already.
+/// The workspace with its app `slot` in the zone `zone`, behind the apps there (ADR 0034: as a
+/// window dropped onto a zone of Home's picture joins it, ADR 0033). A tab leaves its group for
+/// it, unless the group is in that zone already.
 pub fn move_app(ws: &Workspace, slot: &SlotId, zone: &ZoneId) -> Result<Workspace, EditError> {
+    let (mut out, moved) = put_in_zone(ws, slot, zone)?;
+    if moved {
+        behind_the_zone(&mut out.layout, slot, zone);
+    }
+    Ok(out)
+}
+
+/// The workspace with its app `slot` in the zone `zone`, keeping its place front to back; and
+/// whether it moved.
+fn put_in_zone(ws: &Workspace, slot: &SlotId, zone: &ZoneId) -> Result<(Workspace, bool), EditError> {
     let current = ws.layout.slot(slot).ok_or(EditError::GoneApp)?;
     if ws.layout.zone(zone).is_none() {
         return Err(EditError::GoneZone);
     }
     let place = Place::Zone { zone: zone.clone() };
     if ws.layout.effective_place(current) == Some(&place) {
-        return Ok(ws.clone());
+        return Ok((ws.clone(), false));
     }
     let mut out = ws.clone();
     if !out.layout.leave_tab(slot, place.clone())
@@ -562,7 +573,29 @@ pub fn move_app(ws: &Workspace, slot: &SlotId, zone: &ZoneId) -> Result<Workspac
     {
         s.place = place;
     }
-    Ok(out)
+    Ok((out, true))
+}
+
+/// App `slot` behind every other app of `zone`, front to back being the order of the layout's
+/// slots ([`Layout::ranks`]); already behind them, it stays.
+fn behind_the_zone(layout: &mut Layout, slot: &SlotId, zone: &ZoneId) {
+    let place = Place::Zone { zone: zone.clone() };
+    let Some(from) = layout.slots.iter().position(|s| &s.id == slot) else {
+        return;
+    };
+    let last = layout
+        .slots
+        .iter()
+        .enumerate()
+        .filter(|&(i, s)| i != from && layout.effective_place(s) == Some(&place))
+        .map(|(i, _)| i)
+        .max();
+    if let Some(last) = last
+        && last > from
+    {
+        let s = layout.slots.remove(from);
+        layout.slots.insert(last, s);
+    }
 }
 
 /// The workspace with its apps `a` and `b` trading places (one dropped on the other in its
@@ -581,8 +614,8 @@ pub fn swap_apps(ws: &Workspace, a: &SlotId, b: &SlotId) -> Result<Workspace, Ed
     if za == zb {
         return Ok(trade_in_zone(ws, a, b));
     }
-    let out = move_app(ws, a, &zb)?;
-    let mut out = move_app(&out, b, &za)?;
+    let (out, _) = put_in_zone(ws, a, &zb)?;
+    let (mut out, _) = put_in_zone(&out, b, &za)?;
     let at = |id: &SlotId, slots: &[crate::layout::Slot]| slots.iter().position(|s| &s.id == id);
     if let (Some(i), Some(j)) = (at(a, &out.layout.slots), at(b, &out.layout.slots)) {
         out.layout.slots.swap(i, j);
@@ -1049,6 +1082,49 @@ mod tests {
 
     fn sid(id: &str) -> SlotId {
         SlotId(id.into())
+    }
+
+    #[test]
+    fn an_app_moved_into_a_zone_goes_behind_the_apps_there() {
+        // ADR 0034 (the owner, of a workspace's list: "permute when specifically dropped on
+        // another app otherwise just add"): an app moved into a zone joins it behind its apps,
+        // as a window dropped onto a zone of Home's picture does (ADR 0033), and opening the
+        // workspace stacks it so; one already behind them stays where it is. Two apps of two
+        // zones trading places keep each other's places front to back (ADR 0031).
+        let t = fixtures::uhd_200_plus_1080p_100();
+        for tabs in [false, true] {
+            let ws = coding(&t, tabs);
+            let order = |ws: &Workspace, zone: &str| -> Vec<String> {
+                let ranks = ws.layout.ranks();
+                let mut in_zone: Vec<&Slot> = ws
+                    .layout
+                    .slots
+                    .iter()
+                    .filter(|s| {
+                        ws.layout.effective_place(s)
+                            == Some(&Place::Zone {
+                                zone: ZoneId::new(zone),
+                            })
+                    })
+                    .collect();
+                in_zone.sort_by_key(|s| (ranks.get(&s.id).copied(), s.id.0.clone()));
+                in_zone.iter().map(|s| s.id.0.clone()).collect()
+            };
+            let moved = move_app(&ws, &sid("s1"), &ZoneId::new("z3")).unwrap();
+            assert_eq!(moved.layout.problems(), vec![], "tabs {tabs}");
+            assert_eq!(order(&moved, "z3"), ["s5", "s6", "s1"], "tabs {tabs}");
+            assert!(order(&moved, "z1").is_empty(), "tabs {tabs}");
+            let back = move_app(&moved, &sid("s6"), &ZoneId::new("z1")).unwrap();
+            assert_eq!(order(&back, "z3"), ["s5", "s1"], "tabs {tabs}");
+            assert_eq!(order(&back, "z1"), ["s6"], "tabs {tabs}");
+            // Explorer, behind or beside Claude and Chrome, into zone 3: behind MSYS2 and Terminal.
+            let explorer = move_app(&ws, &sid("s3"), &ZoneId::new("z3")).unwrap();
+            assert_eq!(order(&explorer, "z3"), ["s5", "s6", "s3"], "tabs {tabs}");
+            // Traded: each takes the other's zone and place front to back.
+            let traded = swap_apps(&ws, &sid("s1"), &sid("s5")).unwrap();
+            assert_eq!(order(&traded, "z3"), ["s1", "s6"], "tabs {tabs}");
+            assert_eq!(order(&traded, "z1"), ["s5"], "tabs {tabs}");
+        }
     }
 
     #[test]
