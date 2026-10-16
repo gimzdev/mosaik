@@ -476,6 +476,39 @@ test.describe('Home', () => {
 });
 
 test.describe('a workspace’s page', () => {
+  test('is one width: its title and Open, its picture and its sections line up, in the middle', async ({ page }) => {
+    // The owner, of the page with its picture narrower than the rest and on the left: "the view in
+    // image two is disgraceful we should be more appealing symetrical" (ADR 0034).
+    for (const size of [
+      { width: 1000, height: 760 },
+      { width: 1400, height: 1100 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.goto('/');
+      await editWorkspace(page, 'Website');
+      const picture = await still(page, page.getByRole('group', { name: /^Visual Studio Code in zone 1/ }));
+      const edges = async (l: Locator) => {
+        const b = await still(page, l);
+        return [Math.round(b.x), Math.round(b.x + b.width)];
+      };
+      const wanted = [Math.round(picture.x), Math.round(picture.x + picture.width)];
+      for (const name of ['Apps', 'Shortcut', 'Zones']) {
+        expect(await edges(page.getByRole('region', { name })), `${name}, ${String(size.height)} high`).toEqual(wanted);
+      }
+      const [, open] = await edges(page.getByRole('button', { name: 'Open', exact: true }));
+      expect(open, `Open, ${String(size.height)} high`).toBe(wanted[1]);
+      const main = await page.locator('main').evaluate((m) => {
+        const r = m.getBoundingClientRect();
+        return { left: r.left, right: r.left + m.clientWidth };
+      });
+      const [left = 0, right = 0] = wanted;
+      expect(
+        Math.abs(left - main.left - (main.right - right)),
+        `in the middle, ${String(size.height)} high`,
+      ).toBeLessThanOrEqual(2);
+    }
+  });
+
   test('shows how it opens, lists its apps by zone, and moves, removes and adds them', async ({ page }) => {
     await page.goto('/');
     await editWorkspace(page, 'Website');

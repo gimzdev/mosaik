@@ -139,7 +139,8 @@ describe('a workspace’s page', () => {
     expect(asked).toContainEqual({ cmd: 'preview_workspace', workspace: 'ship' });
     // It is the one on screen, in quiet words.
     expect(screen.getByText('On screen')).toBeInTheDocument();
-    expect(screen.getByText('2 apps · 2 zones')).toBeInTheDocument();
+    expect(screen.getByText('2 apps')).toBeInTheDocument();
+    expect(screen.getByText('2 zones')).toBeInTheDocument();
   });
 
   it('says only that its zones are empty while it has no app to drag or move', async () => {

@@ -11,10 +11,13 @@ import { request } from './engine';
 import { Glyph } from './icons';
 import { type ArrangePreview, MAX_NAME, type WorkspaceApps, type WorkspaceSummary, errorMessage } from './protocol';
 import { useReads } from './reads';
-import { type PictureEdits, Screen, dropped, stretched } from './Screen';
+import { type PictureEdits, Screen, dropped, pictureWidth, stretched } from './Screen';
 import { ShortcutRecorder } from './shortcut';
 import { Button, Confirm, OnScreen, PageTitle, Section, Status, useAnnounce } from './ui';
 import { type Change, moveApp, resizeZones } from './workspacePicture';
+
+/** The picture's height at most, in percent of the window's: the apps below stay in sight. */
+const TALLEST = 38;
 
 function Rename({
   workspace,
@@ -190,8 +193,15 @@ export function WorkspacePage({
     );
   }
 
+  // One width, the picture's, for everything on the page, in the middle of it: the title and
+  // Open, the picture, the sections (the owner, of a picture narrower than the rest and on the
+  // left: "disgraceful we should be more appealing symetrical", ADR 0034).
   return (
-    <article aria-labelledby="workspace-title" className="mx-auto w-full max-w-[46rem]">
+    <article
+      aria-labelledby="workspace-title"
+      className="mx-auto max-w-[46rem]"
+      style={pictureWidth(picture?.work_area ?? null, TALLEST)}
+    >
       <button
         type="button"
         onClick={onBack}
@@ -241,8 +251,11 @@ export function WorkspacePage({
               </>
             ) : null}
             <span>
-              {summary.apps.length} {summary.apps.length === 1 ? 'app' : 'apps'} · {summary.zones}{' '}
-              {summary.zones === 1 ? 'zone' : 'zones'}
+              {summary.apps.length} {summary.apps.length === 1 ? 'app' : 'apps'}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {summary.zones} {summary.zones === 1 ? 'zone' : 'zones'}
             </span>
           </p>
         </div>
@@ -271,7 +284,7 @@ export function WorkspacePage({
       </div>
 
       <div className="mt-4">
-        <Screen preview={picture} unread={unread} tallest={38} edit={pictureEdits} />
+        <Screen preview={picture} unread={unread} tallest={TALLEST} edit={pictureEdits} />
       </div>
 
       <Section title="Apps">
