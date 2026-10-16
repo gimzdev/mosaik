@@ -1663,6 +1663,11 @@ simetric and appealing". ADR 0032.
   portrait monitor leaves no zone empty). Its random runs: no window in two zones in 349348
   checks; the plan's rules kept and every window found where it is on 20000 screens on one and
   two monitors, and in 18204 runs of Move windows, then a stretch and moves, then Move windows.
+- **On the owner's PC** (job 0166, at d522d00): build and every test passing (interface 134);
+  the engine's arrange test ok; `smart`, every check passing (each picture read again after Move
+  windows finding every window where it is, first where it was, in its colour; Undo stacking them
+  as they were); the side menu; the tour: 32 pictures. Mosaïk left in the tray (1.0.2, protocol
+  11, watchdog, Win+Alt+Space); packed (289 files).
 
 ## Owner decisions
 
