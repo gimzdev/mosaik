@@ -1741,6 +1741,14 @@ simetric and appealing". ADR 0032.
   with nothing to drag or move: it says Empty. Tests first: interface 144. The test of the dark
   theme now waits for the effect that sets it (it had read it before, once in a run of all the
   tests).
+- **On the owner's PC** (job 0173, at 350973a): build and every test passing (interface 144);
+  the engine's arrange test ok; the scan 0.4 ms (302 windows); `smart`, every check passing (the
+  join keeping every zone's colour); the side menu; the tour: 32 pictures, Add an app's list with
+  its apps' icons, a workspace with no app saying Empty in its zones, Like Windows following
+  Windows. Mosaïk left in the tray (1.0.2, protocol 12, watchdog, Win+Alt+Space); the owner's
+  "Coding" on all ten layouts, every app kept, nothing saved. Packed (294 files); both files
+  beside the repository brought up to date (the key line kept), and again at the commit recording
+  this.
 
 ## Owner decisions
 
