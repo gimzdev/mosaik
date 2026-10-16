@@ -1421,6 +1421,24 @@ workspace?", the owner: "arrange should arrange, save should save. yes". ADR 003
     undone (ADR 0029): kept so, and said in ADR 0030.
   - The probe's notes follow; `menu-shot` saves the arranged windows so the picture lists a
     workspace.
+- **On the owner's PC** (job 0157, at de4146f, a release probe at last): build 2 min 40 s;
+  `mosaik.ps1 test` passing (interface 119, the publish script's checks), and the new engine
+  test on its own: `arrange_goes_on_when_the_workspaces_cannot_be_saved ... ok`. The scan: 306
+  windows, the engine's 0.6 ms, every window 3.4 ms.
+  - `smart`: **Arrange made no workspace** ("Arranged 3 windows." in 7.4 ms, 0 workspaces, none
+    open, `~arranged` on screen), every window 0 px from its zone; Undo 0 px in 11.1 ms; the
+    arranged screen **saved as "Probe arranged"** in 6.6 ms: 3 windows, 3 zones, the same zones,
+    no window moved, 1 workspace, open; its apps added, moved and taken out 0 px. The side menu
+    opened in 49 ms with "Probe arranged" and "Update “Probe arranged”"; a press as it opened did
+    nothing. No check failing.
+  - `workspace --drag`, tags in title bars / above windows: saved 5.2 / 36 ms, opened 18 / 24 ms,
+    every window 0 px from its zone and from the preview; opening undone in 10.4 / 17.6 ms, the
+    window it minimised back 0 px; tabs hidden again (job 0156's debug watchdog was the cause):
+    a tab clicked shows 0 px off with the strip in the same place, the group moved and back 0 px,
+    drops onto the strip where Windows snaps make tabs; a zone split 0 px; a new workspace saved
+    under the old name: "2 windows, 1 zone", as before ADR 0030. Memory with frames 9.3 / 8.9 MB.
+  - Mosaïk left in the tray (1.0.2, watchdog, Win+Alt+Space registered); packed (282 files) and
+    both files beside the repository brought up to date (the key line kept).
 
 ## Owner decisions
 
