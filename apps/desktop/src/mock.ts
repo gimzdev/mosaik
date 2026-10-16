@@ -422,9 +422,10 @@ function screenAgain(preset: Preset | undefined, work: Rect): Arranged | null {
 
 /** What Arrange would do with `preset` (or its own choice), with the windows the user moved and
  * the zones as resized on the picture (`areas`, taken when there is one for each zone), as the
- * engine reports it (`arrange::plan_moved`, its `Stretched` zones): a window moved trades
- * places with the window in the zone it was put in, and keeps its zone's colour; a screen Move
- * windows arranged stays as it is, and each zone wears the colour its window wears
+ * engine reports it (`arrange::plan_moved`, its `Stretched` zones): a window dropped onto another
+ * trades places with it, and one dropped onto a zone joins it, behind its windows (ADR 0033); the
+ * windows are found in the zones as the layout made them, so a line dragged moves none; a screen
+ * Move windows arranged stays as it is, and each zone wears the colour its window wears
  * (`arrange::zone_colors`). */
 function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: RatioRect[] = []): ArrangePreview {
   const work = monitors[0]?.work_area ?? { left: 0, top: 0, right: 1920, bottom: 1032 };
@@ -434,6 +435,9 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
   const made = again ? again.zones.map((z) => z.area) : preset ? presetShape(preset) : (auto?.shape ?? []);
   const shape = areas.length > 0 && areas.length === made.length ? areas : made;
   const rects = shape.map((a) => px(a, work));
+  // The zones as the layout made them, where the windows are found: a line dragged on the picture
+  // moves the zones, never a window to another zone (ADR 0033).
+  const madeRects = made.map((a) => px(a, work));
   // A picked layout: the windows used last take the largest zones (as the layout made them); the
   // rest are minimised.
   const order = made
@@ -455,7 +459,7 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
   });
   // Windows already in a zone stay as they are on screen (the engine's step 3): of the windows
   // filling a zone, the one in front is its own window.
-  rects.forEach((r, i) => {
+  madeRects.forEach((r, i) => {
     if (again) return;
     const f = onScreen.findIndex((s) => fills(s.now, r));
     if (f < 0 || own[i] === f) return;
@@ -471,7 +475,7 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
     }
   });
   const area = (i: number) => {
-    const r = rects[i];
+    const r = madeRects[i];
     return r ? (r.right - r.left) * (r.bottom - r.top) : 0;
   };
   // The windows left over: each in the zone it fills, else with its kind, else where there are
@@ -482,7 +486,7 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
       const count = (i: number) => zoneOf.filter((z) => z === i).length;
       const kin = (i: number) => onScreen.some((o, m) => zoneOf[m] === i && o.kind === s.kind);
       const filled = (i: number) => {
-        const r = rects[i];
+        const r = madeRects[i];
         return r !== undefined && fills(s.now, r);
       };
       const [best] = rects
@@ -522,31 +526,44 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
     seq[i] = b;
     seq[j] = a;
   };
+  // A zone holding stacked windows only has the one in front for its own, as the picture shows it
+  // (the engine's `own_the_lone`); then each zone's own window first.
+  const ownTheLone = () => {
+    rects.forEach((_, i) => {
+      if (own[i] !== undefined) return;
+      const n = seq.find((x) => zoneOf[x] === i);
+      if (n === undefined) return;
+      own[i] = n;
+      stacked[n] = false;
+    });
+    seq.sort((a, b) => Number(stacked[a]) - Number(stacked[b]));
+  };
   // The windows the user moved (the engine's step 5): dropped onto a window, the two trade
-  // places; onto a zone, its own window takes the moved one's place, or the moved one takes the
-  // zone left empty.
+  // places; onto a zone, the moved one joins it, behind its windows, or takes it when it is empty
+  // (ADR 0033).
   for (const m of moves) {
     const a = onScreen.findIndex((s) => s.window === m.window);
     if (a < 0 || m.zone >= rects.length) continue;
     const b = m.onto === undefined ? -1 : onScreen.findIndex((s) => s.window === m.onto);
     if (b >= 0 && b !== a && zoneOf[b] === m.zone) {
       trade(a, b);
+      ownTheLone();
       continue;
     }
     if (zoneOf[a] === m.zone) continue;
-    const there = own[m.zone];
-    if (there !== undefined) {
-      trade(a, there);
-      continue;
-    }
     const qa = ownOf(a);
-    if (qa !== undefined) {
-      own[qa] = undefined;
-      swapColours(qa, m.zone);
-    }
+    if (qa !== undefined) own[qa] = undefined;
     zoneOf[a] = m.zone;
-    own[m.zone] = a;
-    stacked[a] = false;
+    if (own[m.zone] !== undefined) {
+      stacked[a] = true;
+      seq.splice(seq.indexOf(a), 1);
+      seq.push(a);
+    } else {
+      if (qa !== undefined) swapColours(qa, m.zone);
+      own[m.zone] = a;
+      stacked[a] = false;
+    }
+    ownTheLone();
   }
   stack();
   seq.sort((a, b) => Number(stacked[a]) - Number(stacked[b]));

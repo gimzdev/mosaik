@@ -31,4 +31,53 @@ describe('the stand-in engine', () => {
     expect(terminal.left).toBe(work.left);
     expect(terminal.top).toBeGreaterThanOrEqual(middle.y);
   });
+  it('puts a window dropped onto a zone behind its windows, and moves no other, as Mosaïk does', async () => {
+    // ADR 0033 (`a_window_dropped_onto_a_zone_joins_it_behind_its_windows`).
+    const base = pictured(await mock.request({ cmd: 'preview_arrange', preset: 'halves' }));
+    const zone = (p: ArrangePreview, label: string) =>
+      p.zones.findIndex((z) => z.id === p.windows.find((w) => w.label === label)?.zone);
+    const [first, second] = base.windows;
+    if (!first || !second) throw new Error('the stand-in has windows');
+    // A window of the other half, dropped onto the first one's half itself.
+    const into = zone(base, first.label);
+    const mover = base.windows.find((w) => zone(base, w.label) !== into);
+    if (!mover) throw new Error('both halves hold a window');
+    const moved = pictured(
+      await mock.request({ cmd: 'preview_arrange', preset: 'halves', moves: [{ window: mover.window, zone: into }] }),
+    );
+    const there = (p: ArrangePreview, z: number) => p.windows.filter((w) => zone(p, w.label) === z).map((w) => w.label);
+    expect(there(moved, into)).toEqual([...there(base, into), mover.label]);
+    for (const w of base.windows) {
+      if (w !== mover) expect(zone(moved, w.label)).toBe(zone(base, w.label));
+    }
+    expect(moved.zones.map((z) => z.color)).toEqual(base.zones.map((z) => z.color));
+  });
+
+  it('keeps every window in its zone when a line between zones is dragged, as Mosaïk does', async () => {
+    // ADR 0033 (`random_lines_dragged_move_no_window_to_another_zone`): the stand-in found the
+    // windows in the zones as stretched, so a window filling one of them took it.
+    for (const preset of ['thirds', 'quarters', 'main-side', 'side-main', 'half-stack', 'stack-half'] as const) {
+      const base = pictured(await mock.request({ cmd: 'preview_arrange', preset }));
+      const lines = [...new Set(base.zones.flatMap((z) => [z.area?.left ?? 0, z.area?.right ?? 1]))].filter(
+        (v) => v > 0.01 && v < 0.99,
+      );
+      for (const line of lines) {
+        for (const x of [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]) {
+          const areas = base.zones.map((z) => {
+            const a = z.area ?? { left: 0, top: 0, right: 1, bottom: 1 };
+            const f = (v: number) => (Math.abs(v - line) < 1e-9 ? x : v);
+            return { left: f(a.left), top: a.top, right: f(a.right), bottom: a.bottom };
+          });
+          const stretched = pictured(await mock.request({ cmd: 'preview_arrange', preset, areas }));
+          for (const w of base.windows) {
+            const now = stretched.windows.find((v) => v.window === w.window);
+            expect(now?.zone, `${preset}, the line at ${String(line)} dragged to ${String(x)}: ${w.label}`).toBe(
+              w.zone,
+            );
+          }
+          expect(stretched.zones.map((z) => z.area)).toEqual(areas);
+        }
+      }
+    }
+  });
 });

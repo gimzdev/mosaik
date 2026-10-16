@@ -20,7 +20,8 @@ const shown = (page: Page, text: string) => page.locator('main').getByText(text,
 /** The stand-in's screen as the automatic layout would leave it. */
 const AUTO = 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 4, Slack in zone 3.';
 const arrange = (page: Page) => page.getByRole('button', { name: 'Move windows', exact: true });
-const HINT = 'Drag a window onto another to swap them, or a line between zones to resize them.';
+const HINT =
+  'Drag a window into a zone to add it there, onto another window to swap them, or drag a line to resize zones.';
 
 /** Where a bar of a picture is once it has stopped moving: zones glide to a new layout. */
 async function still(page: Page, l: Locator) {
@@ -42,6 +43,18 @@ async function dragOnto(page: Page, from: Locator, to: Locator) {
   await page.mouse.down();
   await page.mouse.move(a.x + a.width / 2 + 10, a.y + a.height / 2 + 6, { steps: 4 });
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+  await page.mouse.up();
+}
+
+/** Drags a bar of a picture into the zone another bar is in, below that bar: onto the zone itself. */
+async function dragInto(page: Page, from: Locator, there: Locator) {
+  const a = await still(page, from);
+  const zone = await there.locator('xpath=ancestor::div[contains(@class, "stage-window")]').boundingBox();
+  if (!zone) throw new Error('the zone is not drawn');
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2 + 10, a.y + a.height / 2 + 6, { steps: 4 });
+  await page.mouse.move(zone.x + zone.width / 2, zone.y + zone.height * 0.75, { steps: 12 });
   await page.mouse.up();
 }
 
@@ -251,6 +264,27 @@ test.describe('Home', () => {
     ).toBeVisible();
   });
 
+  test('a window dragged into another zone joins it, behind its window, and Move windows puts it so', async ({
+    page,
+  }) => {
+    // ADR 0033 (the owner: it "permutes with the app of welcoming zone instead of just adding
+    // it"). In Thirds, Windows Terminal dragged into Chrome's zone, below Chrome's bar: it goes
+    // behind Chrome, and its own zone is left empty; no other window moves.
+    await page.goto('/');
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
+    await page.getByRole('radio', { name: 'Thirds' }).check();
+    const terminal = page.getByRole('button', { name: 'Windows Terminal in zone 3' });
+    await expect(terminal).toBeVisible();
+    await dragInto(page, terminal, page.getByRole('button', { name: 'Google Chrome in zone 1' }));
+    const joined =
+      'Visual Studio Code in zone 2, Google Chrome in zone 1, Slack in zone 2, Windows Terminal in zone 1. Zone 3 is empty.';
+    await expect(page.getByRole('group', { name: joined })).toBeVisible();
+    await arrange(page).click();
+    await expect(shown(page, 'Moved 4 windows into Thirds.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Undo changes' })).toBeHidden();
+    await expect(page.getByRole('group', { name: joined })).toBeVisible();
+  });
+
   test('a line between zones dragged resizes them; Arrange puts the windows so, and the picture keeps them', async ({
     page,
   }) => {
@@ -268,6 +302,8 @@ test.describe('Home', () => {
     await page.mouse.move(box.x + box.width / 2 - picture.width / 10, box.y + box.height / 2, { steps: 8 });
     await page.mouse.up();
     await expect(line).toHaveAttribute('aria-valuenow', '48');
+    // Every window stays in its zone (ADR 0033).
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Undo changes' })).toBeVisible();
     await arrange(page).click();
     await expect(shown(page, 'Moved 4 windows.')).toBeVisible();

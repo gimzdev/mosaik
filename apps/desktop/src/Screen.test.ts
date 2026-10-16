@@ -43,18 +43,39 @@ describe('the picture, before Mosaïk says', () => {
     const traded = { zones: [['Claude', 'Google Chrome'], ['MSYS2']], colours: ['lapis', 'verdigris'] };
     expect(seen(moved(halves, 3, 1, 2))).toEqual(traded);
     expect(seen(moved(halves, 2, 0, 3))).toEqual(traded);
-    // Onto Chrome's zone itself: the zone's own window, Chrome, takes MSYS2's place.
-    expect(seen(moved(halves, 3, 1))).toEqual(traded);
     // In one zone: MSYS2 comes in front of Claude.
     expect(seen(moved(halves, 3, 0, 1))).toEqual({
       zones: [['MSYS2', 'Claude'], ['Google Chrome']],
       colours: ['lapis', 'verdigris'],
     });
-    // Claude onto Chrome's zone: the two own windows trade zones, with their colours; MSYS2
-    // stays, behind Chrome now.
-    expect(seen(moved(halves, 1, 1))).toEqual({
+    // Claude onto Chrome: the two own windows trade zones, with their colours; MSYS2 stays,
+    // behind Chrome now.
+    expect(seen(moved(halves, 1, 1, 2))).toEqual({
       zones: [['Google Chrome', 'MSYS2'], ['Claude']],
       colours: ['verdigris', 'lapis'],
+    });
+  });
+
+  it('puts a window dropped onto a zone itself behind its windows, every zone keeping its colour', () => {
+    // ADR 0033 (the owner: it "permutes with the app of welcoming zone instead of just adding
+    // it"): MSYS2, or Claude, onto Chrome's half joins it, behind Chrome; nothing else moves.
+    expect(seen(moved(halves, 3, 1))).toEqual({
+      zones: [['Claude'], ['Google Chrome', 'MSYS2']],
+      colours: ['lapis', 'verdigris'],
+    });
+    expect(seen(moved(halves, 1, 1))).toEqual({
+      zones: [['MSYS2'], ['Google Chrome', 'Claude']],
+      colours: ['lapis', 'verdigris'],
+    });
+    // Onto a zone shown empty: it takes it, with its colour, as before.
+    const BOTTOM: Rect = { left: 960, top: 516, right: 1920, bottom: 1032 };
+    const three: ArrangePreview = {
+      ...halves,
+      zones: [...halves.zones, { id: 'a3', name: '3', color: 'saffron', rect: BOTTOM }],
+    };
+    expect(seen(moved(three, 1, 2))).toEqual({
+      zones: [['MSYS2'], ['Google Chrome'], ['Claude']],
+      colours: ['saffron', 'verdigris', 'lapis'],
     });
   });
 

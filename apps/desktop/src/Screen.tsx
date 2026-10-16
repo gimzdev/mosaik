@@ -8,8 +8,9 @@
 // glide to their new places.
 //
 // With `edit` (ADR 0031), the picture changes before anything moves: a window dragged onto
-// another trades places with it, or onto a zone goes there; the lines between zones are dragged
-// to resize them, or moved with the arrow keys (`LineHandle`). Without a mouse, Enter (or a click)
+// another trades places with it, or into a zone joins it, behind its windows (ADR 0033); the
+// lines between zones are dragged to resize them, or moved with the arrow keys (`LineHandle`),
+// every window staying in its zone. Without a mouse, Enter (or a click)
 // picks a window, and Enter on another window or on a zone puts it there; Escape lets go. In
 // Arrange's picture a window takes its zone's colour with it, as a tile moved in a mosaic, and a
 // zone keeps its number, which says where it is. In a workspace's, each of its apps moves on its
@@ -159,10 +160,11 @@ const inZone = (preview: ArrangePreview, zone: number) => preview.windows.filter
 /**
  * Arrange's picture once `window` is dropped in the `zone`-th zone, before Mosaïk says: `onto` a
  * window there, the two trade places, zones and places front to back (ADR 0032); onto the zone
- * itself, the zone's own window takes its place, or the window takes the zone left empty. When
- * the window and the one it trades with are their zones' own, the zones' colours go with them; the
- * zones keep their numbers. Mosaïk's own answer follows (it may also make room for a window that
- * needs more).
+ * itself, the window joins it, behind its windows (ADR 0033), or takes it when it is empty. When
+ * the window and the one it trades with are their zones' own, or the window takes an empty zone,
+ * the zones' colours go with them; a window that joins a zone takes its colour. The zones keep
+ * their numbers. Mosaïk's own answer follows (it may also make room for a window that needs more,
+ * or keep it where it was when the zone cannot have it).
  */
 export function moved(
   preview: ArrangePreview,
@@ -177,11 +179,14 @@ export function moved(
   if (!target || !w || !from) return preview;
   const dropped = onto === null ? undefined : inZone(preview, zone).find((x) => x.window === onto && x !== w);
   if (!dropped && fromIndex === zone) return preview;
-  const other = dropped ?? inZone(preview, zone)[0];
+  // Onto the zone itself, a window joins it at the back: last in the list, which is front to back.
+  if (!dropped && inZone(preview, zone).length > 0) {
+    return { ...preview, windows: [...preview.windows.filter((x) => x !== w), put(w, target)] };
+  }
   const own = (x: PreviewWindow, z: number) => inZone(preview, z)[0] === x;
-  const colours = fromIndex !== zone && own(w, fromIndex) && (!other || own(other, zone));
-  const next = other
-    ? traded(preview, w, other)
+  const colours = fromIndex !== zone && own(w, fromIndex) && (!dropped || own(dropped, zone));
+  const next = dropped
+    ? traded(preview, w, dropped)
     : { ...preview, windows: preview.windows.map((x) => (x === w ? put(x, target) : x)) };
   if (!colours) return next;
   return {
@@ -257,9 +262,9 @@ export interface Dropped {
 }
 
 export interface PictureEdits {
-  /** `arrange`: a window put in a zone trades places with the window there. `workspace`: an app
-   * dropped onto another trades zones with it, dropped onto a zone joins it. In both, two of one
-   * zone trade places in it. */
+  /** In both kinds, a window or app dropped onto another trades places with it (two of one zone
+   * trade places in it), and dropped onto a zone joins it. `arrange`: the screen's windows, to
+   * move. `workspace`: a workspace's apps, saved in it at once. */
   kind: 'arrange' | 'workspace';
   onDrop: (dropped: Dropped) => void;
   /** A line between zones was moved: the zones' areas now, in the picture's order. */
@@ -777,8 +782,8 @@ export function Screen({
       {kind ? (
         <span id={hint} className="sr-only">
           {kind === 'arrange'
-            ? 'Drag it onto another window to swap them, or onto a zone. Or press Enter, then Enter on the other window or a zone.'
-            : 'Drag it onto another app to swap them, or onto a zone to put it there. Or press Enter, then Enter on the other app or a zone.'}
+            ? 'Drag it into a zone to add it there, or onto another window to swap them. Or press Enter, then Enter on a zone or on the other window.'
+            : 'Drag it into a zone to add it there, or onto another app to swap them. Or press Enter, then Enter on a zone or on the other app.'}
         </span>
       ) : null}
       <div ref={inner} className="absolute inset-[6px]">

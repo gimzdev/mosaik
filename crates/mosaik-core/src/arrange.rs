@@ -629,6 +629,54 @@ fn make_room_for(
     }
 }
 
+/// The least size zone `r` holds its windows in: the largest least width and height among them,
+/// those stacked behind its own window too.
+fn least_in(r: usize, units: &[Unit], goes: &[Option<Goes>]) -> Size {
+    (0..units.len())
+        .filter(|&u| goes.get(u).copied().flatten() == Some(Goes::Zone(r)))
+        .map(|u| units[u].least)
+        .fold(Size::default(), |a, b| {
+            Size::new(a.width.max(b.width), a.height.max(b.height))
+        })
+}
+
+/// Step 4½ of [`plan_moved`]: the zones of the monitor stretched on the picture take the areas
+/// drawn there (one for each, none too small and none over another: [`Stretched::for_zones`]),
+/// made to hold every window in them, those stacked behind too ([`fit::make_room`]); the moves
+/// start from them (`made`). Which window is in which zone does not change. Areas that cannot
+/// hold their windows are not taken: the zones stay as the layout made them.
+fn stretch(
+    stretched: Option<Stretched<'_>>,
+    monitors: &[Rect],
+    units: &[Unit],
+    goes: &[Option<Goes>],
+    zones: &mut [NewZone],
+    made: &mut [RatioRect],
+) {
+    let Some(s) = stretched else {
+        return;
+    };
+    let Some(work) = monitors.get(s.monitor) else {
+        return;
+    };
+    let here: Vec<usize> = (0..zones.len())
+        .filter(|&r| zones[r].monitor == s.monitor)
+        .collect();
+    let Some(drawn) = Stretched::for_zones(stretched, s.monitor, here.len()) else {
+        return;
+    };
+    let least: Vec<Size> = here.iter().map(|&r| least_in(r, units, goes)).collect();
+    let Some(fitted) = fit::make_room(&drawn, &least, work.width(), work.height()) else {
+        return;
+    };
+    for (&r, area) in here.iter().zip(fitted) {
+        zones[r].area = area;
+        if let Some(m) = made.get_mut(r) {
+            *m = area;
+        }
+    }
+}
+
 /// Step 4 of the plan: the windows left without a zone stack in the zones they fit, behind the
 /// windows there, rather than leave the screen (the owner, 2026-10-16: "when we have less zones
 /// than apps it just makes them disappear they should stack"): each stays in the zone it fills
@@ -761,9 +809,6 @@ pub fn plan_moved(
     let mut made_areas: Vec<RatioRect> = Vec::new();
     let mut goes: Vec<Option<Goes>> = vec![None; units.len()];
     let mut tasks: Vec<Option<Task>> = vec![None; monitors.len()];
-    // The monitors laid out for their task in zones stretched on the picture, with the layout's
-    // own areas.
-    let mut own_areas: Vec<(usize, Vec<RatioRect>)> = Vec::new();
     // The windows stacked behind a zone's own window.
     let mut stacked = vec![false; units.len()];
     // The zones on screen that are each monitor's layout again (step 0): Move windows made them
@@ -800,15 +845,12 @@ pub fn plan_moved(
     for (m, work) in monitors.iter().enumerate() {
         let here = &on[m];
         if let Some(screen) = &screens[m] {
-            // 0. Its zones on screen are its layout again (ADR 0032), as stretched on the picture
-            //    when they are: each window in the zone it is in, the one in front its own, the
-            //    others stacked behind it. So arranging again moves nothing, whatever task the
-            //    windows, stacked anew by Move windows, say now.
-            let mut areas: Vec<RatioRect> = screen.iter().map(|&i| zones[i].area).collect();
-            if let Some(drawn) = Stretched::for_zones(stretched, m, screen.len()) {
-                own_areas.push((m, std::mem::replace(&mut areas, drawn)));
-            }
-            for (&i, &area) in screen.iter().zip(&areas) {
+            // 0. Its zones on screen are its layout again (ADR 0032): each window in the zone it
+            //    is in, the one in front its own, the others stacked behind it. So arranging
+            //    again moves nothing, whatever task the windows, stacked anew by Move windows,
+            //    say now.
+            for &i in screen {
+                let area = zones[i].area;
                 let r = new_zones.len();
                 let mut own = None;
                 for &u in here {
@@ -850,14 +892,6 @@ pub fn plan_moved(
         l.placed
             .retain(|p| here.iter().any(|&u| fits(&units[u], p.area.to_rect(*work))));
         steady(&mut l.placed, here, units, *work);
-        // The zones as stretched on the picture; room is made in them for the windows the layout
-        // gives them before step 3, else the layout's own are kept.
-        if let Some(areas) = Stretched::for_zones(stretched, m, l.placed.len()) {
-            own_areas.push((m, l.placed.iter().map(|p| p.area).collect()));
-            for (p, area) in l.placed.iter_mut().zip(areas) {
-                p.area = area;
-            }
-        }
         for p in l.placed {
             let u = here[p.window];
             goes[u] = Some(Goes::Zone(new_zones.len()));
@@ -883,8 +917,7 @@ pub fn plan_moved(
     if let Some(c) = chosen.filter(|c| screens[c.monitor].is_none()) {
         let work = monitors[c.monitor];
         let from = new_zones.len();
-        let preset = c.preset.zones();
-        let areas = Stretched::for_zones(stretched, c.monitor, preset.len()).unwrap_or(preset);
+        let areas = c.preset.zones();
         for &area in &areas {
             new_zones.push(NewZone {
                 monitor: c.monitor,
@@ -968,33 +1001,6 @@ pub fn plan_moved(
         made_areas = new_zones.iter().map(|z| z.area).collect();
     }
 
-    // The zones of a task's layout as stretched on the picture make room for their windows, as
-    // a layout picked does; else they are the layout's own. Before windows are found in them
-    // (step 3), which must fit them: so no zone goes back to the layout's own after windows were
-    // found in it as stretched (the seventh review of ADR 0032: a zone stayed empty).
-    for (m, own) in own_areas {
-        let Some(work) = monitors.get(m) else {
-            continue;
-        };
-        let here: Vec<usize> = (0..new_zones.len())
-            .filter(|&r| new_zones[r].monitor == m)
-            .collect();
-        let areas: Vec<RatioRect> = here.iter().map(|&r| new_zones[r].area).collect();
-        let least: Vec<Size> = here
-            .iter()
-            .map(|&r| new_zone_window[r].map_or_else(Size::default, |u| units[u].least))
-            .collect();
-        let fitted = fit::make_room(&areas, &least, work.width(), work.height());
-        let taken = fitted.is_some();
-        for (&r, area) in here.iter().zip(fitted.unwrap_or(own)) {
-            new_zones[r].area = area;
-            // The areas the moves start from: the stretched ones, or the layout's own.
-            if !taken && let Some(made) = made_areas.get_mut(r) {
-                *made = area;
-            }
-        }
-    }
-
     // 3. Windows already in a zone of the layout stay as they are on screen (ADR 0032): of the
     //    windows filling a zone, the one in front is its own window. So arranging again moves
     //    nothing, and a window the user brought in front of another stays there.
@@ -1061,9 +1067,17 @@ pub fn plan_moved(
     }
     .restack(units, monitors, &on);
 
+    // 4½. The zones as the user stretched them on the picture (ADR 0031): a line dragged changes
+    //    where the zones are, never which windows are in them (ADR 0033: the owner, "when
+    //    resizing in homescreen anim it sometimes moves apps from a zone to another"). So the
+    //    windows were found in the zones as the layout made them, and the zones as stretched now
+    //    make room for every window in them, those stacked behind too; zones that cannot hold
+    //    them all keep the layout's places.
+    stretch(stretched, monitors, units, &goes, &mut new_zones, &mut made_areas);
+
     // 5. The windows the user moved on the picture of the screen, in the order they were moved.
-    //    Dropped onto a window, the two trade places: zones, and places in them; onto a zone, the
-    //    window trades places with the zone's own window, or takes the zone left empty.
+    //    Dropped onto a window, the two trade places: zones, and places in them; dropped onto a
+    //    zone itself, the window joins it, behind its windows (ADR 0033), or takes it empty.
     for mv in moves {
         let Some(unit) = units.get(mv.unit) else {
             continue;
@@ -1082,11 +1096,18 @@ pub fn plan_moved(
         };
         let a = mv.unit;
         let in_r = |u: usize| goes.get(u).copied().flatten() == Some(Goes::Zone(r));
-        let other = match mv.onto.filter(|&o| o != a && in_r(o)) {
-            Some(o) => Some(o),
-            None if in_r(a) => continue,
-            None => new_zone_window[r],
-        };
+        let onto = mv.onto.filter(|&o| o != a && in_r(o));
+        if onto.is_none() && in_r(a) {
+            continue;
+        }
+        // As it was, for a window joining a zone that cannot have it.
+        let before = (
+            goes.clone(),
+            stacked.clone(),
+            order.clone(),
+            new_zone_window.clone(),
+            new_zones.clone(),
+        );
         let mut placed = Placed {
             goes: &mut goes,
             stacked: &mut stacked,
@@ -1094,9 +1115,9 @@ pub fn plan_moved(
             own: &mut new_zone_window,
             zones: &mut new_zones,
         };
-        match other {
+        match onto {
             Some(b) => placed.trade(a, b),
-            None => placed.take_empty(a, r),
+            None => placed.join(a, r),
         }
         // The picture shows the screen so before the next move: the zones made room in again,
         // the windows stacked again where they fit, each zone's own window in front (the
@@ -1105,6 +1126,15 @@ pub fn plan_moved(
         stack_the_rest(&mut goes, &on, &new_zones, units, monitors, &mut stacked);
         own_the_lone(&goes, &order, &mut new_zone_window, &mut stacked);
         order.sort_by_key(|&u| stacked[u]);
+        // A window that joins a zone moves no other (ADR 0033): when the zones cannot make room
+        // for it there without sending another window elsewhere, or it fits none, nothing
+        // changes.
+        let joined = goes[a] == Some(Goes::Zone(r));
+        let others_stay = (0..units.len())
+            .all(|u| u == a || !matches!(before.0[u], Some(Goes::Zone(_))) || goes[u] == before.0[u]);
+        if onto.is_none() && !(joined && others_stay) {
+            (goes, stacked, order, new_zone_window, new_zones) = before;
+        }
     }
     // 6. A window in a zone it no longer fits, the windows a move or the want of room sent to
     //    the taskbar: stacked again where they fit, as in step 4.
@@ -1291,17 +1321,7 @@ impl Placed<'_> {
         let areas: Vec<RatioRect> = here.iter().map(|&r| made[r]).collect();
         let before: Vec<Option<usize>> = here.iter().map(|&r| self.own[r]).collect();
         let mut in_zone = before.clone();
-        let least: Vec<Size> = here
-            .iter()
-            .map(|&r| {
-                (0..units.len())
-                    .filter(|&u| self.goes[u] == Some(Goes::Zone(r)))
-                    .map(|u| units[u].least)
-                    .fold(Size::default(), |a, b| {
-                        Size::new(a.width.max(b.width), a.height.max(b.height))
-                    })
-            })
-            .collect();
+        let least: Vec<Size> = here.iter().map(|&r| least_in(r, units, self.goes)).collect();
         let fitted = fit::make_room(&areas, &least, work.width(), work.height())
             .unwrap_or_else(|| make_room_for(&areas, &mut in_zone, units, work));
         let color_of: Vec<(usize, usize)> = here
@@ -1410,6 +1430,26 @@ impl Placed<'_> {
         let at = |u: usize, order: &[usize]| order.iter().position(|&x| x == u);
         if let (Some(i), Some(j)) = (at(a, self.order), at(b, self.order)) {
             self.order.swap(i, j);
+        }
+    }
+
+    /// Unit `a` joins zone `r`, dropped onto the zone itself (ADR 0033: the owner, "it permutes
+    /// with the app of welcoming zone instead of just adding it"): behind the windows there, or
+    /// as its own window when it has none ([`Placed::take_empty`]). The zone it leaves keeps its
+    /// other windows, the one in front its own ([`own_the_lone`]), and both keep their colours.
+    fn join(&mut self, a: usize, r: usize) {
+        if self.own.get(r).copied().flatten().is_none() {
+            self.take_empty(a, r);
+            return;
+        }
+        if let Some(q) = self.own_zone(a) {
+            self.own[q] = None;
+        }
+        self.goes[a] = Some(Goes::Zone(r));
+        self.stacked[a] = true;
+        // Behind every window of the zone: last of all, as only the order in one zone counts.
+        if let Some(i) = self.order.iter().position(|&x| x == a) {
+            self.order[i..].rotate_left(1);
         }
     }
 
@@ -2013,8 +2053,8 @@ mod tests {
     #[test]
     fn a_window_moved_on_the_picture_trades_places_with_the_window_there() {
         // The owner: "we should be able to drag drop apps to permute them". The editor dropped
-        // on the browser's zone: the two trade places; each zone keeps its place, size and
-        // number, and its colour goes with the window, as a tile moved in a mosaic.
+        // on the browser: the two trade places; each zone keeps its place, size and number, and
+        // its colour goes with the window, as a tile moved in a mosaic.
         let units = [
             unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 1000, 1000)),
             unit("chrome.exe", "Google Chrome", Rect::new(900, 0, 1900, 1000)),
@@ -2032,7 +2072,7 @@ mod tests {
                 unit: 0,
                 monitor: 0,
                 zone: k,
-                onto: None,
+                onto: Some(1),
             }],
             None,
         );
@@ -2123,7 +2163,7 @@ mod tests {
                 unit: 0,
                 monitor: 0,
                 zone: b,
-                onto: None,
+                onto: Some(1),
             }],
             None,
         );
@@ -2191,7 +2231,7 @@ mod tests {
                 unit: 1,
                 monitor: 0,
                 zone: b,
-                onto: None,
+                onto: Some(0),
             }],
             None,
         );
@@ -2369,9 +2409,9 @@ mod tests {
             )
         };
         let colours = |p: &Plan| (p.new_zones[l].color, p.new_zones[r].color);
-        // MSYS2 onto Chrome, Chrome onto MSYS2, or MSYS2 onto Chrome's half: the two trade
-        // places, Chrome stacked behind Claude; Claude stays, and the halves keep their colours.
-        for p in [moved(2, r, Some(1)), moved(1, l, Some(2)), moved(2, r, None)] {
+        // MSYS2 onto Chrome, or Chrome onto MSYS2: the two trade places, Chrome stacked behind
+        // Claude; Claude stays, and the halves keep their colours.
+        for p in [moved(2, r, Some(1)), moved(1, l, Some(2))] {
             assert_eq!(in_zone(&p, l), vec![0, 1], "{:?} {:?}", p.goes, p.order);
             assert_eq!(in_zone(&p, r), vec![2]);
             assert_eq!(colours(&p), colours(&base));
@@ -2382,10 +2422,20 @@ mod tests {
         assert_eq!(in_zone(&p, r), vec![1]);
         // Claude onto Chrome's half: the two trade halves, with their colours; MSYS2 stays,
         // behind Chrome now.
-        let p = moved(0, r, None);
+        let p = moved(0, r, Some(1));
         assert_eq!(in_zone(&p, l), vec![1, 2]);
         assert_eq!(in_zone(&p, r), vec![0]);
         assert_eq!(colours(&p), (colours(&base).1, colours(&base).0));
+        // Onto Chrome's half itself, MSYS2 joins it, behind Chrome (ADR 0033); Claude onto it
+        // too, and MSYS2 is its half's own then. No other window moves, and no colour.
+        let p = moved(2, r, None);
+        assert_eq!(in_zone(&p, l), vec![0]);
+        assert_eq!(in_zone(&p, r), vec![1, 2]);
+        assert_eq!(colours(&p), colours(&base));
+        let p = moved(0, r, None);
+        assert_eq!(in_zone(&p, l), vec![2]);
+        assert_eq!(in_zone(&p, r), vec![1, 0]);
+        assert_eq!(colours(&p), colours(&base));
         // Dropped onto a window that is not in that zone, or onto itself: a move into the zone.
         assert_eq!(moved(2, r, Some(0)).goes, moved(2, r, None).goes);
         assert_eq!(moved(2, l, Some(2)).order, base.order);
@@ -2658,7 +2708,7 @@ mod tests {
         // The review of 414b014: in Thirds, Battle.net (1400 x 720 at least) fits no third and is
         // minimised; Slack, left over, went alone into its third as a window stacked behind no
         // one. Visual Studio Code dropped onto that third then took it as if empty, rather than
-        // trade places with Slack, as the picture showed.
+        // join it behind Slack (ADR 0033), as the picture showed Slack there.
         let mut battle = unit("battle.net.exe", "Battle.net", Rect::new(0, 0, 1500, 800));
         battle.least = Size::new(1400, 720);
         let units = [
@@ -2676,19 +2726,26 @@ mod tests {
         let (code, slack) = (zone_of(&base, 1), zone_of(&base, 3));
         assert_ne!(code, slack);
         let k = |r: usize| on_main(&base).iter().position(|&x| x == r).unwrap();
-        let p = plan_moved(
-            &units,
-            &[],
-            &[WORK],
-            thirds,
-            &[Move {
-                unit: 1,
-                monitor: 0,
-                zone: k(slack),
-                onto: None,
-            }],
-            None,
-        );
+        let drop = |onto: Option<usize>| {
+            plan_moved(
+                &units,
+                &[],
+                &[WORK],
+                thirds,
+                &[Move {
+                    unit: 1,
+                    monitor: 0,
+                    zone: k(slack),
+                    onto,
+                }],
+                None,
+            )
+        };
+        let p = drop(None);
+        assert_eq!(in_zone(&p, slack), vec![3, 1]);
+        assert!(in_zone(&p, code).is_empty());
+        // Onto Slack itself, the two trade places.
+        let p = drop(Some(3));
         assert_eq!(in_zone(&p, slack), vec![1]);
         assert_eq!(in_zone(&p, code), vec![3]);
     }
@@ -2938,12 +2995,14 @@ mod tests {
     }
 
     #[test]
-    fn a_drop_onto_a_zone_whose_window_left_trades_with_the_one_now_in_front() {
+    fn a_drop_onto_a_zone_whose_window_left_joins_it_behind_the_one_now_in_front() {
         // The third review of ADR 0032: once a zone's own window was moved into an empty zone,
         // the picture showed the window behind it in front; a window dropped onto that zone then
-        // took it as if empty, rather than trade places with the window shown in front.
+        // took it as if empty. It joins the zone behind the window shown in front (ADR 0033),
+        // and no other window moves; or, when the zones cannot make room for it there, nothing
+        // changes.
         let mut rng = Rng(0x5555_1234_ABCD_0001);
-        let mut tried = 0;
+        let (mut tried, mut in_front) = (0, 0);
         for case in 0..30000 {
             let count = 3 + rng.below(6);
             let units = random_units(&mut rng, count, WORK, true);
@@ -2977,9 +3036,9 @@ mod tests {
                 continue;
             };
             let Goes::Zone(rc) = p1.goes[c] else { continue };
-            // Only where each fits the other's zone: else the zones' room decides.
+            // Only where it fits the zone: else the zones' room decides.
             let area = |r: usize| p1.new_zones[r].area.to_rect(WORK);
-            if !fits(&units[c], area(q)) || !fits(&units[w], area(rc)) {
+            if !fits(&units[c], area(q)) {
                 continue;
             }
             tried += 1;
@@ -2990,11 +3049,17 @@ mod tests {
                 onto: None,
             };
             let p2 = plan_moved(&units, &[], &[WORK], chosen, &[first, second], None);
-            // Not taken as an empty zone, with the window shown in front left behind the one
-            // dropped there (where each goes after that, the zones' room decides).
+            // Behind the window shown in front, every other window where it was; or nothing
+            // changed.
+            let mut joined = in_zone(&p1, q);
+            joined.push(c);
+            let others_stay = (0..units.len())
+                .all(|u| u == c || !matches!(p1.goes[u], Goes::Zone(_)) || p2.goes[u] == p1.goes[u]);
+            let went = in_zone(&p2, q) == joined && others_stay;
+            in_front += usize::from(went);
             assert!(
-                !(p2.goes[c] == Goes::Zone(q) && p2.goes[w] == Goes::Zone(q)),
-                "case {case}: {c} dropped onto zone {q} stayed with {w}, which was in front of it\n{:#?}\n{chosen:?}\nbase {:?} {:?}\np1 {:?} order {:?} {:?}\np2 {:?} order {:?} {:?}",
+                went || (p2.goes == p1.goes && p2.order == p1.order),
+                "case {case}: {c} dropped onto zone {q}, where {w} was in front\n{:#?}\n{chosen:?}\nbase {:?} {:?}\np1 {:?} order {:?} {:?}\np2 {:?} order {:?} {:?}",
                 units
                     .iter()
                     .map(|u| (u.label.clone(), u.frame, u.least, u.resizable))
@@ -3019,7 +3084,10 @@ mod tests {
             );
             assert!(rc != q);
         }
-        assert!(tried > 20, "{tried} cases tried");
+        assert!(
+            tried > 20 && in_front * 10 > tried * 9,
+            "{in_front} of {tried} joined"
+        );
     }
 
     #[test]
@@ -3838,13 +3906,14 @@ mod tests {
     }
 
     #[test]
-    fn a_drop_onto_a_window_restacked_by_a_stretch_trades_with_exactly_it() {
-        // The sixth review of ADR 0032. Halves, arranged: Code in front of the left half, Slack
+    fn a_line_dragged_on_an_arranged_screen_moves_no_window_to_another_zone() {
+        // ADR 0033 (the owner, 2026-10-16: "when resizing in homescreen anim it sometimes moves
+        // apps from a zone to another"). Halves, arranged: Code in front of the left half, Slack
         // (900 px wide at least) stacked behind it, Chrome in the right half. The line between
-        // the halves dragged to 40%: the left half (768 px) is too narrow for Slack, and the
-        // picture shows Slack stacked behind Chrome in the right half. The moves started from
-        // the plan before Slack was stacked again: a drop onto Slack traded with Chrome, and
-        // Slack dropped onto Chrome sent Chrome to the left half.
+        // the halves dragged to 40%: the left half (768 px) would be too narrow for Slack, which
+        // the plan then stacked behind Chrome (the sixth review of ADR 0032). The left half keeps
+        // the room Slack needs, and every window stays in its half; a drop then acts on the
+        // windows as the picture shows them.
         let left = Rect::new(0, 0, 960, 1032);
         let mut code = unit("code.exe", "Visual Studio Code", left);
         code.zone = Some(0);
@@ -3881,9 +3950,266 @@ mod tests {
         });
         let picture = plan_moved(&units, &zones, &[WORK], halves, &[], st);
         assert_eq!(picture.again, vec![true]);
-        assert_eq!(in_zone(&picture, 0), vec![code]);
-        assert_eq!(in_zone(&picture, 1), vec![chrome, slack]);
-        let drop = |unit: usize, onto: usize| {
+        assert_eq!(in_zone(&picture, 0), vec![code, slack]);
+        assert_eq!(in_zone(&picture, 1), vec![chrome]);
+        let half = picture.new_zones[0].area.to_rect(WORK);
+        assert!(half.width() >= 898 && half.width() < 960, "{half:?}");
+        assert_eq!(broken(&units, &picture, false), None);
+        // Slack dropped onto Chrome: the two trade places.
+        let p = plan_moved(
+            &units,
+            &zones,
+            &[WORK],
+            halves,
+            &[Move {
+                unit: slack,
+                monitor: 0,
+                zone: 1,
+                onto: Some(chrome),
+            }],
+            st,
+        );
+        assert_eq!(in_zone(&p, 1), vec![slack]);
+        assert_eq!(in_zone(&p, 0), vec![code, chrome]);
+        assert_eq!(broken(&units, &p, false), None);
+    }
+
+    #[test]
+    fn a_line_dragged_on_a_layout_picked_moves_no_window_to_another_zone() {
+        // ADR 0033: Quarters for Slack, Chrome and Visual Studio Code, none filling a quarter.
+        // The line between the left and right quarters dragged to 30%: the windows were given
+        // the zones as stretched, by how well each suits each, so Slack and Chrome traded
+        // quarters as the line moved (on 9918 of 20000 random screens with a layout picked, a
+        // window changed zones). They stay in the zones the layout gave them, which take the
+        // places drawn.
+        let units = [
+            unit("slack.exe", "Slack", Rect::new(121, 598, 1704, 827)),
+            unit("chrome.exe", "Google Chrome", Rect::new(69, 713, 1867, 951)),
+            unit("code.exe", "Visual Studio Code", Rect::new(640, 0, 1280, 1032)),
+        ];
+        let quarters = Some(Chosen {
+            monitor: 0,
+            preset: Preset::Quarters,
+        });
+        let base = plan_with(&units, &[], &[WORK], quarters);
+        for x in [0.3, 0.7] {
+            let drawn: Vec<RatioRect> = base
+                .new_zones
+                .iter()
+                .map(|z| {
+                    let f = |v: f64| if (v - 0.5).abs() < 1e-9 { x } else { v };
+                    RatioRect::new(f(z.area.left()), z.area.top(), f(z.area.right()), z.area.bottom())
+                        .unwrap()
+                })
+                .collect();
+            let p = plan_moved(
+                &units,
+                &[],
+                &[WORK],
+                quarters,
+                &[],
+                Some(Stretched {
+                    monitor: 0,
+                    areas: &drawn,
+                }),
+            );
+            assert_eq!(p.goes, base.goes, "line at {x}");
+            let areas: Vec<RatioRect> = p.new_zones.iter().map(|z| z.area).collect();
+            assert_eq!(areas, drawn, "line at {x}");
+        }
+    }
+
+    #[test]
+    fn random_lines_dragged_move_no_window_to_another_zone() {
+        // ADR 0033: on random screens, laid out anew or arranged, with a layout picked or for
+        // their task, a line dragged on the picture changes where the zones are, never which
+        // windows are in them, nor their order front to back; the zones hold their windows. A
+        // window that fit no zone may fit one once it is larger.
+        let mut rng = Rng(0x0BAD_CAFE_D00D_1234);
+        let mut taken = 0;
+        for case in 0..6000 {
+            let count = 2 + rng.below(8);
+            let mut units = random_units(&mut rng, count, WORK, true);
+            let chosen = if rng.chance(50) {
+                Some(Chosen {
+                    monitor: 0,
+                    preset: Preset::ALL[rng.below(Preset::ALL.len())],
+                })
+            } else {
+                None
+            };
+            let mut zones = Vec::new();
+            if rng.chance(50) {
+                let first = plan_with(&units, &[], &[WORK], chosen);
+                let (shown, _, kept) = arranged_screen(&units, &first, WORK, true);
+                if shown.is_empty() {
+                    continue;
+                }
+                units = shown;
+                zones = kept;
+            }
+            let base = plan_moved(&units, &zones, &[WORK], chosen, &[], None);
+            if base.new_zones.len() < 2 {
+                continue;
+            }
+            let x = f64::from(rng.range(15, 85)) / 100.0;
+            let drawn: Vec<RatioRect> = base
+                .new_zones
+                .iter()
+                .map(|z| {
+                    let a = z.area;
+                    let f = |v: f64| {
+                        if v <= 1e-9 || v >= 1.0 - 1e-9 || (v - 0.5).abs() > 0.2 {
+                            v
+                        } else {
+                            x
+                        }
+                    };
+                    RatioRect::new(f(a.left()), a.top(), f(a.right()), a.bottom()).unwrap_or(a)
+                })
+                .collect();
+            let p = plan_moved(
+                &units,
+                &zones,
+                &[WORK],
+                chosen,
+                &[],
+                Some(Stretched {
+                    monitor: 0,
+                    areas: &drawn,
+                }),
+            );
+            // A window in a zone stays there, in its place front to back; one that fit no zone
+            // may fit one now, behind the windows there.
+            for (u, g) in base.goes.iter().enumerate() {
+                if let Goes::Zone(_) = g {
+                    assert_eq!(p.goes[u], *g, "case {case} ({chosen:?}, line at {x}): unit {u}");
+                }
+            }
+            for r in 0..base.new_zones.len() {
+                let mut kept = in_zone(&p, r);
+                kept.retain(|u| base.goes[*u] == Goes::Zone(r));
+                assert_eq!(kept, in_zone(&base, r), "case {case}: zone {r}");
+            }
+            assert_eq!(broken(&units, &p, false), None, "case {case}");
+            taken += usize::from(
+                p.new_zones
+                    .iter()
+                    .zip(&base.new_zones)
+                    .any(|(a, b)| a.area != b.area),
+            );
+        }
+        assert!(taken > 1500, "{taken} stretches taken");
+    }
+
+    #[test]
+    fn a_window_dropped_onto_a_zone_joins_it_behind_its_windows() {
+        // ADR 0033 (the owner, 2026-10-16: on Home's picture, a window dragged into another zone
+        // "permutes with the app of welcoming zone instead of just adding it"). Thirds: Claude,
+        // Chrome with Slack stacked behind it, Terminal. A window dropped onto a zone itself
+        // joins it, behind its windows; no other window moves, and every zone keeps its colour.
+        let third = |k: i32| Rect::new(640 * k, 0, 640 * (k + 1), 1032);
+        let units = [
+            unit("claude.exe", "Claude", third(0)),
+            unit("chrome.exe", "Google Chrome", third(1)),
+            unit("windowsterminal.exe", "Windows Terminal", third(2)),
+            unit("slack.exe", "Slack", third(1)),
+        ];
+        let (claude, chrome, terminal, slack) = (0, 1, 2, 3);
+        let thirds = Some(Chosen {
+            monitor: 0,
+            preset: Preset::Thirds,
+        });
+        let base = plan_with(&units, &[], &[WORK], thirds);
+        let (l, m, r) = (
+            zone_of(&base, claude),
+            zone_of(&base, chrome),
+            zone_of(&base, terminal),
+        );
+        assert_eq!(in_zone(&base, m), vec![chrome, slack]);
+        let k = |z: usize| on_main(&base).iter().position(|&x| x == z).unwrap();
+        let colours = |p: &Plan| p.new_zones.iter().map(|z| z.color).collect::<Vec<_>>();
+        let drop = |moves: &[(usize, usize)]| {
+            let moves: Vec<Move> = moves
+                .iter()
+                .map(|&(unit, zone)| Move {
+                    unit,
+                    monitor: 0,
+                    zone: k(zone),
+                    onto: None,
+                })
+                .collect();
+            plan_moved(&units, &[], &[WORK], thirds, &moves, None)
+        };
+        // Claude onto Terminal's third: behind Terminal; its own third left empty.
+        let p = drop(&[(claude, r)]);
+        assert_eq!(in_zone(&p, r), vec![terminal, claude]);
+        assert!(in_zone(&p, l).is_empty());
+        assert_eq!(in_zone(&p, m), vec![chrome, slack]);
+        assert_eq!(colours(&p), colours(&base));
+        // Slack, stacked behind Chrome, onto Claude's third: behind Claude.
+        let p = drop(&[(slack, l)]);
+        assert_eq!(in_zone(&p, l), vec![claude, slack]);
+        assert_eq!(in_zone(&p, m), vec![chrome]);
+        assert_eq!(colours(&p), colours(&base));
+        // Chrome onto Terminal's third: Slack is its third's own now.
+        let p = drop(&[(chrome, r)]);
+        assert_eq!(in_zone(&p, r), vec![terminal, chrome]);
+        assert_eq!(in_zone(&p, m), vec![slack]);
+        assert_eq!(colours(&p), colours(&base));
+        // Two in a row: each behind the last.
+        let p = drop(&[(claude, r), (slack, r)]);
+        assert_eq!(in_zone(&p, r), vec![terminal, claude, slack]);
+        assert_eq!(in_zone(&p, m), vec![chrome]);
+        // Back to the third it left empty: it takes it again, as its own.
+        let p = drop(&[(claude, r), (claude, l)]);
+        assert_eq!(in_zone(&p, l), vec![claude]);
+        assert_eq!(in_zone(&p, r), vec![terminal]);
+        assert_eq!(colours(&p), colours(&base));
+    }
+
+    #[test]
+    fn a_window_joins_a_zone_only_where_it_moves_no_other() {
+        // ADR 0033: the zones make room for a window that joins one, as for a trade; when that
+        // room would push another window out of its zone, or the window fits nowhere, nothing
+        // changes. Halves, arranged at 1000 px and 920: Battle.net (1000 px wide at least) in
+        // front of the left half, Spotify (950) behind it; Slack (900) in the right half.
+        let split = 1000.0 / 1920.0;
+        let areas = [
+            RatioRect::new(0.0, 0.0, split, 1.0).unwrap(),
+            RatioRect::new(split, 0.0, 1.0, 1.0).unwrap(),
+        ];
+        let zones: Vec<KeptZone> = areas
+            .iter()
+            .enumerate()
+            .map(|(k, &area)| KeptZone {
+                monitor: 0,
+                area,
+                color: ZoneColor::nth(k),
+                arranged: true,
+                filled: true,
+            })
+            .collect();
+        let at = |k: usize, least: i32, exe: &str| {
+            let mut u = unit(exe, exe, areas[k].to_rect(WORK));
+            u.least = Size::new(least, 400);
+            u.zone = Some(k);
+            u
+        };
+        let units = [
+            at(0, 1000, "battle.net.exe"),
+            at(1, 900, "slack.exe"),
+            at(0, 950, "spotify.exe"),
+        ];
+        let (battle, slack, spotify) = (0, 1, 2);
+        let halves = Some(Chosen {
+            monitor: 0,
+            preset: Preset::Halves,
+        });
+        let base = plan_with(&units, &zones, &[WORK], halves);
+        assert_eq!(base.again, vec![true]);
+        assert_eq!(in_zone(&base, 0), vec![battle, spotify]);
+        let drop = |unit: usize, zone: usize| {
             plan_moved(
                 &units,
                 &zones,
@@ -3892,25 +4218,27 @@ mod tests {
                 &[Move {
                     unit,
                     monitor: 0,
-                    zone: 1,
-                    onto: Some(onto),
+                    zone,
+                    onto: None,
                 }],
-                st,
+                None,
             )
         };
-        // Slack brought to the front of the right half.
-        let p = drop(slack, chrome);
-        assert_eq!(
-            in_zone(&p, 1),
-            vec![slack, chrome],
-            "left half {:?}",
-            in_zone(&p, 0)
-        );
-        // Code dropped onto Slack: Code takes Slack's place, Slack Code's; Chrome stays.
-        let p = drop(code, slack);
-        assert_eq!(p.goes[chrome], Goes::Zone(1), "Chrome traded instead of Slack");
-        assert_eq!(p.goes[slack], Goes::Zone(0));
-        assert_eq!(in_zone(&p, 1), vec![chrome, code]);
+        // Battle.net or Spotify into the right half: it would need 1000 or 950 px there, and
+        // Spotify or Battle.net as much in the left one.
+        for u in [battle, spotify] {
+            let p = drop(u, 1);
+            assert_eq!(
+                (p.goes.clone(), p.order.clone()),
+                (base.goes.clone(), base.order.clone()),
+                "{u}"
+            );
+        }
+        // Slack into the left half: the half holds the three of them, the right one is empty.
+        let p = drop(slack, 0);
+        assert_eq!(in_zone(&p, 0), vec![battle, spotify, slack]);
+        assert!(in_zone(&p, 1).is_empty());
+        assert_eq!(broken(&units, &p, false), None);
     }
 
     #[test]

@@ -192,7 +192,8 @@ const picture = () => screen.getByRole('group', { name: /main screen|Visual Stud
 const tile = (name: string) => screen.getByRole('button', { name });
 const arrange = () => screen.getByRole('button', { name: 'Move windows' });
 const title = () => screen.getByRole('heading', { level: 2, name: /Your screen|Preview of/ });
-const HINT = 'Drag a window onto another to swap them, or a line between zones to resize them.';
+const HINT =
+  'Drag a window into a zone to add it there, onto another window to swap them, or drag a line to resize zones.';
 
 describe('Home', () => {
   it('shows the automatic layout for what is open, each window in its zone, and says nothing moves yet', async () => {
@@ -438,6 +439,46 @@ describe('Home', () => {
     });
     // The focus stays with the window put there.
     expect(tile('Visual Studio Code in zone 2')).toHaveFocus();
+  });
+
+  it('adds a window put in a zone with windows behind them, and moves no other', async () => {
+    // ADR 0033 (the owner: a window dragged into another zone "permutes with the app of welcoming
+    // zone instead of just adding it"). Visual Studio Code put in Chrome's zone itself joins it,
+    // behind Chrome; Chrome stays.
+    const [code, browser] = coding.windows;
+    const right = coding.zones[1]?.rect;
+    if (!code || !browser || !right) throw new Error('the fixture has two windows in two zones');
+    const joined: ArrangePreview = { ...coding, windows: [browser, { ...code, then: right }] };
+    const asked = answer(coding, (c) =>
+      c.cmd === 'preview_arrange' && c.moves?.length && c.moves.every((m) => m.onto === undefined)
+        ? preview(joined)
+        : null,
+    );
+    // Mosaïk answers the move only once the picture has been read before its answer.
+    const usual = engine.request.getMockImplementation();
+    if (!usual) throw new Error('the stand-in engine answers');
+    let release: () => void = () => undefined;
+    engine.request.mockImplementation((c) =>
+      c.cmd === 'preview_arrange' && c.moves?.length
+        ? new Promise<Reply>((resolve) => {
+            release = () => {
+              void usual(c).then(resolve);
+            };
+          })
+        : usual(c),
+    );
+    home();
+    await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in zone 1' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Zone 2' }));
+    const label = 'Google Chrome in zone 2, Visual Studio Code in zone 2. Zone 1 is empty.';
+    // At once, then as Mosaïk says.
+    expect(picture()).toHaveAttribute('aria-label', label);
+    release();
+    await waitFor(() => {
+      expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [{ window: 101, zone: 1 }] });
+    });
+    await wait(50);
+    expect(picture()).toHaveAttribute('aria-label', label);
   });
 
   it('puts a window in an empty zone of a layout', async () => {

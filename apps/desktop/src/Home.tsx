@@ -1,8 +1,10 @@
 // Home: the main screen as the chosen layout would leave it, with Move windows beside it, and
 // the workspaces in a column of their own. The automatic layout is chosen first (Mosaïk reads
 // what the windows are for); any of the eight layouts can be chosen instead, and the picture shows
-// it before anything moves. On the picture, windows dragged onto each other trade places (in one
-// zone, front to back: ADR 0032) and the lines between zones resize them (ADR 0031); Undo changes
+// it before anything moves. On the picture, a window dragged into another zone joins it, behind
+// its windows (ADR 0033), windows dragged onto each other trade places (in one zone, front to
+// back: ADR 0032), and the lines between zones resize them, the windows staying in their zones
+// (ADR 0031, 0033); Undo changes
 // puts the layout's own back. Move windows does it; Undo puts everything back. A workspace picked
 // in the column shows in the picture as opening it would leave the screen, with Open (the owner:
 // "we shouldnt open the workspace when clicking on it it should show it in the anim as preview and
@@ -418,8 +420,8 @@ export function Home({
   const hint =
     pictureEdits && !said
       ? shown
-        ? 'Drag an app onto another to swap them, or a line between zones to resize them.'
-        : 'Drag a window onto another to swap them, or a line between zones to resize them.'
+        ? 'Drag an app into a zone to add it there, onto another app to swap them, or drag a line to resize zones.'
+        : 'Drag a window into a zone to add it there, onto another window to swap them, or drag a line to resize zones.'
       : null;
   const busy =
     launching !== null && shown !== null && launching.kind === shown.kind && launching.id === target(shown).id;
