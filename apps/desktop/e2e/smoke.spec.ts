@@ -509,6 +509,28 @@ test.describe('a workspace’s page', () => {
     await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
   });
 
+  test('its apps are dragged in their list onto a zone, which they join, or onto another app, trading places', async ({
+    page,
+  }) => {
+    // The owner: "the apps in image 1 must be able to be dragged and droped from zones" (ADR 0033).
+    await page.goto('/');
+    await editWorkspace(page, 'Backend');
+    const apps = page.getByRole('group', { name: 'Apps of “Backend”' });
+    const zone = (n: string) => apps.getByRole('group', { name: `Zone ${n}`, exact: true });
+    const row = (label: string) => apps.getByRole('listitem').filter({ hasText: label });
+    await expect(zone('3').getByText('Empty. Drag an app here, or use Move.')).toBeVisible();
+    await dragOnto(page, row('MSYS2'), zone('3'));
+    await expect(shown(page, 'MSYS2 goes in zone 3.')).toBeVisible();
+    await expect(zone('3').getByText('MSYS2')).toBeVisible();
+    await dragOnto(page, row('Visual Studio Code'), row('MSYS2'));
+    await expect(shown(page, 'Visual Studio Code and MSYS2 traded zones.')).toBeVisible();
+    await expect(zone('3').getByText('Visual Studio Code')).toBeVisible();
+    await expect(zone('1').getByText('MSYS2')).toBeVisible();
+    // The picture follows.
+    await expect(page.getByRole('group', { name: /MSYS2 starts in zone 1/ })).toBeVisible();
+    await accessible(page);
+  });
+
   test('its picture shows each zone once, empty ones too, and an app dragged there goes in it', async ({ page }) => {
     // The owner, of a workspace with two windows in one zone drawn over each other: "look at the
     // anim wtf is happening"; and "when a zone is empty we dont have either color or number".

@@ -157,7 +157,7 @@ describe('a workspace’s page', () => {
     expect(asked).toContainEqual({ cmd: 'move_app', workspace: 'ship', app: 's1', zone: 'z2' });
     expect(await shown('Visual Studio Code goes in zone 2.')).toBeInTheDocument();
     // A zone left empty says so, with its number.
-    expect(within(zone('1')).getByText('Empty. Drag an app here on the picture, or use Move.')).toBeInTheDocument();
+    expect(within(zone('1')).getByText('Empty. Drag an app here, or use Move.')).toBeInTheDocument();
     expect(within(zone('2')).getByText('Visual Studio Code')).toBeInTheDocument();
     // The picture follows.
     await waitFor(() => {

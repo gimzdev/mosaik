@@ -6,34 +6,14 @@
 
 import { type SyntheticEvent, useId, useState } from 'react';
 
-import { AddApp } from './AddApp';
+import { AppsList } from './AppsList';
 import { request } from './engine';
-import { AppIcon, Glyph } from './icons';
-import {
-  type AppZone,
-  type ArrangePreview,
-  type Command,
-  MAX_NAME,
-  type WorkspaceApp,
-  type WorkspaceApps,
-  type WorkspaceSummary,
-  errorMessage,
-} from './protocol';
+import { Glyph } from './icons';
+import { type ArrangePreview, MAX_NAME, type WorkspaceApps, type WorkspaceSummary, errorMessage } from './protocol';
 import { useReads } from './reads';
 import { type PictureEdits, Screen, dropped, stretched } from './Screen';
 import { ShortcutRecorder } from './shortcut';
-import {
-  Button,
-  Confirm,
-  MenuButton,
-  OnScreen,
-  PageTitle,
-  Section,
-  Status,
-  useAnnounce,
-  zoneChip,
-  zoneTint,
-} from './ui';
+import { Button, Confirm, OnScreen, PageTitle, Section, Status, useAnnounce } from './ui';
 import { type Change, moveApp, resizeZones } from './workspacePicture';
 
 function Rename({
@@ -96,204 +76,6 @@ function Rename({
       </div>
       <Status text={problem} error />
     </form>
-  );
-}
-
-/** A zone's number on its colour, as on the picture. */
-function ZoneNumber({ zone, small = false }: { zone: AppZone; small?: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`zone-chip grid shrink-0 place-items-center rounded-full font-bold tabular-nums ${
-        small ? 'size-5 text-[11px]' : 'size-7 text-caption'
-      }`}
-      style={zoneChip(zone.color)}
-    >
-      {zone.name}
-    </span>
-  );
-}
-
-/** The workspace's apps, zone by zone as its picture shows them: each zone's number in its colour,
- * a line of its colour down the apps it takes, a zone left empty said so (the owner, of the row of
- * zone dots each app had: "the options look like absolute garbage"). Move puts an app in another
- * zone (as dragging it on the picture does), and × takes it out. Then the windows on screen to
- * add. In the open workspace a change moves the window at once. Each change answers with the
- * apps as they are now. */
-function Apps({
-  name,
-  data,
-  problem,
-  onApps,
-  onStale,
-}: {
-  /** The workspace's name, as its page says it. */
-  name: string;
-  data: WorkspaceApps | null;
-  problem: string | null;
-  /** A change made, with the apps as they are now. */
-  onApps: (apps: WorkspaceApps) => void;
-  /** A change refused: the apps may have changed meanwhile. */
-  onStale: () => void;
-}) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<{ text: string; error: boolean } | null>(null);
-  const announce = useAnnounce();
-
-  const change = (key: string, command: Command, done: string) => {
-    if (busy !== null) return;
-    setBusy(key);
-    setOutcome(null);
-    void request(command).then((reply) => {
-      setBusy(null);
-      if (reply.reply === 'apps') {
-        onApps(reply);
-        setOutcome({ text: done, error: false });
-        announce(done);
-      } else {
-        setOutcome({ text: errorMessage(reply) ?? 'The workspace could not be changed.', error: true });
-        onStale();
-      }
-    });
-  };
-
-  if (problem) return <Status text={problem} error />;
-  if (data === null) {
-    return (
-      <p className="py-3 text-small text-[var(--muted)]" aria-busy="true">
-        Reading its apps…
-      </p>
-    );
-  }
-  // The zones in their order on screen: 1, 2, 3…
-  const zones = [...data.zones].sort((a, b) => Number(a.name) - Number(b.name) || a.name.localeCompare(b.name));
-  const installed = data.installed ?? [];
-  const known = new Set(zones.map((z) => z.id));
-  const loose = data.apps.filter((a) => a.zone === null || !known.has(a.zone));
-
-  const row = (a: WorkspaceApp) => {
-    const elsewhere = zones.filter((z) => z.id !== a.zone);
-    return (
-      <li key={a.id} className="flex min-h-11 items-center gap-2.5">
-        <AppIcon icon={a.icon} size={22} keepSpace />
-        <span className="min-w-0 flex-1 truncate font-semibold">{a.label}</span>
-        {a.tab ? (
-          <span className="shrink-0 rounded-md bg-[var(--hover)] px-1.5 py-0.5 text-caption font-semibold text-[var(--muted)]">
-            Tab
-          </span>
-        ) : null}
-        {elsewhere.length ? (
-          <MenuButton
-            label={`Move ${a.label} to another zone`}
-            items={elsewhere.map((z) => ({
-              key: z.id,
-              label: `Zone ${z.name}`,
-              icon: <ZoneNumber zone={z} small />,
-              onSelect: () => {
-                change(
-                  a.id,
-                  { cmd: 'move_app', workspace: data.workspace, app: a.id, zone: z.id },
-                  `${a.label} goes in zone ${z.name}.`,
-                );
-              },
-            }))}
-          >
-            Move
-            <Glyph name="down" size={14} />
-          </MenuButton>
-        ) : null}
-        <button
-          type="button"
-          aria-label={`Remove ${a.label}`}
-          title={`Remove ${a.label}`}
-          aria-busy={busy === a.id || undefined}
-          disabled={busy !== null}
-          onClick={() => {
-            change(a.id, { cmd: 'remove_app', workspace: data.workspace, app: a.id }, `${a.label} removed.`);
-          }}
-          className="grid size-10 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)] disabled:cursor-progress disabled:opacity-50"
-        >
-          <Glyph name="close" size={16} />
-        </button>
-      </li>
-    );
-  };
-
-  /** One zone and its apps: its number, then a line of its colour down to its last app. */
-  const group = (zone: AppZone | null, apps: WorkspaceApp[]) => (
-    <div
-      key={zone?.id ?? 'none'}
-      role="group"
-      aria-label={zone ? `Zone ${zone.name}` : 'Not in a zone'}
-      className="flex gap-3 py-2"
-    >
-      <div aria-hidden="true" className="flex w-7 shrink-0 flex-col items-center pt-2">
-        {zone ? (
-          <ZoneNumber zone={zone} />
-        ) : (
-          <span className="size-7 rounded-full border-2 border-dashed border-[var(--control)]" />
-        )}
-        {apps.length > 1 ? (
-          <span
-            className="mt-1.5 mb-3 w-0.5 flex-1 rounded-full forced-colors:bg-[CanvasText]"
-            style={{
-              background: zone ? `color-mix(in srgb, ${zoneTint(zone.color)} 55%, transparent)` : 'var(--line)',
-            }}
-          />
-        ) : null}
-      </div>
-      {apps.length ? (
-        <ul className="min-w-0 flex-1">{apps.map(row)}</ul>
-      ) : (
-        <p className="flex min-h-11 flex-1 items-center text-small text-[var(--muted)]">
-          Empty. Drag an app here on the picture, or use Move.
-        </p>
-      )}
-    </div>
-  );
-
-  return (
-    <div>
-      {data.apps.length === 0 && zones.length === 0 ? (
-        <p className="py-3.5 text-small text-[var(--muted)]">No apps yet. Add one below.</p>
-      ) : (
-        <div aria-label={`Apps of “${name}”`} role="group" className="divide-y divide-[var(--line)]">
-          {zones.map((z) =>
-            group(
-              z,
-              data.apps.filter((a) => a.zone === z.id),
-            ),
-          )}
-          {loose.length ? group(null, loose) : null}
-        </div>
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--line)] py-3">
-        {data.windows.length || installed.length ? (
-          <AddApp
-            name={name}
-            windows={data.windows}
-            installed={installed}
-            onWindow={(w) => {
-              change(
-                'add',
-                { cmd: 'add_app', workspace: data.workspace, window: w.window, zone: null },
-                `${w.label} added.`,
-              );
-            }}
-            onInstalled={(a) => {
-              change(
-                'add',
-                { cmd: 'add_installed_app', workspace: data.workspace, app: a.app, zone: null },
-                `${a.label} added.`,
-              );
-            }}
-          />
-        ) : (
-          <p className="text-small text-[var(--muted)]">Open a window to add it here.</p>
-        )}
-        <Status text={outcome?.text ?? null} error={outcome?.error ?? false} />
-      </div>
-    </div>
   );
 }
 
@@ -493,7 +275,7 @@ export function WorkspacePage({
       </div>
 
       <Section title="Apps">
-        <Apps
+        <AppsList
           name={summary.name}
           data={apps}
           problem={appsProblem}
