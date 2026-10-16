@@ -1642,7 +1642,6 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
 /// every window back.
 fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
     let before = frames(w);
-    let base = preview(engine, Some("halves"))?;
     // A zone's windows in the picture, front to back.
     let in_zone = |p: &ArrangePreview, z: usize| -> Vec<mosaik_core::window::WindowHandle> {
         p.windows
@@ -1651,21 +1650,32 @@ fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Re
             .map(|x| x.window)
             .collect()
     };
-    let Some((zone, pair)) = (0..base.zones.len())
-        .map(|z| (z, in_zone(&base, z)))
-        .find(|(_, list)| list.len() == 2)
-    else {
-        return Ok(json!({ "stacked_pair": false, "ok": false }));
+    let stacked_pair = |p: &ArrangePreview| {
+        (0..p.zones.len())
+            .map(|z| (z, in_zone(p, z)))
+            .find(|(_, list)| list.len() == 2)
+            .map(|(z, list)| (z, list[0], list[1]))
     };
-    let (front, back) = (pair[0], pair[1]);
     let hwnd_of = |h| w.iter().copied().find(|x| handle(*x) == h);
     let z_at = |h| hwnd_of(h).and_then(|x| mosaik_win::window::top_level().iter().position(|y| *y == x));
-    // The window to bring to the front is put behind the other first, so the check cannot pass
-    // by chance.
-    if let (Some(b), Some(f)) = (hwnd_of(back), hwnd_of(front)) {
-        let _ = mosaik_win::arrange::put_below(b, f);
+    let behind = |b, f| matches!((z_at(b), z_at(f)), (Some(b), Some(f)) if b > f);
+    // The window stacked behind the half's own window is behind it on screen, so that bringing
+    // it to the front is a change. Should another window lie between them, it is put just
+    // behind the own window, and the picture read again: the windows used last count most in
+    // the plan, so that can change which windows go where.
+    let mut pair = stacked_pair(&preview(engine, Some("halves"))?);
+    if let Some((_, front, back)) = pair
+        && !behind(back, front)
+    {
+        if let (Some(b), Some(f)) = (hwnd_of(back), hwnd_of(front)) {
+            let _ = mosaik_win::arrange::put_below(b, f);
+        }
+        pair = stacked_pair(&preview(engine, Some("halves"))?);
     }
-    let behind_before = matches!((z_at(back), z_at(front)), (Some(b), Some(f)) if b > f);
+    let Some((zone, front, back)) = pair else {
+        return Ok(json!({ "stacked_pair": false, "ok": false }));
+    };
+    let behind_before = behind(back, front);
     let mv = ArrangeMove {
         window: back,
         zone: u32::try_from(zone).unwrap_or(u32::MAX),
@@ -1674,7 +1684,8 @@ fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Re
     let start = Instant::now();
     let shown = preview_moved(engine, Some("halves"), vec![mv])?;
     let preview_ms = start.elapsed().as_secs_f64() * 1000.0;
-    let traded = in_zone(&shown, zone) == vec![back, front];
+    let in_picture = in_zone(&shown, zone);
+    let traded = in_picture == vec![back, front];
     let untouched = most_moved(&frames(w), &before) <= SLACK;
 
     let (reply, ms) = ask(
@@ -1704,6 +1715,8 @@ fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Re
     let back_px = most_moved(&frames(w), &before);
     Ok(json!({
         "preview_ms": preview_ms,
+        "pair": { "zone": zone, "front": front.0, "behind": back.0 },
+        "zone_in_picture": in_picture.iter().map(|h| h.0).collect::<Vec<_>>(),
         "traded_in_picture": traded,
         "preview_changed_nothing": untouched,
         "message": message,
@@ -2069,8 +2082,9 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     let untouched =
         most_moved(&frames(w), &before) <= SLACK && rects(&zones(engine, &ws.0, work)?) == zones_before;
     // The half with two windows: the picture lists its own window first, the other stacked
-    // behind it (ADR 0032). The own window is put behind the other first, so the check that
-    // Arrange puts it in front cannot pass by chance.
+    // behind it (ADR 0032), and Arrange keeps the own window in front. (Putting it behind first
+    // would change the plan: the windows used last count most. The trade in 3e4 shows a window
+    // brought in front by Arrange.)
     let pair: Option<(HWND, HWND)> = (0..shown.zones.len()).find_map(|z| {
         let list: Vec<HWND> = shown
             .windows
@@ -2081,10 +2095,6 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         (list.len() == 2).then(|| (list[0], list[1]))
     });
     let z_at = |h: HWND| mosaik_win::window::top_level().iter().position(|x| *x == h);
-    if let Some((own, other)) = pair {
-        let _ = mosaik_win::arrange::put_below(own, other);
-    }
-    let own_behind_before = pair.is_some_and(|(own, other)| z_at(own) > z_at(other));
 
     let (reply, ms) = ask(
         engine,
@@ -2161,10 +2171,8 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         "back_px": back,
         "zones_back": zones_back,
         "all_shown": all_shown,
-        "own_window_behind_before": own_behind_before,
         "own_window_in_front": own_in_front,
         "ok": shown_zones == halves
-            && own_behind_before
             && own_in_front
             && planned.iter().all(Option::is_some)
             && minimized_shown == 0
