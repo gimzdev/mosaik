@@ -164,10 +164,10 @@ export async function rescueWindows(): Promise<{ text: string; error: boolean }>
   }
 }
 
-/** Matches the window's title bar to the page: dark or light, in the page's colours. Without
- * colours (high contrast), Windows' own stay. A title bar left in Windows' colours is not worth
- * a message, so a failure here is ignored. */
-export function styleTitleBar(look: { dark: boolean; caption: string; text: string } | null): void {
+/** Matches the window's title bar to the page: dark or light (`dark` null: as Windows says), in
+ * the page's colours. Without colours (high contrast), Windows' own stay. A title bar left in
+ * Windows' colours is not worth a message, so a failure here is ignored. */
+export function styleTitleBar(look: { dark: boolean | null; caption: string; text: string } | null): void {
   if (!inMosaik) return;
   void invoke('style_title_bar', {
     dark: look?.dark ?? null,

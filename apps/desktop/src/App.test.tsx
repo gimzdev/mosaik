@@ -220,6 +220,28 @@ describe('Mosaïk’s window', () => {
     expect(document.documentElement.dataset.theme).toBe('system');
   });
 
+  it('leaves the window’s theme to Windows with “Like Windows”, so that the page follows Windows', async () => {
+    // The owner: "windows theme doesnt work". The title bar was made light or dark like the page,
+    // and Tauri gives the page the window's theme: once made so, the page never followed Windows
+    // again. With "Like Windows" the title bar takes the page's colours, and the theme is left.
+    answer({ ...setUp, theme: 'system' });
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Your screen' });
+    await waitFor(() => {
+      expect(engine.styleTitleBar).toHaveBeenCalled();
+    });
+    expect(engine.styleTitleBar.mock.calls.at(-1)?.[0]).toMatchObject({ dark: null });
+    cleanup();
+    engine.styleTitleBar.mockClear();
+    answer({ ...setUp, theme: 'light' });
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Your screen' });
+    await waitFor(() => {
+      expect(engine.styleTitleBar).toHaveBeenCalled();
+    });
+    expect(engine.styleTitleBar.mock.calls.at(-1)?.[0]).toMatchObject({ dark: false });
+  });
+
   it('keeps Mosaïk’s notes behind a button, never over the page', async () => {
     engine.takeNotices.mockResolvedValue([
       { title: 'FancyZones is running', body: 'It moves windows too.' },

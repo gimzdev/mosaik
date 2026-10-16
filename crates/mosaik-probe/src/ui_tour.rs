@@ -3,7 +3,8 @@
 //! the role and name UI Automation gives every control (what a screen reader says), controls
 //! with no name, and the order the Tab key goes through them. Home (with a workspace's ⋯ menu),
 //! a workspace's page, the zone editor and Settings (with Advanced and About), in dark and
-//! light, at the window's usual and smallest size, and the switcher. On Home, a layout is also
+//! light, at the window's usual and smallest size, and the switcher; "Like Windows" chosen after
+//! each of them, the page following Windows' app mode. On Home, a layout is also
 //! chosen, so the picture shows where the windows would go; a window of the picture is dragged
 //! onto another, and a line between its zones across, each then undone with Undo changes
 //! (Move windows is never clicked: no window moves).
@@ -643,6 +644,52 @@ impl Tour {
         self.click(&c)
     }
 
+    /// "Like Windows" follows Windows' app mode, chosen after Light and after Dark (the owner:
+    /// "windows theme doesnt work": the page stayed as the theme chosen before). The page's
+    /// background, read on screen at the window's bottom left, is light when Windows' apps are.
+    fn like_windows(&mut self) -> Result<(), String> {
+        let windows_light = mosaik_win::os::apps_use_light_theme();
+        let mut seen = Vec::new();
+        for before in ["Light", "Dark"] {
+            self.theme(before)?;
+            pump_until(800, || false);
+            self.theme("Like Windows")?;
+            pump_until(1500, || false);
+            seen.push(json!({ "after": before, "page_light": self.page_is_light()? }));
+        }
+        let follows = seen
+            .iter()
+            .all(|s| s["page_light"].as_bool() == Some(windows_light));
+        let page = json!({
+            "page": "like-windows",
+            "windows_light": windows_light,
+            "seen": seen,
+            "follows_windows": follows,
+        });
+        println!("page like-windows: {page}");
+        self.pages.push(page);
+        Ok(())
+    }
+
+    /// Whether the page's background is light: the mean luminance of a strip of the window's
+    /// bottom left, inside its border, where the page's background shows.
+    fn page_is_light(&self) -> Result<bool, String> {
+        let r = window::window_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;
+        let strip = Rect::new(r.left + 12, r.bottom - 34, r.left + 64, r.bottom - 14);
+        let px = crate::capture::capture(strip).ok_or("the window could not be read on screen")?;
+        if px.is_empty() {
+            return Err("the window could not be read on screen".into());
+        }
+        let luminance = |p: &u32| {
+            let channel = |shift: u32| f64::from((p >> shift) & 0xFF);
+            0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+        };
+        // A strip of a few hundred pixels: exact in f64.
+        #[allow(clippy::cast_precision_loss)]
+        let mean = px.iter().map(luminance).sum::<f64>() / px.len() as f64;
+        Ok(mean > 128.0)
+    }
+
     /// The switcher, opened as the shortcut opens it, then closed with Escape.
     fn switcher(&mut self, name: &str) -> Result<(), String> {
         let Some(ctl) = &self.ctl else { return Ok(()) };
@@ -808,6 +855,9 @@ impl Tour {
             self.page(&format!("zones-{theme}"), false)?;
             self.switcher(&format!("switcher-{theme}"))?;
         }
+
+        // Like Windows, after each of the others.
+        self.like_windows()?;
 
         // The smallest the window goes.
         let before = window::window_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;

@@ -46,7 +46,10 @@ export interface Saved {
 }
 export type SaveSettings = (next: Settings) => Promise<Saved>;
 
-/** The page's colours on the window's title bar, following the theme and high contrast. */
+/** The page's colours on the window's title bar, following the theme and high contrast. With
+ * "Like Windows" the window's theme is left to Windows: Tauri gives the page the window's theme,
+ * so a title bar made light or dark like the page kept the page so, whatever Windows said next
+ * (the owner: "windows theme doesnt work"). */
 function useTitleBar(theme: Settings['theme'] | undefined) {
   useEffect(() => {
     const queries = [matchMedia('(prefers-color-scheme: dark)'), matchMedia('(forced-colors: active)')];
@@ -57,7 +60,7 @@ function useTitleBar(theme: Settings['theme'] | undefined) {
       }
       const css = getComputedStyle(document.documentElement);
       styleTitleBar({
-        dark: css.colorScheme === 'dark',
+        dark: theme === 'system' ? null : css.colorScheme === 'dark',
         caption: css.getPropertyValue('--panel').trim(),
         text: css.getPropertyValue('--text').trim(),
       });
