@@ -32,10 +32,14 @@ import { type Shown, type Sorted, type Target, Workspaces } from './Workspaces';
 /** No window put elsewhere: one list, so the pictures asked for do not change with each render. */
 const NO_MOVES: ArrangeMove[] = [];
 
-/** "Slack", "Slack and Teams", "Slack, Teams and Mail". */
+/** "Slack", "Slack and Teams", "Slack, Teams and Mail"; the windows of one app counted once,
+ * in the place of its first ("2 File Explorer windows and Google Chrome"). */
 function names(list: string[]): string {
-  if (list.length <= 1) return list.join('');
-  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1] ?? ''}`;
+  const counts = new Map<string, number>();
+  for (const name of list) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const said = [...counts].map(([name, n]) => (n > 1 ? `${String(n)} ${name} windows` : name));
+  if (said.length <= 1) return said.join('');
+  return `${said.slice(0, -1).join(', ')} and ${said[said.length - 1] ?? ''}`;
 }
 
 /** What opening a workspace does besides moving its windows, in a sentence under its picture:

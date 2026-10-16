@@ -1321,7 +1321,31 @@ speed, 27 on the code); what they found and what changed is ADR 0029.
   one place, key state read through mosaik-win; ADRs 0011, 0014 to 0019, 0022, 0024 and 0028
   marked as amended; architecture and README brought up to date.
 - Checks here: fmt; clippy -D warnings for Windows on every crate; core 251, ipc 11; interface
-  118; Playwright 30; the site type-checks; shellcheck.
+  119; Playwright 30; the site type-checks; shellcheck.
+- **On the owner's PC** (job 0152, at 918e379):
+  - Build 2 min 44 s; `mosaik.ps1 test`: every test passing, the new Windows test among them.
+  - **The Store's 1.0.1 quit when asked** through its engine's window, 0.25 s after: its log says
+    "asked to close", "Mosaïk stopped", then the build "the older Mosaïk quit"; the build ran in
+    its place (1.0.2, protocol 9, watchdog).
+  - **taskkill without /F did not quit** the build in the tray (still running 20 s later, its log
+    silent): taskkill asks only the windows that show, never the engine's. Fixed in 995e0dc (a
+    close posted to any window of the engine's thread goes to the engine's), checked by job 0153.
+  - **The scan** (classify): 310 top-level windows; the engine's scan 0.6 ms, every window
+    3.8 ms (medians of 10).
+  - `workspace --drag`, tags in title bars / above windows: saved 6.8 / 43 ms (21 / 61 before),
+    opened 24 / 28 ms (47 / 53 before); every window 0 px from its zone and from the preview; the
+    window on top minimised; tabs, chips, strip above after clicks and moves, a tab pulled out,
+    drops where Windows snaps: as in job 0151; a zone split: 0 px both ways (the code window a tab
+    of a group, its band expected). Memory with frames: 9.1 and 9.4 MB private.
+  - `smart --only quick`: the side menu opened 51 ms after the pointer rested; a press as it
+    opened did nothing (menu open, no window moved). Three checks failed on the probe's side and
+    were fixed in it: two read Arrange's old words (every other check of those steps passed), and
+    one grabbed the menu's first line before the 300 ms guard was over (now 350 ms after, as a
+    person would).
+  - UI tour: 31 pictures; Automatic, Undo swaps, Back to my screen and More settings found; a tile
+    dragged onto another traded places and was put back; a workspace picked showed Open, and Back
+    returned to Arrange. On Windows, the larger type and the controls read as in the pictures
+    taken here.
 
 ## Owner decisions
 

@@ -207,6 +207,33 @@ describe('Home', () => {
     expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 1, Google Chrome minimized.');
   });
 
+  it('counts the windows of one app it would minimise, rather than naming the app twice', async () => {
+    // Job 0152: "Steam, File Explorer, File Explorer, Google Chrome and MSYS2 terminal will be
+    // minimized."
+    const explorer = (window: number) => ({
+      window,
+      label: 'File Explorer',
+      icon: null,
+      now: { left: 100, top: 100, right: 900, bottom: 700 },
+      then: null,
+      minimized: true,
+      starting: false,
+      tabs: [],
+    });
+    const two: ArrangePreview = {
+      ...full,
+      windows: [...(full.windows[0] ? [full.windows[0]] : []), explorer(71), explorer(72), full.windows[1]].filter(
+        (w): w is ArrangePreview['windows'][number] => w !== undefined,
+      ),
+    };
+    answer(coding, (c) => (c.cmd === 'preview_arrange' && c.preset === 'full' ? preview(two) : null));
+    home();
+    await screen.findByRole('radio', { name: 'Halves' });
+    await moreLayouts();
+    await userEvent.click(screen.getByRole('radio', { name: 'Full screen' }));
+    expect(await screen.findByText('2 File Explorer windows and Google Chrome will be minimized.')).toBeInTheDocument();
+  });
+
   it('arranges with the automatic layout, says what it did, and undoes it', async () => {
     const asked = answer();
     home();
