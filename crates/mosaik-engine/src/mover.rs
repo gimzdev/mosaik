@@ -239,6 +239,7 @@ pub(crate) fn pump_for(ms: u32, wake: Option<&Wake>) {
                 PostQuitMessage(i32::try_from(msg.wParam.0).unwrap_or(0));
                 return;
             }
+            crate::thread::forward_close(&msg);
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

@@ -56,9 +56,12 @@ without a way to quit.
 **Quitting**
 - A newer Mosaïk asks an older one to quit through the older one's engine window alone
   (`window::ask_mosaik_to_quit`).
-- When the interface cannot be reached as Mosaïk is asked to close (`taskkill` without `/F`, an
-  installer, closing every window it has), Mosaïk quits from its engine side, every window it hid
-  coming back first.
+- A request to close posted to any window of the engine's thread (the side menu's line, a frame)
+  goes to the engine's window: `taskkill` without `/F` asks only the windows that show, which the
+  engine's never does (job 0152: Mosaïk in the tray did not quit).
+- When the interface cannot be reached as Mosaïk is asked to close (every window it has closed,
+  the one its events go through among them), Mosaïk quits from its engine side, every window it
+  hid coming back first.
 
 **Less waiting**
 - A scan reads only the windows Windows shows (23 of 326 on the owner's PC); the ones Mosaïk hid

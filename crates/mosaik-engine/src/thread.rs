@@ -11,6 +11,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
+use std::ffi::c_void;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
@@ -30,7 +31,7 @@ use mosaik_win::window::{self, Scanner};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, DispatchMessageW, GetMessageW, KillTimer, MSG, PostQuitMessage, SetTimer,
+    DefWindowProcW, DispatchMessageW, GetMessageW, KillTimer, MSG, PostMessageW, PostQuitMessage, SetTimer,
     TranslateMessage, WM_CLOSE, WM_DISPLAYCHANGE, WM_ENDSESSION, WM_HOTKEY, WM_POWERBROADCAST,
     WM_QUERYENDSESSION, WM_SETTINGCHANGE, WM_TIMER, WS_EX_TOOLWINDOW, WS_POPUP,
 };
@@ -145,6 +146,8 @@ impl Pending {
 
 thread_local! {
     static ENGINE: RefCell<Option<Engine>> = const { RefCell::new(None) };
+    /// The engine's window, for a request to close that reaches another window of its thread.
+    static ENGINE_WINDOW: Cell<isize> = const { Cell::new(0) };
     static PENDING: Cell<Pending> = const { Cell::new(Pending {
         wake: false,
         events: false,
@@ -206,6 +209,19 @@ pub(crate) struct Engine {
     pub(crate) start_apps: crate::sets::StartApps,
     /// When the programs running were last looked through for other window arrangers.
     pub(crate) others_checked: Option<std::time::Instant>,
+}
+
+/// A request to close posted to another window of the engine's thread (the side menu's line, a
+/// frame) goes to the engine's window, which quits Mosaïk properly: `taskkill` without /F asks
+/// only the windows that show (job 0152: Mosaïk in the tray did not quit), and the engine's never
+/// does. One sent rather than posted (Alt+F4 on the switcher) is that window's own business.
+pub(crate) fn forward_close(msg: &MSG) {
+    let engine = ENGINE_WINDOW.with(Cell::get);
+    if msg.message == WM_CLOSE && engine != 0 && msg.hwnd.0 as isize != engine {
+        tracing::info!("asked to close through another window");
+        // SAFETY: posts to the engine's own window, which lives as long as this thread's loop.
+        let _ = unsafe { PostMessageW(Some(HWND(engine as *mut c_void)), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+    }
 }
 
 pub(crate) fn run(
@@ -349,6 +365,7 @@ pub(crate) fn run(
         "engine ready"
     );
     ENGINE.with(|e| *e.borrow_mut() = Some(engine));
+    ENGINE_WINDOW.with(|w| w.set(window.0 as isize));
     let _ = ready.send(Ok(window.0 as isize));
 
     let mut msg = MSG::default();
@@ -362,6 +379,7 @@ pub(crate) fn run(
         if switcher::translate(&msg) {
             continue;
         }
+        forward_close(&msg);
         // SAFETY: standard dispatch of a message from this thread's queue.
         unsafe {
             let _ = TranslateMessage(&msg);
@@ -448,8 +466,8 @@ unsafe extern "system" fn engine_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         },
         // Windows may end the session: say yes, and get ready when it does.
         WM_QUERYENDSESSION => return LRESULT(1),
-        // The engine's window is a top-level window, so an installer or `taskkill` asks it to
-        // close: Mosaïk quits properly instead of losing its window.
+        // Asked to close (a newer Mosaïk taking its place, an installer, `taskkill` through
+        // another window of this thread, `forward_close`): Mosaïk quits properly.
         WM_CLOSE => Pending {
             close: true,
             ..Pending::default()
