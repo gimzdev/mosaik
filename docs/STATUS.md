@@ -1749,6 +1749,18 @@ simetric and appealing". ADR 0032.
   "Coding" on all ten layouts, every app kept, nothing saved. Packed (294 files); both files
   beside the repository brought up to date (the key line kept), and again at the commit recording
   this.
+- **The owner's notes of 13:03** (ADR 0034), with three pictures: in a workspace's list an app
+  dropped into another zone traded with the app there ("should be same as in anim permute when
+  specifically dropped on another app otherwise just ad"); the workspace's page had its picture
+  narrower than the rest and on the left ("disgraceful we should be more appealing symetrical");
+  the workspace's menu should have Rename, and Edit zones "feels like it should be on workspace
+  edit screen". Now in the list only an app's icon and name are the app (a drop there trades),
+  the rest of a zone is the zone (a drop there joins it, behind its apps: `editing::move_app` had
+  kept an app's place front to back, so it could land in front of them); the page is one width,
+  the picture's, in the middle; the menu has Open, Replace with what's on screen (the one on
+  screen), Rename (in the row) and Edit, Edit zones being on the page. Tests first: core 307,
+  interface 145, Playwright 40 (a drop beside a name joins, onto a name trades; the page's edges
+  line up in the middle at two sizes; a rename in the row, with axe).
 
 ## Owner decisions
 
@@ -1822,3 +1834,7 @@ simetric and appealing". ADR 0032.
 - 2026-10-16: the first run leaves no note of the workspaces it made ("this shit has to go lets
   not flood with useless infos"), as there is no welcome (2026-10-15): they are simply in Home's
   column. ADR 0033.
+- 2026-10-16: in a workspace's list, a drop trades only when made on another app; elsewhere in a
+  zone it adds the app there ("permute when specifically dropped on another app otherwise just
+  add"); the workspace's page is symmetrical; its menu has Rename and no Edit zones, which is on
+  its page. ADR 0034.
