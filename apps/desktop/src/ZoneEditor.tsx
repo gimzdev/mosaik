@@ -1,5 +1,5 @@
 // The zone editor: one workspace's zones on each monitor connected now, numbered by place. Drag
-// the bars between zones (or focus one and use the arrow keys) to resize; pick a zone to
+// the lines between zones (or focus one and use the arrow keys) to resize; pick a zone to
 // recolour, split or remove it; start from a layout. Nothing changes until "Save zones".
 
 import { useEffect, useMemo, useState } from 'react';
@@ -158,8 +158,8 @@ export function ZoneEditor({
         </div>
       </div>
       <p className="mt-2 text-small text-[var(--muted)]">
-        Drag the bars between zones to resize them. With the keyboard, focus a bar and use the arrow keys. Windows in a
-        zone you remove stay where they are.
+        Drag the line between two zones to resize them. With the keyboard, focus a line and use the arrow keys. Windows
+        in a zone you remove stay where they are.
       </p>
       <div className="mt-1">
         <Status text={outcome?.text ?? null} error={outcome?.error ?? false} />
