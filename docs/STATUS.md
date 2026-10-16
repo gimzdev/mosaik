@@ -1477,6 +1477,19 @@ discreet or not shown". ADR 0031.
   open workspace trading zones; the UI tour drags a line of Home's picture. Site 1.11.4: "pick one
   of eight layouts", and the windows and lines dragged. The Store's own description, typed in
   Partner Center, still says "ten layouts" (docs/RELEASE.md has the new words).
+- Then, from the owner (2026-10-16): ""ship the release" "arrange my screen" those wordings are
+  cringe af", "dont be brosky nor corporate just balanced and pro yet casual": Home's button says
+  **Arrange windows**, as the tray does; the site's coding project is "Client website", the
+  stand-in's workspaces Website, Backend and Portfolio.
+- **A review of 596ba4f** by a second agent found four bugs, each caught first by a test that
+  failed: a line drag let go of with Esc saved later into the workspace shown next; a pick let go
+  of during Arrange came back, unsaid; a zone resized to the smallest came out a hair under it
+  (limits from rounded pixels, kept edges exact), so Mosaïk refused it; the focus fell to the page
+  after a tab was moved with the keyboard. Fixed (the preview now sends each zone's exact
+  `area`), with two it thought plausible: a drag whose window leaves the picture ends on the
+  release anywhere, and a trade refits the zones the two apps were really in (the `smart` probe
+  trades back from a stale zone). A resize making a zone too small, or two overlap, is not sent.
+  Checks here: interface 128, Playwright 32, core 262, ipc 11, clippy, fmt.
 
 ## Owner decisions
 

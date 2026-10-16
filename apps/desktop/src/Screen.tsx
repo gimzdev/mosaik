@@ -174,7 +174,7 @@ export function dropped(preview: ArrangePreview, d: Dropped): ArrangePreview {
 /** The zones' places as fractions of the work area, in the picture's order: where the lines
  * between them start from. */
 export function areasOf(preview: ArrangePreview): RatioRect[] {
-  return preview.zones.map((z) => ratioOf(z.rect, preview.work_area));
+  return preview.zones.map((z) => z.area ?? ratioOf(z.rect, preview.work_area));
 }
 
 /** The picture with its zones resized to `areas` (in its order), and their windows with them,
@@ -184,7 +184,11 @@ export function stretched(preview: ArrangePreview, areas: readonly RatioRect[]):
   const rects = areas.map((a) => rectOf(a, preview.work_area));
   return {
     ...preview,
-    zones: preview.zones.map((z, i) => ({ ...z, rect: rects[i] ?? z.rect })),
+    zones: preview.zones.map((z, i) => {
+      const area = areas[i];
+      const rect = rects[i];
+      return area && rect ? { ...z, rect, area } : z;
+    }),
     windows: preview.windows.map((w) => {
       const r = rects[zoneIndex(preview, w)];
       return r && w.then ? { ...w, then: r } : w;
@@ -245,6 +249,13 @@ function barsByZone(preview: ArrangePreview): Bar[][] {
 }
 
 const tabKey = (bar: Bar, t: PreviewTab, k: number) => (t.app !== undefined ? `a:${t.app}` : `${bar.key}:${String(k)}`);
+
+/** The piece picked to be put elsewhere: its key on the picture, and the zone it is in. */
+interface Picked {
+  key: string;
+  piece: Piece;
+  zone: number;
+}
 
 /** A target under the pointer, or picked with the keyboard: a zone, and the piece in it dropped
  * onto (none for the zone itself). */
@@ -321,7 +332,7 @@ export function Screen({
   /** Every bar and tab drawn: its element, the piece it is (when it can be moved) and its zone. */
   const drawn = useRef(new Map<string, { el: HTMLElement; piece: Piece | null; zone: number }>());
   const zoneEls = useRef(new Map<number, HTMLElement>());
-  const [picked, setPicked] = useState<{ key: string; piece: Piece; zone: number } | null>(null);
+  const [picked, setPicked] = useState<Picked | null>(null);
   const [drag, setDragState] = useState<Drag | null>(null);
   const dragging = useRef<Drag | null>(null);
   /** Where the pointer went down on a piece, until it moves far enough to drag it. */
@@ -329,11 +340,12 @@ export function Screen({
   /** A drag just ended: the click that follows is not a pick. */
   const dragged = useRef(false);
   const last = useRef(new Map<string, Spot>());
-  /** The piece to focus once drawn in its new place (put there with the keyboard). */
-  const focusNext = useRef<string | null>(null);
+  /** The piece put elsewhere with the keyboard, from its zone, on the picture shown then: it takes
+   * the focus once drawn in another zone, which for a tab is once Mosaïk has answered. */
+  const focusNext = useRef<{ key: string; from: number; seen: ArrangePreview | null } | null>(null);
   /** The zones as a line between them is being moved, over the picture they started from. */
   const [stretch, setStretch] = useState<{ from: ArrangePreview; drafts: Draft[] } | null>(null);
-  const stretchLatest = useRef<Draft[] | null>(null);
+  const stretchLatest = useRef<{ from: ArrangePreview; drafts: Draft[] } | null>(null);
   /** The picture's size in pixels, for how many title bars a zone has room for. */
   const [box, setBox] = useState<{ w: number; h: number } | null>(null);
 
@@ -347,7 +359,7 @@ export function Screen({
             name: z.name,
             color: z.color,
             monitor: MAIN,
-            area: ratioOf(z.rect, preview.work_area),
+            area: z.area ?? ratioOf(z.rect, preview.work_area),
           }))
         : [],
     [preview],
@@ -365,21 +377,23 @@ export function Screen({
       }
     }
   }
+  // A piece picked that is not in the picture any more (another layout, a window closed, the
+  // picture not to be changed for now) is let go for good, not picked again when it comes back.
+  if (picked !== null && !pieceKeys.has(picked.key)) setPicked(null);
   const chosen = picked && pieceKeys.has(picked.key) ? picked : null;
-  // Let go that way, the page stops saying where it goes.
-  const lost = picked !== null && chosen === null;
+  // The page says where the piece picked goes, and stops when it is let go, however that was.
+  const choosing = chosen?.piece.label ?? null;
   useEffect(() => {
-    if (lost) onPick?.(null);
-  }, [lost, onPick]);
+    onPick?.(choosing);
+  }, [choosing, onPick]);
 
   const setDrag = (d: Drag | null) => {
     dragging.current = d;
     setDragState(d);
   };
 
-  const pick = (next: { key: string; piece: Piece; zone: number } | null) => {
+  const pick = (next: Picked | null) => {
     setPicked(next);
-    onPick?.(next ? next.piece.label : null);
   };
 
   const putIn = (piece: Piece, t: Target) => {
@@ -471,7 +485,7 @@ export function Screen({
         pick(chosen?.key === key ? null : { key, piece, zone });
         return;
       }
-      focusNext.current = chosen.key;
+      focusNext.current = { key: chosen.key, from: chosen.zone, seen: preview };
       putIn(chosen.piece, { zone, onto: piece, key });
       pick(null);
     },
@@ -509,10 +523,35 @@ export function Screen({
     last.current = now;
     const next = focusNext.current;
     if (next !== null) {
-      drawn.current.get(next)?.el.focus();
-      focusNext.current = null;
+      const d = drawn.current.get(next.key);
+      if (d && d.zone !== next.from) {
+        d.el.focus();
+        focusNext.current = null;
+      } else if (preview !== next.seen) {
+        // Mosaïk answered, and it stayed where it was (refused): the focus stays where it is.
+        focusNext.current = null;
+      }
     }
   });
+
+  // A drag whose piece left the picture (its window closed, or no room for it now) never hears
+  // the pointer let go on it: the release anywhere ends it.
+  const dragOn = drag !== null;
+  useEffect(() => {
+    if (!dragOn) return;
+    const end = () => {
+      if (!dragging.current) return;
+      dragging.current = null;
+      press.current = null;
+      setDragState(null);
+    };
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+  }, [dragOn]);
 
   useLayoutEffect(() => {
     const el = inner.current;
@@ -528,27 +567,37 @@ export function Screen({
     };
   }, []);
 
+  /** Whether the zones are where the picture has them. */
+  const asShown = (next: Draft[]) =>
+    next.length === base.length &&
+    next.every((d, i) => {
+      const was = base[i]?.area;
+      return (
+        was !== undefined &&
+        Math.abs(d.area.left - was.left) <= 1e-9 &&
+        Math.abs(d.area.top - was.top) <= 1e-9 &&
+        Math.abs(d.area.right - was.right) <= 1e-9 &&
+        Math.abs(d.area.bottom - was.bottom) <= 1e-9
+      );
+    });
   const stretchTo = (next: Draft[]) => {
     if (!preview) return;
-    stretchLatest.current = next;
+    // Put back as they were (a drag let go of with Esc): nothing is being changed any more.
+    if (asShown(next)) {
+      stretchLatest.current = null;
+      setStretch(null);
+      return;
+    }
+    stretchLatest.current = { from: preview, drafts: next };
     setStretch({ from: preview, drafts: next });
   };
   const stretchDone = () => {
-    const next = stretchLatest.current;
+    const latest = stretchLatest.current;
     stretchLatest.current = null;
     setStretch(null);
-    if (!next || !edit) return;
-    const moved = next.some((d, i) => {
-      const was = base[i]?.area;
-      return (
-        !was ||
-        Math.abs(d.area.left - was.left) > 1e-9 ||
-        Math.abs(d.area.top - was.top) > 1e-9 ||
-        Math.abs(d.area.right - was.right) > 1e-9 ||
-        Math.abs(d.area.bottom - was.bottom) > 1e-9
-      );
-    });
-    if (moved) edit.onStretch(next.map((d) => d.area));
+    // Only what was dragged on the picture shown now, and changed.
+    if (latest?.from !== preview || !edit || asShown(latest.drafts)) return;
+    edit.onStretch(latest.drafts.map((d) => d.area));
   };
 
   const label = preview
@@ -728,7 +777,7 @@ export function Screen({
                     aria-label={`Zone ${z.name}${list.length ? '' : ', empty'}`}
                     className="absolute inset-0 z-0 cursor-pointer rounded-[9px] hover:bg-[color-mix(in_srgb,var(--desk-text)_8%,transparent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)]"
                     onClick={() => {
-                      focusNext.current = chosen.key;
+                      focusNext.current = { key: chosen.key, from: chosen.zone, seen: preview };
                       putIn(chosen.piece, { zone: i, onto: null, key: null });
                       pick(null);
                     }}

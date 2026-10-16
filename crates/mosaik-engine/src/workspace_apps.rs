@@ -244,15 +244,20 @@ impl Engine {
             return not_found(which);
         };
         let ws = &self.file.workspaces[index];
-        // The zone the app leaves, which the other one takes.
-        let left = ws
-            .layout
-            .slot(slot)
-            .and_then(|s| ws.layout.effective_place(s))
-            .and_then(|p| match p {
-                Place::Zone { zone } => Some(zone.clone()),
-                _ => None,
-            });
+        let zone_of = |s: &SlotId| {
+            ws.layout
+                .slot(s)
+                .and_then(|s| ws.layout.effective_place(s))
+                .and_then(|p| match p {
+                    Place::Zone { zone } => Some(zone.clone()),
+                    _ => None,
+                })
+        };
+        // The zone the app leaves, which the other one takes; and, trading, the zone the other
+        // one is really in, whatever zone a picture drawn before a change asked for.
+        let left = zone_of(slot);
+        let target = swap_with.and_then(zone_of).unwrap_or_else(|| zone.clone());
+        let zone = &target;
         let moved = match swap_with {
             Some(other) => swap_apps(ws, slot, other),
             None => move_app(ws, slot, zone),

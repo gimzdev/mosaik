@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Command, Reply } from './protocol';
+import type { ArrangePreview, Command, Reply, ZoneEdit } from './protocol';
 import {
   appsOf,
   done,
@@ -168,6 +168,54 @@ describe('a workspace’s page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add a window to “Ship”' }));
     await userEvent.click(screen.getByRole('button', { name: /^Slack/ }));
     expect(asked).toContainEqual({ cmd: 'add_app', workspace: 'ship', window: 0x2_04f2, zone: null });
+  });
+
+  it('resizes a zone down to the smallest Mosaïk takes, from where its zones are exactly', async () => {
+    // Review of 596ba4f: the line's limits came from the picture's rounded pixels while the
+    // edges not moved kept their exact place: Thirds on a screen 2560 wide made a zone 0.0499
+    // wide, which Mosaïk refused as too small.
+    const work = { left: 0, top: 0, right: 2560, bottom: 1392 };
+    const third = (i: number) => ({ left: i / 3, top: 0, right: (i + 1) / 3, bottom: 1 });
+    const colors = ['lapis', 'verdigris', 'saffron'] as const;
+    const thirds: ZoneEdit[] = [0, 1, 2].map((i) => ({
+      id: `z${String(i + 1)}`,
+      name: String(i + 1),
+      color: colors[i] ?? 'slate',
+      monitor: 'm1',
+      area: third(i),
+    }));
+    const picture: ArrangePreview = {
+      work_area: work,
+      zones: thirds.map((z, i) => ({
+        id: z.id ?? '',
+        name: z.name,
+        color: z.color,
+        rect: { left: Math.round((i * 2560) / 3), top: 0, right: Math.round(((i + 1) * 2560) / 3), bottom: 1392 },
+        area: z.area,
+      })),
+      windows: [],
+      elsewhere: 0,
+      task: null,
+    };
+    const asked = answer((c) =>
+      c.cmd === 'preview_workspace'
+        ? preview(picture)
+        : c.cmd === 'zones' || c.cmd === 'set_zones'
+          ? zonesReply(thirds)
+          : null,
+    );
+    page();
+    const line = await screen.findByRole('separator', { name: 'Line between zone 2 and zone 3' });
+    line.focus();
+    await userEvent.keyboard('{Home}');
+    expect(await shown('Zones resized.')).toBeInTheDocument();
+    const saved = asked.find((c) => c.cmd === 'set_zones');
+    const [, two, three] = saved?.cmd === 'set_zones' ? saved.zones : [];
+    expect(two?.area.left).toBe(1 / 3);
+    expect(two?.area.right).toBe(1 / 3 + 0.05);
+    expect(three?.area.left).toBe(1 / 3 + 0.05);
+    // As wide as Mosaïk takes, give or take the last digit of a float (it allows 1e-9).
+    expect((two?.area.right ?? 0) - (two?.area.left ?? 0)).toBeGreaterThanOrEqual(0.05 - 1e-9);
   });
 
   it('moves its apps and resizes its zones on its picture, saved at once', async () => {

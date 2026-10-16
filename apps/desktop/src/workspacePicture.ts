@@ -3,8 +3,9 @@
 // the app it was dropped on; its zones resized by the lines between them. One change at a time,
 // in the order made: a resize reads the zones' revision, which the one before it changes.
 
+import { MIN_ZONE } from './editor/model';
 import { request } from './engine';
-import { type ArrangePreview, type Command, type RatioRect, type Reply, errorMessage } from './protocol';
+import { type ArrangePreview, type Command, type RatioRect, type Reply, type ZoneEdit, errorMessage } from './protocol';
 import { type Dropped, areasOf } from './Screen';
 
 /** What a change came to: Mosaïk's reply, and the words that say it. */
@@ -23,6 +24,24 @@ function inTurn(job: () => Promise<Change>): Promise<Change> {
 }
 
 const refused = (message: string): Reply => ({ reply: 'error', code: 'bad_request', message, hint: null });
+
+/** Why these zones cannot be saved, in words, or null: one too small, or two over each other on
+ * one monitor (the editor's lines never make either; a picture out of date could). */
+function unfit(zones: readonly ZoneEdit[]): string | null {
+  const small = zones.find(
+    (z) => z.area.right - z.area.left < MIN_ZONE - 1e-9 || z.area.bottom - z.area.top < MIN_ZONE - 1e-9,
+  );
+  if (small) return `Zone ${small.name} would be too small, so nothing was resized.`;
+  for (const [i, a] of zones.entries()) {
+    for (const b of zones.slice(i + 1)) {
+      if (a.monitor !== b.monitor) continue;
+      const w = Math.min(a.area.right, b.area.right) - Math.max(a.area.left, b.area.left);
+      const h = Math.min(a.area.bottom, b.area.bottom) - Math.max(a.area.top, b.area.top);
+      if (w > 1e-6 && h > 1e-6) return `Zones ${a.name} and ${b.name} would overlap, so nothing was resized.`;
+    }
+  }
+  return null;
+}
 
 /** " of “Ship”" or " in “Ship”", where the page is not the workspace's own. */
 const naming = (word: 'of' | 'in', name: string | null) => (name ? ` ${word} “${name}”` : '');
@@ -85,6 +104,8 @@ export function resizeZones(
         },
       };
     });
+    const problem = unfit(zones);
+    if (problem !== null) return { reply: refused(problem), text: problem, done: false };
     const reply = await request({ cmd: 'set_zones', workspace, zones, revision: read.revision });
     if (reply.reply !== 'zones') {
       return { reply, text: errorMessage(reply) ?? 'The zones could not be resized.', done: false };

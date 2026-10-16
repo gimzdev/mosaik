@@ -28,7 +28,8 @@ use thiserror::Error;
 /// (`starting`) and each tab group's tabs (`tabs`); zones are numbered 1, 2, 3 by place.
 /// 10: the zones of the home page's picture resized (`areas` on `arrange` and
 /// `preview_arrange`), two apps of a workspace trading zones (`swap_with` on `move_app`), and in
-/// a preview each zone's id and the zone and app of each window and tab (`id`, `zone`, `app`).
+/// a preview each zone's id and exact place and the zone and app of each window and tab (`id`,
+/// `area`, `zone`, `app`).
 pub const PROTOCOL_VERSION: u32 = 10;
 
 /// The longest message accepted, newline included, so a broken or hostile client cannot make
@@ -343,7 +344,7 @@ pub struct OpenWindow {
 
 /// What Arrange (`preview_arrange`), or opening a workspace (`preview_workspace`), would do on
 /// the main monitor, in screen pixels.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ArrangePreview {
     /// The main monitor's work area: the zones and windows below are on it.
     pub work_area: Rect,
@@ -367,7 +368,7 @@ pub struct ArrangeMove {
     pub zone: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PreviewZone {
     /// The zone's id, which `move_app` and the zone editor take.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -375,6 +376,10 @@ pub struct PreviewZone {
     pub name: String,
     pub color: ZoneColor,
     pub rect: Rect,
+    /// Its place on the work area as fractions, exactly as kept: a line dragged on the picture
+    /// starts from it, never from `rect`'s rounded pixels (ADR 0031).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<RatioRect>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1211,12 +1216,14 @@ mod wire {
                         name: "1".into(),
                         color: ZoneColor::Lapis,
                         rect: Rect::new(0, 0, 960, 1032),
+                        area: RatioRect::new(0.0, 0.0, 0.5, 1.0).ok(),
                     },
                     PreviewZone {
                         id: Some(ZoneId::new("z2")),
                         name: "2".into(),
                         color: ZoneColor::Verdigris,
                         rect: Rect::new(960, 0, 1920, 1032),
+                        area: RatioRect::new(0.5, 0.0, 1.0, 1.0).ok(),
                     },
                 ],
                 windows: vec![

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -24,6 +24,12 @@ import {
   zonesReply,
 } from './test-fixtures';
 import { Announcer } from './ui';
+
+// jsdom has no pointer capture; the picture holds the pointer on a press.
+if (typeof Element.prototype.setPointerCapture !== 'function') {
+  Element.prototype.setPointerCapture = () => undefined;
+  Element.prototype.releasePointerCapture = () => undefined;
+}
 
 const engine = vi.hoisted(() => ({
   request: vi.fn<(c: Command) => Promise<Reply>>(),
@@ -504,6 +510,125 @@ describe('Home', () => {
     expect(asked.some((c) => c.cmd === 'switch')).toBe(false);
     // Saved in the workspace, what opening it did can no longer be undone.
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+  });
+
+  it('lets go of a window picked once the picture cannot change, for good', async () => {
+    // Review of 596ba4f: picked, then Arrange windows, the window came back picked, unsaid, with
+    // the zones' buttons over the picture and its lines hidden.
+    answer();
+    home();
+    await userEvent.click(await screen.findByRole('button', { name: 'Visual Studio Code in zone 1' }));
+    expect(screen.getByText('Choose where Visual Studio Code goes. Esc cancels.')).toBeInTheDocument();
+    await userEvent.click(arrange());
+    expect(await shown('Arranged 2 windows for coding.')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(tile('Visual Studio Code in zone 1')).toBeInTheDocument();
+    });
+    expect(tile('Visual Studio Code in zone 1')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: 'Zone 2' })).not.toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' })).toBeInTheDocument();
+    expect(screen.queryByText(/Choose where/)).not.toBeInTheDocument();
+  });
+
+  it('saves nothing for a line let go of with Esc, even on a click on a line after', async () => {
+    // Review of 596ba4f: the zones as they were when the drag was cancelled were saved in the
+    // workspace shown next, on a click on its line that moved nothing.
+    const asked = answer(coding, (c) => (c.cmd === 'zones' || c.cmd === 'set_zones' ? zonesReply(openingZones) : null));
+    home();
+    await userEvent.click(await screen.findByRole('radio', { name: 'Halves' }));
+    await waitFor(() => {
+      expect(screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' })).toHaveAttribute(
+        'aria-valuenow',
+        '50',
+      );
+    });
+    const line = screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' });
+    fireEvent.pointerDown(line, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.keyDown(line, { key: 'Escape' });
+    fireEvent.pointerUp(line, { button: 0, pointerId: 1 });
+    await userEvent.click(await screen.findByRole('button', { name: 'Ship' }));
+    await waitFor(() => {
+      expect(screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' })).toHaveAttribute(
+        'aria-valuenow',
+        '60',
+      );
+    });
+    const other = screen.getByRole('separator', { name: 'Line between zone 1 and zone 2' });
+    fireEvent.pointerDown(other, { button: 0, pointerId: 2, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(other, { button: 0, pointerId: 2 });
+    await wait(300);
+    expect(asked.some((c) => c.cmd === 'set_zones' || c.cmd === 'zones')).toBe(false);
+    expect(screen.queryByText(/resized/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the focus on a tab put in another zone with the keyboard, once Mosaïk has moved it', async () => {
+    // Review of 596ba4f: the tab moved, as a window of its own, and the focus fell to the page.
+    let moved = false;
+    const [code, terminal, chrome] = opening.windows;
+    if (!code || !terminal || !chrome) throw new Error('the fixture has three windows');
+    const after: ArrangePreview = {
+      ...opening,
+      windows: [
+        code,
+        { ...terminal, tabs: [] },
+        {
+          window: 0,
+          label: 'Claude',
+          icon: 'app:Claude',
+          now: { left: 0, top: 0, right: 1152, bottom: 1032 },
+          then: { left: 0, top: 0, right: 1152, bottom: 1032 },
+          minimized: false,
+          starting: true,
+          zone: 'z1',
+          app: 's3',
+        },
+        chrome,
+      ],
+    };
+    answer(coding, (c) => {
+      if (c.cmd === 'move_app') {
+        moved = true;
+        return appsOf();
+      }
+      return c.cmd === 'preview_workspace' ? preview(moved ? after : opening) : null;
+    });
+    home();
+    await userEvent.click(await screen.findByRole('button', { name: 'Ship' }));
+    screen.getByRole('button', { name: 'Claude, a tab in zone 2' }).focus();
+    await userEvent.keyboard('{Enter}');
+    screen.getByRole('button', { name: 'Zone 1' }).focus();
+    await userEvent.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Claude starts in zone 1' })).toHaveFocus();
+    });
+  });
+
+  it('ends a drag whose window is gone from the picture, and drags nothing after', async () => {
+    // Review of 596ba4f: the window dragged left the picture (it closed), the pointer's release
+    // went elsewhere, and the drag stayed under way with its ghost.
+    let gone = false;
+    const [code, browser] = coding.windows;
+    if (!code || !browser) throw new Error('the fixture has two windows');
+    const asked = answer(coding, (c) =>
+      c.cmd === 'preview_arrange' && gone ? preview({ ...coding, windows: [browser] }) : null,
+    );
+    home();
+    const bar = await screen.findByRole('button', { name: 'Visual Studio Code in zone 1' });
+    fireEvent.pointerDown(bar, { button: 0, pointerId: 1, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(bar, { pointerId: 1, clientX: 60, clientY: 60 });
+    // Its ghost, under the pointer.
+    expect(screen.getAllByText('Visual Studio Code')).toHaveLength(2);
+    gone = true;
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Visual Studio Code in zone 1' })).not.toBeInTheDocument();
+    });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(screen.queryByText('Visual Studio Code')).not.toBeInTheDocument();
+    const chrome = screen.getByRole('button', { name: 'Google Chrome in zone 2' });
+    fireEvent.pointerDown(chrome, { button: 0, pointerId: 2, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(chrome, { pointerId: 2 });
+    expect(asked.filter((c) => c.cmd === 'preview_arrange' && c.moves !== undefined)).toEqual([]);
   });
 
   it('says why a workspace could not be changed on its picture, and shows it as it is', async () => {

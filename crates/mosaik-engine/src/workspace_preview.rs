@@ -62,6 +62,7 @@ impl Engine {
                     name: z.name.clone(),
                     color: z.color,
                     rect,
+                    area: Some(z.area),
                 })
             })
             .collect();

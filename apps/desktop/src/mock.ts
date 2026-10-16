@@ -422,6 +422,7 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
     work_area: work,
     zones: rects.map((rect, i) => ({
       id: `a${String(i + 1)}`,
+      ...(shape[i] ? { area: shape[i] } : {}),
       name: numbers[i] ?? String(i + 1),
       color: ZONE_COLORS[(colorOf[i] ?? i) % ZONE_COLORS.length] ?? 'slate',
       rect,
@@ -464,6 +465,7 @@ function previewWorkspace(w: Workspace): ArrangePreview {
   const here = w.zoneList.filter((z) => z.monitor === 'm1');
   const zones: PreviewZone[] = here.map((z) => ({
     ...(z.id ? { id: z.id } : {}),
+    area: z.area,
     name: z.name,
     color: z.color,
     rect: px(z.area, work),

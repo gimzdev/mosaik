@@ -32,8 +32,9 @@ editor: "way too large", "either discreet or not shown".
   screen, a place of its own) is not drawn; the words for screen readers say where it goes, and
   which zones are empty ("Zone 3 is empty.").
 - Mosaïk says which zone each window goes in, and which app each window and tab is, rather than
-  the page working it out from rectangles (protocol 10: a preview zone's `id`, a window's and a
-  tab's `zone` and `app`).
+  the page working it out from rectangles, and each zone's exact place, which the lines start
+  from rather than from rounded pixels (protocol 10: a preview zone's `id` and `area`, a window's
+  and a tab's `zone` and `app`).
 - A window (or a tab) is dragged by its bar: a ghost follows the pointer and the zone or window
   under it lights up; let go, it flies to its new place. Without a mouse: Enter picks it, the
   other zones become buttons ("Zone 2", "Zone 3, empty"), and Enter on one of them or on another
@@ -94,3 +95,18 @@ editor: "way too large", "either discreet or not shown".
   the release": "cringe af").
 - The stand-in engine (`mock.ts`) has a workspace like the owner's "Coding" ("Backend":
   two apps and a tab group in one zone, a zone left empty).
+
+## Review (2026-10-16)
+
+A second agent reviewed the first commit (596ba4f) and found four bugs, each now caught by a test
+written first: a line drag let go of with Esc was saved later into the workspace shown next, on a
+click on its line that moved nothing (a line now ends a drag only when it moved, and only on the
+picture it was dragged on); a window picked, then let go of because the picture could not change
+(Arrange windows), came back picked, unsaid (let go for good now); a line's limits came from the
+picture's rounded pixels while the edges not moved kept their exact place, so a zone resized to
+the smallest came out a hair under it and was refused (the preview now sends each zone's exact
+`area`); and the focus fell to the page when a tab was put in another zone with the keyboard (it
+now waits for the tab's new place). Also: a drag whose window left the picture mid-drag ends on
+the release anywhere; a trade of two apps refits the zones they really were in, whatever zone a
+picture drawn before a change named (the `smart` probe trades back that way); a resize that
+would make a zone too small or put two over each other is not sent.

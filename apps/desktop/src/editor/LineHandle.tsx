@@ -28,9 +28,12 @@ export function LineHandle({
   /** The line was let go of, or the keys that moved it were: where it is now is meant. */
   onEnd?: (() => void) | undefined;
 }) {
-  /** The drafts and the line as they were when the drag started: every move starts from them,
-   * and Esc puts them back. */
-  const dragging = useRef<{ drafts: Draft[]; line: Line } | null>(null);
+  /** The drafts and the line as they were when the drag started (every move starts from them,
+   * and Esc puts them back), and whether it has moved since: a press that moved nothing, or a
+   * drag put back with Esc, ends nothing. */
+  const dragging = useRef<{ drafts: Draft[]; line: Line; moved: boolean } | null>(null);
+  /** The keys moved it since they were last let go of. */
+  const keyed = useRef(false);
   /** Held by the pointer: the line shows until it is let go of. */
   const [held, setHeld] = useState(false);
   const vertical = line.axis === 'x';
@@ -71,7 +74,10 @@ export function LineHandle({
               : null;
     if (to === null) return;
     e.preventDefault();
-    onChange(moveLine(drafts, line, monitor, e.key === 'Home' || e.key === 'End' ? to : snap(to)));
+    const next = moveLine(drafts, line, monitor, e.key === 'Home' || e.key === 'End' ? to : snap(to));
+    if (next === drafts) return;
+    keyed.current = true;
+    onChange(next);
   };
 
   // 16 pixels to grab, over the gap between the zones and a little of each.
@@ -104,25 +110,29 @@ export function LineHandle({
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
         e.currentTarget.focus();
-        dragging.current = { drafts, line };
+        dragging.current = { drafts, line, moved: false };
         setHeld(true);
       }}
       onPointerMove={(e) => {
         const start = dragging.current;
         const v = at(e);
         if (!start || v === null) return;
-        onChange(moveLine(start.drafts, start.line, monitor, snap(v)));
+        const next = moveLine(start.drafts, start.line, monitor, snap(v));
+        if (next !== start.drafts) start.moved = true;
+        onChange(next);
       }}
       onPointerUp={() => {
         setHeld(false);
-        if (!dragging.current) return;
+        const start = dragging.current;
         dragging.current = null;
-        onEnd?.();
+        if (start?.moved) onEnd?.();
       }}
       onPointerCancel={cancel}
       onKeyDown={onKeyDown}
       onKeyUp={(e) => {
-        if (KEYS.has(e.key) && !dragging.current) onEnd?.();
+        if (!KEYS.has(e.key) || !keyed.current || dragging.current) return;
+        keyed.current = false;
+        onEnd?.();
       }}
       className={`group absolute z-10 flex touch-none items-center justify-center rounded-full ${
         vertical ? 'cursor-col-resize' : 'cursor-row-resize'

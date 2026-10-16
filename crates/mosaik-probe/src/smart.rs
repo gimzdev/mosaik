@@ -1718,7 +1718,9 @@ fn stretched(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<
 
 /// 3g2. Two apps of the open workspace, one dropped on the other on its picture (ADR 0031): they
 /// trade zones in the workspace, and their windows trade places at once; the third window stays
-/// where it is. Traded back after.
+/// where it is. Traded back after, as from a picture drawn before the first trade (the zone it
+/// names is the first app's own): Mosaïk trades them by where they are, and both windows go back
+/// (the review of 596ba4f: only the zone named was refitted, so one window stayed).
 fn swapped(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
     let st = settled(engine)?;
     let ws = st
@@ -1782,7 +1784,7 @@ fn swapped(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Va
         .get(2)
         .zip(before.get(2))
         .is_none_or(|(h, was)| frame_rect(*h).is_some_and(|f| edge_error(f, *was) <= SLACK));
-    let _ = trade(&a, &za, &b)?;
+    let _ = trade(&a, &zb, &b)?;
     let _ = settled(engine)?;
     let back = most_moved(&frames(w), &before);
     Ok(json!({

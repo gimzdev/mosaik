@@ -147,6 +147,9 @@ export interface ArrangeMove {
 export interface PreviewZone {
   /** Its id, which `move_app` and the zone editor take. */
   id?: string;
+  /** Its place on the work area as fractions, exactly as kept: a line dragged on the picture
+   * starts from it, never from `rect`'s rounded pixels. */
+  area?: RatioRect;
   /** Its number by place ("1"). */
   name: string;
   color: ZoneColor;
@@ -411,6 +414,7 @@ function isPreviewZone(x: unknown): x is PreviewZone {
   return (
     isObject(x) &&
     isOptionalString(x.id) &&
+    (x.area === undefined || isRect(x.area)) &&
     isString(x.name) &&
     isString(x.color) &&
     COLORS.has(x.color) &&
