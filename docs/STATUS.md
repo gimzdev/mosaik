@@ -1590,6 +1590,19 @@ simetric and appealing". ADR 0032.
   only), interface 133, Playwright 35. The `smart` probe checks that a second picture after Move
   windows finds every window where it is, the zone's own window first.
 
+- **On the owner's PC** (job 0163, at 5b6280a): build and every test passing (interface 133);
+  the engine's arrange test ok. The scan: 304 windows, the engine's 0.4 ms, every window 2.3 ms.
+  `smart`, every check passing: no workspace made by Arrange (7 ms), undone 0 px; the arranged
+  screen saved; its apps edited; Halves stretched to two thirds, 0 px; two apps trading zones,
+  0 px; two apps of one zone trading places (the first one's window in front, 0 px back); a
+  window put elsewhere; two windows of a half traded on the picture, then moved (the one behind
+  in front, both 0 px from where the picture put them, Undo 0 px); a fifth window and Halves
+  with every window in a zone, the zone's own window in front, and a second picture right after
+  finding every window where it is, the own window still first; the side menu (Halves from it,
+  every window in a half). The tour: 32 pictures. Mosaïk left in the tray (1.0.2, protocol 11,
+  watchdog, Win+Alt+Space); packed (288 files); both files beside the repository brought up to
+  date (the key line kept).
+
 ## Owner decisions
 
 - 2026-10-11: the Patreon link is https://www.patreon.com/gimzdev (About and the tray menu only).
