@@ -29,7 +29,8 @@ use windows::core::PCWSTR;
 use crate::error::{Error, Result};
 use crate::text::wide;
 
-/// The most keys read in one request: a page shows a few dozen apps at most.
+/// The most keys read in one request: the window asks for 24 at a time, a long list (Add an app's,
+/// every app of the Start menu) a part at a time (`apps/desktop/src/icons.tsx`).
 pub const MOST_PER_REQUEST: usize = 96;
 
 type Answer = Vec<(String, Option<Vec<u8>>)>;

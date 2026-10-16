@@ -142,6 +142,19 @@ describe('a workspace’s page', () => {
     expect(screen.getByText('2 apps · 2 zones')).toBeInTheDocument();
   });
 
+  it('says only that its zones are empty while it has no app to drag or move', async () => {
+    // Job 0172's tour: a workspace with no app said "Empty. Drag an app here, or use Move." in
+    // each of its zones, with no app to drag and no Move (the owner: "lets not flood with
+    // useless infos").
+    answer((c) => (c.cmd === 'apps' ? appsOf({ apps: [] }) : null));
+    page();
+    const apps = await screen.findByRole('group', { name: 'Apps of “Ship”' });
+    for (const n of ['1', '2']) {
+      expect(within(within(apps).getByRole('group', { name: `Zone ${n}` })).getByText('Empty')).toBeInTheDocument();
+    }
+    expect(screen.queryByText(/Drag an app here/)).not.toBeInTheDocument();
+  });
+
   it('lists its apps zone by zone, and moves, removes and adds them', async () => {
     // The owner, of a row of zone dots for each app: "the options look like absolute garbage".
     const asked = answer();

@@ -329,7 +329,8 @@ export function AppsList({
           <ul className="min-w-0 flex-1">{apps.map(row)}</ul>
         ) : (
           <p className="flex min-h-11 flex-1 items-center text-small text-[var(--muted)]">
-            Empty. Drag an app here, or use Move.
+            {/* How to fill it, only while there is an app to drag or move. */}
+            {data.apps.length ? 'Empty. Drag an app here, or use Move.' : 'Empty'}
           </p>
         )}
       </div>

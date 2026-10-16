@@ -222,15 +222,21 @@ describe('Mosaïk’s window', () => {
   });
 
   it('is dark unless the user chose otherwise', async () => {
+    // The theme is put on the page by an effect, once the settings are read: it can come a moment
+    // after the page shows (an unrelated run of the tests once read it before).
     answer(setUp);
     render(<App />);
     await screen.findByRole('heading', { name: 'Your screen' });
-    expect(document.documentElement.dataset.theme).toBe('dark');
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe('dark');
+    });
     cleanup();
     answer({ ...setUp, theme: 'system' });
     render(<App />);
     await screen.findByRole('heading', { name: 'Your screen' });
-    expect(document.documentElement.dataset.theme).toBe('system');
+    await waitFor(() => {
+      expect(document.documentElement.dataset.theme).toBe('system');
+    });
   });
 
   it('leaves the window’s theme to Windows with “Like Windows”, so that the page follows Windows', async () => {

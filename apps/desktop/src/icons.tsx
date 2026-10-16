@@ -9,22 +9,36 @@ import { appIcons } from './engine';
 const cache = new Map<string, string | null>();
 /** Callers waiting for each key being read. */
 const waiting = new Map<string, ((url: string | null) => void)[]>();
-/** Keys asked for since the last read: read together, once the page has asked for all it shows. */
-let queued: string[] = [];
+/** Keys asked for and not read yet, in the order the page asked for them. */
+const queued: string[] = [];
 let scheduled = false;
+/** A read is under way: the next waits for it. */
+let reading = false;
+
+/** The most keys in one read. Mosaïk reads icons one after another, at most 96 a read
+ * (`mosaik_win::icons::MOST_PER_REQUEST`): a long list (Add an app's, every app of the Start menu)
+ * is read a part at a time, one read after another, the first on the page first. */
+const PER_READ = 24;
 
 function read() {
   scheduled = false;
-  const keys = queued;
-  queued = [];
-  void appIcons(keys).then((found) => {
-    for (const key of keys) {
-      const url = found[key] ?? null;
-      cache.set(key, url);
-      for (const done of waiting.get(key) ?? []) done(url);
-      waiting.delete(key);
-    }
-  });
+  if (reading) return;
+  const keys = queued.splice(0, PER_READ);
+  if (keys.length === 0) return;
+  reading = true;
+  void appIcons(keys)
+    .then((found) => {
+      for (const key of keys) {
+        const url = found[key] ?? null;
+        cache.set(key, url);
+        for (const done of waiting.get(key) ?? []) done(url);
+        waiting.delete(key);
+      }
+    })
+    .finally(() => {
+      reading = false;
+      read();
+    });
 }
 
 function load(key: string): Promise<string | null> {
