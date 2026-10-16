@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSet, Command, Reply, WorkspaceSummary } from './protocol';
 import { done, failed, set, setsReply, workspace, workspacesReply } from './test-fixtures';
 import { Announcer } from './ui';
-import { type Shown, type Sorted, type Target, Workspaces } from './Workspaces';
+import { type Shown, type Target, Workspaces } from './Workspaces';
 
 const engine = vi.hoisted(() => ({
   request: vi.fn<(c: Command) => Promise<Reply>>(),
@@ -68,23 +68,17 @@ function answer(
   return asked;
 }
 
-function render_(options: { shown?: Target | null; launching?: Target | null; sorted?: Sorted | null } = {}) {
+function render_(options: { shown?: Target | null; launching?: Target | null } = {}) {
   const props = {
     onEdit: vi.fn(),
     onEditZones: vi.fn(),
     onShow: vi.fn<(s: Shown) => void>(),
     onOpen: vi.fn<(w: WorkspaceSummary) => void>(),
     onSay: vi.fn<(text: string, error?: boolean) => void>(),
-    onSortedRead: vi.fn(),
   };
   render(
     <Announcer>
-      <Workspaces
-        shown={options.shown ?? null}
-        launching={options.launching ?? null}
-        sorted={options.sorted ?? null}
-        {...props}
-      />
+      <Workspaces shown={options.shown ?? null} launching={options.launching ?? null} {...props} />
     </Announcer>,
   );
   return props;
@@ -273,25 +267,5 @@ describe('the workspaces', () => {
       await screen.findByText('Arrange your windows, then save them as a workspace to bring them back later.'),
     ).toBeInTheDocument();
     expect(list()).toBeInTheDocument();
-  });
-
-  it('says the first run made workspaces of the windows open, until put away', async () => {
-    answer([ship, brand]);
-    const { onSortedRead } = render_({ sorted: { before: new Set(['brand']), error: null } });
-    const note = await screen.findByText('Made from the windows you had open. Delete any you don’t need.');
-    await userEvent.click(screen.getByRole('button', { name: 'Got it' }));
-    expect(onSortedRead).toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Got it' })).toHaveAccessibleDescription(note.textContent);
-  });
-
-  it('says nothing of the first run when it made no workspace, and why when it could not', async () => {
-    answer([ship]);
-    render_({ sorted: { before: new Set(['ship']), error: null } });
-    await screen.findByRole('button', { name: 'Ship (on screen)' });
-    expect(screen.queryByRole('button', { name: 'Got it' })).not.toBeInTheDocument();
-    cleanup();
-    answer([ship]);
-    render_({ sorted: { before: null, error: 'Workspaces cannot be saved: the disk is full.' } });
-    expect(await screen.findByRole('alert')).toHaveTextContent('Workspaces cannot be saved: the disk is full.');
   });
 });

@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-10-16
-- Amends: ADR 0031 (the picture), 0032 (drops onto a zone, stretched zones)
+- Amends: ADR 0031 (the picture, the first run's note), 0032 (drops onto a zone, stretched zones)
 
 ## Context
 
@@ -23,6 +23,9 @@ The owner, on 2026-10-16, after 1.0.2's pictures:
 - "the apps in image 1 must be able to be dragged and droped from zones" (a workspace's list of
   apps, by zone).
 - "windows theme doesnt work, either make it work or make it go we dont really care for it".
+- Of the note the first run left above the workspaces ("Made from the windows you had open.
+  Delete any you don’t need.", with Got it): "this shit has to go lets not flood with useless
+  infos".
 
 Measured before the change: on 20000 random screens with a layout picked, a line dragged moved a
 window to another zone on 9918. The plan found the windows in the zones as stretched (a window
@@ -71,6 +74,11 @@ gives WebView2 the window's theme, so once a theme had been chosen the page neve
 Windows again. With Like Windows the window's theme is left to Windows (`style_title_bar`
 without `dark`); only the caption takes the page's colours.
 
+**The first run says nothing.** The workspaces it makes of the windows open are in Home's column
+like any other, with no note to read or put away (it was the last such tip: `Tip` is gone).
+Should the windows not be sorted, why waits in Mosaïk's notes, behind their button in the
+window's bar (ADR 0024), with what to do instead: Save as workspace.
+
 ## Consequences
 
 - Protocol 12. An older engine sends no `installed`, and the page offers its open windows.
@@ -82,12 +90,13 @@ without `dark`); only the caption takes the page's colours.
   without a tab group, keeps every app in a zone with no zone empty while another holds two; any
   Start menu app can be added, uninstallers and folders cannot. ADR 0032's tests that dropped
   onto a zone to trade now drop onto the window.
-- Interface tests: the picture before Mosaïk answers for a drop onto a zone; Home lays out a
+- Interface tests: the first run makes its workspaces with nothing to read or put away, and a
+  sorting that failed waits in the notes; the picture before Mosaïk answers for a drop onto a zone; Home lays out a
   workspace shown and undoes it; Like Windows leaves the window's theme to Windows; Add an app
   lists open and not open apps as one list, found by name, with the arrow keys; what each drop of
   the list asks. Playwright: a window dragged into another zone joins it and Move windows keeps
   it; the workspace with the most apps on every layout keeps every app, and Undo; apps dragged in
-  their list; Add an app (with axe).
+  their list; Add an app (with axe); the first run with no note.
 - The `smart` probe drops a window onto the other half itself (it joins it, behind the window in
   front there, on the picture and on screen), and lays its workspace out on every layout (every
   app in a zone, nothing saved or moved), then in Quarters, and undoes it. The UI tour reads the

@@ -70,7 +70,6 @@ export function Button({
   type = 'button',
   expanded,
   controls,
-  describedBy,
   wide = false,
 }: {
   tone?: Tone;
@@ -88,8 +87,6 @@ export function Button({
   /** For a button that shows or hides something. */
   expanded?: boolean;
   controls?: string;
-  /** The element whose words say more about it, to screen readers. */
-  describedBy?: string;
   /** As wide as its box. */
   wide?: boolean;
 }) {
@@ -102,7 +99,6 @@ export function Button({
       title={hint}
       aria-expanded={expanded}
       aria-controls={controls}
-      aria-describedby={describedBy}
       onClick={onClick}
       className={`inline-flex items-center justify-center font-semibold whitespace-nowrap transition-[background-color,opacity] duration-150 disabled:opacity-50 forced-colors:disabled:border forced-colors:disabled:border-[GrayText] forced-colors:disabled:text-[GrayText] forced-colors:disabled:opacity-100 ${
         pending ? 'cursor-progress' : 'disabled:cursor-not-allowed'
@@ -278,34 +274,6 @@ export function OnScreen() {
       <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--ok)] forced-colors:bg-[CanvasText]" />
       On screen
     </span>
-  );
-}
-
-/** A tip shown until it is put away, with what it says read with its button. An error says why
- * something did not happen, and is read out as it appears. */
-export function Tip({
-  children,
-  onDismiss,
-  error = false,
-}: {
-  children: ReactNode;
-  onDismiss: () => void;
-  error?: boolean;
-}) {
-  const id = useId();
-  return (
-    <div
-      role={error ? 'alert' : undefined}
-      // Its button beside the words where there is room, under them where there is not.
-      className="flex flex-wrap items-start justify-end gap-x-2 rounded-[14px] border border-[var(--line)] bg-[var(--raised)] py-1 pr-1 pl-3.5"
-    >
-      <p id={id} className={`min-w-0 flex-1 basis-56 py-2 text-small ${error ? 'text-[var(--danger)]' : ''}`}>
-        {children}
-      </p>
-      <Button tone="quiet" size="sm" describedBy={id} onClick={onDismiss}>
-        Got it
-      </Button>
-    </div>
   );
 }
 

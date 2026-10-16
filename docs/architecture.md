@@ -209,7 +209,8 @@ the engine gathers windows and applies the result.
   AppUserModelID, `AppMatch::same_app`); a start still pending when the workspace is opened again
   stands for its slot; a started app is placed when its window shows or uncloaks (ADR 0023). The
   first time Mosaïk's window opens, the windows open are sorted into a workspace per task,
-  without moving any.
+  without moving any and without a word: the workspaces made are in Home's column, and a sorting
+  that failed says why in Mosaïk's notes (ADR 0033).
 - **The side menu** (ADR 0015, 0017, 0023, 0024): a thin line on an edge of the main monitor
   slides open as soon as the pointer stops on it, onto Arrange, five layouts drawn in small, the
   workspaces with the one open marked, saving, the zone editor and snapping, without taking the

@@ -13,7 +13,7 @@ import { AppIcon, AppIcons, Glyph, Spinner } from './icons';
 import { MiniLayout } from './Layouts';
 import { type AppSet, MAX_NAME, type WorkspaceSummary, errorMessage } from './protocol';
 import { useReads } from './reads';
-import { Button, MenuButton, OnScreen, Status, Tip } from './ui';
+import { Button, MenuButton, OnScreen, Status } from './ui';
 
 /** A workspace, or a suggested set of apps (by its id). */
 export interface Target {
@@ -23,14 +23,6 @@ export interface Target {
 
 /** What Home shows in its picture instead of the screen: a workspace, or a suggested set. */
 export type Shown = { kind: 'workspace'; workspace: WorkspaceSummary } | { kind: 'set'; set: AppSet };
-
-/** The first run's sorting of the windows open into workspaces. */
-export interface Sorted {
-  /** The workspaces there were before, to tell the ones made (null: not known, all of them). */
-  before: ReadonlySet<string> | null;
-  /** Why the windows could not be sorted, if they could not. */
-  error: string | null;
-}
 
 /** The suggested sets change only as apps are installed: read again on coming back to the window
  * at most this often (and whenever the workspaces change, as a set becomes one). */
@@ -163,8 +155,6 @@ const same = (a: Target | null, kind: Target['kind'], id: string) => a?.kind ===
 export function Workspaces({
   shown,
   launching,
-  sorted = null,
-  onSortedRead,
   onShow,
   onOpen,
   onSay,
@@ -175,9 +165,6 @@ export function Workspaces({
   shown: Target | null;
   /** What is being opened. */
   launching: Target | null;
-  /** The first run's sorting, until its note is put away. */
-  sorted?: Sorted | null;
-  onSortedRead?: () => void;
   /** A row clicked: Home shows it (it stays shown when clicked again). */
   onShow: (shown: Shown) => void;
   /** Opens a workspace: a double-click on its row, or Open in its menu. */
@@ -230,8 +217,6 @@ export function Workspaces({
   const suggested = sets.filter((s) => s.workspace === null);
   const names = (list ?? []).map((w) => w.name);
   const activeName = list?.find((w) => w.id === active)?.name ?? null;
-  // The workspaces the first run made: the ones that were not there before.
-  const made = sorted && list ? list.filter((w) => !sorted.before?.has(w.id)) : [];
 
   return (
     <section
@@ -255,14 +240,6 @@ export function Workspaces({
           </Button>
         )}
       </div>
-
-      {sorted && (sorted.error !== null || made.length > 0) && onSortedRead ? (
-        <div className="mt-2">
-          <Tip error={sorted.error !== null} onDismiss={onSortedRead}>
-            {sorted.error ?? 'Made from the windows you had open. Delete any you don’t need.'}
-          </Tip>
-        </div>
-      ) : null}
 
       {problem ? (
         <div className="mt-2 flex flex-wrap items-center gap-3 px-2">

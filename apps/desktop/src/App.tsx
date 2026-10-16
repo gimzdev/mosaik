@@ -1,8 +1,10 @@
 // Mosaïk's window: a bar with its two places, Home (the screen, Arrange, the layouts, the
 // workspaces) and Settings (with About at the end), and Mosaïk's notes; under it, the page. A
 // workspace's own page and the zone editor open from Home. The first time Mosaïk opens, it sorts
-// the windows open into workspaces: there is no tour to sit through, and no word of welcome to put
-// away (the owner, of the one there was: "this shit has to go"); Home shows what Arrange will do.
+// the windows open into workspaces: there is no tour to sit through, and nothing to read or put
+// away (the owner, of the welcome there was: "this shit has to go"; of the note that said which
+// workspaces were made: "lets not flood with useless infos"); Home shows what Arrange will do,
+// and the workspaces made are in its column.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -23,7 +25,6 @@ import { type HotkeyState, type Settings, type SideMenuState, errorMessage } fro
 import { SettingsPage } from './SettingsPage';
 import { Announcer, Button, Confirm, Keys, Mark } from './ui';
 import { WorkspacePage } from './WorkspacePage';
-import type { Sorted } from './Workspaces';
 import { ZoneEditor } from './ZoneEditor';
 
 type View =
@@ -86,8 +87,6 @@ export function App() {
   const [editorDirty, setEditorDirty] = useState(false);
   /** The first run's work is under way (once per window). */
   const firstRunStarted = useRef(false);
-  /** The first run's sorting of the windows into workspaces, until its note is put away. */
-  const [sorted, setSorted] = useState<Sorted | null>(null);
   /** Where the user asked to go while the zone editor has unsaved changes. */
   const [leavingTo, setLeavingTo] = useState<View | null>(null);
   /** The window is closing with unsaved zone edits: resolves the question. */
@@ -196,21 +195,22 @@ export function App() {
 
   // The first run: the windows open now are sorted into a workspace per task (none moves), and
   // Mosaïk as installed starts with Windows from now on (Settings turns that off; a build run
-  // from a folder is left as it is). Home says which workspaces were made.
+  // from a folder is left as it is). The workspaces made are simply there, in Home's column;
+  // should the windows not be sorted, why waits in Mosaïk's notes, with what to do instead.
   useEffect(() => {
     if (!settings || settings.onboarding_done || readOnly || firstRunStarted.current) return;
     firstRunStarted.current = true;
     void (async () => {
-      // The workspaces there are now, to tell the ones the sorting makes.
-      const before = await request({ cmd: 'workspaces' });
       const reply = await request({ cmd: 'sort_windows' });
-      setSorted({
-        before: before.reply === 'workspaces' ? new Set(before.workspaces.map((w) => w.id)) : null,
-        error:
-          reply.reply === 'done'
-            ? null
-            : (errorMessage(reply) ?? 'Your open windows could not be sorted into workspaces.'),
-      });
+      if (reply.reply !== 'done') {
+        noteCount.current += 1;
+        const note: Note = {
+          id: noteCount.current,
+          title: 'Your open windows were not sorted into workspaces',
+          body: `${errorMessage(reply) ?? 'Mosaïk did not answer.'} Save as workspace, on Home, keeps what is on screen as one.`,
+        };
+        setNotes((n) => [note, ...n]);
+      }
       await saveSettings({
         ...settings,
         onboarding_done: true,
@@ -275,10 +275,6 @@ export function App() {
               }}
               onEditZones={(workspace) => {
                 setView({ page: 'zones', workspace, from: 'home' });
-              }}
-              sorted={sorted}
-              onSortedRead={() => {
-                setSorted(null);
               }}
               startsApps={settings.switching.launch_missing}
             />

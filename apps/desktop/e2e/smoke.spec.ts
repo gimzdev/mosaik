@@ -758,14 +758,12 @@ test('the first run has no tour: Home shows what Arrange will do, and Mosaïk st
   await page.goto('/?first=1');
   await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  // No word of welcome to put away (the owner: "this shit has to go"); the workspaces made of the
-  // windows open are said, until put away.
-  await expect(page.getByText(/Mosaïk tidies your windows/)).toHaveCount(0);
-  await expect(shown(page, 'Made from the windows you had open. Delete any you don’t need.')).toBeVisible();
+  // No word of welcome, nor of the workspaces made of the windows open (the owner: "this shit has
+  // to go", then "lets not flood with useless infos"): they are simply there.
   await expect(page.getByRole('button', { name: 'Coding', exact: true })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Your screen' }).getByRole('button', { name: 'Got it' })).toHaveCount(
-    0,
-  );
+  await expect(page.getByText(/Mosaïk tidies your windows/)).toHaveCount(0);
+  await expect(page.getByText(/Made from the windows/)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Got it' })).toHaveCount(0);
   await accessible(page);
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('switch', { name: 'Start with Windows' })).toBeChecked();

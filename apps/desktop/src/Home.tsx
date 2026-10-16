@@ -44,7 +44,7 @@ import {
 } from './Screen';
 import { Button, PageTitle, Status, useAnnounce } from './ui';
 import { type Change, moveApp, resizeZones } from './workspacePicture';
-import { type Shown, type Sorted, type Target, Workspaces } from './Workspaces';
+import { type Shown, type Target, Workspaces } from './Workspaces';
 
 /** No window put elsewhere: one list, so the pictures asked for do not change with each render. */
 /** A window put elsewhere on the picture, and whether it was dropped onto another of its own zone
@@ -156,15 +156,10 @@ function layoutOf(preview: ArrangePreview | null): Preset | null {
 export function Home({
   onEditWorkspace,
   onEditZones,
-  sorted = null,
-  onSortedRead,
   startsApps = true,
 }: {
   onEditWorkspace: (workspace: string) => void;
   onEditZones: (workspace: string) => void;
-  /** The first run's sorting of the windows into workspaces, until its note is put away. */
-  sorted?: Sorted | null;
-  onSortedRead?: () => void;
   /** Opening a workspace starts its apps that are not open ("Start a workspace’s closed apps"). */
   startsApps?: boolean;
 }) {
@@ -607,8 +602,6 @@ export function Home({
         <Workspaces
           shown={shown ? target(shown) : null}
           launching={launching}
-          sorted={sorted}
-          {...(onSortedRead ? { onSortedRead } : {})}
           onShow={(next) => {
             setShown(next);
             setOutcome(null);

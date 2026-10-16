@@ -8,6 +8,7 @@ import {
   appsOf,
   coding,
   done,
+  failed,
   freshSettings,
   preview,
   setUp,
@@ -150,8 +151,9 @@ describe('Mosaïk’s window', () => {
     );
   });
 
-  it('says which workspaces the first run made of the windows open, with no word of welcome to put away', async () => {
-    // The owner, of the welcome Home had: "this shit has to go".
+  it('makes workspaces of the windows open on the first run, with nothing to read or put away', async () => {
+    // The owner, of the welcome Home had: "this shit has to go"; of the note that said which
+    // workspaces were made: "this shit has to go lets not flood with useless infos".
     let sorted = false;
     answer(freshSettings, (c) => {
       if (c.cmd === 'sort_windows') {
@@ -168,15 +170,26 @@ describe('Mosaïk’s window', () => {
     });
     render(<App />);
     const workspaces = await screen.findByRole('region', { name: 'Workspaces' });
-    expect(
-      await within(workspaces).findByText('Made from the windows you had open. Delete any you don’t need.'),
-    ).toBeInTheDocument();
+    expect(await within(workspaces).findByRole('button', { name: 'Coding' })).toBeInTheDocument();
+    expect(screen.queryByText(/Made from the windows/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Mosaïk tidies your windows/)).not.toBeInTheDocument();
-    const [only, ...more] = screen.getAllByRole('button', { name: 'Got it' });
-    expect(more).toHaveLength(0);
-    if (!only) throw new Error('the note of the workspaces made, with its button');
-    await userEvent.click(only);
     expect(screen.queryByRole('button', { name: 'Got it' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Notes from Mosaïk/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps why the first run could not sort the windows in Mosaïk’s notes, off the page', async () => {
+    answer(freshSettings, (c) =>
+      c.cmd === 'sort_windows' ? failed('Workspaces cannot be saved: the disk is full.') : null,
+    );
+    render(<App />);
+    const bell = await screen.findByRole('button', { name: 'Notes from Mosaïk: 1' });
+    expect(screen.queryByText(/the disk is full/)).not.toBeInTheDocument();
+    await userEvent.click(bell);
+    const notes = screen.getByRole('region', { name: 'Notes' });
+    expect(within(notes).getByText('Your open windows were not sorted into workspaces')).toBeInTheDocument();
+    expect(
+      within(notes).getByText(/Workspaces cannot be saved: the disk is full\. Save as workspace/),
+    ).toBeInTheDocument();
   });
 
   it('starts with Windows by itself only when installed: a build run from a folder is left as it is', async () => {
