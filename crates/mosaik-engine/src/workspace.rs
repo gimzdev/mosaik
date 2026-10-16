@@ -159,6 +159,9 @@ fn error(code: ErrorCode, message: impl Into<String>, hint: Option<&str>) -> Rep
     }
 }
 
+/// How long a save the user asked for waits for the disk.
+const SAVE_WAIT: Duration = Duration::from_secs(5);
+
 impl Engine {
     pub(crate) fn style(&self) -> FrameStyle {
         self.settings.frames.effective_style()
@@ -248,28 +251,36 @@ impl Engine {
             .or_else(|| self.topology.clone())
     }
 
-    /// Writes `workspaces.json` for a change the user asked for; the error says why it could
-    /// not be saved (the caller puts things back as they were).
+    /// Writes `workspaces.json` for a change the user asked for, and waits for it; the error
+    /// says why it could not be saved (the caller puts things back as they were).
     pub(crate) fn save_file(&mut self) -> Result<(), String> {
         if let Some(problem) = &self.file_problem {
             return Err(format!("Workspaces cannot be saved: {problem}"));
         }
-        self.store
-            .save(&self.file)
-            .map_err(|e| format!("Your workspaces could not be saved: {e}"))
+        match &self.saver {
+            Some(saver) => saver.now(self.file.clone(), SAVE_WAIT),
+            None => self.store.save(&self.file).map_err(|e| e.to_string()),
+        }
+        .map_err(|e| format!("Your workspaces could not be saved: {e}"))
     }
 
-    /// Writes `workspaces.json` after a change Mosaïk made itself (a window moved by hand);
-    /// a failure is told once and logged.
+    /// Writes `workspaces.json` after a change Mosaïk made itself (a window moved by hand, a tab
+    /// clicked): on the saver's thread, once changes stop for a moment, so the change shows
+    /// without waiting for the disk. A failure is told once and logged.
     pub(crate) fn persist(&mut self) {
         if self.file_problem.is_some() {
             return;
         }
-        if let Err(e) = self.store.save(&self.file) {
+        let failed = match &self.saver {
+            // A write before this one may have failed meanwhile.
+            Some(saver) if saver.later(self.file.clone()) => saver.take_failure(),
+            _ => self.store.save(&self.file).err().map(|e| e.to_string()),
+        };
+        if let Some(e) = failed {
             tracing::error!(error = %e, "workspaces not saved");
             if !self.save_failed_told {
                 self.save_failed_told = true;
-                self.notice("Your workspaces could not be saved", e.to_string());
+                self.notice("Your workspaces could not be saved", e);
             }
         }
     }

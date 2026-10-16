@@ -173,8 +173,7 @@ impl Engine {
                 // How small it goes: what its app tells Windows, or its size when it keeps one.
                 let least = if w.resizable {
                     let dpi = topology.monitor_for_rect(w.frame_rect).dpi;
-                    window::least_frame(window::hwnd(w.handle), w.window_rect, w.frame_rect, dpi)
-                        .unwrap_or_default()
+                    self.least(w.handle, w.window_rect, w.frame_rect, dpi)
                 } else {
                     w.frame_rect.size()
                 };

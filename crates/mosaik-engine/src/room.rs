@@ -9,6 +9,7 @@
 //! all fit, or the zones do not tile the monitor in rows and columns, nothing changes.
 
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use mosaik_core::fit::make_room;
 use mosaik_core::geometry::{RatioRect, Rect, Size};
@@ -25,7 +26,33 @@ use crate::thread::Engine;
 /// A window kept more than its zone by more than this, in pixels, needs room.
 const KEPT_MORE: i32 = 2;
 
+/// How long what an app said of its window's smallest size is used before asking again.
+const LEAST_FRESH: Duration = Duration::from_secs(10);
+
 impl Engine {
+    /// How small window `h` (its window rectangle `window_rect`, its frame `frame`, on a monitor
+    /// at `dpi`) goes, as its app says. Asking is a call into the app, up to 100 ms when it is
+    /// busy, for every window each time Home's picture is drawn: what it said is kept for
+    /// [`LEAST_FRESH`] at the same DPI. An app that does not answer is asked again next time.
+    pub(crate) fn least(&mut self, h: WindowHandle, window_rect: Rect, frame: Rect, dpi: u32) -> Size {
+        let now = Instant::now();
+        if let Some(&(at, at_dpi, least)) = self.least.get(&h)
+            && at_dpi == dpi
+            && now.duration_since(at) < LEAST_FRESH
+        {
+            return least;
+        }
+        let Some(least) = window::least_frame(window::hwnd(h), window_rect, frame, dpi) else {
+            return Size::default();
+        };
+        if self.least.len() > 256 {
+            self.least
+                .retain(|_, (at, _, _)| now.duration_since(*at) < LEAST_FRESH);
+        }
+        self.least.insert(h, (now, dpi, least));
+        least
+    }
+
     /// After windows were put in zones (`placed`: each window, the frame it was meant to have,
     /// and the one it kept), the zones make room for the ones that kept more.
     pub(crate) fn make_room(&mut self, topology: &Topology, placed: &[(WindowHandle, Rect, Rect)]) {
@@ -73,20 +100,20 @@ impl Engine {
             *n = Size::new(n.width.max(more.width), n.height.max(more.height));
         }
         // What the windows in the other zones need: what their apps say, or their own size.
+        let in_zones: Vec<(WindowHandle, ZoneId)> = active
+            .windows
+            .values()
+            .filter_map(|&h| zone_of(h).map(|z| (h, z)))
+            .collect();
         let mut held: HashMap<ZoneId, Size> = HashMap::new();
-        for &h in active.windows.values() {
-            let Some(zone) = zone_of(h) else {
-                continue;
-            };
+        for (h, zone) in in_zones {
             let hwnd = window::hwnd(h);
             let Some(g) = window::geometry(hwnd).filter(window::Geometry::framable) else {
                 continue;
             };
             let least = if g.resizable {
                 let dpi = topology.monitor_for_rect(g.frame).dpi;
-                window::window_rect(hwnd)
-                    .and_then(|r| window::least_frame(hwnd, r, g.frame, dpi))
-                    .unwrap_or_default()
+                window::window_rect(hwnd).map_or_else(Size::default, |r| self.least(h, r, g.frame, dpi))
             } else {
                 g.frame.size()
             };

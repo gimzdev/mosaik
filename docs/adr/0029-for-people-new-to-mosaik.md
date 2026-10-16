@@ -74,6 +74,12 @@ without a way to quit.
   told to ask again. Other window arrangers are looked for at most every five minutes, not after
   every switch. Previews no longer keep the monitors they read, which could hide a display change
   from the refit that follows it.
+- Changes Mosaïk makes to the workspaces itself (a tab clicked, a window dropped) are written on a
+  thread of their own once changes stop for 300 ms, at least every 2 s while they go on, and at
+  once when Mosaïk quits (`mosaik_core::saver`): the click no longer waits for the disk. A save the
+  user asked for still waits for it, and nothing older is written after it.
+- How small a window goes, which its app answers (up to 100 ms when it is busy), is asked again
+  only after 10 s: Home's picture asked every window each time it was drawn.
 
 **Files**
 - Settings edited by hand out of range are brought into range on load, with one note saying

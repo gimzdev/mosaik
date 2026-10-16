@@ -395,6 +395,7 @@ impl Engine {
     fn forget(&mut self, h: WindowHandle) -> bool {
         let tab = self.hiding.hidden.contains_key(&h) || self.group_of_window(h).is_some();
         self.titles.forget(h);
+        self.least.remove(&h);
         if self.watch.frames.remove(&h).is_some() {
             self.sync_location_hooks();
         }

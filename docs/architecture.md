@@ -30,6 +30,7 @@ mosaik.exe            engine thread: windows, zones, workspaces, tabs, hotkey, t
   ├─ titles thread    reads windows' title bars, where their tags go (`mosaik-titles`)
   ├─ Start menu       reads the apps installed, for the sets of apps (`mosaik-start-apps`)
   ├─ launch threads   start a workspace's or a set's apps that are not open (`mosaik-launch`)
+  ├─ saver thread     writes workspaces.json once changes stop (`mosaik_core::saver`)
   ├─ pipe threads     mosaikctl and second launches (ADR 0007)
   ├─ main thread      Tauri: the tray icon, and Mosaïk's window (Home, a workspace's page, the
   │                   zone editor, Settings), created when opened and destroyed when closed

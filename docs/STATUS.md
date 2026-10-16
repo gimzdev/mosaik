@@ -1314,13 +1314,18 @@ speed, 27 on the code); what they found and what changed is ADR 0029.
 - **Opening a workspace undone** as Arrange is (the windows it minimised back where they were,
   the workspace open before open again): Home's test failed before (no Undo after Open) and
   passes; the workspace probe's new `undo_open` step waits for the PC.
+- **Writes and asks off the user's time**: the workspaces written by a saver thread once changes
+  stop for 300 ms (at least every 2 s, at once on quitting; a save the user asked for still
+  waits; 5 core tests: the latest written once quiet, a waited write first and nothing older
+  after it, flushed on quitting, written while changes go on, a failure told once); apps'
+  smallest sizes kept 10 s.
 - **Files**: settings out of range mended on load with one note (the test failed before: 500 px
   kept); damaged workspaces said in words (the test failed before: Rust's debug output).
 - **Code**: the strip's title-bar leftovers, a dead field, an untrue notice, the planner's unused
   zone names, public functions nothing called, two unused dependencies, the journal's file name in
   one place, key state read through mosaik-win; ADRs 0011, 0014 to 0019, 0022, 0024 and 0028
   marked as amended; architecture and README brought up to date.
-- Checks here: fmt; clippy -D warnings for Windows on every crate; core 251, ipc 11; interface
+- Checks here: fmt; clippy -D warnings for Windows on every crate; core 256, ipc 11; interface
   119; Playwright 30; the site type-checks; shellcheck.
 - **On the owner's PC** (job 0152, at 918e379):
   - Build 2 min 44 s; `mosaik.ps1 test`: every test passing, the new Windows test among them.

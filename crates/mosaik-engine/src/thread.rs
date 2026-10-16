@@ -10,10 +10,10 @@
 //! messages Windows broadcasts: display changes, work-area changes, resume from sleep, sign-out.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::sync::mpsc::{Receiver, Sender};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use mosaik_core::hotkey::check;
 use mosaik_core::journal::Journal;
@@ -50,6 +50,9 @@ pub(crate) const WM_EVENTS: u32 = windows::Win32::UI::WindowsAndMessaging::WM_AP
 pub(crate) const WM_TOAST: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 8;
 /// The Start menu's apps were read (`sets::StartApps`).
 pub(crate) const WM_START_APPS: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 9;
+
+/// A change of the workspaces Mosaïk made itself is written once changes stop this long.
+const SAVE_QUIET: Duration = Duration::from_millis(300);
 
 /// Timers on the engine's window.
 pub(crate) mod timer {
@@ -207,8 +210,12 @@ pub(crate) struct Engine {
     pub(crate) toasts: crate::toasts::Toasts,
     /// The apps of the Start menu, for sets.
     pub(crate) start_apps: crate::sets::StartApps,
+    /// Writes `workspaces.json` off this thread (`None`: its thread did not start; written here).
+    pub(crate) saver: Option<mosaik_core::saver::Saver<mosaik_core::store::WorkspacesFile>>,
     /// When the programs running were last looked through for other window arrangers.
     pub(crate) others_checked: Option<std::time::Instant>,
+    /// How small each window goes, as its app said lately, and at which DPI (`room::least`).
+    pub(crate) least: HashMap<WindowHandle, (Instant, u32, mosaik_core::geometry::Size)>,
 }
 
 /// A request to close posted to another window of the engine's thread (the side menu's line, a
@@ -252,6 +259,7 @@ pub(crate) fn run(
             }
         };
     let store = Store::new(&config.data_dir);
+    let saver = mosaik_core::saver::Saver::start(Store::new(&config.data_dir), SAVE_QUIET);
     let mut notices = Vec::new();
     let (settings, settings_on_disk) = match store.load::<Settings>() {
         Ok(loaded) => {
@@ -328,7 +336,9 @@ pub(crate) fn run(
         quick: crate::quick::Quick::default(),
         toasts: crate::toasts::Toasts::default(),
         start_apps: crate::sets::StartApps::new(window.0 as isize),
+        saver,
         others_checked: None,
+        least: HashMap::new(),
     };
     // Read early: the home page asks for sets as soon as it opens.
     engine.start_apps.refresh();
@@ -951,6 +961,12 @@ impl Engine {
     /// finds nothing left to do.
     fn shut_down(&mut self) {
         self.stop_watching();
+        // What waits to be written is written now.
+        if let Some(saver) = &self.saver
+            && (!saver.flush(Duration::from_secs(3)) || saver.take_failure().is_some())
+        {
+            tracing::error!("the workspaces' last change was not saved");
+        }
         self.show_all_hidden();
         let outcome = mosaik_win::rescue::restore_hidden(&self.store);
         log_report("windows restored before exit", &outcome.report);
