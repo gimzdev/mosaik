@@ -96,7 +96,7 @@ const workspaces: Workspace[] =
     : [
         {
           id: 'ship',
-          name: 'Ship the release',
+          name: 'Website',
           windows: 4,
           zones: 3,
           hotkey: 'Win+Alt+J',
@@ -128,7 +128,7 @@ const workspaces: Workspace[] =
           // As the owner's own "Coding" (job 0158's picture): two apps and a tab group in one zone,
           // and a zone left empty.
           id: 'checks',
-          name: 'Release checks',
+          name: 'Backend',
           windows: 6,
           zones: 3,
           hotkey: null,
@@ -160,7 +160,7 @@ const workspaces: Workspace[] =
         },
         {
           id: 'brand',
-          name: 'Brand refresh',
+          name: 'Portfolio',
           windows: 2,
           zones: 2,
           hotkey: null,

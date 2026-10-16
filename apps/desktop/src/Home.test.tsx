@@ -178,7 +178,7 @@ function home(props: Partial<Parameters<typeof Home>[0]> = {}) {
 
 const picture = () => screen.getByRole('group', { name: /main screen|Visual Studio Code|Nothing is open/ });
 const tile = (name: string) => screen.getByRole('button', { name });
-const arrange = () => screen.getByRole('button', { name: 'Arrange my screen' });
+const arrange = () => screen.getByRole('button', { name: 'Arrange windows' });
 const title = () => screen.getByRole('heading', { level: 2, name: /Your screen|Preview of/ });
 const HINT = 'Drag a window onto another to swap them, or a line between zones to resize them.';
 
@@ -193,8 +193,8 @@ describe('Home', () => {
     expect(screen.getByRole('radio', { name: 'Automatic' })).toBeChecked();
     // Nothing else to say: how to change the picture.
     expect(screen.getByText(HINT)).toBeInTheDocument();
-    // Arrange my screen has Mosaïk's tiles; Automatic keeps the spark.
-    expect(arrange()).toHaveTextContent('Arrange my screen');
+    // Arrange windows has Mosaïk's tiles; Automatic keeps the spark.
+    expect(arrange()).toHaveTextContent('Arrange windows');
     expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
   });
 
@@ -457,12 +457,12 @@ describe('Home', () => {
     expect(screen.getByText('Nothing moves until you press Open.')).toBeInTheDocument();
     expect(screen.getByText('Windows Terminal will start. Google Chrome will be minimized.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByRole('button', { name: 'Arrange my screen' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Arrange windows' })).not.toBeInTheDocument();
     expect(asked.some((c) => c.cmd === 'switch')).toBe(false);
     await userEvent.click(screen.getByRole('button', { name: 'Open “Ship”' }));
     expect(asked).toContainEqual({ cmd: 'switch', workspace: 'ship' });
     expect(await shown('Opened “Ship”; starting 1 app.')).toBeInTheDocument();
-    // Open, it is let go: Arrange my screen is back.
+    // Open, it is let go: Arrange windows is back.
     expect(arrange()).toBeInTheDocument();
     expect(title()).toHaveTextContent('Your screen');
     expect(screen.getByRole('button', { name: 'Ship' })).toHaveAttribute('aria-pressed', 'false');

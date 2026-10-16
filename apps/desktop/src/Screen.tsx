@@ -84,16 +84,12 @@ const near = (a: Rect, b: Rect) =>
   Math.abs(a.bottom - b.bottom) <= 4;
 
 /** The zone a window goes in, by its index in the picture's zones; -1 for none (minimised, left
- * where it is, or a place of its own, as full screen). Mosaïk says which; a picture that does not
- * say (an older Mosaïk's) is read by where the window's middle lands. */
+ * where it is, a place of its own as full screen, or a zone on another screen). Mosaïk says which;
+ * a picture that does not say (an older Mosaïk's) is read by where the window's middle lands. */
 export function zoneIndex(preview: ArrangePreview, w: PreviewWindow): number {
   if (w.minimized || !w.then) return -1;
-  if (w.zone !== undefined) {
-    const i = preview.zones.findIndex((z) => z.id === w.zone);
-    if (i >= 0) return i;
-  } else if (w.app !== undefined) {
-    return -1;
-  }
+  if (w.zone !== undefined) return preview.zones.findIndex((z) => z.id === w.zone);
+  if (w.app !== undefined) return -1;
   const x = (w.then.left + w.then.right) / 2;
   const y = (w.then.top + w.then.bottom) / 2;
   return preview.zones.findIndex((z) => inside(z.rect, x, y));

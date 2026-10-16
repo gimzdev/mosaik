@@ -158,12 +158,12 @@ the engine gathers windows and applies the result.
   a second puts it there); the lines between zones resize them (`LineHandle`, hidden until
   pointed at). The moves and the areas go with the preview and with Arrange
   (`mosaik_core::arrange::plan_moved`, then `editing::stretch_zones` before the zones are
-  numbered), each window keeping its colour, each zone its number. Arrange my screen does it,
+  numbered), each window keeping its colour, each zone its number. Arrange windows does it,
   changing no workspace, and Undo brings everything back; what was changed stays chosen, and
   Undo changes puts the layout's own back. Beside it, every workspace with its apps' icons: a
   click shows it in the picture as opening it would leave the screen (`preview_workspace`, the
   plan opening it follows: the apps it would start drawn dashed, a tab group as one bar of its
-  tabs, the windows it would minimise named below), with Open in place of Arrange my screen (ADR
+  tabs, the windows it would minimise named below), with Open in place of Arrange windows (ADR
   0028), and its apps and zones changed on it are saved in it at once (`workspacePicture.ts`);
   a double-click opens it, and Back, Esc or a layout chosen goes back to the screen. A ⋯ menu has Open and the rest, then come
   the suggested sets, shown the same way before "Start these apps" (ADR 0029). What an action did

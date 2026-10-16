@@ -19,8 +19,8 @@ const w = (id: string, kind: Kind, tag: string, zone: Zone, slot: Slot, variant?
 export const WORKSPACES: Workspace[] = [
   {
     id: 'release',
-    label: 'Release',
-    name: 'Ship the release',
+    label: 'Code',
+    name: 'Client website',
     summary: 'Editor, terminal, pull request and team chat, switched as one.',
     windows: [
       w('ed', 'editor', '1', 'lapis', [0, 0, 7, 5]),

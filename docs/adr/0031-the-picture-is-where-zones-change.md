@@ -43,19 +43,21 @@ editor: "way too large", "either discreet or not shown".
   gap between two zones; the pointer over it shows a thin line and a resize arrow, as dragging or
   the keyboard's focus does. The same lines in the zone editor.
 
-**Home's picture of the screen** (before Arrange my screen)
+**Home's picture of the screen** (before Arrange windows)
 - A window dropped onto another, or onto a zone, trades places as before (`moves`). Lines
   dragged resize the zones Arrange will make (`areas` on `preview_arrange` and `arrange`: the
   main monitor's zones in the picture's order, `editing::stretch_zones`, taken when there is one
   area for each, none under the smallest zone and none over another; the zones are then numbered
   by place, so a number follows its zone). The windows keep the zones the plan gave them.
-- What was changed stays chosen after Arrange my screen: the picture keeps showing the screen as
+- What was changed stays chosen after Arrange windows: the picture keeps showing the screen as
   it now is ("Your windows are already like this."), rather than the layout's own shape again.
   "Undo changes" shows while the picture differs from the screen and puts the layout's own back;
   another layout, a workspace opened or a set started starts afresh, and areas made for other
   zones (other windows on screen) are let go.
-- The main button is **Arrange my screen**, with Mosaïk's four tiles (its mark); Automatic keeps
-  the spark. The line under the title says "Automatic layout for coding. Nothing moves yet."
+- The main button is **Arrange windows**, as the tray says it, with Mosaïk's four tiles (its
+  mark); Automatic keeps the spark. ("Apply" read as saving; "Arrange my screen", tried first,
+  the owner: "cringe af", "dont be brosky nor corporate just balanced and pro yet casual".) The
+  line under the title says "Automatic layout for coding. Nothing moves yet."
 - The layouts are all in view: Automatic as tall as two rows, then Halves, Thirds, Main + side,
   Side + main and Half + stack, Stack + half, Quarters, Full screen, each drawn above its name. Top
   + bottom and Three rows are no longer offered (Home, the zone editor's presets); the engine
@@ -86,6 +88,9 @@ editor: "way too large", "either discreet or not shown".
 - The `smart` probe arranges Halves stretched to two thirds (the picture's zones and windows
   first, changing nothing, then the windows in those zones, then Undo), and has two apps of the
   open workspace trade zones (the workspace and the windows, the third window staying). The UI
-  tour drags a line of Home's picture, then Undo changes, and looks for Arrange my screen.
-- The stand-in engine (`mock.ts`) has a workspace like the owner's "Coding" ("Release checks":
+  tour drags a line of Home's picture, then Undo changes, and looks for Arrange windows.
+- Sample names read as people name things: the stand-in's workspaces are Website, Backend and
+  Portfolio, the tour's Website, and the site's coding project "Client website" (it was "Ship
+  the release": "cringe af").
+- The stand-in engine (`mock.ts`) has a workspace like the owner's "Coding" ("Backend":
   two apps and a tab group in one zone, a zone left empty).

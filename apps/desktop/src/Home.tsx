@@ -1,9 +1,9 @@
-// Home: the main screen as the chosen layout would leave it, with Arrange my screen beside it, and
+// Home: the main screen as the chosen layout would leave it, with Arrange windows beside it, and
 // the workspaces in a column of their own. The automatic layout is chosen first (Arrange reads
 // what the windows are for); any of the eight layouts can be chosen instead, and the picture shows
 // it before anything moves. On the picture, windows dragged onto each other trade places and the
-// lines between zones resize them (ADR 0031); Undo changes puts the layout's own back. Arrange my
-// screen does it; Undo puts everything back. A workspace picked in the column shows in the picture
+// lines between zones resize them (ADR 0031); Undo changes puts the layout's own back. Arrange
+// windows does it; Undo puts everything back. A workspace picked in the column shows in the picture
 // as opening it would leave the screen, with Open (the owner: "we shouldnt open the workspace when
 // clicking on it it should show it in the anim as preview and show an open button"); its apps and
 // zones can be changed there too, and are saved in it at once. A suggested one shows the apps it
@@ -395,8 +395,8 @@ export function Home({
   const busy =
     launching !== null && shown !== null && launching.kind === shown.kind && launching.id === target(shown).id;
 
-  /** The main button: Open for a workspace shown, Start these apps for a set, else Arrange my
-   * screen, with Mosaïk's own tiles (Automatic has the spark). */
+  /** The main button: Open for a workspace shown, Start these apps for a set, else Arrange
+   * windows, with Mosaïk's own tiles (Automatic has the spark). */
   const action = () => {
     if (shown?.kind === 'workspace') {
       return (
@@ -435,7 +435,7 @@ export function Home({
     return (
       <Button tone="primary" size="lg" pending={arranging} disabled={!hasWindows || arranging} onClick={arrange}>
         {arranging ? null : <Glyph name="tiles" />}
-        Arrange my screen
+        Arrange windows
       </Button>
     );
   };

@@ -19,7 +19,7 @@ const shown = (page: Page, text: string) => page.locator('main').getByText(text,
 
 /** The stand-in's screen as the automatic layout would leave it. */
 const AUTO = 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 4, Slack in zone 3.';
-const arrange = (page: Page) => page.getByRole('button', { name: 'Arrange my screen', exact: true });
+const arrange = (page: Page) => page.getByRole('button', { name: 'Arrange windows', exact: true });
 const HINT = 'Drag a window onto another to swap them, or a line between zones to resize them.';
 
 /** Opens a workspace's page from its card's menu on Home. */
@@ -31,9 +31,9 @@ async function editWorkspace(page: Page, name: string) {
 
 /** Opens the zone editor of the stand-in's first workspace, from its card's menu. */
 async function editZones(page: Page) {
-  await page.getByRole('button', { name: 'More for “Ship the release”' }).click();
+  await page.getByRole('button', { name: 'More for “Website”' }).click();
   await page.getByRole('button', { name: 'Edit zones' }).click();
-  await expect(page.getByRole('heading', { name: 'Ship the release', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Website', level: 1 })).toBeVisible();
 }
 
 test.describe('Home', () => {
@@ -183,39 +183,39 @@ test.describe('Home', () => {
     // anim as preview and show an open button".
     await page.goto('/');
     const list = page.getByRole('list', { name: 'Workspaces' });
-    await expect(list.getByRole('button', { name: 'Ship the release (on screen)', exact: true })).toBeVisible();
-    await list.getByRole('button', { name: 'Brand refresh', exact: true }).click();
+    await expect(list.getByRole('button', { name: 'Website (on screen)', exact: true })).toBeVisible();
+    await list.getByRole('button', { name: 'Portfolio', exact: true }).click();
     await expect(
       page.getByRole('group', {
         name: 'Figma starts in zone 1, Notepad starts in zone 2, Visual Studio Code minimized, Google Chrome minimized, Windows Terminal minimized, Slack minimized.',
       }),
     ).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Preview of “Brand refresh”' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Preview of “Portfolio”' })).toBeVisible();
     await expect(shown(page, 'Nothing moves until you press Open.')).toBeVisible();
     await accessible(page);
     // Clicked again, it stays; Esc, or Back, shows the screen again.
-    await list.getByRole('button', { name: 'Brand refresh', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Open “Brand refresh”' })).toBeVisible();
+    await list.getByRole('button', { name: 'Portfolio', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Open “Portfolio”' })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
     await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
-    await list.getByRole('button', { name: 'Brand refresh', exact: true }).click();
+    await list.getByRole('button', { name: 'Portfolio', exact: true }).click();
     await page.getByRole('button', { name: 'Back to my screen' }).click();
     await expect(arrange(page)).toBeVisible();
-    await expect(list.getByRole('button', { name: 'Brand refresh', exact: true })).toBeFocused();
-    await list.getByRole('button', { name: 'Brand refresh', exact: true }).click();
-    await page.getByRole('button', { name: 'Open “Brand refresh”' }).click();
-    await expect(shown(page, 'Opened “Brand refresh”.')).toBeVisible();
-    await expect(list.getByRole('button', { name: 'Brand refresh (on screen)', exact: true })).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Portfolio', exact: true })).toBeFocused();
+    await list.getByRole('button', { name: 'Portfolio', exact: true }).click();
+    await page.getByRole('button', { name: 'Open “Portfolio”' }).click();
+    await expect(shown(page, 'Opened “Portfolio”.')).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Portfolio (on screen)', exact: true })).toBeVisible();
     await expect(arrange(page)).toBeVisible();
   });
 
   test('a double-click on a workspace opens it at once', async ({ page }) => {
     await page.goto('/');
     const list = page.getByRole('list', { name: 'Workspaces' });
-    await list.getByRole('button', { name: 'Brand refresh', exact: true }).dblclick();
-    await expect(shown(page, 'Opened “Brand refresh”.')).toBeVisible();
-    await expect(list.getByRole('button', { name: 'Brand refresh (on screen)', exact: true })).toBeVisible();
+    await list.getByRole('button', { name: 'Portfolio', exact: true }).dblclick();
+    await expect(shown(page, 'Opened “Portfolio”.')).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Portfolio (on screen)', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
   });
 
@@ -243,17 +243,17 @@ test.describe('Home', () => {
     const name = page.getByRole('textbox', { name: 'Name the new workspace' });
     await expect(name).toHaveValue('Workspace 1');
     await expect(name).toBeFocused();
-    await name.fill('Ship the release');
+    await name.fill('Website');
     await page.keyboard.press('Enter');
     await expect(
       shown(
         page,
-        '“Ship the release” already exists. Pick another name, or open its ⋯ menu and choose Replace with what’s on screen.',
+        '“Website” already exists. Pick another name, or open its ⋯ menu and choose Replace with what’s on screen.',
       ),
     ).toBeVisible();
-    await name.fill('Brand refresh');
+    await name.fill('Portfolio');
     await page.keyboard.press('Enter');
-    await expect(shown(page, '“Brand refresh” already exists. Pick another name.')).toBeVisible();
+    await expect(shown(page, '“Portfolio” already exists. Pick another name.')).toBeVisible();
     await name.fill('Review');
     await page.keyboard.press('Enter');
     // Said under the picture, as everything done on Home is.
@@ -269,7 +269,7 @@ test.describe('Home', () => {
     await page.locator('main').evaluate((main) => {
       main.scrollTop = main.scrollHeight;
     });
-    await page.getByRole('button', { name: 'More for “Brand refresh”' }).click();
+    await page.getByRole('button', { name: 'More for “Portfolio”' }).click();
     for (const name of ['Edit', 'Edit zones']) {
       await expect(page.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
     }
@@ -280,13 +280,13 @@ test.describe('Home', () => {
 test.describe('a workspace’s page', () => {
   test('shows how it opens, lists its apps by zone, and moves, removes and adds them', async ({ page }) => {
     await page.goto('/');
-    await editWorkspace(page, 'Ship the release');
+    await editWorkspace(page, 'Website');
     await expect(
       page.getByRole('group', {
         name: 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 3 with Slack as tabs.',
       }),
     ).toBeVisible();
-    const apps = page.getByRole('group', { name: 'Apps of “Ship the release”' });
+    const apps = page.getByRole('group', { name: 'Apps of “Website”' });
     await expect(apps.getByRole('listitem')).toHaveCount(4);
     await expect(apps.getByRole('group', { name: 'Zone 3', exact: true }).getByRole('listitem')).toHaveCount(2);
     await page.getByRole('button', { name: 'Move Slack to another zone' }).click();
@@ -295,7 +295,7 @@ test.describe('a workspace’s page', () => {
     await expect(apps.getByRole('group', { name: 'Zone 2', exact: true }).getByText('Slack')).toBeVisible();
     await page.getByRole('button', { name: 'Remove Slack' }).click();
     await expect(apps.getByRole('listitem')).toHaveCount(3);
-    await page.getByRole('button', { name: 'Add a window to “Ship the release”' }).click();
+    await page.getByRole('button', { name: 'Add a window to “Website”' }).click();
     const slack = page.getByRole('button', { name: 'Slack Slack window' });
     await expect(slack).toBeInViewport({ ratio: 1 });
     await slack.click();
@@ -311,7 +311,7 @@ test.describe('a workspace’s page', () => {
     // The owner, of a workspace with two windows in one zone drawn over each other: "look at the
     // anim wtf is happening"; and "when a zone is empty we dont have either color or number".
     await page.goto('/');
-    await editWorkspace(page, 'Release checks');
+    await editWorkspace(page, 'Backend');
     const picture = page.getByRole('group', {
       name: 'Visual Studio Code in zone 1, Windows Terminal in zone 1 with File Explorer as tabs, MSYS2 starts in zone 2, Google Chrome in zone 2 with Claude as tabs, Slack minimized. Zone 3 is empty.',
     });
@@ -338,15 +338,15 @@ test.describe('a workspace’s page', () => {
     await page.mouse.up();
     await expect(shown(page, 'Claude goes in zone 3.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Claude starts in zone 3' })).toBeVisible();
-    const apps = page.getByRole('group', { name: 'Apps of “Release checks”' });
+    const apps = page.getByRole('group', { name: 'Apps of “Backend”' });
     await expect(apps.getByRole('group', { name: 'Zone 3', exact: true }).getByText('Claude')).toBeVisible();
     await accessible(page);
   });
 
   test('renames it, and deletes it after asking', async ({ page }) => {
     await page.goto('/');
-    await editWorkspace(page, 'Brand refresh');
-    await page.getByRole('button', { name: 'Rename “Brand refresh”' }).click();
+    await editWorkspace(page, 'Portfolio');
+    await page.getByRole('button', { name: 'Rename “Portfolio”' }).click();
     const name = page.getByRole('textbox', { name: 'Name' });
     await expect(name).toBeFocused();
     await name.fill('Brand 2');
@@ -567,14 +567,14 @@ test.describe('at the smallest window size', () => {
     await accessible(page);
     await windowDoesNotScroll(page);
     await page.getByRole('button', { name: 'Home', exact: true }).click();
-    await editWorkspace(page, 'Ship the release');
+    await editWorkspace(page, 'Website');
     await accessible(page);
     await windowDoesNotScroll(page);
     await page.getByRole('button', { name: 'Back to Home' }).click();
     await page.locator('main').evaluate((main) => {
       main.scrollTop = main.scrollHeight;
     });
-    await page.getByRole('button', { name: 'More for “Brand refresh”' }).click();
+    await page.getByRole('button', { name: 'More for “Portfolio”' }).click();
     await expect(page.getByRole('button', { name: 'Edit zones' })).toBeInViewport({ ratio: 1 });
     await page.keyboard.press('Escape');
     await editZones(page);

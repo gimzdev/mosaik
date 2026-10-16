@@ -107,7 +107,7 @@ opens this way.
 
 ## Amended by ADR 0031 (2026-10-15)
 
-The picture says "Nothing moves yet." beside Arrange my screen (Mosaïk's tiles, not the spark),
+The picture says "Nothing moves yet." beside Arrange windows (Mosaïk's tiles, not the spark),
 and "Drag a window onto another to swap them, or a line between zones to resize them."; Undo
 swaps is Undo changes. The layouts are all in view (Automatic, then eight in two rows, without
 Top + bottom and Three rows), with no More layouts. The first run's line of welcome is gone.

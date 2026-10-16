@@ -107,4 +107,4 @@ people use them.
 ## Amended by ADR 0031 (2026-10-15)
 
 Eight layouts besides Automatic (no Top + bottom or Three rows), all in view; the picture draws
-zones, with the windows' title bars in them, and its lines resize them; Arrange my screen.
+zones, with the windows' title bars in them, and its lines resize them; Arrange windows.

@@ -96,5 +96,5 @@ set: Start these apps) or a double-click. What an action did shows under the pic
 ## Amended by ADR 0031 (2026-10-15)
 
 The picture draws each zone once, with its windows' title bars in it, and its lines resize the
-zones; Arrange my screen; the layouts all in view, without Top + bottom and Three rows; no word
+zones; Arrange windows; the layouts all in view, without Top + bottom and Three rows; no word
 of welcome.

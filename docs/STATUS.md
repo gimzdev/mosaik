@@ -1440,7 +1440,7 @@ workspace?", the owner: "arrange should arrange, save should save. yes". ADR 003
   - Mosaïk left in the tray (1.0.2, watchdog, Win+Alt+Space registered); packed (282 files) and
     both files beside the repository brought up to date (the key line kept).
 
-### Asked on 2026-10-15 (22:49): the picture, the layouts, Arrange my screen
+### Asked on 2026-10-15 (22:49): the picture, the layouts, Arrange windows
 
 With three pictures of 1.0.2: the first-run line ("this shit has to go"); "Coding" previewed with
 two windows of one zone drawn over each other and its empty zone without colour or number ("look
@@ -1461,9 +1461,9 @@ discreet or not shown". ADR 0031.
   areas go with `preview_arrange` and `arrange` (`editing::stretch_zones`, then the zones are
   numbered); on a workspace's picture an app dropped on another trades zones with it
   (`move_app` with `swap_with`, `editing::swap_apps`) and lines save its zones (`set_zones`, only
-  the edges moved changing), at once. What was changed on Home stays chosen after Arrange my
-  screen, so the picture shows the screen as it now is; Undo changes shows while the two differ.
-- **Home**: Arrange my screen, with Mosaïk's four tiles; "Nothing moves yet."; every layout in
+  the edges moved changing), at once. What was changed on Home stays chosen after Arrange
+  windows, so the picture shows the screen as it now is; Undo changes shows while the two differ.
+- **Home**: Arrange windows, with Mosaïk's four tiles; "Nothing moves yet."; every layout in
   view (Automatic, then two rows of four; no Top + bottom or Three rows, which the engine keeps
   for `mosaikctl`); no word of welcome.
 - **A workspace's page** lists its apps zone by zone, each zone's number on its colour with a line

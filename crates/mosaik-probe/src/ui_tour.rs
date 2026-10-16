@@ -6,9 +6,9 @@
 //! light, at the window's usual and smallest size, and the switcher. On Home, a layout is also
 //! chosen, so the picture shows where the windows would go; a window of the picture is dragged
 //! onto another, and a line between its zones across, each then undone with Undo changes
-//! (Arrange my screen is never clicked: no window moves).
+//! (Arrange windows is never clicked: no window moves).
 //!
-//! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Ship",
+//! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Website",
 //! with three zones and no windows, so nothing of the user's is touched. The profile has no
 //! settings yet, so this is a first run: there is no tour to go through; the windows open are
 //! sorted into workspaces of this profile (none moves), and a build run from a folder is not set
@@ -43,7 +43,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::capture::save_bmp;
 
 /// The workspace the tour's profile holds.
-const WORKSPACE: &str = "Ship";
+const WORKSPACE: &str = "Website";
 
 /// Tab presses at most per page (the settings page has about thirty controls).
 const TABS: usize = 60;
@@ -72,7 +72,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
 }
 
 /// Writes the tour's profile under `roaming` (what `%APPDATA%` will be for the Mosaïk under
-/// test): the workspace "Ship" with three zones on the main monitor and no windows.
+/// test): the workspace "Website" with three zones on the main monitor and no windows.
 fn prepare(roaming: &Path) -> Result<Value, String> {
     let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
     let zone = |id: &str, name: &str, color: ZoneColor, area: [f64; 4]| -> Result<Zone, String> {
@@ -87,7 +87,7 @@ fn prepare(roaming: &Path) -> Result<Value, String> {
     let file = WorkspacesFile {
         version: WORKSPACES_VERSION,
         workspaces: vec![Workspace {
-            id: WorkspaceId("ship".into()),
+            id: WorkspaceId("website".into()),
             name: WORKSPACE.into(),
             hotkey: None,
             layout: Layout {
@@ -482,8 +482,8 @@ impl Tour {
 
     /// Drags the first window of Home's picture onto the second, as a person does (the button
     /// held down all the way), and takes the picture once the two have traded places; Undo
-    /// changes then puts them back. Only the picture changes: no window moves until Arrange my
-    /// screen.
+    /// changes then puts them back. Only the picture changes: no window moves until Arrange
+    /// windows.
     fn drag_in_picture(&mut self, shot: &str) -> Result<(), String> {
         let smart = self.find("radio", "Automatic")?;
         let title = self.heading("Your screen")?;
@@ -753,8 +753,8 @@ impl Tour {
         self.stretch_in_picture("home-stretched")?;
 
         // The workspace picked: the picture shows it as it would open, with Open in place of
-        // Arrange my screen (nothing opens); Back returns to the screen as it is, and Arrange my
-        // screen.
+        // Arrange windows (nothing opens); Back returns to the screen as it is, and Arrange
+        // windows.
         let row = self.reveal("button", WORKSPACE)?;
         self.click(&row)?;
         pump_until(1200, || false);
@@ -767,7 +767,7 @@ impl Tour {
             "page": "home-picked",
             "shot": picked_shot,
             "open_button": open,
-            "back_to_arrange": self.find("button", "Arrange my screen").is_ok(),
+            "back_to_arrange": self.find("button", "Arrange windows").is_ok(),
         });
         println!("page home-picked: {page}");
         self.pages.push(page);

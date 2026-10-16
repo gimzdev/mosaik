@@ -13,7 +13,7 @@
   keeps its number and colour and says it is empty.
 - On the picture, drag a window onto another (or onto a zone) to swap them, and drag the line
   between two zones to resize them; "Undo changes" puts the layout back. The lines show only when
-  you point at them. "Arrange my screen" (with Mosaïk's tiles) then puts your windows there.
+  you point at them. "Arrange windows" (with Mosaïk's tiles) then puts your windows there.
 - The same on a workspace's picture, on Home and on its page: drag its apps to other zones, or
   onto each other to trade places, and resize its zones; each change is saved in the workspace at
   once.
