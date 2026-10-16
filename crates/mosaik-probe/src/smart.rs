@@ -1541,7 +1541,7 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
         "undo": undo,
         "back_px": back,
         "ok": traded && with_windows && untouched
-            && message.contains("\u{201c}Halves\u{201d} layout")
+            && message.contains("in Halves.")
             && landed.iter().all(|x| x["ok"] == json!(true))
             && back <= SLACK,
     }))
@@ -1674,7 +1674,7 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
             && planned.iter().all(Option::is_some)
             && minimized_shown == 1
             && untouched
-            && message.contains("\u{201c}Halves\u{201d} layout")
+            && message.contains("in Halves.")
             && message.contains("1 window minimized")
             && got == halves
             && landed.iter().all(|x| x["ok"] == json!(true))
@@ -2142,6 +2142,8 @@ fn quick_menu(
         .ok_or("the menu has no first line")?
         .rect
         .center();
+    // As a person does, the menu seen first: a press as it opens by itself does nothing (4b2).
+    pump_until(350, || false);
     drag_path(&[header, Point::new(header.x, header.y + down)], HWND::default())?;
     let (dragged_menu, _) = wait_menu(engine, 1000, is_open)?;
     let menu_moved = dragged_menu.as_ref().map(|q| q.rect.top - menu0.rect.top);
