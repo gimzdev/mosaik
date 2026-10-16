@@ -818,13 +818,13 @@ impl Tour {
         println!("page home-picked: {page}");
         self.pages.push(page);
 
-        // The workspace's menu, then its page, with the windows on screen it could take: shown,
-        // none added.
+        // The workspace's menu, then its page, with the apps it could take (Add an app, ADR
+        // 0033): shown, none added.
         self.open_menu(WORKSPACE)?;
         self.page("home-menu", false)?;
         self.choose("Edit")?;
         self.page("workspace", true)?;
-        if let Ok(add) = self.reveal("button", &format!("Add a window to “{WORKSPACE}”")) {
+        if let Ok(add) = self.reveal("button", &format!("Add an app to “{WORKSPACE}”")) {
             self.click(&add)?;
             self.page("workspace-add", false)?;
             Self::press(VK_ESCAPE.0);

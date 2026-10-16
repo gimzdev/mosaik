@@ -1024,6 +1024,7 @@ fn arrange(
     pump_until(600, || false);
     out.insert("layout".into(), layout(engine, styles, work, &w)?);
     out.insert("moved".into(), put_elsewhere(engine, styles, work, &w)?);
+    out.insert("joined".into(), joined(engine, styles, work, &w)?);
     out.insert("traded_in_zone".into(), traded_in_zone(engine, styles, work, &w)?);
     out.insert("stretched".into(), stretched(engine, styles, work, &w)?);
     out.insert("to_front".into(), to_front(engine, &w)?);
@@ -1031,6 +1032,7 @@ fn arrange(
     out.insert("apps".into(), apps(engine, styles, work, opened, &w)?);
     out.insert("swapped".into(), swapped(engine, styles, work, &w)?);
     out.insert("reordered".into(), reordered(engine, styles, work, &w)?);
+    out.insert("laid_out".into(), laid_out(engine, styles, work, &w)?);
     out.insert("least".into(), least(engine, styles, work, opened, &w)?);
     *arranged = w;
     let ok = out.values().all(|v| v["ok"] == json!(true));
@@ -1561,10 +1563,10 @@ fn kept_as_arranged(
 }
 
 /// 3e2. Windows put elsewhere on the home page's picture (the owner: "we should be able to drag
-/// drop apps to permute them"). In Halves, the window of one half dropped on the other: the
-/// picture shows the two traded, each zone's colour going with its window and each zone keeping
-/// its number (ADR 0028), and nothing moves; Arrange with that move puts them so; Undo puts
-/// everything back.
+/// drop apps to permute them"). In Halves, the window of one half dropped on the window of the
+/// other: the picture shows the two traded, each zone's colour going with its window and each
+/// zone keeping its number (ADR 0028), and nothing moves; Arrange with that move puts them so;
+/// Undo puts everything back.
 fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
     let before = frames(w);
     let base = preview(engine, Some("halves"))?;
@@ -1589,7 +1591,7 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
     let mv = ArrangeMove {
         window: a.window,
         zone: u32::try_from(zb).unwrap_or(u32::MAX),
-        onto: None,
+        onto: Some(b.window),
     };
     let start = Instant::now();
     let shown = preview_moved(engine, Some("halves"), vec![mv])?;
@@ -1676,6 +1678,189 @@ fn put_elsewhere(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Res
             && landed.iter().all(|x| x["ok"] == json!(true))
             && again["ok"] == json!(true)
             && back <= SLACK,
+    }))
+}
+
+/// 3e5. A window dropped onto the other half itself on the home page's picture joins it, behind
+/// its windows (ADR 0033; the owner: it "permutes with the app of welcoming zone instead of just
+/// adding it"): the picture lists it last there, every other window where it was and each half
+/// in its colour, nothing moving; Arrange puts it in that half, behind the window in front there;
+/// Undo puts every window back.
+fn joined(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
+    let before = frames(w);
+    let base = preview(engine, Some("halves"))?;
+    let in_zone = |p: &ArrangePreview, z: usize| -> Vec<mosaik_core::window::WindowHandle> {
+        p.windows
+            .iter()
+            .filter(|x| !x.minimized && zone_index(p, x) == Some(z))
+            .map(|x| x.window)
+            .collect()
+    };
+    // A half's own window, one that can be resized (it fills its zone), and the other half,
+    // which has a window.
+    let resizable: Vec<_> = w.iter().take(2).map(|&h| handle(h)).collect();
+    let Some((a, za, zb)) = (0..base.zones.len()).find_map(|za| {
+        let a = *in_zone(&base, za).first().filter(|x| resizable.contains(x))?;
+        let zb = (0..base.zones.len()).find(|&z| z != za && !in_zone(&base, z).is_empty())?;
+        Some((a, za, zb))
+    }) else {
+        return Ok(json!({ "two_halves": false, "ok": false }));
+    };
+    let mv = ArrangeMove {
+        window: a,
+        zone: u32::try_from(zb).unwrap_or(u32::MAX),
+        onto: None,
+    };
+    let start = Instant::now();
+    let shown = preview_moved(engine, Some("halves"), vec![mv])?;
+    let preview_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let mut wanted_b = in_zone(&base, zb);
+    wanted_b.push(a);
+    let wanted_a: Vec<_> = in_zone(&base, za).into_iter().filter(|&x| x != a).collect();
+    let behind_them = in_zone(&shown, zb) == wanted_b;
+    let others_stay = in_zone(&shown, za) == wanted_a;
+    let colours_stay = shown
+        .zones
+        .iter()
+        .map(|z| z.color)
+        .eq(base.zones.iter().map(|z| z.color));
+    let untouched = most_moved(&frames(w), &before) <= SLACK;
+    let (reply, ms) = ask(
+        engine,
+        Command::Arrange {
+            preset: Some("halves".into()),
+            moves: vec![mv],
+            areas: Vec::new(),
+        },
+    );
+    let message = done(&reply)?;
+    let st = settled(engine)?;
+    let ws = st
+        .active_workspace
+        .clone()
+        .ok_or("no workspace open after the move")?;
+    let zs = zones(engine, &ws.0, work)?;
+    let hwnd_of = |h| w.iter().copied().find(|x| handle(*x) == h);
+    let z_at = |h| hwnd_of(h).and_then(|x| mosaik_win::window::top_level().iter().position(|y| *y == x));
+    let front = wanted_b.first().copied();
+    let behind_front = matches!((z_at(a), front.and_then(z_at)), (Some(x), Some(f)) if x > f);
+    let same_zone = match (hwnd_of(a), front.and_then(hwnd_of)) {
+        (Some(x), Some(f)) => zone_of(&st, &zs, x).is_some() && zone_of(&st, &zs, x) == zone_of(&st, &zs, f),
+        _ => false,
+    };
+    let fits = fit(&st, &zs, styles, &hwnd_of(a).into_iter().collect::<Vec<_>>());
+    let again = kept_as_arranged(engine, Some("halves"), w, &shown)?;
+    let undo = done(&ask(engine, Command::UndoArrange).0)?;
+    let _ = settled(engine)?;
+    let back = most_moved(&frames(w), &before);
+    Ok(json!({
+        "preview_ms": preview_ms,
+        "behind_them_in_picture": behind_them,
+        "others_stay": others_stay,
+        "colours_stay": colours_stay,
+        "preview_changed_nothing": untouched,
+        "message": message,
+        "ms": ms,
+        "in_the_zone": same_zone,
+        "behind_the_front_one": behind_front,
+        "fit_px": fits,
+        "again": again,
+        "undo": undo,
+        "back_px": back,
+        "ok": behind_them && others_stay && colours_stay && untouched && message.contains("into Halves.")
+            && same_zone && behind_front && all_fit(&fits) && again["ok"] == json!(true) && back <= SLACK,
+    }))
+}
+
+/// 3j. The open workspace laid out in each layout (ADR 0033; the owner: "lets try workspace with
+/// most apps, on all layouts"): its picture with each layout has every app in a zone, none
+/// minimised, nothing saved or moved; laid out in Quarters, it is saved so and its windows go to
+/// its zones; Undo puts back its zones and its windows.
+fn laid_out(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Value, String> {
+    let st = settled(engine)?;
+    let ws = st
+        .active_workspace
+        .clone()
+        .ok_or("no workspace open to lay out")?;
+    let listed = apps_of(
+        engine,
+        Command::Apps {
+            workspace: ws.0.clone(),
+        },
+    )?;
+    let zones_before = rects(&zones(engine, &ws.0, work)?);
+    let before = frames(w);
+    let mut layouts = serde_json::Map::new();
+    for preset in mosaik_core::presets::Preset::ALL {
+        let p = match engine.request(
+            Command::PreviewWorkspace {
+                workspace: ws.0.clone(),
+                preset: Some(preset.id().into()),
+            },
+            TIMEOUT,
+        ) {
+            Reply::Preview(p) => *p,
+            other => return Err(format!("preview_workspace {}: {other:?}", preset.id())),
+        };
+        // Each app, a window of its own or a tab of a group, in a zone of the picture.
+        let placed: Vec<&SlotId> = p
+            .windows
+            .iter()
+            .filter(|x| !x.minimized && zone_index(&p, x).is_some())
+            .flat_map(|x| {
+                let tabs: Vec<&SlotId> = x.tabs.iter().filter_map(|t| t.app.as_ref()).collect();
+                if tabs.is_empty() {
+                    x.app.iter().collect()
+                } else {
+                    tabs
+                }
+            })
+            .collect();
+        let all = listed.apps.iter().all(|a| placed.contains(&&a.id));
+        let zones_n = p.zones.len() == preset.zones().len();
+        layouts.insert(
+            preset.id().into(),
+            json!({ "apps": listed.apps.len(), "in_zones": placed.len(), "zones": p.zones.len(), "ok": all && zones_n }),
+        );
+    }
+    let saved_nothing = rects(&zones(engine, &ws.0, work)?) == zones_before;
+    let untouched = most_moved(&frames(w), &before) <= SLACK;
+    let (reply, ms) = ask(
+        engine,
+        Command::SetWorkspaceLayout {
+            workspace: ws.0.clone(),
+            preset: "quarters".into(),
+        },
+    );
+    let message = done(&reply)?;
+    let st = settled(engine)?;
+    let zs = zones(engine, &ws.0, work)?;
+    let quarters = zs.len() >= 4;
+    let fits = fit(&st, &zs, styles, &w[..2]);
+    let (reply, _) = ask(
+        engine,
+        Command::UndoWorkspaceLayout {
+            workspace: ws.0.clone(),
+        },
+    );
+    let undo = done(&reply)?;
+    let _ = settled(engine)?;
+    let zones_back = rects(&zones(engine, &ws.0, work)?) == zones_before;
+    let back = most_moved(&frames(w), &before);
+    let every_layout = layouts.values().all(|v| v["ok"] == json!(true));
+    Ok(json!({
+        "layouts": layouts,
+        "previews_saved_nothing": saved_nothing,
+        "previews_moved_nothing": untouched,
+        "message": message,
+        "ms": ms,
+        "quarters_saved": quarters,
+        "fit_px": fits,
+        "undo": undo,
+        "zones_back": zones_back,
+        "back_px": back,
+        "ok": every_layout && saved_nothing && untouched && message.contains("Quarters") && quarters
+            && all_fit(&fits) && zones_back && back <= SLACK,
     }))
 }
 
