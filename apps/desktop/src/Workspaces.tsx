@@ -1,12 +1,15 @@
 // The workspaces on Home, in a column beside the screen: each a row with its layout in small and
 // its apps' icons. A click shows it in Home's picture as opening it would leave the screen, with
-// Open; a double-click opens it at once; its ⋯ menu has the rest. Below them, workspaces Mosaïk
+// Open; a double-click opens it at once; its ⋯ menu has the rest: Open, Replace with what's on
+// screen (the one on screen), Rename (in its row), and Edit, its page, where its zones are edited
+// too (the owner: "we should have rename, and not sure we should keep edit zones it feels like it
+// should be on workspace edit screen", ADR 0034). Below them, workspaces Mosaïk
 // suggests from the apps installed that go together (coding: an editor, a terminal, a
 // browser...): a click shows what starting them does, and Home's button starts them. "Save as
 // workspace" keeps what is on screen as a new one. What all this did is said under Home's
 // picture, in one place.
 
-import { type SyntheticEvent, useId, useRef, useState } from 'react';
+import { type SyntheticEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { request } from './engine';
 import { AppIcon, AppIcons, Glyph, Spinner } from './icons';
@@ -117,6 +120,75 @@ function SaveForm({
   );
 }
 
+/** A workspace renamed in its row: its name, chosen to be typed over. Enter saves it, Esc leaves it
+ * as it was; a name Mosaïk refuses (taken, empty) is said in place. */
+function RenameForm({
+  workspace,
+  onDone,
+  onCancel,
+}: {
+  workspace: WorkspaceSummary;
+  onDone: (message: string) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(workspace.name);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const submit = (e: SyntheticEvent) => {
+    e.preventDefault();
+    const wanted = name.trim();
+    if (wanted === workspace.name) {
+      onCancel();
+      return;
+    }
+    setPending(true);
+    void request({ cmd: 'rename_workspace', workspace: workspace.id, name: wanted }).then((reply) => {
+      setPending(false);
+      if (reply.reply === 'done') onDone(reply.message);
+      else setProblem(errorMessage(reply) ?? 'It could not be renamed.');
+    });
+  };
+  return (
+    <form
+      onSubmit={submit}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          onCancel();
+        }
+      }}
+      className="flex flex-col gap-2 rounded-[14px] border border-[var(--accent)] bg-[var(--raised)] p-2"
+    >
+      <input
+        aria-label={`Rename “${workspace.name}”`}
+        value={name}
+        maxLength={MAX_NAME}
+        // Focus goes where the user is about to type.
+        autoFocus
+        onFocus={(e) => {
+          e.currentTarget.select();
+        }}
+        onChange={(e) => {
+          setName(e.target.value);
+          setProblem(null);
+        }}
+        aria-invalid={problem !== null}
+        className="field w-full font-semibold"
+      />
+      <Status text={problem} error />
+      <div className="flex gap-2">
+        <Button tone="primary" size="sm" type="submit" pending={pending} disabled={!name.trim()}>
+          Save name
+        </Button>
+        <Button size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 /** A suggested workspace's picture: a dashed outline, as it has no zones yet, with the icons of
  * up to four of its apps. */
 function IconCluster({ icons }: { icons: (string | null)[] }) {
@@ -159,7 +231,6 @@ export function Workspaces({
   onOpen,
   onSay,
   onEdit,
-  onEditZones,
 }: {
   /** What Home's picture shows. */
   shown: Target | null;
@@ -172,15 +243,27 @@ export function Workspaces({
   /** Says what an action did, under Home's picture. */
   onSay: (text: string, error?: boolean) => void;
   onEdit: (workspace: string) => void;
-  onEditZones: (workspace: string) => void;
 }) {
   const [list, setList] = useState<WorkspaceSummary[] | null>(null);
   const [sets, setSets] = useState<AppSet[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** The workspace being renamed in its row. */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  /** The workspace whose menu button takes the focus back, once its row is back. */
+  const refocus = useRef<string | null>(null);
+  const column = useRef<HTMLElement>(null);
   /** When the suggested sets were last read. */
   const setsRead = useRef(0);
+
+  useEffect(() => {
+    const id = refocus.current;
+    if (id === null) return;
+    refocus.current = null;
+    // Its ⋯ button, the one control of the row that says whether it is expanded.
+    column.current?.querySelector<HTMLElement>(`li[data-workspace="${CSS.escape(id)}"] [aria-expanded]`)?.focus();
+  });
 
   // Read now, and again whenever Mosaïk says they changed: arranged, saved from the switcher,
   // opened with a shortcut… Its own changes need no read of their own: Mosaïk says so for them
@@ -220,6 +303,7 @@ export function Workspaces({
 
   return (
     <section
+      ref={column}
       aria-labelledby="workspaces-title"
       className="flex min-w-0 flex-col self-start rounded-[22px] bg-[var(--panel)] p-2 pt-3.5"
     >
@@ -276,6 +360,24 @@ export function Workspaces({
         {(list ?? []).map((w) => {
           const isOpen = active === w.id;
           const opening = same(launching, 'workspace', w.id);
+          if (renaming === w.id) {
+            const done = () => {
+              refocus.current = w.id;
+              setRenaming(null);
+            };
+            return (
+              <li key={w.id} data-workspace={w.id}>
+                <RenameForm
+                  workspace={w}
+                  onCancel={done}
+                  onDone={(message) => {
+                    done();
+                    onSay(message);
+                  }}
+                />
+              </li>
+            );
+          }
           return (
             <li key={w.id} className="relative" data-workspace={w.id}>
               <button
@@ -330,15 +432,15 @@ export function Workspaces({
                         ]
                       : []),
                     {
-                      label: 'Edit',
+                      label: 'Rename',
                       onSelect: () => {
-                        onEdit(w.id);
+                        setRenaming(w.id);
                       },
                     },
                     {
-                      label: 'Edit zones',
+                      label: 'Edit',
                       onSelect: () => {
-                        onEditZones(w.id);
+                        onEdit(w.id);
                       },
                     },
                   ]}

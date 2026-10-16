@@ -29,7 +29,9 @@
   it back.
 - A workspace's page: Add an app lists every app you could add, open or not, with a box to find
   one by name (one not open starts when the workspace opens), and its apps are dragged in their
-  list onto a zone or onto another app.
+  list into a zone, which they join behind its apps, or onto another app's name to swap them, as
+  on the picture. The page is one width, the picture's, in the middle.
+- A workspace's ⋯ menu on Home has Rename, right in its row; Edit zones is on its page.
 - Like Windows follows Windows' light or dark mode again.
 - Home's title, picture and layouts are one width, the button ending where the picture does.
 - Every layout is in view, in two rows beside Automatic: Halves, Thirds, Main + side, Side +

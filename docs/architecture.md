@@ -188,16 +188,19 @@ the engine gathers windows and applies the result.
   tabs, the windows it would minimise named below), with Open in place of Move windows (ADR
   0028), and its apps and zones changed on it are saved in it at once (`workspacePicture.ts`);
   a double-click opens it, and Back, Esc or a layout chosen goes back to the screen. The title
-  row, the picture and the layouts under it are one width (`pictureWidth`). A ⋯ menu has Open
-  and the rest, then come
-  the suggested sets, shown the same way before "Start these apps" (ADR 0029). What an action did
+  row, the picture and the layouts under it are one width (`pictureWidth`). A ⋯ menu has Open,
+  Replace with what's on screen (the one on screen), Rename (in its row) and Edit, its page, where
+  its zones are edited too (ADR 0034); then come the suggested sets, shown the same way before
+  "Start these apps" (ADR 0029). A workspace's page is one width too, the picture's, in the middle
+  (ADR 0034). What an action did
   shows under the picture. The window reads from the engine once per burst (`reads.ts`: focus, a
   change and its own action make one read 150 ms after the last). Mosaïk's window has two
   places, Home and Settings (with About at its end).
 - **Apps' icons** (ADR 0024): replies name each app's icon by a key (`app:<AppUserModelID>` or
-  `exe:<path>`, `mosaik_core::icons`); the window asks for the ones it shows in one batch
-  (`app_icons`), read once per app as 48 px PNGs by the shell's image factory on a thread of their
-  own. An app without one shows no picture.
+  `exe:<path>`, `mosaik_core::icons`); the window asks for the ones it shows 24 at a time, one read
+  after another, the first on the page first (`app_icons`, `icons.tsx`), read once per app as
+  48 px PNGs by the shell's image factory on a thread of their own. An app without one shows no
+  picture.
 - **Toasts and notes** (ADR 0024): what the engine has to say while it works (`Engine::notice`)
   shows in a native toast by the corner of the screen the pointer is on (`mosaik_overlay::toast`),
   one at a time, never taking the keyboard, and goes to the window's notes; Mosaïk's window never

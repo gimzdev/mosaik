@@ -155,11 +155,9 @@ function layoutOf(preview: ArrangePreview | null): Preset | null {
 
 export function Home({
   onEditWorkspace,
-  onEditZones,
   startsApps = true,
 }: {
   onEditWorkspace: (workspace: string) => void;
-  onEditZones: (workspace: string) => void;
   /** Opening a workspace starts its apps that are not open ("Start a workspace’s closed apps"). */
   startsApps?: boolean;
 }) {
@@ -610,7 +608,6 @@ export function Home({
           onOpen={open}
           onSay={say}
           onEdit={onEditWorkspace}
-          onEditZones={onEditZones}
         />
       </div>
     </article>

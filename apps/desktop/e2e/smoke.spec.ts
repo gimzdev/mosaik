@@ -75,9 +75,9 @@ async function editWorkspace(page: Page, name: string) {
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
 }
 
-/** Opens the zone editor of the stand-in's first workspace, from its card's menu. */
+/** Opens the zone editor of the stand-in's first workspace, from its page (ADR 0034). */
 async function editZones(page: Page) {
-  await page.getByRole('button', { name: 'More for “Website”' }).click();
+  await editWorkspace(page, 'Website');
   await page.getByRole('button', { name: 'Edit zones' }).click();
   await expect(page.getByRole('heading', { name: 'Website', level: 1 })).toBeVisible();
 }
@@ -468,10 +468,27 @@ test.describe('Home', () => {
       main.scrollTop = main.scrollHeight;
     });
     await page.getByRole('button', { name: 'More for “Portfolio”' }).click();
-    for (const name of ['Edit', 'Edit zones']) {
+    for (const name of ['Rename', 'Edit']) {
       await expect(page.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
     }
     await accessible(page);
+  });
+
+  test('a workspace is renamed in its row, from its menu', async ({ page }) => {
+    // The owner, of the menu: "we should have rename, and not sure we should keep edit zones it
+    // feels like it should be on workspace edit screen" (ADR 0034).
+    await page.goto('/');
+    await page.getByRole('button', { name: 'More for “Portfolio”' }).click();
+    await expect(page.getByRole('button', { name: 'Edit zones' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Rename', exact: true }).click();
+    const field = page.getByRole('textbox', { name: 'Rename “Portfolio”' });
+    await expect(field).toBeFocused();
+    await accessible(page);
+    await field.fill('Portfolio site');
+    await field.press('Enter');
+    await expect(shown(page, 'Renamed to “Portfolio site”.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Portfolio site', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'More for “Portfolio site”' })).toBeFocused();
   });
 });
 
@@ -866,7 +883,7 @@ test.describe('at the smallest window size', () => {
       main.scrollTop = main.scrollHeight;
     });
     await page.getByRole('button', { name: 'More for “Portfolio”' }).click();
-    await expect(page.getByRole('button', { name: 'Edit zones' })).toBeInViewport({ ratio: 1 });
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeInViewport({ ratio: 1 });
     await page.keyboard.press('Escape');
     await editZones(page);
     await page.getByRole('button', { name: /Portrait/ }).click();

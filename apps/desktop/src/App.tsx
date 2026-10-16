@@ -273,9 +273,6 @@ export function App() {
               onEditWorkspace={(workspace) => {
                 setView({ page: 'workspace', workspace });
               }}
-              onEditZones={(workspace) => {
-                setView({ page: 'zones', workspace, from: 'home' });
-              }}
               startsApps={settings.switching.launch_missing}
             />
           );

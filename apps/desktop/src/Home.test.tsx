@@ -191,7 +191,7 @@ function answer(auto: ArrangePreview = coding, extra: (c: Command) => Reply | nu
 function home(props: Partial<Parameters<typeof Home>[0]> = {}) {
   render(
     <Announcer>
-      <Home onEditWorkspace={vi.fn()} onEditZones={vi.fn()} {...props} />
+      <Home onEditWorkspace={vi.fn()} {...props} />
     </Announcer>,
   );
 }

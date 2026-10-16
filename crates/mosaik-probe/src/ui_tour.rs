@@ -1,8 +1,8 @@
 //! Mosaïk's own window, page by page, as a person sees it and as the keyboard and a screen reader
 //! reach it (`mosaik-probe ui-tour`): pictures of the window alone (nothing else of the screen),
 //! the role and name UI Automation gives every control (what a screen reader says), controls
-//! with no name, and the order the Tab key goes through them. Home (with a workspace's ⋯ menu),
-//! a workspace's page, the zone editor and Settings (with Advanced and About), in dark and
+//! with no name, and the order the Tab key goes through them. Home (with a workspace's ⋯ menu,
+//! and its name to rename in its row), a workspace's page, the zone editor and Settings (with Advanced and About), in dark and
 //! light, at the window's usual and smallest size, and the switcher; "Like Windows" chosen after
 //! each of them, the page following Windows' app mode. On Home, a layout is also
 //! chosen, so the picture shows where the windows would go; a window of the picture is dragged
@@ -650,11 +650,14 @@ impl Tour {
         Ok(())
     }
 
-    /// The zone editor of the tour's workspace, from its menu on the home page.
+    /// The zone editor of the tour's workspace, from its page, opened from its menu on the home
+    /// page (ADR 0034: Edit zones is on the page, no longer in the menu).
     fn zones(&self) -> Result<(), String> {
         self.nav("Home")?;
         self.open_menu(WORKSPACE)?;
-        self.choose("Edit zones")
+        self.choose("Edit")?;
+        let zones = self.reveal("button", "Edit zones")?;
+        self.click(&zones)
     }
 
     fn theme(&self, label: &str) -> Result<(), String> {
@@ -841,6 +844,11 @@ impl Tour {
         // 0033): shown, none added.
         self.open_menu(WORKSPACE)?;
         self.page("home-menu", false)?;
+        // Renamed in its row (ADR 0034): its name, ready to be typed over; Escape leaves it.
+        self.choose("Rename")?;
+        self.page("home-rename", false)?;
+        Self::press(VK_ESCAPE.0);
+        self.open_menu(WORKSPACE)?;
         self.choose("Edit")?;
         self.page("workspace", true)?;
         if let Ok(add) = self.reveal("button", &format!("Add an app to “{WORKSPACE}”")) {

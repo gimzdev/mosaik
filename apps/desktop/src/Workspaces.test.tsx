@@ -38,7 +38,7 @@ const coding = set({
 });
 
 /** Commands after which the engine says the workspaces changed (crates/mosaik-engine/src/thread.rs). */
-const CHANGES: ReadonlySet<Command['cmd']> = new Set(['save', 'switch', 'open_set']);
+const CHANGES: ReadonlySet<Command['cmd']> = new Set(['save', 'switch', 'open_set', 'rename_workspace']);
 
 function answer(
   list: WorkspaceSummary[] = [ship, brand],
@@ -61,6 +61,10 @@ function answer(
         return setsReply(sets);
       case 'save':
         return done(`Saved “${c.workspace ?? 'Ship'}”.`);
+      case 'rename_workspace':
+        return list.some((w) => w.id !== c.workspace && w.name === c.name.trim())
+          ? failed(`A workspace is called “${c.name.trim()}” already. Pick another name.`)
+          : done(`Renamed to “${c.name.trim()}”.`);
       default:
         return done('Done.');
     }
@@ -71,7 +75,6 @@ function answer(
 function render_(options: { shown?: Target | null; launching?: Target | null } = {}) {
   const props = {
     onEdit: vi.fn(),
-    onEditZones: vi.fn(),
     onShow: vi.fn<(s: Shown) => void>(),
     onOpen: vi.fn<(w: WorkspaceSummary) => void>(),
     onSay: vi.fn<(text: string, error?: boolean) => void>(),
@@ -196,10 +199,18 @@ describe('the workspaces', () => {
     expect(screen.queryByRole('textbox', { name: 'Name the new workspace' })).not.toBeInTheDocument();
   });
 
-  it('has the rest in each one’s menu: replacing the one on screen, its page, its zones', async () => {
+  it('has the rest in each one’s menu: replacing the one on screen, renaming it, its page', async () => {
+    // The owner, of the menu: "we should have rename, and not sure we should keep edit zones it
+    // feels like it should be on workspace edit screen" (ADR 0034): Edit zones is on its page.
     const asked = answer();
-    const { onEdit, onEditZones, onSay } = render_();
+    const { onEdit, onSay } = render_();
+    const items = () =>
+      screen
+        .getAllByRole('button')
+        .filter((b) => b.hasAttribute('data-item'))
+        .map((b) => b.textContent);
     await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
+    expect(items()).toEqual(['Open again', 'Replace with what’s on screen', 'Rename', 'Edit']);
     await userEvent.click(screen.getByRole('button', { name: 'Replace with what’s on screen' }));
     expect(asked).toContainEqual({ cmd: 'save', workspace: null });
     await waitFor(() => {
@@ -208,11 +219,38 @@ describe('the workspaces', () => {
     await userEvent.click(screen.getByRole('button', { name: 'More for “Ship”' }));
     await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(onEdit).toHaveBeenCalledWith('ship');
-    await userEvent.click(screen.getByRole('button', { name: 'More for “Brand”' }));
     // Only the workspace on screen can take what is on screen.
-    expect(screen.queryByRole('button', { name: 'Replace with what’s on screen' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Edit zones' }));
-    expect(onEditZones).toHaveBeenCalledWith('brand');
+    await userEvent.click(screen.getByRole('button', { name: 'More for “Brand”' }));
+    expect(items()).toEqual(['Open', 'Rename', 'Edit']);
+  });
+
+  it('renames one in its row: Enter saves, Esc leaves it as it was, a name taken says so', async () => {
+    const asked = answer();
+    const { onSay } = render_();
+    await userEvent.click(await screen.findByRole('button', { name: 'More for “Brand”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    const field = screen.getByRole('textbox', { name: 'Rename “Brand”' });
+    expect(field).toHaveValue('Brand');
+    expect(field).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More for “Brand”' })).toHaveFocus();
+    // A name taken: said in place, nothing renamed.
+    await userEvent.click(screen.getByRole('button', { name: 'More for “Brand”' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Rename “Brand”' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Rename “Brand”' }), 'Ship{Enter}');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'A workspace is called “Ship” already. Pick another name.',
+    );
+    // Then a free one: saved, said under Home's picture.
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Rename “Brand”' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Rename “Brand”' }), 'Design{Enter}');
+    expect(asked).toContainEqual({ cmd: 'rename_workspace', workspace: 'brand', name: 'Design' });
+    await waitFor(() => {
+      expect(onSay).toHaveBeenCalledWith('Renamed to “Design”.');
+    });
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 
   it('says why the one on screen could not take what is on screen', async () => {

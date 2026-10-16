@@ -328,7 +328,8 @@ describe('Mosaïk’s window', () => {
     answer(setUp);
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'More for “Ship”' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Edit zones' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit zones' }));
     await userEvent.click(await screen.findByRole('button', { name: /^Zone 1,/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Split side by side' }));
     await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
