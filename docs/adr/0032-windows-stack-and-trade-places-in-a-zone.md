@@ -31,7 +31,11 @@ picked, then Enter on that one), a window trades places with it:
 - On Home's picture of the screen, front to back: the picture lists them so at once, and Move
   windows puts the one that was behind in front (protocol 11: `onto` on a move, the window of the
   same zone; `arrange::traded_order`). The windows are stacked each just below the one before
-  (`put_below`, on a thread of its own), so none comes up over Mosaïk's window.
+  (`put_below`, on a thread of its own), so none comes up over Mosaïk's window. A trade waiting
+  is a change to make, on a screen already arranged too ("Undo changes", not "already like
+  this"), and Move windows makes it once: each swaps the order on screen then, so Home drops the
+  trades once done (sent again, they would trade the windows back), keeping the windows put in
+  other zones. The plan stays as the screen is: a window stacked stays in the zone it fills.
 - On a workspace's picture (Home's preview of it, its page), saved at once: two apps of one zone
   trade their places in it (`move_app` with `swap_with`, `editing::trade_in_zone`). Their order
   is the workspace's own, front to back, which opening it follows; the picture and its page list

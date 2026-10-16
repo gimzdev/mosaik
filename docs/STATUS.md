@@ -1520,7 +1520,9 @@ simetric and appealing". ADR 0032.
   front to back, a tab and a window the tab's place in its group for the window's; the
   workspace's preview lists a zone's apps front to back (`Layout::ranks`, the order opening it
   follows), and in the open workspace the windows are stacked so at once. Pieces traded fly to
-  their places; with the keyboard the focus goes with the piece picked.
+  their places; with the keyboard the focus goes with the piece picked. A trade waiting is a
+  change to make on a screen already arranged too, and Move windows makes it once (Home drops
+  the trades once done: sent again, each would swap the windows back).
 - **Move windows**: Home's button, the tray's item and the side menu's first row; "Moved 4
   windows into Thirds."; a workspace keeps Open.
 - **One width**: Home's title row, picture, layouts and the line under them share the picture's
@@ -1535,7 +1537,7 @@ simetric and appealing". ADR 0032.
   open workspace's zone: listed and pictured the other way round, the first one's window in
   front, both filling the zone, all put back); the windows `moved` puts elsewhere come from two
   zones. Checks here: fmt; clippy -D warnings for Windows on every crate; core 267, ipc 12;
-  interface 130; Playwright 34.
+  interface 131; Playwright 34.
 
 ## Owner decisions
 
