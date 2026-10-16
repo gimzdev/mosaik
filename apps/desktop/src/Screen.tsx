@@ -141,23 +141,28 @@ const put = (w: PreviewWindow, z: ArrangePreview['zones'][number]): PreviewWindo
   ...(z.id === undefined ? {} : { zone: z.id }),
 });
 
-/** The picture with windows `a` and `b` trading places in its list: front to back in their zone
- * (ADR 0032). */
+/** The picture with windows `a` and `b` trading places: their zones, and their places in its
+ * list, front to back (ADR 0032). */
 function traded(preview: ArrangePreview, a: PreviewWindow, b: PreviewWindow): ArrangePreview {
   const [i, j] = [preview.windows.indexOf(a), preview.windows.indexOf(b)];
-  if (i < 0 || j < 0 || i === j) return preview;
+  const [za, zb] = [preview.zones[zoneIndex(preview, a)], preview.zones[zoneIndex(preview, b)]];
+  if (i < 0 || j < 0 || i === j || !za || !zb) return preview;
   const windows = [...preview.windows];
-  windows[i] = b;
-  windows[j] = a;
+  windows[i] = put(b, za);
+  windows[j] = put(a, zb);
   return { ...preview, windows };
 }
 
+/** The windows of the `zone`-th zone, front first: Mosaïk lists each zone's own window first. */
+const inZone = (preview: ArrangePreview, zone: number) => preview.windows.filter((x) => zoneIndex(preview, x) === zone);
+
 /**
- * Arrange's picture once `window` is put in the `zone`-th zone, before Mosaïk says: it trades
- * places with the windows there (or leaves its own zone empty), and the two zones' colours go with
- * their windows; the zones keep their numbers. Put `onto` a window of its own zone, the two trade
- * places front to back (ADR 0032). Mosaïk's own answer follows (it may also make room for a window
- * that needs more).
+ * Arrange's picture once `window` is dropped in the `zone`-th zone, before Mosaïk says: `onto` a
+ * window there, the two trade places, zones and places front to back (ADR 0032); onto the zone
+ * itself, the zone's own window takes its place, or the window takes the zone left empty. When
+ * the window and the one it trades with are their zones' own, the zones' colours go with them; the
+ * zones keep their numbers. Mosaïk's own answer follows (it may also make room for a window that
+ * needs more).
  */
 export function moved(
   preview: ArrangePreview,
@@ -169,37 +174,37 @@ export function moved(
   const w = preview.windows.find((x) => x.window === window);
   const fromIndex = w ? zoneIndex(preview, w) : -1;
   const from = preview.zones[fromIndex];
-  if (w && fromIndex === zone && onto !== null) {
-    const other = preview.windows.find((x) => x.window === onto && zoneIndex(preview, x) === zone);
-    return other ? traded(preview, w, other) : preview;
-  }
-  if (!target || !w || !from || fromIndex === zone) return preview;
-  const there = new Set(preview.windows.filter((x) => x !== w && zoneIndex(preview, x) === zone));
+  if (!target || !w || !from) return preview;
+  const dropped = onto === null ? undefined : inZone(preview, zone).find((x) => x.window === onto && x !== w);
+  if (!dropped && fromIndex === zone) return preview;
+  const other = dropped ?? inZone(preview, zone)[0];
+  const own = (x: PreviewWindow, z: number) => inZone(preview, z)[0] === x;
+  const colours = fromIndex !== zone && own(w, fromIndex) && (!other || own(other, zone));
+  const next = other
+    ? traded(preview, w, other)
+    : { ...preview, windows: preview.windows.map((x) => (x === w ? put(x, target) : x)) };
+  if (!colours) return next;
   return {
-    ...preview,
-    windows: preview.windows.map((x) => (x === w ? put(x, target) : there.has(x) ? put(x, from) : x)),
-    zones: preview.zones.map((z, i) =>
+    ...next,
+    zones: next.zones.map((z, i) =>
       i === zone ? { ...z, color: from.color } : i === fromIndex ? { ...z, color: target.color } : z,
     ),
   };
 }
 
-/** A workspace's picture once an app is put elsewhere, before Mosaïk says: it goes in the zone,
- * and the app it was dropped on takes its old one; two apps of one zone trade places in it, front
- * to back (ADR 0032). A tab leaving its group, or trading places in it, waits for Mosaïk's answer,
- * which draws the group again. */
+/** A workspace's picture once an app is put elsewhere, before Mosaïk says: dropped onto another
+ * app, the two trade places, zones and places front to back (ADR 0031, 0032); onto a zone, it goes
+ * in it. A tab leaving its group, or trading places in it, waits for Mosaïk's answer, which draws
+ * the group again. */
 export function dropped(preview: ArrangePreview, d: Dropped): ArrangePreview {
   if (d.piece.tab || d.onto?.tab) return preview;
   const target = preview.zones[d.zone];
   const w = preview.windows.find((x) => x.app !== undefined && x.app === d.piece.app);
   if (!target || !w) return preview;
-  const from = preview.zones[zoneIndex(preview, w)];
   const other = d.onto ? preview.windows.find((x) => x.app !== undefined && x.app === d.onto?.app) : undefined;
-  if (zoneIndex(preview, w) === d.zone) return other ? traded(preview, w, other) : preview;
-  return {
-    ...preview,
-    windows: preview.windows.map((x) => (x === w ? put(x, target) : x === other && from ? put(x, from) : x)),
-  };
+  if (other) return traded(preview, w, other);
+  if (zoneIndex(preview, w) === d.zone) return preview;
+  return { ...preview, windows: preview.windows.map((x) => (x === w ? put(x, target) : x)) };
 }
 
 /** The zones' places as fractions of the work area, in the picture's order: where the lines

@@ -305,8 +305,6 @@ impl Engine {
                 return failed(e);
             }
             tracing::info!(slot = %slot.0, zone = %zone.0, swap = swap_with.is_some(), "app moved");
-            // Two apps of one zone traded places in it.
-            let in_zone = swap_with.is_some() && left.as_ref() == Some(zone);
             if self.is_open(index) {
                 let one_group = swap_with.is_some_and(|other| {
                     let ws = &self.file.workspaces[index];
@@ -320,11 +318,17 @@ impl Engine {
                     a.shown.retain(|_, s| s != slot && Some(&*s) != swap_with);
                 }
                 self.place_in(zone, None);
-                if let Some(left) = left.filter(|l| swap_with.is_some() && l != zone) {
-                    self.place_in(&left, None);
+                let other_zone = left.filter(|l| swap_with.is_some() && l != zone);
+                if let Some(left) = &other_zone {
+                    self.place_in(left, None);
                 }
-                if in_zone {
+                // Two apps that traded places stack as the workspace now has them, in their
+                // zone or zones; two tabs of one group traded only their places in its strip.
+                if swap_with.is_some() && !one_group {
                     self.stack_zone(zone);
+                    if let Some(left) = &other_zone {
+                        self.stack_zone(left);
+                    }
                 }
             }
         }

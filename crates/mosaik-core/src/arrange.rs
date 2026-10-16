@@ -419,13 +419,15 @@ pub struct NewZone {
 }
 
 /// A window the user moved on the picture of the screen: unit `unit` into the `zone`-th of the
-/// zones the plan makes on `monitor` (in the plan's order, as the picture lists them). The
-/// window there takes its place, or is minimised when it had none.
+/// zones the plan makes on `monitor` (in the plan's order, as the picture lists them), dropped
+/// `onto` the unit there it was put on. The two trade places; dropped onto the zone itself, the
+/// zone's own window takes its place (ADR 0032).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Move {
     pub unit: usize,
     pub monitor: usize,
     pub zone: usize,
+    pub onto: Option<usize>,
 }
 
 /// Where a unit goes.
@@ -450,6 +452,10 @@ pub struct Plan {
     pub gone: Vec<usize>,
     /// For each monitor, the task its windows say, when it was given the layout of its task.
     pub tasks: Vec<Option<Task>>,
+    /// Every unit, front to back as Mosaïk stacks them in their zones (ADR 0032): each zone's
+    /// own window first, then the windows stacked behind it, those used last first, as the
+    /// user's trades left them. Only the order of the windows of one zone counts.
+    pub order: Vec<usize>,
 }
 
 /// A zone of a picked layout, as the planner sees it.
@@ -610,6 +616,7 @@ fn stack_the_rest(
     new_zones: &[NewZone],
     units: &[Unit],
     monitors: &[Rect],
+    stacked: &mut [bool],
 ) {
     let mut count = vec![0_usize; new_zones.len()];
     for g in goes.iter().flatten() {
@@ -647,6 +654,7 @@ fn stack_the_rest(
             if let Some(r) = best {
                 goes[u] = Some(Goes::Zone(r));
                 count[r] += 1;
+                stacked[u] = true;
             }
         }
     }
@@ -672,21 +680,6 @@ pub fn plan(units: &[Unit], zones: &[KeptZone], monitors: &[Rect]) -> Plan {
 /// them.
 pub fn plan_with(units: &[Unit], zones: &[KeptZone], monitors: &[Rect], chosen: Option<Chosen>) -> Plan {
     plan_moved(units, zones, monitors, chosen, &[])
-}
-
-/// The windows' order front to back (indexes into the `count` units, front first) once the
-/// user's trades on the picture are made: each `(a, b)`, a window dropped onto another of its
-/// zone, swaps the two places, in the order they were made (ADR 0032). Which zone a window goes
-/// in does not change.
-pub fn traded_order(count: usize, trades: &[(usize, usize)]) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..count).collect();
-    for &(a, b) in trades {
-        let at = |u: usize, order: &[usize]| order.iter().position(|&x| x == u);
-        if let (Some(i), Some(j)) = (at(a, &order), at(b, &order)) {
-            order.swap(i, j);
-        }
-    }
-    order
 }
 
 /// [`plan_with`], then the windows the user moved on the picture of the screen ([`Move`]), in
@@ -849,7 +842,17 @@ pub fn plan_moved(
         made_areas = new_zones.iter().map(|z| z.area).collect();
     }
 
-    // 3. The windows the user moved on the picture of the screen.
+    // 3. The windows left over stack in the zones, behind each zone's own window (ADR 0032).
+    let mut stacked = vec![false; units.len()];
+    stack_the_rest(&mut goes, &on, &new_zones, units, monitors, &mut stacked);
+    // Front to back, as Mosaïk stacks them: each zone's own window, then the windows stacked in
+    // it, those used last first.
+    let mut order: Vec<usize> = (0..units.len()).collect();
+    order.sort_by_key(|&u| stacked[u]);
+
+    // 4. The windows the user moved on the picture of the screen, in the order they were moved.
+    //    Dropped onto a window, the two trade places: zones, and places in them; onto a zone, the
+    //    window trades places with the zone's own window, or takes the zone left empty.
     let mut moved = vec![false; monitors.len()];
     for mv in moves {
         let Some(unit) = units.get(mv.unit) else {
@@ -864,24 +867,23 @@ pub fn plan_moved(
         else {
             continue;
         };
-        let was = goes[mv.unit];
-        if was == Some(Goes::Zone(r)) {
-            continue;
-        }
-        let there = new_zone_window[r];
-        new_zone_window[r] = Some(mv.unit);
-        goes[mv.unit] = Some(Goes::Zone(r));
-        if let Some(Goes::Zone(q)) = was {
-            // The two trade places, and their zones' colours with them.
-            new_zone_window[q] = there;
-            let (cq, cr) = (new_zones[q].color, new_zones[r].color);
-            new_zones[q].color = cr;
-            new_zones[r].color = cq;
-            if let Some(v) = there {
-                goes[v] = Some(Goes::Zone(q));
-            }
-        } else if let Some(v) = there {
-            goes[v] = Some(Goes::Minimize);
+        let a = mv.unit;
+        let in_r = |u: usize| goes.get(u).copied().flatten() == Some(Goes::Zone(r));
+        let other = match mv.onto.filter(|&o| o != a && in_r(o)) {
+            Some(o) => Some(o),
+            None if in_r(a) => continue,
+            None => new_zone_window[r],
+        };
+        let mut placed = Placed {
+            goes: &mut goes,
+            stacked: &mut stacked,
+            order: &mut order,
+            own: &mut new_zone_window,
+            zones: &mut new_zones,
+        };
+        match other {
+            Some(b) => placed.trade(a, b),
+            None => placed.take_empty(a, r),
         }
         moved[mv.monitor] = true;
     }
@@ -920,14 +922,17 @@ pub fn plan_moved(
                 new_zones[r].color = c;
             }
         }
-        // A window no zone has room for any more is stacked in one in step 4, if it fits.
+        // A window no zone has room for any more is stacked in one in step 5, if it fits.
         for u in before.into_iter().flatten() {
             if !in_zone.contains(&Some(u)) {
                 goes[u] = Some(Goes::Minimize);
             }
         }
     }
-    stack_the_rest(&mut goes, &on, &new_zones, units, monitors);
+    // 5. The windows a move or the want of room sent to the taskbar stack in a zone too, where
+    //    they fit; each zone's own window goes in front of the windows stacked in it.
+    stack_the_rest(&mut goes, &on, &new_zones, units, monitors, &mut stacked);
+    order.sort_by_key(|&u| stacked[u]);
     let goes: Vec<Goes> = goes.into_iter().map(|g| g.unwrap_or(Goes::Stay)).collect();
 
     // The open workspace's zones on the monitors laid out anew make way; the others stay.
@@ -937,12 +942,12 @@ pub fn plan_moved(
     // New zones are numbered in reading order, after the zones kept on the monitors before
     // theirs: a zone's name says where it is, never what it holds (`Layout::number_zones`
     // numbers a workspace's zones the same way once they join it).
-    let mut order: Vec<usize> = (0..new_zones.len()).collect();
-    order.sort_by(|&a, &b| {
+    let mut reading: Vec<usize> = (0..new_zones.len()).collect();
+    reading.sort_by(|&a, &b| {
         let (za, zb) = (&new_zones[a], &new_zones[b]);
         reading_order((za.monitor, za.area), (zb.monitor, zb.area))
     });
-    for (n, i) in order.into_iter().enumerate() {
+    for (n, i) in reading.into_iter().enumerate() {
         let m = new_zones[i].monitor;
         let kept_before = zones
             .iter()
@@ -955,6 +960,75 @@ pub fn plan_moved(
         goes,
         gone,
         tasks,
+        order,
+    }
+}
+
+/// Where the plan has put the units, as the user's moves change it (step 4 of [`plan_moved`]).
+struct Placed<'a> {
+    goes: &'a mut [Option<Goes>],
+    stacked: &'a mut [bool],
+    order: &'a mut [usize],
+    /// Each new zone's own window, in front of the windows stacked in it.
+    own: &'a mut [Option<usize>],
+    zones: &'a mut [NewZone],
+}
+
+impl Placed<'_> {
+    /// The zone `u` is the own window of.
+    fn own_zone(&self, u: usize) -> Option<usize> {
+        match self.goes.get(u).copied().flatten() {
+            Some(Goes::Zone(q)) if self.own.get(q).copied().flatten() == Some(u) => Some(q),
+            _ => None,
+        }
+    }
+
+    /// Units `a` and `b` (in a zone) trade places: their zones, own window or stacked, and their
+    /// places front to back. When both are their zones' own windows, each zone's colour goes
+    /// with its window, as a tile moved in a mosaic. A window that was in no zone sends `b` to
+    /// the taskbar, to be stacked again.
+    fn trade(&mut self, a: usize, b: usize) {
+        let (qa, qb) = (self.own_zone(a), self.own_zone(b));
+        let was = self.goes[a];
+        self.goes[a] = self.goes[b];
+        self.goes[b] = match was {
+            Some(Goes::Zone(q)) => Some(Goes::Zone(q)),
+            _ => Some(Goes::Minimize),
+        };
+        let (sa, sb) = (self.stacked[a], self.stacked[b]);
+        self.stacked[a] = sb;
+        self.stacked[b] = sa && matches!(was, Some(Goes::Zone(_)));
+        if let Some(q) = qb {
+            self.own[q] = Some(a);
+        }
+        if let Some(q) = qa {
+            self.own[q] = Some(b);
+        }
+        if let (Some(q), Some(r)) = (qa, qb)
+            && q != r
+        {
+            let (cq, cr) = (self.zones[q].color, self.zones[r].color);
+            self.zones[q].color = cr;
+            self.zones[r].color = cq;
+        }
+        let at = |u: usize, order: &[usize]| order.iter().position(|&x| x == u);
+        if let (Some(i), Some(j)) = (at(a, self.order), at(b, self.order)) {
+            self.order.swap(i, j);
+        }
+    }
+
+    /// Unit `a` takes zone `r`, which has no window: it is the zone's own, and the zone it was
+    /// the own window of is left without one, the two zones' colours trading places.
+    fn take_empty(&mut self, a: usize, r: usize) {
+        if let Some(q) = self.own_zone(a) {
+            self.own[q] = None;
+            let (cq, cr) = (self.zones[q].color, self.zones[r].color);
+            self.zones[q].color = cr;
+            self.zones[r].color = cq;
+        }
+        self.goes[a] = Some(Goes::Zone(r));
+        self.own[r] = Some(a);
+        self.stacked[a] = false;
     }
 }
 
@@ -1550,6 +1624,7 @@ mod tests {
                 unit: 0,
                 monitor: 0,
                 zone: k,
+                onto: None,
             }],
         );
         assert_eq!(zone_of(&moved, 0), browser);
@@ -1593,6 +1668,7 @@ mod tests {
                 unit: 0,
                 monitor: 0,
                 zone: empty,
+                onto: None,
             }],
         );
         assert_eq!(zone_of(&moved, 0), empty);
@@ -1637,6 +1713,7 @@ mod tests {
                 unit: 0,
                 monitor: 0,
                 zone: b,
+                onto: None,
             }],
         );
         assert_eq!((zone_of(&moved, 0), zone_of(&moved, 1)), (b, a));
@@ -1668,6 +1745,7 @@ mod tests {
                 unit: 0,
                 monitor: 0,
                 zone: empty,
+                onto: None,
             }],
         );
         assert_eq!(moved.new_zones[empty].color, base.new_zones[used[0]].color);
@@ -1701,6 +1779,7 @@ mod tests {
                 unit: 1,
                 monitor: 0,
                 zone: b,
+                onto: None,
             }],
         );
         assert_eq!(zone_of(&moved, 1), b);
@@ -1726,16 +1805,19 @@ mod tests {
                 unit: 0,
                 monitor: 0,
                 zone: 9,
+                onto: None,
             },
             Move {
                 unit: 7,
                 monitor: 0,
                 zone: 0,
+                onto: None,
             },
             Move {
                 unit: 0,
                 monitor: 3,
                 zone: 0,
+                onto: None,
             },
             // Onto the zone it is in already.
             Move {
@@ -1745,6 +1827,7 @@ mod tests {
                     .iter()
                     .position(|&r| r == zone_of(&base, 0))
                     .unwrap(),
+                onto: None,
             },
         ] {
             assert_eq!(plan_moved(&units, &[], &[WORK], None, &[mv]), base, "{mv:?}");
@@ -1759,6 +1842,7 @@ mod tests {
             unit: 1,
             monitor: 0,
             zone: 0,
+            onto: None,
         };
         assert_eq!(plan_moved(&two, &[], &[WORK, side], None, &[mv]), base);
     }
@@ -1785,14 +1869,107 @@ mod tests {
         assert!(plan.new_zones.is_empty() && plan.goes.is_empty() && plan.gone.is_empty());
     }
 
+    /// A zone's windows front to back, as the plan stacks them.
+    fn in_zone(plan: &Plan, r: usize) -> Vec<usize> {
+        plan.order
+            .iter()
+            .copied()
+            .filter(|&u| plan.goes[u] == Goes::Zone(r))
+            .collect()
+    }
+
     #[test]
-    fn windows_traded_in_a_zone_trade_places_front_to_back() {
-        // ADR 0032: a window dropped onto another of its zone on Home's picture; trades are made
-        // in the order they were, and a trade of a window with itself, or with one gone, is none.
-        assert_eq!(traded_order(4, &[]), vec![0, 1, 2, 3]);
-        assert_eq!(traded_order(4, &[(3, 1)]), vec![0, 3, 2, 1]);
-        assert_eq!(traded_order(4, &[(3, 1), (1, 0)]), vec![1, 3, 2, 0]);
-        assert_eq!(traded_order(4, &[(3, 1), (1, 3)]), vec![0, 1, 2, 3], "and back");
-        assert_eq!(traded_order(3, &[(2, 2), (0, 7)]), vec![0, 1, 2]);
+    fn each_zone_has_its_own_window_in_front_of_the_windows_stacked_in_it() {
+        // The review of 598f728: a window stacked in a zone, used more recently than the one the
+        // layout gave the zone, stayed in front of it (job 0105's screen: Chrome over the
+        // editor). The plan's order puts each zone's own window first.
+        let exes = [
+            ("claude.exe", "Claude"),
+            ("chrome.exe", "Google Chrome"),
+            ("steamwebhelper.exe", "Steam"),
+            ("notepad++.exe", "Notepad++"),
+            ("calculatorapp.exe", "Calculator"),
+            ("explorer.exe", "File Explorer"),
+            ("code.exe", "Visual Studio Code"),
+            ("msedge.exe", "Microsoft Edge"),
+            ("figma.exe", "Figma"),
+            ("windowsterminal.exe", "Windows Terminal"),
+        ];
+        let units: Vec<Unit> = exes
+            .iter()
+            .enumerate()
+            .map(|(i, (exe, label))| {
+                let i = i32::try_from(i).unwrap_or(0);
+                unit(exe, label, Rect::new(i * 40, i * 20, 900 + i * 40, 800 + i * 20))
+            })
+            .collect();
+        let plan = plan(&units, &[], &[WORK]);
+        assert_eq!(plan.order.len(), units.len());
+        for own in [0, 3, 9] {
+            let r = zone_of(&plan, own);
+            let list = in_zone(&plan, r);
+            assert_eq!(list.first(), Some(&own), "zone {r}: {list:?}");
+            // The others behind it, those used last first.
+            assert!(list.windows(2).skip(1).all(|p| p[0] < p[1]), "zone {r}: {list:?}");
+        }
+    }
+
+    #[test]
+    fn a_window_dropped_onto_another_trades_places_with_exactly_it() {
+        // The review of 598f728: Halves, Claude in the left half with MSYS2 stacked behind it,
+        // Chrome in the right one. MSYS2 dropped onto Chrome went to the right half with Chrome
+        // still there in front of it; Chrome dropped onto MSYS2 traded with Claude instead.
+        let left = Rect::new(0, 0, 960, 1032);
+        let right = Rect::new(960, 0, 1920, 1032);
+        let units = [
+            unit("a.exe", "Claude", left),
+            unit("b.exe", "Google Chrome", right),
+            unit("c.exe", "MSYS2", left),
+        ];
+        let halves = Some(Chosen {
+            monitor: 0,
+            preset: Preset::Halves,
+        });
+        let base = plan_with(&units, &[], &[WORK], halves);
+        let (l, r) = (zone_of(&base, 0), zone_of(&base, 1));
+        assert_ne!(l, r);
+        assert_eq!(in_zone(&base, l), vec![0, 2], "MSYS2 stacked behind Claude");
+        assert_eq!(in_zone(&base, r), vec![1]);
+        let k = |z: usize| on_main(&base).iter().position(|&x| x == z).unwrap();
+        let moved = |unit: usize, zone: usize, onto: Option<usize>| {
+            plan_moved(
+                &units,
+                &[],
+                &[WORK],
+                halves,
+                &[Move {
+                    unit,
+                    monitor: 0,
+                    zone: k(zone),
+                    onto,
+                }],
+            )
+        };
+        let colours = |p: &Plan| (p.new_zones[l].color, p.new_zones[r].color);
+        // MSYS2 onto Chrome, Chrome onto MSYS2, or MSYS2 onto Chrome's half: the two trade
+        // places, Chrome stacked behind Claude; Claude stays, and the halves keep their colours.
+        for p in [moved(2, r, Some(1)), moved(1, l, Some(2)), moved(2, r, None)] {
+            assert_eq!(in_zone(&p, l), vec![0, 1], "{:?} {:?}", p.goes, p.order);
+            assert_eq!(in_zone(&p, r), vec![2]);
+            assert_eq!(colours(&p), colours(&base));
+        }
+        // MSYS2 onto Claude: it comes to the front of their half.
+        let p = moved(2, l, Some(0));
+        assert_eq!(in_zone(&p, l), vec![2, 0]);
+        assert_eq!(in_zone(&p, r), vec![1]);
+        // Claude onto Chrome's half: the two trade halves, with their colours; MSYS2 stays,
+        // behind Chrome now.
+        let p = moved(0, r, None);
+        assert_eq!(in_zone(&p, l), vec![1, 2]);
+        assert_eq!(in_zone(&p, r), vec![0]);
+        assert_eq!(colours(&p), (colours(&base).1, colours(&base).0));
+        // Dropped onto a window that is not in that zone, or onto itself: a move into the zone.
+        assert_eq!(moved(2, r, Some(0)).goes, moved(2, r, None).goes);
+        assert_eq!(moved(2, l, Some(2)).order, base.order);
     }
 }

@@ -322,16 +322,25 @@ describe('Home', () => {
     await userEvent.click(tile('Google Chrome in zone 2'));
     // At once, then as Mosaïk says: the editor on the right, in zone 2, its colour with it.
     expect(picture()).toHaveAttribute('aria-label', 'Visual Studio Code in zone 2, Google Chrome in zone 1.');
+    // Dropped onto the browser: the two trade places, exactly they (ADR 0032).
+    const move = { window: 101, zone: 1, onto: 102 };
     await waitFor(() => {
-      expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [{ window: 101, zone: 1 }] });
+      expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [move] });
     });
     expect(tile('Visual Studio Code in zone 2')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: 'Undo changes' })).toBeInTheDocument();
     expect(asked.some((c) => c.cmd === 'arrange')).toBe(false);
     await userEvent.click(arrange());
-    expect(asked).toContainEqual({ cmd: 'arrange', moves: [{ window: 101, zone: 1 }] });
+    expect(asked).toContainEqual({ cmd: 'arrange', moves: [move] });
     expect(await shown('Moved 2 windows.')).toBeInTheDocument();
-    // Arranged as they were put, the picture keeps them there, as the screen now is.
+    // Arranged as they were put, the picture keeps them there, as the screen now is: the editor
+    // stays chosen for zone 2, and is not traded back.
+    await waitFor(() => {
+      expect(asked.filter((c) => c.cmd === 'preview_arrange').at(-1)).toEqual({
+        cmd: 'preview_arrange',
+        moves: [{ window: 101, zone: 1 }],
+      });
+    });
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
     });
@@ -422,7 +431,7 @@ describe('Home', () => {
     expect(tile('Google Chrome in zone 2')).toHaveFocus();
     await userEvent.keyboard('{Enter}');
     await waitFor(() => {
-      expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [{ window: 101, zone: 1 }] });
+      expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [{ window: 101, zone: 1, onto: 102 }] });
     });
     // The focus stays with the window put there.
     expect(tile('Visual Studio Code in zone 2')).toHaveFocus();

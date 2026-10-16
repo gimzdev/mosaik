@@ -207,6 +207,33 @@ test.describe('Home', () => {
     await accessible(page);
   });
 
+  test('a window stacked behind another, dropped onto a window of another zone, trades places with exactly it', async ({
+    page,
+  }) => {
+    // The review of 598f728: Slack, stacked behind Visual Studio Code in Thirds, dropped onto
+    // Chrome: Slack takes Chrome's zone, and Chrome Slack's place, behind the editor.
+    await page.goto('/');
+    await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
+    await page.getByRole('radio', { name: 'Thirds' }).check();
+    const slack = page.getByRole('button', { name: 'Slack in zone 2' });
+    await expect(slack).toBeVisible();
+    await dragOnto(page, slack, page.getByRole('button', { name: 'Google Chrome in zone 1' }));
+    await expect(
+      page.getByRole('group', {
+        name: 'Visual Studio Code in zone 2, Slack in zone 1, Windows Terminal in zone 3, Google Chrome in zone 2.',
+      }),
+    ).toBeVisible();
+    await arrange(page).click();
+    await expect(shown(page, 'Moved 4 windows into Thirds.')).toBeVisible();
+    // Done, and kept so: the picture shows the screen as it now is.
+    await expect(page.getByRole('button', { name: 'Undo changes' })).toBeHidden();
+    await expect(
+      page.getByRole('group', {
+        name: 'Visual Studio Code in zone 2, Slack in zone 1, Windows Terminal in zone 3, Google Chrome in zone 2.',
+      }),
+    ).toBeVisible();
+  });
+
   test('a line between zones dragged resizes them; Arrange puts the windows so, and the picture keeps them', async ({
     page,
   }) => {

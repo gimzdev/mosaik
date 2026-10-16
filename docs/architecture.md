@@ -159,8 +159,10 @@ the engine gathers windows and applies the result.
   zone once, numbered and coloured, empty ones too, with the title bars of the windows it takes
   (Mosaïk says which: each preview zone's `id`, each window's and tab's `zone` and `app`). A
   window dragged onto another, or onto a zone, trades places with it (a click or Enter picks one,
-  a second puts it there); two windows of one zone trade places front to back (`onto`,
-  `arrange::traded_order`, then stacked each below the one before by `mover::stack`); the lines
+  a second puts it there): exactly the two dropped one onto the other (`onto`), zones and places
+  front to back, own window or stacked; Arrange lists and stacks each zone's windows front to
+  back (`Plan::order`, its own window first, stacked each below the one before by
+  `mover::stack`, put back by Undo); the lines
   between zones resize them (`LineHandle`, hidden until pointed at). The moves and the areas go
   with the preview and with Arrange (`mosaik_core::arrange::plan_moved`, then
   `editing::stretch_zones` before the zones are numbered), each window keeping its colour, each

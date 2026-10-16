@@ -28,13 +28,30 @@ import {
   errorMessage,
 } from './protocol';
 import { useReads } from './reads';
-import { AppsToStart, type PictureEdits, Screen, dropped, moved, pictureWidth, settled, stretched } from './Screen';
+import {
+  AppsToStart,
+  type PictureEdits,
+  Screen,
+  dropped,
+  moved,
+  pictureWidth,
+  settled,
+  stretched,
+  zoneIndex,
+} from './Screen';
 import { Button, PageTitle, Status, useAnnounce } from './ui';
 import { type Change, moveApp, resizeZones } from './workspacePicture';
 import { type Shown, type Sorted, type Target, Workspaces } from './Workspaces';
 
 /** No window put elsewhere: one list, so the pictures asked for do not change with each render. */
-const NO_MOVES: ArrangeMove[] = [];
+/** A window put elsewhere on the picture, and whether it was dropped onto another of its own zone
+ * (to bring it in front: a change of order alone, made once, ADR 0032). */
+interface Put {
+  move: ArrangeMove;
+  inZone: boolean;
+}
+
+const NO_PUTS: Put[] = [];
 /** No zone resized on the picture: the layout's own. */
 const NO_AREAS: RatioRect[] = [];
 
@@ -131,7 +148,7 @@ export function Home({
   const announce = useAnnounce();
   const [choice, setChoice] = useState<Choice>('auto');
   /** The windows put elsewhere on the picture, in order, for the layout chosen. */
-  const [moves, setMoves] = useState<ArrangeMove[]>(NO_MOVES);
+  const [puts, setPuts] = useState<Put[]>(NO_PUTS);
   /** The zones as resized on the picture, in its order, for the layout chosen. */
   const [areas, setAreas] = useState<RatioRect[]>(NO_AREAS);
   /** A workspace or a suggested set picked in the column, shown instead of the screen. */
@@ -163,9 +180,10 @@ export function Home({
     [announce],
   );
 
+  const moves = puts.map((p) => p.move);
   // Windows traded in a zone (ADR 0032): which is in front, not where they are; to do until Move
   // windows does them, and done once (each is a swap of the order on screen then).
-  const traded = moves.some((m) => m.onto !== undefined);
+  const traded = puts.some((p) => p.inZone);
   // One picture is read: the one shown (a suggested set's is drawn from what the column read).
   // After Arrange, Undo or Open, Mosaïk says the workspaces changed, and that reads it again: a
   // command that worked needs no read of its own; one refused says nothing, so it asks for one.
@@ -236,7 +254,7 @@ export function Home({
 
   /** Puts the layout's own windows and zones back. */
   const reset = () => {
-    setMoves(NO_MOVES);
+    setPuts(NO_PUTS);
     setAreas(NO_AREAS);
     setEarly(null);
     setPicking(null);
@@ -257,7 +275,19 @@ export function Home({
         // done: sent again, they would trade the windows back.
         say(reply.message);
         setUndoable(true);
-        setMoves((list) => (list.some((m) => m.onto !== undefined) ? list.filter((m) => m.onto === undefined) : list));
+        // A window dropped onto another trades places with it, which sent again would trade them
+        // back: the trades in a zone are done, and a window put in another zone stays put there.
+        setPuts((list) =>
+          list.some((p) => p.move.onto !== undefined)
+            ? list.flatMap((p) =>
+                p.move.onto === undefined
+                  ? [p]
+                  : p.inZone
+                    ? []
+                    : [{ move: { window: p.move.window, zone: p.move.zone }, inZone: false }],
+              )
+            : list,
+        );
       } else {
         say(errorMessage(reply) ?? 'Your windows could not be arranged.', true);
         // Some windows may have moved all the same.
@@ -305,11 +335,13 @@ export function Home({
     launch({ kind: 'set', id: s.id }, { cmd: 'open_set', set: s.id }, `The apps of ${s.name} could not be started.`);
   };
 
-  /** A window put in another zone of the picture, or onto another window of its zone (`onto`: the
-   * two trade places front to back, ADR 0032): it shows so at once, then as Mosaïk says. */
+  /** A window dropped in a zone of the picture, `onto` a window there (the two trade places,
+   * ADR 0032) or onto the zone itself: it shows so at once, then as Mosaïk says. */
   const move = (window: number, zone: number, onto: number | null) => {
+    const w = picture?.windows.find((x) => x.window === window);
+    const inZone = onto !== null && picture !== null && w !== undefined && zoneIndex(picture, w) === zone;
     if (picture) setEarly(moved(picture, window, zone, onto));
-    setMoves((list) => [...list, onto === null ? { window, zone } : { window, zone, onto }]);
+    setPuts((list) => [...list, { move: onto === null ? { window, zone } : { window, zone, onto }, inZone }]);
     setOutcome(null);
   };
 
@@ -368,7 +400,7 @@ export function Home({
     return {
       kind: 'arrange',
       onDrop: (d) => {
-        move(d.piece.window, d.zone, d.zone === d.from ? (d.onto?.window ?? null) : null);
+        move(d.piece.window, d.zone, d.onto?.window ?? null);
       },
       onStretch: stretch,
     };

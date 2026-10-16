@@ -1658,6 +1658,14 @@ fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Re
         return Ok(json!({ "stacked_pair": false, "ok": false }));
     };
     let (front, back) = (pair[0], pair[1]);
+    let hwnd_of = |h| w.iter().copied().find(|x| handle(*x) == h);
+    let z_at = |h| hwnd_of(h).and_then(|x| mosaik_win::window::top_level().iter().position(|y| *y == x));
+    // The window to bring to the front is put behind the other first, so the check cannot pass
+    // by chance.
+    if let (Some(b), Some(f)) = (hwnd_of(back), hwnd_of(front)) {
+        let _ = mosaik_win::arrange::put_below(b, f);
+    }
+    let behind_before = matches!((z_at(back), z_at(front)), (Some(b), Some(f)) if b > f);
     let mv = ArrangeMove {
         window: back,
         zone: u32::try_from(zone).unwrap_or(u32::MAX),
@@ -1684,10 +1692,7 @@ fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Re
         .clone()
         .ok_or("no workspace open after the trade")?;
     let zs = zones(engine, &ws.0, work)?;
-    let hwnd_of = |h| w.iter().copied().find(|x| handle(*x) == h);
-    let z_order = mosaik_win::window::top_level();
-    let at = |h| hwnd_of(h).and_then(|x| z_order.iter().position(|y| *y == x));
-    let back_in_front = matches!((at(back), at(front)), (Some(b), Some(f)) if b < f);
+    let back_in_front = matches!((z_at(back), z_at(front)), (Some(b), Some(f)) if b < f);
     let pair_hwnds: Vec<HWND> = [back, front].into_iter().filter_map(hwnd_of).collect();
     let one_zone = pair_hwnds.len() == 2 && {
         let za = zone_of(&st, &zs, pair_hwnds[0]);
@@ -1703,13 +1708,14 @@ fn traded_in_zone(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Re
         "preview_changed_nothing": untouched,
         "message": message,
         "ms": ms,
+        "behind_before": behind_before,
         "behind_now_in_front": back_in_front,
         "one_zone": one_zone,
         "fit_px": fits,
         "undo": undo,
         "back_px": back_px,
-        "ok": traded && untouched && message.contains("into Halves.") && back_in_front && one_zone
-            && all_fit(&fits) && back_px <= SLACK,
+        "ok": traded && untouched && message.contains("into Halves.") && behind_before
+            && back_in_front && one_zone && all_fit(&fits) && back_px <= SLACK,
     }))
 }
 
@@ -1948,6 +1954,28 @@ fn reordered(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<
     };
     let first = in_za(&move_app(&b, &za, None)?);
     let _ = settled(engine)?;
+    let window_of = |s: &SlotId| {
+        if *s == a {
+            Some(w[0])
+        } else if *s == b {
+            Some(w[1])
+        } else {
+            None
+        }
+    };
+    let z_at = |s: Option<&SlotId>| {
+        s.and_then(window_of)
+            .and_then(|h| mosaik_win::window::top_level().iter().position(|x| *x == h))
+    };
+    // The window that will be first is put behind the other first, so the check cannot pass by
+    // chance.
+    if let (Some(x), Some(y)) = (
+        first.first().and_then(window_of),
+        first.get(1).and_then(window_of),
+    ) {
+        let _ = mosaik_win::arrange::put_below(y, x);
+    }
+    let behind_before = matches!((z_at(first.get(1)), z_at(first.first())), (Some(y), Some(x)) if y > x);
     let start = Instant::now();
     let traded = move_app(&b, &za, Some(&a))?;
     let ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -1969,21 +1997,7 @@ fn reordered(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<
         other => return Err(format!("preview_workspace: {other:?}")),
     };
     let picture_follows = picture == second;
-    let window_of = |s: &SlotId| {
-        if *s == a {
-            Some(w[0])
-        } else if *s == b {
-            Some(w[1])
-        } else {
-            None
-        }
-    };
-    let z_order = mosaik_win::window::top_level();
-    let at = |s: Option<&SlotId>| {
-        s.and_then(window_of)
-            .and_then(|h| z_order.iter().position(|x| *x == h))
-    };
-    let first_in_front = matches!((at(second.first()), at(second.get(1))), (Some(f), Some(n)) if f < n);
+    let first_in_front = matches!((z_at(second.first()), z_at(second.get(1))), (Some(f), Some(n)) if f < n);
     let fits = fit(&st, &zs, styles, &w[..2]);
     let _ = move_app(&b, &za, Some(&a))?;
     let _ = move_app(&b, &zb, None)?;
@@ -1995,10 +2009,12 @@ fn reordered(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<
         "listed_after": second.iter().map(|s| s.0.clone()).collect::<Vec<_>>(),
         "reversed": reversed,
         "picture_follows": picture_follows,
+        "behind_before": behind_before,
         "first_in_front": first_in_front,
         "fit_px": fits,
         "back_px": back,
-        "ok": reversed && picture_follows && first_in_front && all_fit(&fits) && back <= SLACK,
+        "ok": reversed && picture_follows && behind_before && first_in_front && all_fit(&fits)
+            && back <= SLACK,
     }))
 }
 
@@ -2052,6 +2068,23 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     let minimized_shown = planned.iter().flatten().filter(|x| x.minimized).count();
     let untouched =
         most_moved(&frames(w), &before) <= SLACK && rects(&zones(engine, &ws.0, work)?) == zones_before;
+    // The half with two windows: the picture lists its own window first, the other stacked
+    // behind it (ADR 0032). The own window is put behind the other first, so the check that
+    // Arrange puts it in front cannot pass by chance.
+    let pair: Option<(HWND, HWND)> = (0..shown.zones.len()).find_map(|z| {
+        let list: Vec<HWND> = shown
+            .windows
+            .iter()
+            .filter(|x| !x.minimized && zone_index(&shown, x) == Some(z))
+            .filter_map(|x| w.iter().copied().find(|h| handle(*h) == x.window))
+            .collect();
+        (list.len() == 2).then(|| (list[0], list[1]))
+    });
+    let z_at = |h: HWND| mosaik_win::window::top_level().iter().position(|x| *x == h);
+    if let Some((own, other)) = pair {
+        let _ = mosaik_win::arrange::put_below(own, other);
+    }
+    let own_behind_before = pair.is_some_and(|(own, other)| z_at(own) > z_at(other));
 
     let (reply, ms) = ask(
         engine,
@@ -2063,6 +2096,7 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
     );
     let message = done(&reply)?;
     let st = settled(engine)?;
+    let own_in_front = pair.is_some_and(|(own, other)| z_at(own) < z_at(other));
     let zs = zones(engine, &ws.0, work)?;
     let got = sorted(rects(&zs));
     // Each window against where the picture said it would go. One that wears its group's strip
@@ -2127,7 +2161,11 @@ fn layout(engine: &Engine, styles: Styles, work: Rect, w: &[HWND]) -> Result<Val
         "back_px": back,
         "zones_back": zones_back,
         "all_shown": all_shown,
+        "own_window_behind_before": own_behind_before,
+        "own_window_in_front": own_in_front,
         "ok": shown_zones == halves
+            && own_behind_before
+            && own_in_front
             && planned.iter().all(Option::is_some)
             && minimized_shown == 0
             && untouched
@@ -2457,7 +2495,7 @@ fn quick_menu(
         .rows
         .iter()
         .find(|r| r.label == "Move windows")
-        .ok_or("the menu has no Arrange row")?;
+        .ok_or("the menu has no Move windows row")?;
     glide(q.rect.center(), row.rect.center());
     pump_until(150, || false);
     {
@@ -2553,7 +2591,8 @@ fn quick_menu(
             "windows": windows,
             "front_window_in_a_half": front_in,
             "menu_closed": closed,
-            "ok": two_halves && in_halves == 2.min(three.len()) && front_in
+            // All three in the halves, the one left over stacked in one (ADR 0032).
+            "ok": two_halves && in_halves == three.len() && front_in
                 && windows.iter().all(|v| v["ok"] == json!(true)) && closed,
         }),
     );

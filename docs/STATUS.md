@@ -1513,8 +1513,7 @@ simetric and appealing". ADR 0032.
   else the larger zone; a window that fits no zone, even stacked, still waits in the taskbar.
   Home's picture shows them in their zone, and says nothing will be minimised.
 - **Trades in a zone**: on Home, a window dropped onto another of its zone trades places with it
-  front to back (protocol 11, `onto` on a move; `arrange::traded_order`), and Move windows
-  stacks them so (`put_below`, each just below the one before, on a thread of its own, so none
+  front to back (protocol 11, `onto` on a move), and Move windows stacks them so (`put_below`, each just below the one before, on a thread of its own, so none
   comes up over Mosaïk's window). On a workspace's picture, two apps of one zone trade places in
   it (`editing::trade_in_zone`): two tabs in their strip (the tab showing stays so), two windows
   front to back, a tab and a window the tab's place in its group for the window's; the
@@ -1538,6 +1537,32 @@ simetric and appealing". ADR 0032.
   front, both filling the zone, all put back); the windows `moved` puts elsewhere come from two
   zones. Checks here: fmt; clippy -D warnings for Windows on every crate; core 267, ipc 12;
   interface 131; Playwright 34.
+- **On the owner's PC** (job 0160, at 4314696): build passing; `mosaik.ps1 test`: "Every test
+  passed." (interface 131); the engine's arrange test ok; the release probe ran at the first try.
+  The scan: 304 windows, the engine's 0.4 ms, every window 2.5 ms. `workspace --drag`, tags in
+  title bars and above windows (job 0159's ran while the PC was in use): saved in 4 and 25 ms,
+  opened in 19 and 23 ms, every window 0 px from its zone and from where the preview put it,
+  one strip of two tabs above the group, 0 px off after tab clicks and the group moved, a zone
+  split in the editor; opening undone in 9 ms, 0 px; memory with frames 8.9 and 9.0 MB. `smart`:
+  no workspace made by Arrange (8 ms), undone 0 px, the arranged screen saved with its zones,
+  its apps edited, Halves stretched to two thirds 0 px, two apps trading zones 0 px, a window put
+  elsewhere, a fifth window and Halves with every window in a zone (none minimised). Not
+  passing: the two trades in a zone (the window behind not brought in front: the probe's windows
+  are always on top, which `put_below` left alone), and Halves from the side menu, which still
+  expected one window minimised. The tour of Mosaïk's window: 32 pictures, a window dragged
+  onto another of its zone, a line dragged, both undone, Move windows and Open found. Mosaïk
+  left in the tray (1.0.2, protocol 11, watchdog, Win+Alt+Space); packed (287 files); both
+  files beside the repository brought up to date (the key line kept).
+- **A review of 598f728** by a second agent (ADR 0032, Review): a window stacked in a zone, used
+  more recently than the zone's own window, stayed in front of it (Arrange now stacks every zone
+  of two windows, own window first, and lists them so); a window dropped onto a window of
+  another zone traded with that zone's own window (now exactly the two, `onto` across zones
+  too, with a move into a zone kept once made); the probe's windows always on top were never
+  stacked (windows alike are, and each check first puts the order the other way round); a
+  window always on top would have lost it; Undo left the stacking; two tabs of one group
+  restacked their zone. Two apps trading zones in a workspace trade their places front to back
+  too. Tests first: core 268, interface 133 (the picture before Mosaïk says, for each kind of
+  drop), Playwright 35 (a stacked window dropped onto a window of another zone).
 
 ## Owner decisions
 

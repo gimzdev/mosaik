@@ -699,6 +699,7 @@ impl Engine {
                 .map(|f| (f.handle, f.frame_rect, f.maximized))
                 .collect(),
             minimized: touched.iter().filter(|f| f.minimized).map(|f| f.handle).collect(),
+            stacked: Vec::new(),
         };
 
         self.hide_frames();

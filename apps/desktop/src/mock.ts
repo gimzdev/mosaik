@@ -392,60 +392,99 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
     .map((x) => x.i);
   const zoneOf: (number | undefined)[] = onScreen.map((_, n) => (auto ? auto.takes[n] : order[n]));
   const colorOf = rects.map((_, i) => i);
-  for (const m of moves) {
-    const n = onScreen.findIndex((s) => s.window === m.window);
-    const from = zoneOf[n];
-    // A window dropped onto another of its zone changes no zone (below).
-    if (m.onto !== undefined || n < 0 || m.zone >= rects.length || from === m.zone) continue;
-    const there = zoneOf.indexOf(m.zone);
-    zoneOf[n] = m.zone;
-    if (from === undefined) {
-      if (there >= 0) zoneOf[there] = undefined;
-    } else {
-      if (there >= 0) zoneOf[there] = from;
-      [colorOf[from], colorOf[m.zone]] = [colorOf[m.zone] ?? m.zone, colorOf[from] ?? from];
-    }
-  }
-  // The windows left over stack in the zones (ADR 0032, the engine's step 4): with their kind,
-  // else where there are fewest, the larger zone first.
+  // Each zone's own window; the windows left over stack behind them (ADR 0032, the engine's step
+  // 3): with their kind, else where there are fewest, the larger zone first.
+  const own: (number | undefined)[] = rects.map((_, i) => {
+    const n = zoneOf.indexOf(i);
+    return n >= 0 ? n : undefined;
+  });
+  const stacked = onScreen.map(() => false);
   const area = (i: number) => {
     const r = rects[i];
     return r ? (r.right - r.left) * (r.bottom - r.top) : 0;
   };
-  onScreen.forEach((s, n) => {
-    if (zoneOf[n] !== undefined || rects.length === 0) return;
-    const count = (i: number) => zoneOf.filter((z) => z === i).length;
-    const kin = (i: number) => onScreen.some((o, m) => zoneOf[m] === i && o.kind === s.kind);
-    const [best] = rects
-      .map((_, i) => i)
-      .sort((a, b) => Number(kin(b)) - Number(kin(a)) || count(a) - count(b) || area(b) - area(a) || a - b);
-    zoneOf[n] = best;
-  });
-  const windows: PreviewWindow[] = onScreen.map((s, n): PreviewWindow => {
+  const stack = () => {
+    onScreen.forEach((s, n) => {
+      if (zoneOf[n] !== undefined || rects.length === 0) return;
+      const count = (i: number) => zoneOf.filter((z) => z === i).length;
+      const kin = (i: number) => onScreen.some((o, m) => zoneOf[m] === i && o.kind === s.kind);
+      const [best] = rects
+        .map((_, i) => i)
+        .sort((a, b) => Number(kin(b)) - Number(kin(a)) || count(a) - count(b) || area(b) - area(a) || a - b);
+      zoneOf[n] = best;
+      stacked[n] = best !== undefined;
+    });
+  };
+  stack();
+  // Front to back: each zone's own window, then those stacked behind it, used last first.
+  const seq = onScreen.map((_, n) => n).sort((a, b) => Number(stacked[a]) - Number(stacked[b]));
+  const ownOf = (n: number) => {
+    const z = zoneOf[n];
+    return z !== undefined && own[z] === n ? z : undefined;
+  };
+  const swapColours = (a: number, b: number) => {
+    [colorOf[a], colorOf[b]] = [colorOf[b] ?? b, colorOf[a] ?? a];
+  };
+  // Windows `a` and `b` trade places: zones, own or stacked, and places front to back.
+  const trade = (a: number, b: number) => {
+    const [qa, qb, was] = [ownOf(a), ownOf(b), zoneOf[a]];
+    zoneOf[a] = zoneOf[b];
+    zoneOf[b] = was;
+    [stacked[a], stacked[b]] = [stacked[b] ?? false, was !== undefined && (stacked[a] ?? false)];
+    if (qb !== undefined) own[qb] = a;
+    if (qa !== undefined) own[qa] = b;
+    if (qa !== undefined && qb !== undefined && qa !== qb) swapColours(qa, qb);
+    const [i, j] = [seq.indexOf(a), seq.indexOf(b)];
+    seq[i] = b;
+    seq[j] = a;
+  };
+  // The windows the user moved (the engine's step 4): dropped onto a window, the two trade
+  // places; onto a zone, its own window takes the moved one's place, or the moved one takes the
+  // zone left empty.
+  for (const m of moves) {
+    const a = onScreen.findIndex((s) => s.window === m.window);
+    if (a < 0 || m.zone >= rects.length) continue;
+    const b = m.onto === undefined ? -1 : onScreen.findIndex((s) => s.window === m.onto);
+    if (b >= 0 && b !== a && zoneOf[b] === m.zone) {
+      trade(a, b);
+      continue;
+    }
+    if (zoneOf[a] === m.zone) continue;
+    const there = own[m.zone];
+    if (there !== undefined) {
+      trade(a, there);
+      continue;
+    }
+    const qa = ownOf(a);
+    if (qa !== undefined) {
+      own[qa] = undefined;
+      swapColours(qa, m.zone);
+    }
+    zoneOf[a] = m.zone;
+    own[m.zone] = a;
+    stacked[a] = false;
+  }
+  stack();
+  seq.sort((a, b) => Number(stacked[a]) - Number(stacked[b]));
+  const windows: PreviewWindow[] = seq.flatMap((n): PreviewWindow[] => {
+    const s = onScreen[n];
+    if (!s) return [];
     const zone = zoneOf[n];
     const rect = zone === undefined ? undefined : rects[zone];
-    return rect === undefined || zone === undefined
-      ? { window: s.window, label: s.label, icon: null, now: s.now, then: null, minimized: true }
-      : {
-          window: s.window,
-          label: s.label,
-          icon: null,
-          now: s.now,
-          then: rect,
-          minimized: false,
-          zone: `a${String(zone + 1)}`,
-        };
+    return [
+      rect === undefined || zone === undefined
+        ? { window: s.window, label: s.label, icon: null, now: s.now, then: null, minimized: true }
+        : {
+            window: s.window,
+            label: s.label,
+            icon: null,
+            now: s.now,
+            then: rect,
+            minimized: false,
+            zone: `a${String(zone + 1)}`,
+          },
+    ];
   });
-  // Windows dropped onto another of their zone trade places front to back (ADR 0032).
-  for (const m of moves) {
-    if (m.onto === undefined) continue;
-    const i = windows.findIndex((w) => w.window === m.window);
-    const j = windows.findIndex((w) => w.window === m.onto);
-    const [a, b] = [windows[i], windows[j]];
-    if (!a || !b) continue;
-    windows[i] = b;
-    windows[j] = a;
-  }
   const numbers = readingNumbers(shape);
   return {
     work_area: work,
@@ -850,8 +889,8 @@ function answer(command: Command): Reply {
           hint: 'Look at the list again.',
         };
       }
-      if (other && other !== app && other.zone === app.zone) {
-        const key = `${w.id}/${app.zone ?? ''}`;
+      if (other && other !== app && other.zone !== null && other.zone === app.zone) {
+        const key = `${w.id}/${other.zone}`;
         const shown = showing.get(key) ?? w.appList.find((a) => a.zone === app.zone && a.tab)?.id;
         const [i, j] = [w.appList.indexOf(app), w.appList.indexOf(other)];
         w.appList[i] = other;
@@ -865,9 +904,13 @@ function answer(command: Command): Reply {
           wasTab !== otherTab ? (shown === app.id ? other.id : shown === other.id ? app.id : shown) : shown;
         if (passed !== undefined) showing.set(key, passed);
       } else if (other && other.zone !== app.zone) {
+        // In two zones: zones, and places front to back.
         const was = app.zone;
         Object.assign(app, { zone: other.zone, tab: false });
         Object.assign(other, { zone: was, tab: false });
+        const [i, j] = [w.appList.indexOf(app), w.appList.indexOf(other)];
+        w.appList[i] = other;
+        w.appList[j] = app;
       } else if (!other && app.zone !== command.zone) {
         Object.assign(app, { zone: command.zone, tab: false });
       }

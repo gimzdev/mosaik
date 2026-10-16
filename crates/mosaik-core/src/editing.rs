@@ -323,7 +323,8 @@ pub fn move_app(ws: &Workspace, slot: &SlotId, zone: &ZoneId) -> Result<Workspac
 
 /// The workspace with its apps `a` and `b` trading places (one dropped on the other in its
 /// picture). In two zones they trade zones, a tab leaving its group for the other zone (ADR
-/// 0031); in one zone, they trade their places in it ([`trade_in_zone`], ADR 0032).
+/// 0031), and their places front to back; in one zone, they trade their places in it
+/// ([`trade_in_zone`], ADR 0032).
 pub fn swap_apps(ws: &Workspace, a: &SlotId, b: &SlotId) -> Result<Workspace, EditError> {
     let zone_of = |slot: &SlotId| -> Result<ZoneId, EditError> {
         let s = ws.layout.slot(slot).ok_or(EditError::GoneApp)?;
@@ -337,7 +338,12 @@ pub fn swap_apps(ws: &Workspace, a: &SlotId, b: &SlotId) -> Result<Workspace, Ed
         return Ok(trade_in_zone(ws, a, b));
     }
     let out = move_app(ws, a, &zb)?;
-    move_app(&out, b, &za)
+    let mut out = move_app(&out, b, &za)?;
+    let at = |id: &SlotId, slots: &[crate::layout::Slot]| slots.iter().position(|s| &s.id == id);
+    if let (Some(i), Some(j)) = (at(a, &out.layout.slots), at(b, &out.layout.slots)) {
+        out.layout.slots.swap(i, j);
+    }
+    Ok(out)
 }
 
 /// Two apps of one zone trade their places in it, as its picture lists them (the owner: "i
@@ -1018,6 +1024,9 @@ mod tests {
         assert_eq!(zone_of(&out, "s2"), z("z1"));
         assert_eq!(zone_of(&out, "s3"), z("z2"), "the other tab stays");
         assert_eq!(out.layout.problems(), vec![]);
+        // And their places front to back (ADR 0032): each takes the other's.
+        let order: Vec<&str> = out.layout.slots.iter().map(|s| s.id.0.as_str()).collect();
+        assert_eq!(order, ["s2", "s1", "s3"]);
         assert_eq!(swap_apps(&ws, &sid("s1"), &sid("gone")), Err(EditError::GoneApp));
         // An app with a place of its own, not a zone: refused.
         let mut free = ws.clone();

@@ -389,7 +389,6 @@ impl Layout {
         self.slots.iter_mut().find(|s| &s.id == id)
     }
 
-    /// The group a slot is a tab of.
     /// Each app's place front to back, as opening the workspace stacks its windows and its
     /// picture lists them (ADR 0032): the order of its slots, a tab of a group where the
     /// group's front-most tab is (whichever tab shows).
@@ -412,6 +411,7 @@ impl Layout {
             .collect()
     }
 
+    /// The group a slot is a tab of.
     pub fn group_of(&self, slot: &SlotId) -> Option<&TabGroup> {
         match &self.slot(slot)?.place {
             Place::Tab { group } => self.tab_group(group),

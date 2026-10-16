@@ -40,16 +40,22 @@ pub fn raise(hwnd: HWND) -> Result<()> {
     .ctx("SetWindowPos")
 }
 
+/// Whether `hwnd` stays above every window that is not (always on top).
+fn topmost(hwnd: HWND) -> bool {
+    // SAFETY: reads the extended style of any window handle; 0 for one that has gone.
+    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
+    style & WS_EX_TOPMOST.0 as isize != 0
+}
+
 /// Puts `hwnd` just below `above`, without activating it: windows stacked in one zone put in
 /// the order the user chose (ADR 0032), under the front one rather than over every window,
 /// Mosaïk's own among them. Synchronous, unlike [`raise`], so a chain of them lands in order:
-/// call it off the engine thread (the mover does). Nothing is done when `above` is a topmost
-/// window, which would make `hwnd` one too.
-pub fn put_below(hwnd: HWND, above: HWND) -> Result<()> {
-    // SAFETY: reads the extended style of any window handle; 0 for one that has gone.
-    let style = unsafe { GetWindowLongPtrW(above, GWL_EXSTYLE) };
-    if style & WS_EX_TOPMOST.0 as isize != 0 {
-        return Ok(());
+/// call it off the engine thread (the mover does). Only between two windows alike, always on top
+/// or not: under one that is, a window would become so; one that is would stop being so under
+/// one that is not. Returns whether it was done.
+pub fn put_below(hwnd: HWND, above: HWND) -> Result<bool> {
+    if topmost(hwnd) != topmost(above) {
+        return Ok(false);
     }
     // SAFETY: z-order only (no move, no size, no activation) of another app's window.
     unsafe {
@@ -63,7 +69,8 @@ pub fn put_below(hwnd: HWND, above: HWND) -> Result<()> {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
         )
     }
-    .ctx("SetWindowPos")
+    .ctx("SetWindowPos")?;
+    Ok(true)
 }
 
 /// Minimises a window without activating another one in its place.

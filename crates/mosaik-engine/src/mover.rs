@@ -163,10 +163,12 @@ pub(crate) fn stack(order: &[WindowHandle], wait: Duration) -> bool {
         .name("mosaik-stack".into())
         .spawn(move || {
             for pair in order.windows(2) {
-                if let [above, below] = pair
-                    && let Err(e) = arrange::put_below(window::hwnd(*below), window::hwnd(*above))
-                {
-                    tracing::debug!(error = %e, "window not stacked");
+                let [above, below] = pair else { continue };
+                match arrange::put_below(window::hwnd(*below), window::hwnd(*above)) {
+                    Ok(true) => {}
+                    // One always on top and one not: left as they are.
+                    Ok(false) => tracing::debug!("window not stacked: one of the two is always on top"),
+                    Err(e) => tracing::debug!(error = %e, "window not stacked"),
                 }
             }
             let _ = finished.send(());
