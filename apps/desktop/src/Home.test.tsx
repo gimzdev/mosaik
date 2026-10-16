@@ -374,6 +374,36 @@ describe('Home', () => {
     expect(asked).toContainEqual({ cmd: 'arrange', moves: [move] });
   });
 
+  it('keeps a trade in a zone to do on a screen already arranged, and does it once', async () => {
+    // A trade changes which window is in front, not where windows are: the screen as arranged
+    // is not "already like this" while one waits, and Move windows does it once (sent again, it
+    // would trade them back).
+    const [code, browser] = coding.windows;
+    if (!code || !browser) throw new Error('the fixture has two windows');
+    const claude = { ...browser, window: 103, label: 'Claude', icon: null };
+    const there = (w: typeof code) => ({ ...w, now: w.then ?? w.now });
+    const stacked: ArrangePreview = { ...coding, windows: [code, browser, claude].map(there) };
+    const swapped: ArrangePreview = { ...coding, windows: [code, claude, browser].map(there) };
+    const asked = answer(stacked, (c) => (c.cmd === 'preview_arrange' && c.moves?.length ? preview(swapped) : null));
+    home();
+    expect(await shown('Your windows are already like this.')).toBeInTheDocument();
+    await userEvent.click(tile('Claude in zone 2'));
+    await userEvent.click(tile('Google Chrome in zone 2'));
+    await waitFor(() => {
+      expect(asked).toContainEqual({ cmd: 'preview_arrange', moves: [{ window: 103, zone: 1, onto: 102 }] });
+    });
+    expect(screen.queryByText('Your windows are already like this.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo changes' })).toBeInTheDocument();
+    await userEvent.click(arrange());
+    expect(asked).toContainEqual({ cmd: 'arrange', moves: [{ window: 103, zone: 1, onto: 102 }] });
+    expect(await shown('Moved 2 windows.')).toBeInTheDocument();
+    // Done: the picture is read without it.
+    await waitFor(() => {
+      expect(asked.filter((c) => c.cmd === 'preview_arrange').at(-1)).toEqual({ cmd: 'preview_arrange' });
+    });
+    expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
+  });
+
   it('picks and puts a window with the keyboard alone, and lets go with Escape', async () => {
     const asked = answer();
     home();

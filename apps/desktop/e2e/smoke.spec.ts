@@ -197,6 +197,13 @@ test.describe('Home', () => {
     await expect(page.getByRole('button', { name: 'Undo changes' })).toBeVisible();
     await arrange(page).click();
     await expect(shown(page, 'Moved 4 windows into Thirds.')).toBeVisible();
+    // Done once: the picture shows the screen as it now is, Slack in front.
+    await expect(page.getByRole('button', { name: 'Undo changes' })).toBeHidden();
+    await expect(
+      page.getByRole('group', {
+        name: 'Slack in zone 2, Google Chrome in zone 1, Windows Terminal in zone 3, Visual Studio Code in zone 2.',
+      }),
+    ).toBeVisible();
     await accessible(page);
   });
 

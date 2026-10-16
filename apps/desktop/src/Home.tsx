@@ -83,10 +83,11 @@ function setNote(s: AppSet, startsApps: boolean): string {
   return `${s.name} puts ${all} in their zones, starting the ${closed === 1 ? 'one' : String(closed)} not open yet.`;
 }
 
-/** What the picture shows, in a sentence under it: what will be minimised, or that nothing moves. */
-function note(preview: ArrangePreview | null, choice: Choice): string | null {
+/** What the picture shows, in a sentence under it: what will be minimised, or that nothing moves
+ * (with no window to bring in front of another, `traded`). */
+function note(preview: ArrangePreview | null, choice: Choice, traded: boolean): string | null {
   if (!preview || preview.windows.length === 0) return null;
-  if (settled(preview)) return 'Your windows are already like this.';
+  if (settled(preview) && !traded) return 'Your windows are already like this.';
   const gone = preview.windows.filter((w) => w.minimized).map((w) => w.label);
   const parts: string[] = [];
   if (gone.length) parts.push(`${names(gone)} will be minimized.`);
@@ -162,6 +163,9 @@ export function Home({
     [announce],
   );
 
+  // Windows traded in a zone (ADR 0032): which is in front, not where they are; to do until Move
+  // windows does them, and done once (each is a swap of the order on screen then).
+  const traded = moves.some((m) => m.onto !== undefined);
   // One picture is read: the one shown (a suggested set's is drawn from what the column read).
   // After Arrange, Undo or Open, Mosaïk says the workspaces changed, and that reads it again: a
   // command that worked needs no read of its own; one refused says nothing, so it asks for one.
@@ -249,9 +253,11 @@ export function Home({
       setArranging(false);
       if (reply.reply === 'done') {
         // The windows and zones as put on the picture stay chosen: the picture now shows the
-        // screen as it is, and Undo changes waits for another change.
+        // screen as it is, and Undo changes waits for another change. The trades in a zone are
+        // done: sent again, they would trade the windows back.
         say(reply.message);
         setUndoable(true);
+        setMoves((list) => (list.some((m) => m.onto !== undefined) ? list.filter((m) => m.onto === undefined) : list));
       } else {
         say(errorMessage(reply) ?? 'Your windows could not be arranged.', true);
         // Some windows may have moved all the same.
@@ -387,7 +393,7 @@ export function Home({
         : opening?.id === shown.workspace.id
           ? openingNote(opening.preview)
           : null
-      : note(picture, choice);
+      : note(picture, choice, traded);
   const hint =
     pictureEdits && !said
       ? shown
@@ -505,7 +511,7 @@ export function Home({
                   Undo
                 </Button>
               ) : null}
-              {(moves.length || areas.length) && !arranging && !shown && !(picture && settled(picture)) ? (
+              {(moves.length || areas.length) && !arranging && !shown && !(picture && settled(picture) && !traded) ? (
                 <Button
                   tone="quiet"
                   size="sm"
