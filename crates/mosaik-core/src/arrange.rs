@@ -14,7 +14,7 @@
 //! The plan is pure; the engine applies it, and can undo it.
 
 use crate::fit;
-use crate::geometry::{RatioRect, Rect, Size};
+use crate::geometry::{Insets, RatioRect, Rect, Size};
 use crate::layout::reading_order;
 use crate::presets::Preset;
 use crate::task::{self, Role, Task};
@@ -401,6 +401,10 @@ pub struct Unit {
     /// The zone on screen it is in, by its place there (an index into the zones given to
     /// [`plan`]), when it is in one.
     pub zone: Option<usize>,
+    /// Where Move windows puts it in a zone, inside the zone: the gaps around it and the band
+    /// above it (its tag's, or its tab group's strip), at its monitor's scale
+    /// (`FrameStyle::window_insets`). It is in a zone already when it fills that part of it.
+    pub inset: Insets,
 }
 
 /// A zone on screen: the open workspace's, or one that Move windows made. The plan keeps it
@@ -432,6 +436,9 @@ pub struct NewZone {
     /// Its colour: the n-th of the plan's zones. A window the user moved keeps the colour of the
     /// zone it was in, as a tile moved in a mosaic keeps its own.
     pub color: usize,
+    /// The zone on screen it is again (step 0 of [`plan_moved`]), by index into the zones
+    /// given: the colour it has there is the colour of the n-th zone ([`zone_colors`]).
+    pub kept: Option<usize>,
 }
 
 /// A window the user moved on the picture of the screen: unit `unit` into the `zone`-th of the
@@ -818,6 +825,7 @@ pub fn plan_moved(
                     area,
                     name: String::new(),
                     color: r,
+                    kept: Some(i),
                 });
                 new_zone_window.push(own);
             }
@@ -853,6 +861,7 @@ pub fn plan_moved(
                 area: p.area,
                 name: String::new(),
                 color: new_zones.len(),
+                kept: None,
             });
             new_zone_window.push(Some(u));
         }
@@ -877,6 +886,7 @@ pub fn plan_moved(
                 area,
                 name: String::new(),
                 color: new_zones.len(),
+                kept: None,
             });
             new_zone_window.push(None);
         }
@@ -971,13 +981,15 @@ pub fn plan_moved(
             continue;
         }
         // The window the layout gave the zone goes where the one in front was, when that was a
-        // zone of its own (left empty else, so then only when it fits there); else it is left
-        // over, and stacked.
+        // zone of its own; else it is left over, and stacked. A task's layout leaves no zone
+        // empty, so there only when it fits that zone; a layout picked may (the fourth review of
+        // ADR 0032: the window filling a half of Half and stack went to a quarter instead).
         let left = match goes[f] {
             Some(Goes::Zone(q)) if q != r && new_zone_window[q] == Some(f) => Some(q),
             _ => None,
         };
-        if let Some(q) = left
+        if tasks[m].is_some()
+            && let Some(q) = left
             && !given.is_some_and(|g| fits(&units[g], new_zones[q].area.to_rect(*work)))
         {
             continue;
@@ -1121,11 +1133,17 @@ pub fn plan_moved(
 }
 
 /// The colour of each of the plan's new zones: the colour its own window wears on screen (a
-/// window keeps its colour wherever it goes, as a tile moved in a mosaic keeps its own), else
-/// the plan's, after the `first` colours (the zones kept before them); each colour once, while
-/// there are colours left.
+/// window keeps its colour wherever it goes, as a tile moved in a mosaic keeps its own), else one
+/// a window stacked in it wears; else the colour it has on screen (a zone that is the screen's
+/// again, [`NewZone::kept`], its colour gone where the user's moves took it); else the plan's,
+/// after the `first` colours (the zones kept before them). Each colour once while there are
+/// colours left, the zones kept on screen beside the new ones counted.
 pub fn zone_colors(plan: &Plan, units: &[Unit], zones: &[KeptZone], first: usize) -> Vec<ZoneColor> {
     let count = plan.new_zones.len();
+    let staying: Vec<ZoneColor> = (0..zones.len())
+        .filter(|i| !plan.gone.contains(i))
+        .map(|i| zones[i].color)
+        .collect();
     let worn = |u: usize| {
         units
             .get(u)
@@ -1143,6 +1161,7 @@ pub fn zone_colors(plan: &Plan, units: &[Unit], zones: &[KeptZone], first: usize
         }
     }
     let mut out: Vec<Option<ZoneColor>> = vec![None; count];
+    let taken = |out: &[Option<ZoneColor>], c: ZoneColor| out.contains(&Some(c)) || staying.contains(&c);
     // The own windows first, the one used last first; then, for a zone whose own window wears
     // none, the windows stacked behind it.
     for depth in [0, 1] {
@@ -1159,9 +1178,25 @@ pub fn zone_colors(plan: &Plan, units: &[Unit], zones: &[KeptZone], first: usize
         }
         wearing.sort_unstable_by_key(|&(u, r, _)| (u, r));
         for (_, r, c) in wearing {
-            if out[r].is_none() && !out.contains(&Some(c)) {
+            if out[r].is_none() && !taken(&out, c) {
                 out[r] = Some(c);
             }
+        }
+    }
+    // A zone's colour names the zone it came from (`NewZone::color`): that zone's colour on
+    // screen.
+    for r in 0..count {
+        let carried = plan
+            .new_zones
+            .get(plan.new_zones[r].color)
+            .and_then(|z| z.kept)
+            .and_then(|i| zones.get(i))
+            .map(|z| z.color);
+        if out[r].is_none()
+            && let Some(c) = carried
+            && !taken(&out, c)
+        {
+            out[r] = Some(c);
         }
     }
     for r in 0..count {
@@ -1169,7 +1204,7 @@ pub fn zone_colors(plan: &Plan, units: &[Unit], zones: &[KeptZone], first: usize
             let start = first + plan.new_zones[r].color;
             let free = (0..ZoneColor::ALL.len())
                 .map(|k| ZoneColor::nth(start + k))
-                .find(|c| !out.contains(&Some(*c)));
+                .find(|c| !taken(&out, *c));
             out[r] = Some(free.unwrap_or_else(|| ZoneColor::nth(start)));
         }
     }
@@ -1179,13 +1214,16 @@ pub fn zone_colors(plan: &Plan, units: &[Unit], zones: &[KeptZone], first: usize
 /// How much of a zone a window covers for it to be in that zone already (`covering`).
 const FILLS: f64 = 0.9;
 
-/// Whether `unit` is in `rect` already, as Move windows puts it there: filling it, or, for a
-/// window that keeps its size, where `place::fit_size` puts it.
+/// Whether `unit` is in the zone at `rect` already, as Move windows puts it there: filling the
+/// part of it a window takes (below its band, inside the gaps: [`Unit::inset`]), or, for a
+/// window that keeps its size, where `place::fit_size` puts it in that part.
 fn in_place(unit: &Unit, rect: Rect, work: Rect) -> bool {
+    let area = rect.inset(unit.inset);
+    let area = if area.is_empty() { rect } else { area };
     let landed = if unit.resizable {
-        rect
+        area
     } else {
-        crate::place::fit_size(rect, unit.frame.size(), work)
+        crate::place::fit_size(area, unit.frame.size(), work)
     };
     covering(unit.frame, landed) >= FILLS
 }
@@ -1355,6 +1393,7 @@ mod tests {
             least: Size::default(),
             monitor: 0,
             zone: None,
+            inset: Insets::default(),
         }
     }
 
@@ -2325,7 +2364,10 @@ mod tests {
             .filter_map(|u| match plan.goes[u] {
                 Goes::Zone(r) => {
                     let mut on = units[u].clone();
-                    let rect = plan.new_zones[r].area.to_rect(work);
+                    // Inside the zone, below its band, as the engine's resolver puts it.
+                    let zone = plan.new_zones[r].area.to_rect(work);
+                    let area = zone.inset(on.inset);
+                    let rect = if area.is_empty() { zone } else { area };
                     on.frame = if on.resizable {
                         rect
                     } else {
@@ -3243,5 +3285,298 @@ mod tests {
         let worn = zone_colors(&apart, &both, &one, 0);
         assert_eq!(worn[zone_of(&apart, 0)], one[0].color);
         assert_ne!(worn[zone_of(&apart, 1)], one[0].color);
+    }
+
+    #[test]
+    fn a_window_below_a_band_is_found_in_its_zone() {
+        // The fourth review of ADR 0032: 1080p at 125% (work area 1920 x 1020), Three rows.
+        // Chrome is a tab group, which Move windows puts below its strip's band (35 px here);
+        // Edge is stacked behind it. Chrome covered less than 90% of its row, so the next plan
+        // did not find it there, made Edge the row's own, and Move windows put Edge in front.
+        let work = Rect::new(0, 0, 1920, 1020);
+        let rows = Some(Chosen {
+            monitor: 0,
+            preset: Preset::ThreeRows,
+        });
+        let mut chrome = unit("chrome.exe", "Google Chrome", Rect::new(0, 0, 1920, 340));
+        chrome.inset = crate::settings::FrameSettings::default()
+            .effective_style()
+            .for_tabs()
+            .window_insets(120);
+        assert_eq!(chrome.inset.top, 35);
+        let units = [
+            chrome,
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 340, 1920, 680)),
+            unit(
+                "windowsterminal.exe",
+                "Windows Terminal",
+                Rect::new(0, 680, 1920, 1020),
+            ),
+            unit("msedge.exe", "Microsoft Edge", Rect::new(200, 40, 1500, 300)),
+        ];
+        let first = plan_with(&units, &[], &[work], rows);
+        let all: Vec<usize> = (0..units.len()).collect();
+        for arranged in [true, false] {
+            let (shown, index, kept) = arranged_screen(&units, &first, work, arranged);
+            let second = plan_with(&shown, &kept, &[work], rows);
+            let mut wanted = as_seen(&first, &all, work);
+            wanted.retain(|(u, _, _)| index.contains(u));
+            assert_eq!(
+                as_seen(&second, &index, work),
+                wanted,
+                "kept as arranged: {arranged}"
+            );
+            assert_eq!(second.again, vec![arranged]);
+        }
+    }
+
+    #[test]
+    fn a_window_filling_a_zone_of_a_layout_picked_stays_there() {
+        // The fourth review of ADR 0032: Half and stack. Slack (409 x 900 at least) in front,
+        // over the left half; Visual Studio Code filling it. The layout gave Slack the left half
+        // and Code a quarter; Slack fits no quarter, and Code was left in its quarter, where a
+        // layout picked may leave a zone empty and Slack can stack behind Code.
+        let mut slack = unit("slack.exe", "Slack", Rect::new(0, 0, 1280, 1032));
+        slack.least = Size::new(409, 900);
+        let units = [
+            slack,
+            unit("claude.exe", "Claude", Rect::new(204, 5, 1898, 872)),
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 960, 1032)),
+        ];
+        let picked = Some(Chosen {
+            monitor: 0,
+            preset: Preset::HalfAndStack,
+        });
+        let p = plan_with(&units, &[], &[WORK], picked);
+        let r = zone_of(&p, 2);
+        assert_eq!(p.new_zones[r].area.to_rect(WORK), Rect::new(0, 0, 960, 1032));
+        assert_eq!(
+            in_zone(&p, r).first(),
+            Some(&2),
+            "Code in front of its half: {:?}",
+            p.order
+        );
+        assert_eq!(broken(&units, &p, false), None);
+    }
+
+    #[test]
+    fn empty_zones_keep_their_colours_on_an_arranged_screen() {
+        // The fourth review of ADR 0032: Quarters for two windows, two quarters empty; Visual
+        // Studio Code put in the empty bottom-right one (the two zones trade colours). Once Move
+        // windows had made it, the next plan gave the empty quarters the plan's colours, not
+        // theirs on screen, so the picture and the screen disagreed.
+        let quarters = Some(Chosen {
+            monitor: 0,
+            preset: Preset::Quarters,
+        });
+        let units = [
+            unit("code.exe", "Visual Studio Code", Rect::new(0, 0, 960, 516)),
+            unit("chrome.exe", "Google Chrome", Rect::new(960, 0, 1920, 516)),
+        ];
+        let base = plan_with(&units, &[], &[WORK], quarters);
+        let empty: Vec<usize> = (0..base.new_zones.len())
+            .filter(|&r| !base.goes.contains(&Goes::Zone(r)))
+            .collect();
+        assert_eq!(empty.len(), 2);
+        let last = empty[1];
+        let k = on_main(&base).iter().position(|&x| x == last).unwrap();
+        let first = plan_moved(
+            &units,
+            &[],
+            &[WORK],
+            quarters,
+            &[Move {
+                unit: 0,
+                monitor: 0,
+                zone: k,
+                onto: None,
+            }],
+            None,
+        );
+        let on_screen = zone_colors(&first, &units, &[], 0);
+        let (shown, _, mut kept) = arranged_screen(&units, &first, WORK, true);
+        for (z, c) in kept.iter_mut().zip(&on_screen) {
+            z.color = *c;
+        }
+        let next = plan_with(&shown, &kept, &[WORK], quarters);
+        assert_eq!(next.again, vec![true]);
+        assert_eq!(zone_colors(&next, &shown, &kept, 0), on_screen);
+        // A window moved on that screen into an empty zone takes its colour along, and the zone
+        // it left takes the other's.
+        let code = (0..shown.len())
+            .find(|&k| shown[k].label == "Visual Studio Code")
+            .unwrap();
+        let free = (0..next.new_zones.len())
+            .find(|&r| !next.goes.contains(&Goes::Zone(r)))
+            .unwrap();
+        let was = zone_of(&next, code);
+        let moved = plan_moved(
+            &shown,
+            &kept,
+            &[WORK],
+            quarters,
+            &[Move {
+                unit: code,
+                monitor: 0,
+                zone: on_main(&next).iter().position(|&x| x == free).unwrap(),
+                onto: None,
+            }],
+            None,
+        );
+        let colours = zone_colors(&moved, &shown, &kept, 0);
+        assert_eq!(colours[free], on_screen[was]);
+        assert_eq!(colours[was], on_screen[free]);
+    }
+
+    #[test]
+    fn colours_of_zones_kept_on_another_monitor_are_not_given_again() {
+        // The fourth review of ADR 0032: an open workspace of five zones, one each colour, the
+        // Lapis one on a second monitor with no window now. On the main monitor two windows wear
+        // Slate and Madder, two are new; Quarters picked there: no quarter may be Lapis too.
+        let second = Rect::new(1920, 0, 3840, 1032);
+        let zone = |monitor: usize, area: RatioRect, color: ZoneColor| KeptZone {
+            monitor,
+            area,
+            color,
+            arranged: false,
+            filled: true,
+        };
+        let q = |k: usize| Preset::Quarters.zones()[k];
+        let zones = [
+            zone(1, RatioRect::FULL, ZoneColor::Lapis),
+            zone(0, q(0), ZoneColor::Verdigris),
+            zone(0, q(1), ZoneColor::Saffron),
+            zone(0, q(2), ZoneColor::Madder),
+            zone(0, q(3), ZoneColor::Slate),
+        ];
+        let quarters = Some(Chosen {
+            monitor: 0,
+            preset: Preset::Quarters,
+        });
+        for a in 0..4 {
+            for b in (0..4).filter(|&b| b != a) {
+                let rest: Vec<usize> = (0..4).filter(|&k| k != a && k != b).collect();
+                let mut slate = unit("code.exe", "Visual Studio Code", q(a).to_rect(WORK));
+                slate.zone = Some(4);
+                let mut madder = unit("chrome.exe", "Google Chrome", q(b).to_rect(WORK));
+                madder.zone = Some(3);
+                let units = [
+                    slate,
+                    madder,
+                    unit("slack.exe", "Slack", q(rest[0]).to_rect(WORK)),
+                    unit(
+                        "windowsterminal.exe",
+                        "Windows Terminal",
+                        q(rest[1]).to_rect(WORK),
+                    ),
+                ];
+                let plan = plan_with(&units, &zones, &[WORK, second], quarters);
+                assert_eq!(plan.gone, vec![1, 2, 3, 4]);
+                let colours = zone_colors(&plan, &units, &zones, 1);
+                assert!(!colours.contains(&ZoneColor::Lapis), "{a} {b}: {colours:?}");
+                assert_eq!(colours[zone_of(&plan, 0)], ZoneColor::Slate);
+                assert_eq!(colours[zone_of(&plan, 1)], ZoneColor::Madder);
+            }
+        }
+    }
+
+    #[test]
+    fn random_arranged_screens_with_bands_stay_as_they_are() {
+        // The fourth review of ADR 0032: windows below a band (a tab group's strip, or every
+        // window's tag when tags go above them), and gaps, at 100% to 150%. Once Move windows has
+        // put the plan on screen, the next plan finds every window where it is, in front where
+        // it is in front.
+        use crate::settings::FrameSettings;
+        let styles = [
+            FrameSettings::default().effective_style(),
+            FrameSettings {
+                tags_in_title_bar: false,
+                ..FrameSettings::default()
+            }
+            .effective_style(),
+            FrameSettings {
+                show_frames: true,
+                ..FrameSettings::default()
+            }
+            .effective_style(),
+        ];
+        let mut rng = Rng(0x0DDB_A11C_0FFE_E000);
+        for case in 0..6000 {
+            let (work, dpi) = [
+                (Rect::new(0, 0, 1920, 1032), 96),
+                (Rect::new(0, 0, 1920, 1020), 120),
+                (Rect::new(0, 0, 1920, 1008), 144),
+            ][rng.below(3)];
+            let style = styles[rng.below(styles.len())];
+            let count = 2 + rng.below(8);
+            let mut units = random_units(&mut rng, count, work, true);
+            for u in &mut units {
+                let s = if rng.chance(20) { style.for_tabs() } else { style };
+                u.inset = s.window_insets(dpi);
+            }
+            let chosen = if rng.chance(50) {
+                Some(Chosen {
+                    monitor: 0,
+                    preset: Preset::ALL[rng.below(Preset::ALL.len())],
+                })
+            } else {
+                None
+            };
+            let base = plan_with(&units, &[], &[work], chosen);
+            let mut moves = Vec::new();
+            for _ in 0..rng.below(3) {
+                let onto = if rng.chance(50) {
+                    Some(rng.below(units.len()))
+                } else {
+                    None
+                };
+                moves.push(Move {
+                    unit: rng.below(units.len()),
+                    monitor: 0,
+                    zone: rng.below(base.new_zones.len().max(1)),
+                    onto,
+                });
+            }
+            let first = plan_moved(&units, &[], &[work], chosen, &moves, None);
+            let (shown, index, kept) = arranged_screen(&units, &first, work, true);
+            if shown.is_empty() {
+                continue;
+            }
+            let second = plan_with(&shown, &kept, &[work], chosen);
+            let all: Vec<usize> = (0..units.len()).collect();
+            let mut wanted = as_seen(&first, &all, work);
+            wanted.retain(|(u, _, _)| index.contains(u));
+            assert_eq!(
+                as_seen(&second, &index, work),
+                wanted,
+                "case {case} ({chosen:?}, {moves:?}, insets {:?})",
+                units.iter().map(|u| u.inset).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_over_a_whole_half_fills_no_quarter_of_it() {
+        // The fourth review of ADR 0032 (the stand-in engine took such a window for filling each
+        // quarter of its half): Move windows in Halves, then Quarters. Visual Studio Code and
+        // Windows Terminal both fill the left half, Code in front; each gets a quarter of it,
+        // Code the top one.
+        let work = Rect::new(0, 0, 2560, 1392);
+        let left = Rect::new(0, 0, 1280, 1392);
+        let right = Rect::new(1280, 0, 2560, 1392);
+        let units = [
+            unit("code.exe", "Visual Studio Code", left),
+            unit("chrome.exe", "Google Chrome", right),
+            unit("windowsterminal.exe", "Windows Terminal", left),
+            unit("slack.exe", "Slack", right),
+        ];
+        let quarters = Some(Chosen {
+            monitor: 0,
+            preset: Preset::Quarters,
+        });
+        let p = plan_with(&units, &[], &[work], quarters);
+        let at = |u: usize| p.new_zones[zone_of(&p, u)].area.to_rect(work);
+        assert_eq!(at(0), Rect::new(0, 0, 1280, 696));
+        assert_eq!(at(2), Rect::new(0, 696, 1280, 1392));
     }
 }

@@ -240,13 +240,26 @@ impl Engine {
             }
             (spots, zone_of_window)
         };
+        // The tab that shows of each group: Move windows puts it below its strip's band.
+        let shown_tabs: HashSet<WindowHandle> = self
+            .groups_now()
+            .iter()
+            .filter_map(|g| g.visible().map(|(_, w)| *w))
+            .collect();
         let units: Vec<Unit> = windows
             .iter()
             .map(|w| {
                 let path = self.scanner.process_path(w.pid);
+                let dpi = topology.monitor_for_rect(w.frame_rect).dpi;
+                // Where Move windows puts it inside a zone: the window's part of it, which it
+                // fills once there (ADR 0032).
+                let placed_with = if shown_tabs.contains(&w.handle) {
+                    style.for_tabs()
+                } else {
+                    style
+                };
                 // How small it goes: what its app tells Windows, or its size when it keeps one.
                 let least = if w.resizable {
-                    let dpi = topology.monitor_for_rect(w.frame_rect).dpi;
                     self.least(w.handle, w.window_rect, w.frame_rect, dpi)
                 } else {
                     w.frame_rect.size()
@@ -259,6 +272,7 @@ impl Engine {
                     least,
                     monitor: monitor_of(w.frame_rect),
                     zone: zone_of_window.get(&w.handle).copied(),
+                    inset: placed_with.window_insets(dpi),
                 }
             })
             .collect();

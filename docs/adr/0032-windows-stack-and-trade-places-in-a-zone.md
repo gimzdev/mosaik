@@ -35,8 +35,10 @@ strips aside, or on top of the others when none was.
 
 **As the screen is.** Zones that Move windows made with the layout asked for now (the same layout
 picked, or the layout of the task both times) are that layout again while every window there is
-still in the zone it was put in, filling it (a window that keeps its size where `place::fit_size`
-puts it), and, for the layout of a task, no zone it put a window in is empty (step 0 of the plan,
+still in the zone it was put in, filling the part of it a window takes (below a tab group's strip
+or a tag's band, inside the gaps: `Unit::inset`; a window that keeps its size where
+`place::fit_size` puts it there), and, for the layout of a task, no zone it put a window in is
+empty (step 0 of the plan,
 `KeptZone::arranged`): each window stays in its zone, the one in front its own, whatever task
 the windows, stacked anew, say now, and the zones keep the room they made for the user's moves.
 A window opened since, closed or taken out of its zone lays the screen out anew; then too,
@@ -48,9 +50,11 @@ are the plan's own (`Stretched`), so that the windows are fitted to them; on an 
 they stretch its zones.
 
 **Colours go with the windows.** Each zone takes the colour its own window wears on screen, else
-one that a window stacked in it wears, else the plan's, each colour once (`arrange::zone_colors`):
-a trade takes the colours along with the windows, and once Move windows has made it, the picture
-and the screen agree.
+one that a window stacked in it wears, else the colour it has on screen itself (an empty zone of
+an arranged screen, its colour gone where the user's moves took it), else the plan's; each colour
+once, the zones kept on another monitor counted (`arrange::zone_colors`). A trade takes the
+colours along with the windows, and once Move windows has made it, the picture and the screen
+agree.
 
 **A window dropped onto another trades places with exactly it**, wherever the two are: their
 zones, and their places in them, own window or stacked; when both are their zones' own windows,
@@ -172,3 +176,21 @@ Hence the screen as arranged (step 0) and colours that go with the windows, abov
 random screens of 2 to 9 windows (one in five of a minimum size or one they keep, half with one
 or two moves), a second Move windows moves no window, where it moved one on 220 to 849 of 20000
 after the second review.
+
+## Fourth review (2026-10-16)
+
+A fourth agent reviewed ef9d140 and found, each now caught by a test written first: a window
+below a band (a tab group's strip, or every window's tag when tags go above the windows) covers
+less of its zone, and with a band over a tenth of the zone's height the next plan did not find it
+there (on random screens with one tab group at 125%, 250 of 6000 moved a window; with tags in a
+band, 554); in a layout picked, the window filling a zone went to another zone when the window
+the layout had given that zone fit no other, which only a task's layout must avoid (47 of 20000
+screens, a regression of the third review's fix); the empty zones of an arranged screen took the
+plan's colours, not theirs; a colour could repeat that of a zone kept on another monitor; the
+stand-in measured a window against its zone alone, not against the larger of the two, and kept
+the arranged screen after Save or a set opened. Now a window is in a zone when it fills the part
+of it Move windows puts it in (`Unit::inset`, from `FrameStyle::window_insets`, with the tab
+style for a group's shown tab); the third review's guard holds for a task's layout only; a zone
+that is the screen's again keeps its colour there (`NewZone::kept`); the colours of the zones kept
+are not given again. On 6000 random screens with bands, gaps and tab groups at 100% to 150%, the
+next plan finds every window where it is.

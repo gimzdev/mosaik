@@ -201,12 +201,17 @@ impl FrameStyle {
         }
     }
 
-    /// Where the window's visible frame goes inside a zone on a monitor at `dpi`.
-    pub fn window_area(self, zone: Rect, dpi: u32) -> Rect {
+    /// What a zone keeps around a window's visible frame on a monitor at `dpi`: half the gap
+    /// on each side, and the band above.
+    pub fn window_insets(self, dpi: u32) -> Insets {
         let half_gap = scale_for_dpi(self.gap, dpi) / 2;
         let band = scale_for_dpi(self.tag_band, dpi);
-        let area = zone.inset(Insets::uniform(half_gap));
-        let area = area.inset(Insets::new(0, band, 0, 0));
+        Insets::new(half_gap, half_gap + band, half_gap, half_gap)
+    }
+
+    /// Where the window's visible frame goes inside a zone on a monitor at `dpi`.
+    pub fn window_area(self, zone: Rect, dpi: u32) -> Rect {
+        let area = zone.inset(self.window_insets(dpi));
         if area.is_empty() { zone } else { area }
     }
 

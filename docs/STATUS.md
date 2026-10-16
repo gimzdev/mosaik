@@ -1621,6 +1621,26 @@ simetric and appealing". ADR 0032.
   trade in a half, a window put elsewhere and Halves stretched, the picture read again finds each
   of its windows where it is, first in its zone where it was, in its colour; Undo puts them back
   in their order front to back too.
+- **On the owner's PC** (job 0164, at ef9d140): build and every test passing (interface 133);
+  the engine's arrange test ok. The scan: 302 windows, the engine's 0.4 ms, every window 2.2 ms.
+  `smart`, every check passing, the new ones too: after Halves stretched to two thirds, a window
+  put elsewhere, two windows of a half traded and Halves for three windows, the picture read again
+  finds each window where it is, first in its zone where it was, in its colour (the zones still
+  stretched); Undo stacks the windows as they were (the one brought to the front behind again).
+  The side menu: Halves from it, every window in a half. The tour: 32 pictures. Mosaïk left in
+  the tray (1.0.2, protocol 11, watchdog, Win+Alt+Space); packed (288 files); both files beside
+  the repository brought up to date (the key line kept).
+- **A fourth review** (of ef9d140, ADR 0032, Fourth review): a window below a band (a tab
+  group's strip, or tags above windows) was not found in its zone when the band was over a tenth
+  of its height (250 of 6000 random screens with a tab group at 125%); in a layout picked, a
+  window filling a zone could go to another one (47 of 20000, from the third review's fix); empty
+  zones of an arranged screen and zones kept on another monitor were not counted in the colours;
+  the stand-in measured windows otherwise than Mosaïk. Now a window is in a zone when it fills the
+  part of it Move windows puts it in (`Unit::inset`), the guard is for a task's layout only, an
+  empty zone keeps its colour, and the colours of the zones kept are not given again. Tests
+  first: core 290 (a tab group below its strip at 125%; Half and stack; empty quarters' colours;
+  a zone kept on another monitor; 6000 random screens with bands, gaps and tab groups at 100% to
+  150%; Quarters after Halves), interface 134 (the stand-in's measure), Playwright 35.
 
 ## Owner decisions
 

@@ -250,6 +250,8 @@ function openSet(id: string): Reply {
     workspaces.push(w);
   }
   active = w.id;
+  // Its zones are on screen now, not Move windows' ones.
+  arranged = null;
   return done(`Opened “${w.name}”.`);
 }
 
@@ -387,12 +389,17 @@ function autoLayout(): { task: Task; shape: RatioRect[]; takes: (number | undefi
   return { task: 'coding', shape, takes };
 }
 
-/** How much of `zone` the frame `frame` covers, from 0 to 1. */
+/** How much the frame `frame` and `zone` overlap, over the larger of the two, from 0 to 1, as the
+ * engine measures it (`arrange::covering`): a window over a whole half does not fill a quarter
+ * of it. */
 function covering(frame: Rect, zone: Rect): number {
   const w = Math.min(frame.right, zone.right) - Math.max(frame.left, zone.left);
   const h = Math.min(frame.bottom, zone.bottom) - Math.max(frame.top, zone.top);
-  const area = (zone.right - zone.left) * (zone.bottom - zone.top);
-  return w > 0 && h > 0 && area > 0 ? (w * h) / area : 0;
+  const larger = Math.max(
+    (frame.right - frame.left) * (frame.bottom - frame.top),
+    (zone.right - zone.left) * (zone.bottom - zone.top),
+  );
+  return w > 0 && h > 0 && larger > 0 ? (w * h) / larger : 0;
 }
 
 /** A window is in a zone already when it covers most of it, as the engine finds it (`FILLS`). */
@@ -563,6 +570,11 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
       if (colours[i] === undefined && !colours.includes(c)) colours[i] = c;
     }
   }
+  // A zone of the screen as arranged keeps its colour there, as its colour went with the moves.
+  rects.forEach((_, i) => {
+    const carried = again?.zones[colorOf[i] ?? i]?.color;
+    if (colours[i] === undefined && carried !== undefined && !colours.includes(carried)) colours[i] = carried;
+  });
   rects.forEach((_, i) => {
     if (colours[i] !== undefined) return;
     const start = colorOf[i] ?? i;
@@ -1094,6 +1106,8 @@ function answer(command: Command): Reply {
       return sortWindows();
     case 'save': {
       const name = command.workspace;
+      // The workspace saved is the one on screen now: Move windows' zones are its.
+      arranged = null;
       if (name === null) {
         const w = workspaces.find((x) => x.id === active);
         return w ? done(`Saved “${w.name}”.`) : done('Saved.');
