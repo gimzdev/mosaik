@@ -1883,6 +1883,17 @@ simetric and appealing". ADR 0032.
   pictures for `gimz` were not put in place: on their way each gained a C2PA content credentials
   chunk (`caBX`, its pixels the same), so none matched the hashes sent. The repository keeps them
   as the PC has them.
+- **On the owner's PC** (job 0191, at e1f3379): his `mosaik.ps1` built the smaller names (3 files
+  brought up to date; exit 0, 135 s) and its tests passed (83 s; interface 148); at the window's
+  smallest size every layout's name is on one line. Mosaïk in the tray: 1.0.2, protocol 12,
+  watchdog, Win+Alt+Space. In `gimz`: `deploy.sh` and `gimzdev\gimzdev.sh` put in place, the four
+  pictures in `screenshots` and the five in `gimzdev\public\images`, each as it arrived; the
+  files they replace kept in `gimz\old-2026-10-16`. The README's pictures in the repository are
+  the same bytes as `gimz\screenshots`, and the repository has nothing uncommitted, so a deploy
+  makes no commit there. With Git Bash: `deploy.sh`'s first lines run with Windows line endings,
+  it finds and copies the four pictures, and Mosaïk's topics are set; its syntax is sound. Both
+  files beside the repository brought up to date (the key line kept), and again at the commit
+  recording this.
 
 ## Owner decisions
 
