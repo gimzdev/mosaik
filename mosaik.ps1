@@ -7,7 +7,8 @@
 .DESCRIPTION
   Right-click this file and choose "Run with PowerShell" for a menu. From a terminal:
 
-    .\mosaik.ps1 unpack [folder]   put the source in a folder (default: mosaik-<version> beside this file)
+    .\mosaik.ps1 unpack [folder]   put the source in a folder (default: mosaik-<version> beside this file;
+                                  another mosaik.ps1's source there is brought to this one's)
     .\mosaik.ps1 check             see what building needs; offers to install what is missing (winget)
     .\mosaik.ps1 build             build the interface, then mosaik.exe, its watchdog and mosaikctl
     .\mosaik.ps1 test              run the tests and checks
@@ -40,8 +41,15 @@ $SourceSha256 = ''
 $Waiting = $false
 
 # Paths the source inside never includes: what building makes, the site (mosaik1.sh makes it),
-# the README's pictures of the site, and this PC's own settings (.env.local: the Store's key).
-$Excluded = '^(\.git|\.agent|target|site|node_modules|dist|test-results|playwright-report)(/|$)|/(node_modules|dist|target|test-results|gen)/|^mosaik1\.sh$|^docs/screenshots/|(^|/)\.env[^/]*\.local$'
+# the README's pictures of the site, this PC's own settings (.env.local: the Store's key), and an
+# unpacked folder's record of its source and the user's changes kept aside (`Update-Source`).
+$Excluded = '^(\.git|\.agent|target|site|node_modules|dist|test-results|playwright-report|\.mosaik-replaced)(/|$)|/(node_modules|dist|target|test-results|gen)/|^mosaik1\.sh$|^docs/screenshots/|(^|/)\.env[^/]*\.local$|^\.mosaik-source\.json$'
+# An unpacked folder's record of the source in it: its fingerprint, and each file's. (Not $Record:
+# PowerShell's names know no case, and a function's $record would stand for it in what it calls.)
+$RecordFile = '.mosaik-source.json'
+# The date the source inside gives its files (`New-SourceZip`): a file of an unpacked folder still
+# dated so is as unpacked.
+$PackedDate = New-Object DateTimeOffset(2026, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
 $PayloadStart = '<#--- source: a zip, in base64 ---'
 $PayloadEnd = '---#>'
 
@@ -59,7 +67,9 @@ function Test-Source([string]$Path) {
 }
 
 # The source to work on: the folder given, the repository this file is in, or the folder this
-# file unpacks to (unpacked first if it is not yet).
+# file unpacks to: unpacked first if it is not yet, and brought to the source inside this file
+# when another mosaik.ps1 put its own there (the owner, building from his mosaik.ps1, got the
+# source a mosaik.ps1 of the day before had unpacked: the version had not changed, the source had).
 function Get-Source {
   if ($Folder) {
     if (Test-Source $Folder) { return (Resolve-Path $Folder).Path }
@@ -68,6 +78,7 @@ function Get-Source {
   if (Test-Source $PSScriptRoot) { return $PSScriptRoot }
   $target = Get-DefaultFolder
   if (-not (Test-Source $target)) { Expand-Source $target }
+  elseif ((Get-RecordedSha256 $target) -ne $SourceSha256) { Update-Source $target }
   $target
 }
 
@@ -93,7 +104,8 @@ function Get-Sha256([byte[]]$Bytes) {
   try { -join ($sha.ComputeHash($Bytes) | ForEach-Object { $_.ToString('x2') }) } finally { $sha.Dispose() }
 }
 
-function Expand-Source([string]$Target) {
+# The source inside this file, checked: the zip's bytes.
+function Get-Payload {
   $zip = Read-Payload
   if (-not $zip) {
     Fail 'This copy of mosaik.ps1 carries no source (it is the one in the repository). Run it from the repository, or make a one-file copy with: .\mosaik.ps1 pack'
@@ -101,6 +113,51 @@ function Expand-Source([string]$Target) {
   if ((Get-Sha256 $zip) -ne $SourceSha256) {
     Fail 'The source inside this file is damaged (its fingerprint does not match). Get mosaik.ps1 again.'
   }
+  $zip
+}
+
+# The files of the source inside this file: each relative path (forward slashes) with its bytes.
+function Get-PayloadFiles([byte[]]$Zip) {
+  Add-Type -AssemblyName System.IO.Compression
+  $files = [ordered]@{}
+  $archive = New-Object IO.Compression.ZipArchive((New-Object IO.MemoryStream(, $Zip)), [IO.Compression.ZipArchiveMode]::Read)
+  try {
+    foreach ($entry in $archive.Entries) {
+      if ($entry.FullName.EndsWith('/')) { continue }
+      $buffer = New-Object IO.MemoryStream
+      $stream = $entry.Open()
+      try { $stream.CopyTo($buffer) } finally { $stream.Dispose() }
+      $files[$entry.FullName] = $buffer.ToArray()
+    }
+  }
+  finally { $archive.Dispose() }
+  $files
+}
+
+# Writes an unpacked folder's record of its source: the fingerprint of the source inside this file,
+# and each of its files'.
+function Write-Record([string]$Target, $Files) {
+  $sums = [ordered]@{}
+  foreach ($name in $Files.Keys) { $sums[$name] = Get-Sha256 $Files[$name] }
+  $json = [ordered]@{ version = $SourceVersion; sha256 = $SourceSha256; files = $sums } | ConvertTo-Json -Depth 3
+  [IO.File]::WriteAllText((Under $Target $RecordFile), $json, (New-Object Text.UTF8Encoding $false))
+}
+
+# What an unpacked folder's record says: $null when it has none (unpacked by a mosaik.ps1 from
+# before records, or not unpacked at all).
+function Read-Record([string]$Target) {
+  $path = Under $Target $RecordFile
+  if (-not (Test-Path -LiteralPath $path)) { return $null }
+  try { Get-Content -Raw -Encoding UTF8 -LiteralPath $path | ConvertFrom-Json } catch { $null }
+}
+
+function Get-RecordedSha256([string]$Target) {
+  $record = Read-Record $Target
+  if ($record -and $record.PSObject.Properties['sha256']) { [string]$record.sha256 } else { '' }
+}
+
+function Expand-Source([string]$Target) {
+  $zip = Get-Payload
   if ((Test-Path $Target) -and @(Get-ChildItem -Force $Target).Count -gt 0) {
     Fail "$Target is not empty. Choose another folder: .\mosaik.ps1 unpack <folder>"
   }
@@ -109,7 +166,75 @@ function Expand-Source([string]$Target) {
   $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "mosaik-source-$PID.zip")
   [IO.File]::WriteAllBytes($temp, $zip)
   try { [IO.Compression.ZipFile]::ExtractToDirectory($temp, $Target) } finally { Remove-Item $temp -Force }
+  Write-Record $Target (Get-PayloadFiles $zip)
   Say "Done: the source is in $Target" Green
+}
+
+# Brings a folder another mosaik.ps1 unpacked to the source inside this file, keeping its build
+# (target, node_modules: never part of the source). A file of the old source is replaced, or
+# removed when this source has it not; one the user changed is moved first to
+# .mosaik-replaced\<when>\, never lost; a file of the user's own that this source has not stays
+# where it is. What the old source's files were comes from the folder's record; a folder from
+# before records has none, and its files still dated as the source inside dates them are taken
+# for the old source's (a change made since dates a file anew).
+function Update-Source([string]$Target) {
+  $zip = Get-Payload
+  $new = Get-PayloadFiles $zip
+  $record = Read-Record $Target
+  $sums = if ($record -and $record.PSObject.Properties['files']) { $record.files } else { $null }
+  Step ("Bringing the source in {0} to this mosaik.ps1's (Mosaik {1}, source {2})" -f $Target, $SourceVersion, $SourceSha256.Substring(0, 12))
+  $root = (Resolve-Path $Target).Path
+  $aside = Under $root '.mosaik-replaced' (Get-Date -Format 'yyyyMMdd-HHmmss')
+  $changed = 0
+  $moved = New-Object 'System.Collections.Generic.List[string]'
+  # Whether a file is the old source's, as unpacked: by its record, else by its date.
+  $asUnpacked = {
+    param([string]$Name, [string]$Path, [string]$Sha)
+    if ($sums) {
+      $known = $sums.PSObject.Properties[$Name]
+      return ($null -ne $known -and [string]$known.Value -eq $Sha)
+    }
+    [Math]::Abs(((Get-Item -LiteralPath $Path).LastWriteTimeUtc - $PackedDate.UtcDateTime).TotalHours) -lt 15
+  }
+  $wasOld = {
+    param([string]$Name)
+    if ($sums) { return ($null -ne $sums.PSObject.Properties[$Name]) }
+    $true
+  }
+  foreach ($name in @(Get-TreeFiles $root)) {
+    if ($name -match $Excluded) { continue }
+    $path = Under $root $name
+    $sha = Get-Sha256 ([IO.File]::ReadAllBytes($path))
+    $wanted = $new.Contains($name)
+    if ($wanted -and (Get-Sha256 $new[$name]) -eq $sha) { continue }
+    $ours = & $asUnpacked $name $path $sha
+    if (-not $wanted -and -not $ours -and -not $sums) { continue }
+    if (-not $wanted -and -not (& $wasOld $name)) { continue }
+    if (-not $ours) {
+      $to = Under $aside $name
+      New-Item -ItemType Directory -Force -Path (Split-Path $to) | Out-Null
+      Move-Item -LiteralPath $path -Destination $to
+      $moved.Add($name)
+    }
+    elseif (-not $wanted) {
+      Remove-Item -LiteralPath $path -Force
+    }
+    $changed++
+  }
+  foreach ($name in $new.Keys) {
+    $path = Under $root $name
+    if ((Test-Path -LiteralPath $path) -and (Get-Sha256 ([IO.File]::ReadAllBytes($path))) -eq (Get-Sha256 $new[$name])) { continue }
+    New-Item -ItemType Directory -Force -Path (Split-Path $path) | Out-Null
+    [IO.File]::WriteAllBytes($path, $new[$name])
+    $item = Get-Item -LiteralPath $path
+    $item.LastWriteTimeUtc = $PackedDate.UtcDateTime
+    $changed++
+  }
+  Write-Record $root $new
+  Say ("Done: the source in {0} is this mosaik.ps1's ({1} files brought up to date; the build kept)." -f $Target, $changed) Green
+  if ($moved.Count -gt 0) {
+    Say ("{0} file(s) changed since they were unpacked are kept in {1}: {2}" -f $moved.Count, $aside, (@($moved | Select-Object -First 5) -join ', ')) Yellow
+  }
 }
 
 # The files of a source folder, relative, with forward slashes, sorted: the ones git tracks when
@@ -541,6 +666,8 @@ function Invoke-Test {
   & (Under $source 'installer' 'msix' 'test-publish.ps1')
   Step 'This script: building with a Mosaik running'
   & (Under $source 'installer' 'test-mosaik-ps1.ps1') -Script $PSCommandPath
+  Step 'This script: a new source over one unpacked before'
+  & (Under $source 'installer' 'test-mosaik-ps1-unpack.ps1') -Script $PSCommandPath
   Say 'Every test passed.' Green
 }
 
@@ -600,7 +727,11 @@ function Show-Menu {
     if ($choice -eq 'Q' -or $choice -eq '') { return }
     try {
       switch ($choice) {
-        '1' { if (Test-Source $where) { Say "The source is already in $where." Green } else { Expand-Source $where } }
+        '1' {
+          if (-not (Test-Source $where)) { Expand-Source $where }
+          elseif ($SourceSha256 -and (Get-RecordedSha256 $where) -ne $SourceSha256) { Update-Source $where }
+          else { Say "The source is already in $where." Green }
+        }
         '2' { [void](Invoke-Check) }
         '3' { Invoke-Build }
         '4' { Invoke-Test }
@@ -619,7 +750,12 @@ function Show-Menu {
 try {
   switch ($Command) {
     'menu' { Show-Menu }
-    'unpack' { Expand-Source $(if ($Folder) { $Folder } else { Get-DefaultFolder }) }
+    'unpack' {
+      $target = if ($Folder) { $Folder } else { Get-DefaultFolder }
+      if ((Test-Source $target) -and (Get-RecordedSha256 $target) -ne $SourceSha256) { Update-Source $target }
+      elseif (Test-Source $target) { Say "The source is already in $target." Green }
+      else { Expand-Source $target }
+    }
     'check' { if (-not (Invoke-Check)) { exit 1 } }
     'build' { Invoke-Build }
     'test' { Invoke-Test }
