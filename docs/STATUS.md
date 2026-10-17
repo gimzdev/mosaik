@@ -20,7 +20,7 @@ re-run before each release.
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.0.1, first builds | (called 1.1 then) built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.0.1: first builds](#101-first-builds) |
 | 1.0.1 | (called 2.0 until 2026-10-13) built, tested and packaged on Windows (jobs 0122 to 0143): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 1.0.1.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's key is kept (the key alone asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant made, linked to the developer account, and its application "Mosaik Store publishing" made with a key on 2026-10-13 | [1.0.1: the window rebuilt](#101-the-window-rebuilt) |
-| 1.0.2 | built and tested on Windows (jobs 0146 to 0190): a workspace previewed before it opens, the picture where zones and windows change (dragged, swapped, resized), every layout in view, a workspace's page with its apps by zone, the first run with no note, two themes, apps started as the taskbar starts them; the last full check every test and probe check passing (job 0175); the owner's own `mosaik.ps1` beside the repository builds and tests it, every test passing (jobs 0178 and 0190); sending it to the Store stays the owner's (`./mosaik1.sh --deploy --app`) | [1.0.2](#102) |
+| 1.0.2 | built and tested on Windows (jobs 0146 to 0196; since 0196 in the repository itself): a workspace previewed before it opens, the picture where zones and windows change (dragged, swapped, resized), every layout in view, a workspace's page with its apps by zone, the first run with no note, two themes, apps started as the taskbar starts them; the last full check every test and probe check passing (job 0175); the owner's own `mosaik.ps1` beside the repository builds and tests it, every test passing (jobs 0178 and 0190); sending it to the Store stays the owner's (`./mosaik1.sh --deploy --app`) | [1.0.2](#102) |
 
 ## Step 1: verify assumptions
 
@@ -1921,6 +1921,26 @@ simetric and appealing". ADR 0032.
   at 00:46 and the PC has not restarted since, so it is left as it is (it does not start with
   Windows); the Store's 1.0.1 is still installed, and the Start menu's Mosaïk opens it. The
   runner stopped.
+- **The owner's notes of 01:55 to 02:49 (2026-10-17)**: "lets just rename all the bash and ps1
+  with just the name of the site / app no 1 or 2 or whatever after" (ADR 0039); "i think we
+  should get one folder for site one for app why a third" (ADR 0040); "is mosaik app on dark
+  theme default ? it should", a question only: it is, since 1.0.1 (settings 6), and his own
+  setting was dark already. Two attempts to start the runner by taking over his screen hid his
+  game, Teamfight Tactics, twice ("you griefed me for zero reason"): the screen is never taken
+  over without asking him first (below).
+- **On the owner's PC** (job 0196, at 8108749, started by the owner): synced; packed (303 files);
+  `mosaik.ps1` beside the repository, and `mosaik1.sh` renamed `mosaik.sh` with his key line kept.
+  His `mosaik.ps1`, run as he runs it, worked in the repository beside it ("Its source is the one
+  inside this file (303 files)"): `build` exit 0 (153 s), `mosaik.exe` in `mosaik\target\release`;
+  `test` exit 0 (120 s), every test passing (interface 148, the Rust tests, the Store's stand-ins,
+  the build step's cases and the unpack test's 31 checks, on Windows PowerShell 5.1); the
+  repository as committed after both. `dropdate1.sh`, `metaforge2.sh`, `grimoire1.sh` and
+  `gimzdev1.sh` renamed, each the file the edit was made from, with its text as sent; the markers
+  `.metaforge-v2` and `.grimoire-v1` renamed `.metaforge` and `.grimoire`. The only old name
+  left in `gimz` is in Gimzdev's built site (`lib/content.ts`), which `gimzdev.sh` writes again on
+  its next run. Mosaïk's theme: dark, untouched; the Store's 1.0.1 has no settings saved (dark).
+  No `.env.local` anywhere: the Store's key is only in his `mosaik.sh`. `mosaik-1.0.2` is no
+  longer used; deleting it is the owner's.
 
 ## Owner decisions
 
@@ -2000,3 +2020,7 @@ simetric and appealing". ADR 0032.
   its page. ADR 0034.
 - 2026-10-16: his `mosaik.ps1` builds the source it carries, whatever an older one left beside it
   ("lets clear all you need and do the job properly please"). ADR 0035.
+- 2026-10-17: every script named after its app, with no number or version (ADR 0039); one folder
+  for the app and one for the site (ADR 0040).
+- 2026-10-17: the owner's screen is never taken over without asking him first: it hides his
+  other windows, a game included. The runner stays open, started by him, so jobs need no click.
