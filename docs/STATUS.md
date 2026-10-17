@@ -1819,6 +1819,54 @@ simetric and appealing". ADR 0032.
   PowerShell (18 checks); Mosaïk 1.0.2 still running from that folder. Both files beside the
   repository brought up to date (the key line kept), and again at the commit recording this.
 
+### Asked on 2026-10-16 (22:01): two themes, terminals opened twice, a pass over the whole app, GitHub and the portfolio
+
+- **The owner's notes of 22:01**: "is windows like necessary i feel like its basically light
+  theme"; "often when terminal and msys opened, opening a workspace opens another one ? and asks
+  for powershell or msys (mintty) instead of opening whats described directly"; then a pass over
+  the whole app for "optimization cleaness" and "appeal balance in layout and look", the one-file
+  scripts and `gimz/deploy.sh` "for github to be absolutely perfect", and a new `gimzdev.sh`
+  whose Mosaïk gallery has the app too ("limit those tho"). Publishing stays his: `deploy.sh`
+  and `--deploy` were not run.
+- **Two themes** (ADR 0036): Dark and Light. Like Windows showed one of them, as Windows did;
+  settings that chose it keep the one it showed, settled when Mosaïk starts and saved. Tests
+  first: core (the settled theme), the interface (two choices, the title bar following the
+  page), the tour pictures the themes as chosen.
+- **A terminal started again, and Windows asking which shell** (jobs 0184 to 0187, ADR 0037):
+  the owner's "MSYS2 terminal" was saved as `mintty.exe` with no arguments. Started so, mintty
+  asks which shell to open, and its window has no app id, so the workspace never found it: each
+  open started another. `mosaik-probe open-plan` (read only) printed each window's relaunch
+  command and what opening each workspace would do. Now Mosaïk reads a window's relaunch command
+  as the taskbar does, starts an app by it, finds a window by the program that launched it (Git
+  Bash's mintty, Steam's helper) and never starts mintty alone: Git Bash as `git-bash.exe`, any
+  other mintty with a login shell (`mintty -`). Tests first: core 311 (the command split as
+  Windows does; mintty never alone; a window found by its launcher). On the PC (job 0187):
+  "Workspace 2" starts Git Bash as `git-bash.exe`, "Coding" its MSYS2 terminal as `mintty -`; the
+  Windows tests of the window scan and the engine pass. "Coding" also has two Chrome entries,
+  so it opens a second Chrome window: the workspace says so, not a fault.
+- **The pass over the window**: Home in the middle, its picture and workspaces a set space apart,
+  the panel as tall as the picture's column; the picture keeps its place when a workspace is
+  shown; the zone editor one width, the canvas's; headings in line with what is under them; the
+  lines between a workspace's zones as wide as its list. Apps' icons no longer go missing: a
+  suggested set drawn while a workspace above it was reading the same icon showed none of it
+  (icons are now a store every drawing reads, told when a read comes in). The zone editor's
+  picked zone has Colour and Split level, the swatches in line with the buttons. Tests first:
+  interface 148, Playwright 45.
+- **The site, 1.11.5**: "Every window shows its zone's number in its colour", as the app does
+  (it said each window wears its zone's colour, which is only with Coloured borders on). The
+  site's CI built `./mosaik_site` and checked nothing it ships: it builds `site/` now.
+- **Screenshots** for the README, GitHub and the portfolio: the window from the stand-in engine
+  with the icons Windows gives its apps on the owner's PC (read by jobs 0188 and 0189, as Mosaïk
+  reads them), framed as a window on a tiled backdrop; the site at 1440 by 900; all at 2880 by
+  1800. The README shows Home, a workspace, the zone editor and the site
+  (`docs/screenshots/`, the old pictures of the site gone from the folder). `deploy.sh` copies
+  the same four from `gimz/screenshots` (so a deploy changes nothing in the repository), sets
+  each repository's topics, and runs whatever line endings it has (a copy without CRs, as
+  `gimzdev1.sh` does: with CRLF, bash here stops at its first function). `gimzdev.sh` 1.4.2: Mosaïk
+  as it is (a free Windows app; Rust, Tauri, React, TypeScript) with five pictures (the site, Home,
+  a workspace, its zones, the site's features), and the full-screen viewer's thumbnails kept off
+  a phone's edges; built here, its gallery checked on a desktop and a phone.
+
 ## Owner decisions
 
 - 2026-10-11: the Patreon link is https://www.patreon.com/gimzdev (About and the tray menu only).
