@@ -100,6 +100,7 @@ try {
   # Four files: two changed, one added, one gone (job 0179 was told 11 for 6: a changed file was
   # counted once as gone and once as written).
   Check (($said -join ' ') -match '\(4 files brought up to date') ('not said as 4 files brought up to date: {0}' -f (@($said | Where-Object { $_ -match 'brought up to date' }) -join ' '))
+  Check (($said -join ' ') -match '1 file changed since it was unpacked is kept in') ('the file kept aside not said so: {0}' -f (@($said | Where-Object { $_ -match 'kept in' }) -join ' '))
   Check ((Read-Text $unpacked 'apps/desktop/src/Home.tsx') -eq 'Move windows') 'a changed file kept the old source'
   Check ((Read-Text $unpacked 'crates/mosaik-core/src/lib.rs') -eq 'two') 'a file the user changed was not brought to the new source'
   Check ((Read-Text $unpacked 'docs/new.md') -eq 'the second source only') 'a new file is not there'
@@ -124,6 +125,12 @@ try {
   Run $copy @('pack') | Out-Null
   Check (@(Aside).Count -eq 1) 'a second run moved files aside again'
 
+  # One file changed, said as one (job 0181: "1 files").
+  Put $src 'crates/mosaik-core/src/lib.rs' 'three'
+  Copy-Item (Pack) $copy -Force
+  $said = Run $copy @('pack')
+  Check (($said -join ' ') -match '\(1 file brought up to date') ('one file not said as one: {0}' -f (@($said | Where-Object { $_ -match 'brought up to date' }) -join ' '))
+
   # A folder unpacked before this check, with no record of its source: its files as the source
   # inside dated them are the old source's; the user's own and the build stay.
   Remove-Item (Join-Path $unpacked '.mosaik-source.json') -ErrorAction SilentlyContinue
@@ -147,4 +154,4 @@ finally {
 }
 
 if ($failures.Count -gt 0) { throw ("mosaik.ps1, a new source over one unpacked before: {0}" -f ($failures -join '; ')) }
-Write-Host 'mosaik.ps1, a new source over one unpacked before (same version): files changed, added and gone, dated after the build; the build and the user''s own files kept; the user''s change kept aside; nothing on a second run; a folder with no record of its source; how many files it says: 18 checks passing.' -ForegroundColor Green
+Write-Host 'mosaik.ps1, a new source over one unpacked before (same version): files changed, added and gone, dated after the build; the build and the user''s own files kept; the user''s change kept aside; nothing on a second run; a folder with no record of its source; how many files it says: 20 checks passing.' -ForegroundColor Green

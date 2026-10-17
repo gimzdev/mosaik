@@ -231,9 +231,10 @@ function Update-Source([string]$Target) {
     $changed++
   }
   Write-Record $root $new
-  Say ("Done: the source in {0} is this mosaik.ps1's ({1} files brought up to date; the build kept)." -f $Target, $changed) Green
+  Say ("Done: the source in {0} is this mosaik.ps1's ({1} {2} brought up to date; the build kept)." -f $Target, $changed, $(if ($changed -eq 1) { 'file' } else { 'files' })) Green
   if ($moved.Count -gt 0) {
-    Say ("{0} file(s) changed since they were unpacked are kept in {1}: {2}" -f $moved.Count, $aside, (@($moved | Select-Object -First 5) -join ', ')) Yellow
+    $what = if ($moved.Count -eq 1) { '1 file changed since it was unpacked is' } else { "$($moved.Count) files changed since they were unpacked are" }
+    Say ("{0} kept in {1}: {2}" -f $what, $aside, (@($moved | Select-Object -First 5) -join ', ')) Yellow
   }
 }
 
