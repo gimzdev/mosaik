@@ -40,6 +40,7 @@
   you had chosen it, Mosaïk keeps the one it showed.
 - Apps' icons no longer go missing: a suggested set drawn while a workspace above it was reading
   the same app's icon showed none of it.
+- The zone editor's picked zone: Colour and Split level, the swatches in line with the buttons.
 - Home's title, picture and layouts are one width, the button ending where the picture does.
 - Every layout is in view, in two rows beside Automatic: Halves, Thirds, Main + side, Side +
   main, Half + stack, Stack + half, Quarters and Full screen. Top + bottom and Three rows are gone

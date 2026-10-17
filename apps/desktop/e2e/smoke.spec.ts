@@ -901,6 +901,38 @@ test.describe('the zone editor', () => {
     await expect(page.getByRole('region', { name: 'Zone 1' })).toBeVisible();
     await accessible(page);
   });
+
+  test('lines up a picked zone’s controls: Colour and Split level, its swatches and buttons on one line', async ({
+    page,
+  }) => {
+    // The window's pictures for the README, 2026-10-16: "Split" stood 8 px above "Colour", the
+    // panel's parts set on their bottoms, and the swatches lower than the buttons beside them.
+    for (const size of [
+      { width: 1080, height: 760 },
+      { width: 1400, height: 1100 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.goto('/');
+      await editZones(page);
+      await page.getByRole('button', { name: /^Zone 3,/ }).click();
+      const panel = page.getByRole('region', { name: 'Zone 3' });
+      const at = `${String(size.width)} by ${String(size.height)}`;
+      const colour = await still(page, panel.getByText('Colour', { exact: true }));
+      const split = await still(page, panel.getByText('Split', { exact: true }));
+      const swatch = await still(page, panel.locator('fieldset span[title]').first());
+      const sideBySide = await still(page, panel.getByRole('button', { name: 'Split side by side' }));
+      expect(Math.round(split.y), `Split level with Colour, ${at}`).toBe(Math.round(colour.y));
+      expect(
+        Math.abs(swatch.y + swatch.height / 2 - (sideBySide.y + sideBySide.height / 2)),
+        `the swatches in line with the buttons, ${at}`,
+      ).toBeLessThanOrEqual(1);
+      const remove = await still(page, panel.getByRole('button', { name: 'Remove zone' }));
+      if (Math.abs(remove.y - sideBySide.y) < sideBySide.height) {
+        // In the same row: on the same line as Split's buttons.
+        expect(Math.round(remove.y), `Remove zone in line, ${at}`).toBe(Math.round(sideBySide.y));
+      }
+    }
+  });
 });
 
 test('the first run has no tour: Home shows what Arrange will do, and Mosaïk starts with Windows', async ({ page }) => {

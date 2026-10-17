@@ -30,7 +30,7 @@ export function ZonePanel({
   return (
     <section
       aria-labelledby={nameId}
-      className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4"
+      className="flex flex-wrap items-start gap-x-6 gap-y-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4"
     >
       <h3 id={nameId} className="flex items-center gap-2 self-center font-display text-heading font-bold">
         Zone{' '}
@@ -43,7 +43,8 @@ export function ZonePanel({
       </h3>
       <fieldset>
         <legend className="text-small font-semibold">Colour</legend>
-        <div className="mt-1 flex gap-1.5">
+        {/* As tall as Split's buttons, so the swatches are in line with them. */}
+        <div className="mt-1 flex h-10 items-center gap-1.5">
           {ZONE_COLORS.map((c) => (
             <label key={c} className="cursor-pointer rounded-full">
               <input
@@ -97,7 +98,7 @@ export function ZonePanel({
           </Button>
         </div>
       </div>
-      <div className="ml-auto">
+      <div className="ml-auto self-end">
         <Button tone="danger" onClick={onRemove}>
           Remove zone
         </Button>
