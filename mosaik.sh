@@ -2420,6 +2420,13 @@ if [ "$DEPLOY" = 1 ]; then
   [ -z "${VERCEL_TOKEN:-}" ] || G+=(--token "$VERCEL_TOKEN")
   [ -z "${VERCEL_SCOPE:-}" ] || G+=(--scope "$VERCEL_SCOPE")
   vc() { "${VC[@]}" "$@" ${G[@]+"${G[@]}"}; }
+  # Vercel takes the last commit of the git repository the site's folder is in, and a Hobby
+  # account blocks a deploy made from someone else's commit ("the commit author doesn't have
+  # permission to create deployments"). The site's folder is no repository of its own, and one
+  # above it is other work (gimz/, or Mosaïk's own for site/), so git is kept from looking above
+  # the site's folder: the deploy is simply the signed-in account's.
+  GIT_CEILING_DIRECTORIES="$(cd .. && { pwd -W 2>/dev/null || pwd; })"
+  export GIT_CEILING_DIRECTORIES
   step "Checking types"
   npm run --silent typecheck || die "Type errors above. Nothing was deployed."
   ok "Types are clean"
