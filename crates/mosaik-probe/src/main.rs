@@ -56,6 +56,8 @@ mod kbd;
 mod matrix;
 #[cfg(windows)]
 mod monitors;
+#[cfg(windows)]
+mod open_plan;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod pixels;
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -108,7 +110,7 @@ fn main() {
     }
     let Some(command) = args.first().cloned() else {
         eprintln!(
-            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace|smart|sets|menu-shot|titlebar|ui-tour> [--out file.json]"
+            "usage: mosaik-probe <env|classify|matrix|drag|watchdog|hotkey|idle|workspace|smart|sets|menu-shot|titlebar|ui-tour|open-plan> [--out file.json]"
         );
         std::process::exit(2);
     };
@@ -141,6 +143,7 @@ fn main() {
         "menu-shot" => smart::menu_shot(&args),
         "titlebar" => titlebar::run(&args),
         "ui-tour" => ui_tour::run(&args),
+        "open-plan" => open_plan::run(&args),
         _ => Err(format!("unknown command {command}")),
     };
     match result {
