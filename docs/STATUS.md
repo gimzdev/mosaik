@@ -1809,6 +1809,10 @@ simetric and appealing". ADR 0032.
 - **How many files `mosaik.ps1` says it brought up to date** (job 0179 said 11 for 6 changed): a
   changed file was counted as it went and again as it was written. Each file is counted once now.
   Test first: the unpack test checks the count said, with a record and without (18 checks).
+  On the owner's PC (job 0180, at e37f823): his `mosaik.ps1` brought `mosaik-1.0.2` to its source
+  ("4 files brought up to date", the 4 changed), and the unpack test passes with it in Windows
+  PowerShell (18 checks); Mosaïk 1.0.2 still running from that folder. Both files beside the
+  repository brought up to date (the key line kept), and again at the commit recording this.
 
 ## Owner decisions
 
