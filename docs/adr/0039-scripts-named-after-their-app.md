@@ -28,5 +28,5 @@ browsers keeps its key (MetaForge's saved builds), so nobody loses theirs.
   site script out of the source it carries) name `mosaik.sh`; `site/` is written again and says
   so. ADRs 0001, 0025 and 0026 keep the name they were written with, with a note.
 - The owner's files were renamed in place, his own settings in them (the Store's key line in his
-  `mosaik.sh`, the mail key in `gimzdev.sh`) kept as they were. The Project keeps `mosaik.sh`
-  where it kept `mosaik1.sh`.
+  `mosaik.sh`, the mail key in `gimzdev.sh`) kept as they were. The Project keeps
+  `claude/mosaik.sh` beside `claude/mosaik.ps1`, in place of `mosaik1.sh`.
