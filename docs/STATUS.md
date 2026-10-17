@@ -1911,6 +1911,16 @@ simetric and appealing". ADR 0032.
   old Grimoire installer and the Everforge prototype under `dropdate`, the old brief and Store
   pictures, an empty repository from 2026-09-29 in `gimz\mosaik`, and the runner's jobs,
   bundles and test profiles.
+- **On the owner's PC** (job 0194, at bf7cd9a): packed (301 files, 1.0.2) and both files beside
+  the repository brought up to date, `mosaik1.sh` at 1.0.2 with its key line kept; his
+  `mosaik-1.0.2` brought to that source (9 files, the build kept: the stand-in's names, the tour
+  and the docs, nothing the app shows). The README's four pictures are the same bytes as
+  `gimz\screenshots`, and the repository has nothing uncommitted. The Project's `mosaik1.sh` and
+  `claude/mosaik.ps1` are these two files: the pack as the PC made it (its source checked file by
+  file against the repository), the site script without the key line. Job 0195: Mosaïk was quit
+  at 00:46 and the PC has not restarted since, so it is left as it is (it does not start with
+  Windows); the Store's 1.0.1 is still installed, and the Start menu's Mosaïk opens it. The
+  runner stopped.
 
 ## Owner decisions
 
