@@ -20,7 +20,7 @@ re-run before each release.
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.0.1, first builds | (called 1.1 then) built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.0.1: first builds](#101-first-builds) |
 | 1.0.1 | (called 2.0 until 2026-10-13) built, tested and packaged on Windows (jobs 0122 to 0143): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 1.0.1.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's key is kept (the key alone asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant made, linked to the developer account, and its application "Mosaik Store publishing" made with a key on 2026-10-13 | [1.0.1: the window rebuilt](#101-the-window-rebuilt) |
-| 1.0.2 | built and tested on Windows (jobs 0146 to 0196; since 0196 in the repository itself): a workspace previewed before it opens, the picture where zones and windows change (dragged, swapped, resized), every layout in view, a workspace's page with its apps by zone, the first run with no note, two themes, apps started as the taskbar starts them; the last full check every test and probe check passing (job 0175); the owner's own `mosaik.ps1` beside the repository builds and tests it, every test passing (jobs 0178 and 0190); sending it to the Store stays the owner's (`./mosaik1.sh --deploy --app`) | [1.0.2](#102) |
+| 1.0.2 | built and tested on Windows (jobs 0146 to 0207; since 0196 in the repository itself): a workspace previewed before it opens, the picture where zones and windows change (dragged, swapped, resized), every layout in view, a workspace's page with its apps by zone, the first run with no note, two themes, apps started as the taskbar starts them; the last full check every test and probe check passing (job 0175); the owner's own `mosaik.ps1` beside the repository builds and tests it, every test passing (jobs 0178, 0190, 0196 and 0207); sending it to the Store stays the owner's (`./mosaik.sh --deploy --app`) | [1.0.2](#102) |
 
 ## Step 1: verify assumptions
 
@@ -1941,6 +1941,49 @@ simetric and appealing". ADR 0032.
   its next run. Mosaïk's theme: dark, untouched; the Store's 1.0.1 has no settings saved (dark).
   No `.env.local` anywhere: the Store's key is only in his `mosaik.sh`. `mosaik-1.0.2` is no
   longer used; deleting it is the owner's.
+- **The owner's notes of 03:09 to 03:21 (2026-10-17)**: "i can drag drop tft academy is that a
+  bug ?"; "the building or ./mosaik.sh --deploy takes forever"; "why did you write a fucking book
+  for description of mosaik ? ... lets rework the whole deploy.sh for all repos lets streamline
+  ... less is more but keep decent amount of infos tho"; "did you even try before conclude
+  something ?"; "tftacademy shouldnt be treated as an exception thats bad practice". TFT Academy
+  was first called not a bug without trying it; tried through the pipe, it was one.
+- **A drop Home's picture refused without a word** (jobs 0198, 0204 and 0206): Mosaïk manages TFT
+  Academy (`Chrome_WidgetWin_1`, verdict manage). Asked through the pipe (`preview_arrange`),
+  TFT Academy dropped from zone 1 (1114x1032) into zone 2 (806x568) or 3 (806x464) stayed in
+  zone 1, while Claude's drops went where they were dropped. Its app keeps the window at least
+  916x928 (`WM_GETMINMAXINFO`; its frame about 902x921): neither zone can take it, and a window
+  joining a zone moves no other (ADR 0033), so the drop was refused and nothing said so. Now
+  (19d6417, dcf4b2e) the plan names each drop it refuses, the preview carries it (window, zone,
+  smallest size, protocol 12, an optional field), and Home says, for any app: "TFT Academy
+  doesn't fit zone 2: its app keeps it at least 902 × 921. Drag a line to make zone 2 bigger, or
+  drop it in a bigger zone." Tests first: the core with his zones and sizes, the wire fixture,
+  the interface's message, and Playwright with a window the stand-in keeps at least 1280x720.
+- **On the owner's PC** (job 0207, at 19d6417): synced and packed (303 files); his `mosaik.ps1`
+  in the repository: `build` exit 0 (94 s), `test` exit 0 (104 s, interface 149, every test
+  passing); Mosaïk running again in the tray; the repository as committed. TFT Academy was closed
+  by then, so the check went over the windows open: zones 1152x1032 and 768x1032, each of the
+  six windows dropped in the other zone went there. The refusal on his desktop is to be seen with
+  TFT Academy open again.
+- **The slow site deploy** (jobs 0199, 0200 and 0205): Vercel's "Building…" was a deployment
+  "Blocked" ("the commit author doesn't have permission to create deployments for this
+  project"). The site's folder has no repository of its own, so the CLI took the last commit of
+  one at `gimz` (one commit, 2026-10-01, another email, no remote), found once the empty
+  repository in `gimz\mosaik` was deleted. `mosaik.sh` now keeps git from looking above the
+  site's folder (74eeaaa); beside the repository since job 0205, his key line kept. Dropdate's
+  own repository's last commit (2026-10-11) is by another email too.
+- **Shorter, everywhere** (the owner's notes of 03:13): the README 238 lines to 53 (109a996).
+  `gimz\deploy.sh` (his, outside this repository) rewritten, 1,897 lines to 501: one line of
+  data per repo (name, what it is, built with, its site, one more link) gives its GitHub
+  description and its cell on the profile ("Windows workspaces: zones, tabs for any app, layouts
+  in one click."); a README of a page for each repo whose README it writes, the facts checked
+  against each site's script; no questions; the commits in his git name; `.env.example` kept,
+  secrets and build output kept out; a repo whose README it doesn't write (Mosaïk's) pushed as
+  it is, its screenshots its own. A dry run with a stand-in `gh` and local repositories for
+  GitHub: 32 checks passing, with and without a git name of his own; 10 failed on the first
+  draft (`.env.example` left out; Mosaïk's screenshots replaced by the older copies in
+  `gimz\screenshots` and a commit added in its repository, which the runner's next sync would
+  have refused; the commits in a fixed name rather than his). shellcheck clean; on the PC, the
+  same bytes.
 
 ## Owner decisions
 
@@ -2024,3 +2067,6 @@ simetric and appealing". ADR 0032.
   for the app and one for the site (ADR 0040).
 - 2026-10-17: the owner's screen is never taken over without asking him first: it hides his
   other windows, a game included. The runner stays open, started by him, so jobs need no click.
+- 2026-10-17: less is more: Mosaïk's README a page, one line per project on GitHub and on his
+  profile, `deploy.sh` streamlined for every repo. A drop no zone can take is said, for any app
+  ("tftacademy shouldnt be treated as an exception").
