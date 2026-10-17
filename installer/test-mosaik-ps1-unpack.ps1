@@ -102,6 +102,11 @@ try {
   Check ((Read-Text $unpacked 'docs/new.md') -eq 'the second source only') 'a new file is not there'
   Check ($null -eq (Read-Text $unpacked 'docs/old.md')) 'a file the new source has not is still there'
   Check ((Read-Text $unpacked 'target/release/build.txt') -eq 'a build') 'the build was not kept'
+  # Newer than the build, as written now: cargo and npm build what changed by the dates of the
+  # files (job 0177: dated as the source inside dates them, older than the build, they were taken
+  # for built already, and the build failed).
+  $built = (Get-Item -LiteralPath ([IO.Path]::Combine($unpacked, 'target', 'release', 'build.txt'))).LastWriteTimeUtc
+  Check ((Get-Item -LiteralPath ([IO.Path]::Combine($unpacked, 'apps', 'desktop', 'src', 'Home.tsx'))).LastWriteTimeUtc -ge $built) 'a changed file is dated before the build'
   Check ((Read-Text $unpacked 'apps/desktop/node_modules/x/index.js') -eq 'installed') 'the installed packages were not kept'
   Check ((Read-Text $unpacked 'notes/mine.txt') -eq 'the user''s own') 'a file of the user''s own was not left where it is'
   $kept = @(Aside)
@@ -138,4 +143,4 @@ finally {
 }
 
 if ($failures.Count -gt 0) { throw ("mosaik.ps1, a new source over one unpacked before: {0}" -f ($failures -join '; ')) }
-Write-Host 'mosaik.ps1, a new source over one unpacked before (same version): files changed, added and gone; the build and the user''s own files kept; the user''s change kept aside; nothing on a second run; a folder with no record of its source: 15 checks passing.' -ForegroundColor Green
+Write-Host 'mosaik.ps1, a new source over one unpacked before (same version): files changed, added and gone, dated after the build; the build and the user''s own files kept; the user''s change kept aside; nothing on a second run; a folder with no record of its source: 16 checks passing.' -ForegroundColor Green

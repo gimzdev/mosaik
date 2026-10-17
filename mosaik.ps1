@@ -224,10 +224,9 @@ function Update-Source([string]$Target) {
   foreach ($name in $new.Keys) {
     $path = Under $root $name
     if ((Test-Path -LiteralPath $path) -and (Get-Sha256 ([IO.File]::ReadAllBytes($path))) -eq (Get-Sha256 $new[$name])) { continue }
+    # Written now, so dated now: cargo and npm build what changed by the dates of the files.
     New-Item -ItemType Directory -Force -Path (Split-Path $path) | Out-Null
     [IO.File]::WriteAllBytes($path, $new[$name])
-    $item = Get-Item -LiteralPath $path
-    $item.LastWriteTimeUtc = $PackedDate.UtcDateTime
     $changed++
   }
   Write-Record $root $new
@@ -604,13 +603,22 @@ function Invoke-Build([switch]$Installed) {
   Use-Cargo
   $ui = Under $source 'apps' 'desktop'
   # A Mosaik of this build that is running quits first, and starts again in the tray once the new
-  # build is made.
+  # build is made; should the build fail, as it was (job 0177: none was running after).
   $restart = Stop-RunningBuild $source
-  Step 'Building the interface'
-  if (-not $Installed) { Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund') }
-  Invoke-Tool $ui 'npm' @('run', 'build')
-  Step 'Building Mosaik, its watchdog and mosaikctl (release)'
-  Invoke-Cargo $source @('build', '--release', '-p', 'mosaik-desktop', '-p', 'mosaik-watchdog', '-p', 'mosaik-ipc')
+  try {
+    Step 'Building the interface'
+    if (-not $Installed) { Invoke-Tool $ui 'npm' @('ci', '--no-audit', '--no-fund') }
+    Invoke-Tool $ui 'npm' @('run', 'build')
+    Step 'Building Mosaik, its watchdog and mosaikctl (release)'
+    Invoke-Cargo $source @('build', '--release', '-p', 'mosaik-desktop', '-p', 'mosaik-watchdog', '-p', 'mosaik-ipc')
+  }
+  catch {
+    if ($restart -and (Test-Path (Under $source 'target' 'release' 'mosaik.exe'))) {
+      Say 'The build failed: the Mosaik that quit for it starts again, as it was.' Yellow
+      Start-Again $source
+    }
+    throw
+  }
   # The licences of what Mosaik is built with, where About finds them: beside mosaik.exe.
   Copy-Item (Under $source 'THIRD-PARTY-NOTICES.txt') (Under $source 'target' 'release')
   $exe = Under $source 'target' 'release' 'mosaik.exe'

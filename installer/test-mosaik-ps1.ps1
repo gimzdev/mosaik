@@ -57,7 +57,12 @@ function Step([string]$Text) { }
 function Get-Source { $work }
 function Use-Cargo { }
 function Invoke-Tool([string]$In, [string]$Program, [string[]]$Arguments) { $script:Done.Add("$Program $($Arguments -join ' ')") }
-function Invoke-Cargo([string]$In, [string[]]$Arguments) { $script:Done.Add("cargo $($Arguments -join ' ')") }
+# A build that fails, as cargo stops at an error.
+$script:CargoFails = $false
+function Invoke-Cargo([string]$In, [string[]]$Arguments) {
+  $script:Done.Add("cargo $($Arguments -join ' ')")
+  if ($script:CargoFails) { throw 'cargo build --release failed (exit code 101).' }
+}
 $script:StartRefused = $false
 # How many starts Windows refuses before it lets one through, as Smart App Control does with a new
 # build for a minute or two; and whether the Mosaik started leaves at once (another took its place).
@@ -242,6 +247,30 @@ try {
     if ($watchdog.Stopped) { return 'the watchdog was stopped' }
     if (-not $script:Done.Contains($built)) { return 'not built' }
   }
+  Check 'one running, the build failing' {
+    # Job 0177: the build failed after Mosaik had quit for it, and none was running after. The
+    # build it had been started from is still there (cargo stops before linking a new one).
+    $mine = New-Mosaik (Join-Path $release 'mosaik.exe')
+    $script:Running = @($mine)
+    $script:CargoFails = $true
+    Set-Content -Path (Join-Path $release 'mosaik.exe') -Value ''
+    try { Invoke-Build } catch { $said = $_.Exception.Message } finally {
+      $script:CargoFails = $false
+      Remove-Item -LiteralPath (Join-Path $release 'mosaik.exe')
+    }
+    $order = @($script:Done)
+    if (-not (Get-Variable said -ErrorAction SilentlyContinue)) { return 'the failure was not passed on' }
+    if ($mine.WaitedFor -le 0) { return 'it did not quit for the build' }
+    if ([array]::IndexOf($order, $restart) -le [array]::IndexOf($order, $built)) { return "the Mosaik that quit not started again ($($order -join ' / '))" }
+    if (-not ($order | Where-Object { $_ -like 'say *build failed*as it was*' })) { return "nothing said ($($order -join ' / '))" }
+  }
+  Check 'none running, the build failing' {
+    $script:Running = @()
+    $script:CargoFails = $true
+    try { Invoke-Build } catch { $said = $_.Exception.Message } finally { $script:CargoFails = $false }
+    if (-not (Get-Variable said -ErrorAction SilentlyContinue)) { return 'the failure was not passed on' }
+    if (@($script:Done | Where-Object { $_ -like 'start *' }).Count -gt 0) { return 'a Mosaik was started' }
+  }
   Check 'one that does not quit' {
     $script:Running = @(New-Mosaik (Join-Path $release 'mosaik.exe') $false 'mosaik' $false)
     try { Invoke-Build } catch { $said = $_.Exception.Message }
@@ -290,4 +319,4 @@ finally {
 }
 if ($publishFailures.Count -gt 0) { throw ("mosaik.ps1 publish: {0}" -f ($publishFailures -join '; ')) }
 Write-Host 'mosaik.ps1 publish: sent (0), waiting for the Store with nothing sent (3, not a failure), a failure (1): 3 cases passing.' -ForegroundColor Green
-Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one whose mosaikctl answers on stderr (shown, still asked), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one Windows refuses twice (tried again, saying so, then running), one started again but gone at once (said, not called running), one whose mosaikctl Windows refuses (its watchdog stopped first, then it, its windows brought back quietly, said), the same with its journal not readable, its watchdog (waited for), one that does not quit (said): 12 cases passing.' -ForegroundColor Green
+Write-Host 'mosaik.ps1 build with a Mosaik running: none, one from its folder (quit, then started again), one whose mosaikctl answers on stderr (shown, still asked), one from elsewhere (left alone), two, one Windows does not start again (said, still built), one Windows refuses twice (tried again, saying so, then running), one started again but gone at once (said, not called running), one whose mosaikctl Windows refuses (its watchdog stopped first, then it, its windows brought back quietly, said), the same with its journal not readable, its watchdog (waited for), a build failing with one running (it is started again, as it was, said) and with none, one that does not quit (said): 14 cases passing.' -ForegroundColor Green
