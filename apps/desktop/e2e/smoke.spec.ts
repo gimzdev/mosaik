@@ -340,7 +340,11 @@ test.describe('Home', () => {
     const big = page.getByRole('button', { name: 'Battle.net in zone 1' });
     await expect(big).toBeVisible();
     await dragInto(page, big, page.getByRole('button', { name: /in zone 2$/ }).first());
-    await expect(page.getByText('Battle.net doesn’t fit zone 2: its app keeps it at least 1280 × 720.')).toBeVisible();
+    await expect(
+      page.getByText(
+        'Battle.net doesn’t fit zone 2: its app keeps it at least 1280 × 720. Drag a line to make zone 2 bigger, or drop it in a bigger zone.',
+      ),
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Battle.net in zone 1' })).toBeVisible();
   });
 

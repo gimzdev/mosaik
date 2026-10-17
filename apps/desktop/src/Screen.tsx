@@ -204,14 +204,17 @@ export function moved(
 }
 
 /** What the picture says when Mosaïk could not make the last drop, `move` (ADR 0033): the zone
- * cannot take the window, which its app keeps larger, whatever the app. */
+ * cannot take the window, which its app keeps larger, whatever the app; and what to do instead. */
 export function refusal(preview: ArrangePreview, move: ArrangeMove | undefined): string | null {
   if (!move) return null;
   const r = preview.refused?.find((x) => x.window === move.window && x.zone === move.zone);
   if (!r) return null;
   const label = preview.windows.find((w) => w.window === r.window)?.label ?? 'That window';
   const zone = preview.zones[r.zone]?.name ?? String(r.zone + 1);
-  return `${label} doesn’t fit zone ${zone}: its app keeps it at least ${String(r.least.width)} × ${String(r.least.height)}.`;
+  return (
+    `${label} doesn’t fit zone ${zone}: its app keeps it at least ${String(r.least.width)} × ${String(r.least.height)}. ` +
+    `Drag a line to make zone ${zone} bigger, or drop it in a bigger zone.`
+  );
 }
 
 /** A workspace's picture once an app is put elsewhere, before Mosaïk says: dropped onto another
