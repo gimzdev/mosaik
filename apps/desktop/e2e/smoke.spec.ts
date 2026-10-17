@@ -77,9 +77,9 @@ async function editWorkspace(page: Page, name: string) {
 
 /** Opens the zone editor of the stand-in's first workspace, from its page (ADR 0034). */
 async function editZones(page: Page) {
-  await editWorkspace(page, 'Website');
+  await editWorkspace(page, 'Web development');
   await page.getByRole('button', { name: 'Edit zones' }).click();
-  await expect(page.getByRole('heading', { name: 'Website', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Web development', level: 1 })).toBeVisible();
 }
 
 test.describe('Home', () => {
@@ -378,30 +378,30 @@ test.describe('Home', () => {
     // anim as preview and show an open button".
     await page.goto('/');
     const list = page.getByRole('list', { name: 'Workspaces' });
-    await expect(list.getByRole('button', { name: 'Website (on screen)', exact: true })).toBeVisible();
-    await list.getByRole('button', { name: 'Portfolio', exact: true }).click();
+    await expect(list.getByRole('button', { name: 'Web development (on screen)', exact: true })).toBeVisible();
+    await list.getByRole('button', { name: 'Brand design', exact: true }).click();
     await expect(
       page.getByRole('group', {
         name: 'Figma starts in zone 1, Notepad starts in zone 2, Visual Studio Code minimized, Google Chrome minimized, Windows Terminal minimized, Slack minimized.',
       }),
     ).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Preview of “Portfolio”' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Preview of “Brand design”' })).toBeVisible();
     await expect(shown(page, 'Nothing moves until you press Open.')).toBeVisible();
     await accessible(page);
     // Clicked again, it stays; Esc, or Back, shows the screen again.
-    await list.getByRole('button', { name: 'Portfolio', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Open “Portfolio”' })).toBeVisible();
+    await list.getByRole('button', { name: 'Brand design', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Open “Brand design”' })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
     await expect(page.getByRole('group', { name: AUTO })).toBeVisible();
-    await list.getByRole('button', { name: 'Portfolio', exact: true }).click();
+    await list.getByRole('button', { name: 'Brand design', exact: true }).click();
     await page.getByRole('button', { name: 'Back to my screen' }).click();
     await expect(arrange(page)).toBeVisible();
-    await expect(list.getByRole('button', { name: 'Portfolio', exact: true })).toBeFocused();
-    await list.getByRole('button', { name: 'Portfolio', exact: true }).click();
-    await page.getByRole('button', { name: 'Open “Portfolio”' }).click();
-    await expect(shown(page, 'Opened “Portfolio”.')).toBeVisible();
-    await expect(list.getByRole('button', { name: 'Portfolio (on screen)', exact: true })).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Brand design', exact: true })).toBeFocused();
+    await list.getByRole('button', { name: 'Brand design', exact: true }).click();
+    await page.getByRole('button', { name: 'Open “Brand design”' }).click();
+    await expect(shown(page, 'Opened “Brand design”.')).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Brand design (on screen)', exact: true })).toBeVisible();
     await expect(arrange(page)).toBeVisible();
   });
 
@@ -412,8 +412,8 @@ test.describe('Home', () => {
     // some"; "lets try workspace with most apps, on all layouts" (ADR 0033).
     await page.goto('/');
     const list = page.getByRole('list', { name: 'Workspaces' });
-    await list.getByRole('button', { name: 'Backend', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Preview of “Backend”' })).toBeVisible();
+    await list.getByRole('button', { name: 'Side project', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Preview of “Side project”' })).toBeVisible();
     const picture = page.getByRole('group', { name: /^Visual Studio Code/ });
     await expect(picture).toBeVisible();
     const before = await picture.getAttribute('aria-label');
@@ -435,8 +435,8 @@ test.describe('Home', () => {
       if (!own) {
         // Checked once Mosaïk has laid it out, as its picture then shows.
         await radio.click();
-        await expect(shown(page, `“Backend” is laid out in ${layout}.`)).toBeVisible();
-        await expect(page.getByRole('heading', { name: 'Preview of “Backend”' })).toBeVisible();
+        await expect(shown(page, `“Side project” is laid out in ${layout}.`)).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Preview of “Side project”' })).toBeVisible();
         await expect(radio).toBeChecked();
       }
       const label = (await picture.getAttribute('aria-label')) ?? '';
@@ -446,7 +446,7 @@ test.describe('Home', () => {
       }
       if (own) continue;
       await page.getByRole('button', { name: 'Undo', exact: true }).click();
-      await expect(shown(page, '“Backend” is back as it was.')).toBeVisible();
+      await expect(shown(page, '“Side project” is back as it was.')).toBeVisible();
       await expect(picture).toHaveAttribute('aria-label', before ?? '');
     }
   });
@@ -454,9 +454,9 @@ test.describe('Home', () => {
   test('a double-click on a workspace opens it at once', async ({ page }) => {
     await page.goto('/');
     const list = page.getByRole('list', { name: 'Workspaces' });
-    await list.getByRole('button', { name: 'Portfolio', exact: true }).dblclick();
-    await expect(shown(page, 'Opened “Portfolio”.')).toBeVisible();
-    await expect(list.getByRole('button', { name: 'Portfolio (on screen)', exact: true })).toBeVisible();
+    await list.getByRole('button', { name: 'Brand design', exact: true }).dblclick();
+    await expect(shown(page, 'Opened “Brand design”.')).toBeVisible();
+    await expect(list.getByRole('button', { name: 'Brand design (on screen)', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
   });
 
@@ -484,17 +484,17 @@ test.describe('Home', () => {
     const name = page.getByRole('textbox', { name: 'Name the new workspace' });
     await expect(name).toHaveValue('Workspace 1');
     await expect(name).toBeFocused();
-    await name.fill('Website');
+    await name.fill('Web development');
     await page.keyboard.press('Enter');
     await expect(
       shown(
         page,
-        '“Website” already exists. Pick another name, or open its ⋯ menu and choose Replace with what’s on screen.',
+        '“Web development” already exists. Pick another name, or open its ⋯ menu and choose Replace with what’s on screen.',
       ),
     ).toBeVisible();
-    await name.fill('Portfolio');
+    await name.fill('Brand design');
     await page.keyboard.press('Enter');
-    await expect(shown(page, '“Portfolio” already exists. Pick another name.')).toBeVisible();
+    await expect(shown(page, '“Brand design” already exists. Pick another name.')).toBeVisible();
     await name.fill('Review');
     await page.keyboard.press('Enter');
     // Said under the picture, as everything done on Home is.
@@ -510,7 +510,7 @@ test.describe('Home', () => {
     await page.locator('main').evaluate((main) => {
       main.scrollTop = main.scrollHeight;
     });
-    await page.getByRole('button', { name: 'More for “Portfolio”' }).click();
+    await page.getByRole('button', { name: 'More for “Brand design”' }).click();
     for (const name of ['Rename', 'Edit']) {
       await expect(page.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
     }
@@ -521,17 +521,17 @@ test.describe('Home', () => {
     // The owner, of the menu: "we should have rename, and not sure we should keep edit zones it
     // feels like it should be on workspace edit screen" (ADR 0034).
     await page.goto('/');
-    await page.getByRole('button', { name: 'More for “Portfolio”' }).click();
+    await page.getByRole('button', { name: 'More for “Brand design”' }).click();
     await expect(page.getByRole('button', { name: 'Edit zones' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Rename', exact: true }).click();
-    const field = page.getByRole('textbox', { name: 'Rename “Portfolio”' });
+    const field = page.getByRole('textbox', { name: 'Rename “Brand design”' });
     await expect(field).toBeFocused();
     await accessible(page);
-    await field.fill('Portfolio site');
+    await field.fill('Brand guidelines');
     await field.press('Enter');
-    await expect(shown(page, 'Renamed to “Portfolio site”.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Portfolio site', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'More for “Portfolio site”' })).toBeFocused();
+    await expect(shown(page, 'Renamed to “Brand guidelines”.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Brand guidelines', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'More for “Brand guidelines”' })).toBeFocused();
   });
 });
 
@@ -545,7 +545,7 @@ test.describe('a workspace’s page', () => {
     ]) {
       await page.setViewportSize(size);
       await page.goto('/');
-      await editWorkspace(page, 'Website');
+      await editWorkspace(page, 'Web development');
       const picture = await still(page, page.getByRole('group', { name: /^Visual Studio Code in zone 1/ }));
       const edges = async (l: Locator) => {
         const b = await still(page, l);
@@ -572,8 +572,8 @@ test.describe('a workspace’s page', () => {
   test('draws the lines between its zones as wide as its list', async ({ page }) => {
     // They went 8 px past it on each side, the line above Add an app did not.
     await page.goto('/');
-    await editWorkspace(page, 'Website');
-    const apps = page.getByRole('group', { name: 'Apps of “Website”' });
+    await editWorkspace(page, 'Web development');
+    const apps = page.getByRole('group', { name: 'Apps of “Web development”' });
     const list = await still(page, apps);
     const lines = await apps.evaluate((g) =>
       Array.from(g.children).map((c) => {
@@ -587,13 +587,13 @@ test.describe('a workspace’s page', () => {
 
   test('shows how it opens, lists its apps by zone, and moves, removes and adds them', async ({ page }) => {
     await page.goto('/');
-    await editWorkspace(page, 'Website');
+    await editWorkspace(page, 'Web development');
     await expect(
       page.getByRole('group', {
         name: 'Visual Studio Code in zone 1, Google Chrome in zone 2, Windows Terminal in zone 3 with Slack as tabs.',
       }),
     ).toBeVisible();
-    const apps = page.getByRole('group', { name: 'Apps of “Website”' });
+    const apps = page.getByRole('group', { name: 'Apps of “Web development”' });
     await expect(apps.getByRole('listitem')).toHaveCount(4);
     await expect(apps.getByRole('group', { name: 'Zone 3', exact: true }).getByRole('listitem')).toHaveCount(2);
     await page.getByRole('button', { name: 'Move Slack to another zone' }).click();
@@ -602,7 +602,7 @@ test.describe('a workspace’s page', () => {
     await expect(apps.getByRole('group', { name: 'Zone 2', exact: true }).getByText('Slack')).toBeVisible();
     await page.getByRole('button', { name: 'Remove Slack' }).click();
     await expect(apps.getByRole('listitem')).toHaveCount(3);
-    await page.getByRole('button', { name: 'Add an app to “Website”' }).click();
+    await page.getByRole('button', { name: 'Add an app to “Web development”' }).click();
     const slack = page.getByRole('group', { name: 'Apps to add' }).getByRole('button', { name: 'Slack', exact: true });
     await expect(slack).toBeInViewport({ ratio: 1 });
     await accessible(page);
@@ -610,7 +610,7 @@ test.describe('a workspace’s page', () => {
     await expect(shown(page, 'Slack added.')).toBeVisible();
     await expect(apps.getByRole('listitem')).toHaveCount(4);
     // An app that is not open, found by its name (ADR 0033): it starts when the workspace opens.
-    await page.getByRole('button', { name: 'Add an app to “Website”' }).click();
+    await page.getByRole('button', { name: 'Add an app to “Web development”' }).click();
     await page.getByRole('searchbox', { name: 'Find an app' }).fill('spot');
     await page.getByRole('group', { name: 'Apps to add' }).getByRole('button', { name: 'Spotify' }).click();
     await expect(shown(page, 'Spotify added.')).toBeVisible();
@@ -628,8 +628,8 @@ test.describe('a workspace’s page', () => {
     // then, as an app dropped in a zone traded with the app there: "permute when specifically
     // dropped on another app otherwise just add", as on the picture (ADR 0034).
     await page.goto('/');
-    await editWorkspace(page, 'Backend');
-    const apps = page.getByRole('group', { name: 'Apps of “Backend”' });
+    await editWorkspace(page, 'Side project');
+    const apps = page.getByRole('group', { name: 'Apps of “Side project”' });
     const zone = (n: string) => apps.getByRole('group', { name: `Zone ${n}`, exact: true });
     const row = (label: string) => apps.getByRole('listitem').filter({ hasText: label });
     const name = (label: string) => row(label).getByText(label, { exact: true });
@@ -655,7 +655,7 @@ test.describe('a workspace’s page', () => {
     // The owner, of a workspace with two windows in one zone drawn over each other: "look at the
     // anim wtf is happening"; and "when a zone is empty we dont have either color or number".
     await page.goto('/');
-    await editWorkspace(page, 'Backend');
+    await editWorkspace(page, 'Side project');
     const picture = page.getByRole('group', {
       name: 'Visual Studio Code in zone 1, Windows Terminal in zone 1 with File Explorer as tabs, MSYS2 starts in zone 2, Google Chrome in zone 2 with Claude as tabs, Slack minimized. Zone 3 is empty.',
     });
@@ -682,7 +682,7 @@ test.describe('a workspace’s page', () => {
     await page.mouse.up();
     await expect(shown(page, 'Claude goes in zone 3.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Claude starts in zone 3' })).toBeVisible();
-    const apps = page.getByRole('group', { name: 'Apps of “Backend”' });
+    const apps = page.getByRole('group', { name: 'Apps of “Side project”' });
     await expect(apps.getByRole('group', { name: 'Zone 3', exact: true }).getByText('Claude')).toBeVisible();
     await accessible(page);
   });
@@ -690,7 +690,7 @@ test.describe('a workspace’s page', () => {
   test('two tabs of one zone trade places in their strip, the tab showing staying so', async ({ page }) => {
     // ADR 0032, the owner: "i should be able to permute chrome with claude".
     await page.goto('/');
-    await editWorkspace(page, 'Backend');
+    await editWorkspace(page, 'Side project');
     const chrome = page.getByRole('button', { name: 'Google Chrome, a tab in zone 2' });
     const claude = page.getByRole('button', { name: 'Claude, a tab in zone 2' });
     const [a, b] = [await chrome.boundingBox(), await claude.boundingBox()];
@@ -706,7 +706,7 @@ test.describe('a workspace’s page', () => {
     // Chrome still shows, Claude behind it; the list says the order too.
     await expect(page.getByRole('group', { name: /Google Chrome in zone 2 with Claude as tabs/ })).toBeVisible();
     const zone2 = page
-      .getByRole('group', { name: 'Apps of “Backend”' })
+      .getByRole('group', { name: 'Apps of “Side project”' })
       .getByRole('group', { name: 'Zone 2', exact: true });
     await expect(zone2.getByText(/^(MSYS2|Claude|Google Chrome)$/)).toHaveText(['MSYS2', 'Claude', 'Google Chrome']);
     await accessible(page);
@@ -714,8 +714,8 @@ test.describe('a workspace’s page', () => {
 
   test('renames it, and deletes it after asking', async ({ page }) => {
     await page.goto('/');
-    await editWorkspace(page, 'Portfolio');
-    await page.getByRole('button', { name: 'Rename “Portfolio”' }).click();
+    await editWorkspace(page, 'Brand design');
+    await page.getByRole('button', { name: 'Rename “Brand design”' }).click();
     const name = page.getByRole('textbox', { name: 'Name' });
     await expect(name).toBeFocused();
     await name.fill('Brand 2');
@@ -863,7 +863,7 @@ test.describe('the zone editor', () => {
       await editZones(page);
       const canvas = await still(page, page.locator('[data-canvas] > div'));
       const at = `${String(size.width)} by ${String(size.height)}`;
-      const title = await still(page, page.getByRole('heading', { name: 'Website', level: 1 }));
+      const title = await still(page, page.getByRole('heading', { name: 'Web development', level: 1 }));
       const save = await still(page, page.getByRole('button', { name: 'Save zones' }));
       const said = await still(page, page.getByText('Pick a zone to recolour, split or remove it.'));
       expect(Math.round(title.x), `the title's left, ${at}`).toBe(Math.round(canvas.x));
@@ -995,14 +995,14 @@ test.describe('at the smallest window size', () => {
     await accessible(page);
     await windowDoesNotScroll(page);
     await page.getByRole('button', { name: 'Home', exact: true }).click();
-    await editWorkspace(page, 'Website');
+    await editWorkspace(page, 'Web development');
     await accessible(page);
     await windowDoesNotScroll(page);
     await page.getByRole('button', { name: 'Back to Home' }).click();
     await page.locator('main').evaluate((main) => {
       main.scrollTop = main.scrollHeight;
     });
-    await page.getByRole('button', { name: 'More for “Portfolio”' }).click();
+    await page.getByRole('button', { name: 'More for “Brand design”' }).click();
     await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeInViewport({ ratio: 1 });
     await page.keyboard.press('Escape');
     await editZones(page);

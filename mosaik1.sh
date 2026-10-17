@@ -58,7 +58,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.11.5"
+MK_VERSION="1.0.2"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -2164,7 +2164,7 @@ export const WORKSPACES: Workspace[] = [
   {
     id: 'release',
     label: 'Code',
-    name: 'Client website',
+    name: 'Web development',
     summary: 'Editor, terminal, pull request and team chat, switched as one.',
     windows: [
       w('ed', 'editor', '1', 'lapis', [0, 0, 7, 5]),

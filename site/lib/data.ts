@@ -20,7 +20,7 @@ export const WORKSPACES: Workspace[] = [
   {
     id: 'release',
     label: 'Code',
-    name: 'Client website',
+    name: 'Web development',
     summary: 'Editor, terminal, pull request and team chat, switched as one.',
     windows: [
       w('ed', 'editor', '1', 'lapis', [0, 0, 7, 5]),

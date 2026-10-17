@@ -92,7 +92,7 @@ editor: "way too large", "either discreet or not shown".
   tour drags a line of Home's picture, then Undo changes, and looks for Arrange windows.
 - Sample names read as people name things: the stand-in's workspaces are Website, Backend and
   Portfolio, the tour's Website, and the site's coding project "Client website" (it was "Ship
-  the release": "cringe af").
+  the release": "cringe af"). Renamed for the work done in them by ADR 0038.
 - The stand-in engine (`mock.ts`) has a workspace like the owner's "Coding" ("Backend":
   two apps and a tab group in one zone, a zone left empty).
 

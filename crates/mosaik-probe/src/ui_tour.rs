@@ -9,7 +9,7 @@
 //! onto another, and a line between its zones across, each then undone with Undo changes
 //! (Move windows is never clicked: no window moves).
 //!
-//! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Website",
+//! Run against a Mosaïk started with a profile made for it (`--prepare`): one workspace, "Web development",
 //! with three zones and no windows, so nothing of the user's is touched. The profile has no
 //! settings yet, so this is a first run: there is no tour to go through; the windows open are
 //! sorted into workspaces of this profile (none moves), and a build run from a folder is not set
@@ -44,7 +44,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::capture::save_bmp;
 
 /// The workspace the tour's profile holds.
-const WORKSPACE: &str = "Website";
+const WORKSPACE: &str = "Web development";
 
 /// Tab presses at most per page (the settings page has about thirty controls).
 const TABS: usize = 60;
@@ -73,7 +73,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
 }
 
 /// Writes the tour's profile under `roaming` (what `%APPDATA%` will be for the Mosaïk under
-/// test): the workspace "Website" with three zones on the main monitor and no windows.
+/// test): the workspace "Web development" with three zones on the main monitor and no windows.
 fn prepare(roaming: &Path) -> Result<Value, String> {
     let topology = mosaik_win::monitors::topology().map_err(|e| e.to_string())?;
     let zone = |id: &str, name: &str, color: ZoneColor, area: [f64; 4]| -> Result<Zone, String> {
