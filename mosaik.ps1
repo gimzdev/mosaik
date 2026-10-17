@@ -219,7 +219,8 @@ function Update-Source([string]$Target) {
     elseif (-not $wanted) {
       Remove-Item -LiteralPath $path -Force
     }
-    $changed++
+    # A file the source has is counted once, as it is written below.
+    if (-not $wanted) { $changed++ }
   }
   foreach ($name in $new.Keys) {
     $path = Under $root $name

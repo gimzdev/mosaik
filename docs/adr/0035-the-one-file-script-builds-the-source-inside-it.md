@@ -37,9 +37,9 @@ failure is still passed on.
 
 ## Consequences
 
-- `installer/test-mosaik-ps1-unpack.ps1`, run by `mosaik.ps1 test` (16 checks): a source packed
-  twice under one version, unpacked, built, changed by the person, brought up to date; again with
-  nothing to do; a folder with no record. `installer/test-mosaik-ps1.ps1` (14 cases): a build
+- `installer/test-mosaik-ps1-unpack.ps1`, run by `mosaik.ps1 test` (18 checks): a source packed
+  twice under one version, unpacked, built, changed by the person, brought up to date, and how
+  many files that was said to be; again with nothing to do; a folder with no record. `installer/test-mosaik-ps1.ps1` (14 cases): a build
   failing with a Mosaïk running, and with none.
 - The owner's folder from job 0177, its files dated before its build, had them dated now once
   (job 0178), the one folder written by the first fix.

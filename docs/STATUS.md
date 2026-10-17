@@ -1781,12 +1781,12 @@ simetric and appealing". ADR 0032.
 - **On the owner's PC** (job 0177, at dca58a9): what was there: the Mosaïk running, built at 20:03
   from `mosaik-1.0.2` (unpacked 2026-10-15 22:35, no record); the Store's Mosaïk 1.0.1.0 installed;
   nothing changed by the owner in the folder. His `mosaik.ps1`, run as he runs it, brought the
-  folder to the new source (144 files), but dated them as the source inside dates every file
-  (2026-01-01), older than the build: cargo took `mosaik-ipc` for built and the build failed
-  (`Command::Arrange` has no field `areas`); the Mosaïk that had quit for it was not started again.
-  Files written are now dated as written, and a failed build starts again the Mosaïk that quit for
-  it (unpack test 16 checks, `test-mosaik-ps1.ps1` 14 cases). Its tests: one interface test failed
-  (below).
+  folder to the new source (about 80 files: it said 144, counting a changed file twice, fixed
+  below), but dated them as the source inside dates every file (2026-01-01), older than the build:
+  cargo took `mosaik-ipc` for built and the build failed (`Command::Arrange` has no field `areas`);
+  the Mosaïk that had quit for it was not started again. Files written are now dated as written,
+  and a failed build starts again the Mosaïk that quit for it (unpack test 16 checks,
+  `test-mosaik-ps1.ps1` 14 cases). Its tests: one interface test failed (below).
 - **A page's title took the key pressed as the page appeared** (job 0177's failing test, "Zones
   resized." never shown; 1 run in 12 here): the title takes the focus when a page opens, and did
   in an effect run once the page was on screen; the test had focused a line of the picture and
@@ -1799,13 +1799,16 @@ simetric and appealing". ADR 0032.
   the Store's Mosaïk 1.0.1.0 is the Start menu's Mosaïk and does not start with Windows (its
   startup task off). Every source file of `mosaik-1.0.2` dated now, once (297 files). The owner's
   `mosaik.ps1` beside the repository, run as he runs it: `build` brought the folder to its source
-  (10 files, the build kept, nothing kept aside) and built it (exit 0, 143 s): the interface has
-  Move windows, Replace with what's on screen and Save name, neither More layouts nor the first
-  run's note, and `mosaik.exe` is newer than it and than the files. Started in the tray: 1.0.2,
-  protocol 12, watchdog, Win+Alt+Space registered; its window pictured, Home as it is now. `test`:
-  exit 0 (98 s): core 307, clippy, interface 147, the Store's stand-ins, this script's 14 cases
-  and the unpack test's 16 checks. Mosaïk left running from `mosaik-1.0.2`, its window open.
+  (5 files; it said 10; the build kept, nothing kept aside) and built it (exit 0, 143 s): the
+  interface has Move windows, Replace with what's on screen and Save name, neither More layouts nor
+  the first run's note, and `mosaik.exe` is newer than it and than the files. Started in the tray:
+  1.0.2, protocol 12, watchdog, Win+Alt+Space registered; its window pictured, Home as it is now.
+  `test`: exit 0 (98 s): core 307, clippy, interface 147, the Store's stand-ins, this script's 14
+  cases and the unpack test's 16 checks. Mosaïk left running from `mosaik-1.0.2`, its window open.
   Packed (296 files); both files beside the repository brought up to date (the key line kept).
+- **How many files `mosaik.ps1` says it brought up to date** (job 0179 said 11 for 6 changed): a
+  changed file was counted as it went and again as it was written. Each file is counted once now.
+  Test first: the unpack test checks the count said, with a record and without (18 checks).
 
 ## Owner decisions
 
