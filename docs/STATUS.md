@@ -20,7 +20,7 @@ re-run before each release.
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.0.1, first builds | (called 1.1 then) built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.0.1: first builds](#101-first-builds) |
 | 1.0.1 | (called 2.0 until 2026-10-13) built, tested and packaged on Windows (jobs 0122 to 0143): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 1.0.1.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's key is kept (the key alone asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant made, linked to the developer account, and its application "Mosaik Store publishing" made with a key on 2026-10-13 | [1.0.1: the window rebuilt](#101-the-window-rebuilt) |
-| 1.0.2 | built and tested on Windows (jobs 0146 to 0178): a workspace previewed before it opens, the picture where zones and windows change (dragged, swapped, resized), every layout in view, a workspace's page with its apps by zone, the first run with no note; the last full check every test and probe check passing (job 0175); the owner's own `mosaik.ps1` beside the repository builds and tests it, every test passing (job 0178); sending it to the Store stays the owner's (`./mosaik1.sh --deploy --app`) | [1.0.2](#102) |
+| 1.0.2 | built and tested on Windows (jobs 0146 to 0190): a workspace previewed before it opens, the picture where zones and windows change (dragged, swapped, resized), every layout in view, a workspace's page with its apps by zone, the first run with no note, two themes, apps started as the taskbar starts them; the last full check every test and probe check passing (job 0175); the owner's own `mosaik.ps1` beside the repository builds and tests it, every test passing (jobs 0178 and 0190); sending it to the Store stays the owner's (`./mosaik1.sh --deploy --app`) | [1.0.2](#102) |
 
 ## Step 1: verify assumptions
 
@@ -1869,6 +1869,20 @@ simetric and appealing". ADR 0032.
   as it is (a free Windows app; Rust, Tauri, React, TypeScript) with five pictures (the site, Home,
   a workspace, its zones, the site's features), and the full-screen viewer's thumbnails kept off
   a phone's edges; built here, its gallery checked on a desktop and a phone.
+- **On the owner's PC** (job 0190, at acf1ff7): his `mosaik.ps1` beside the repository, run as
+  he runs it: `build` brought `mosaik-1.0.2` to its source (39 files, the build kept) and built it
+  (exit 0, 150 s), the Mosaïk from that folder quitting for it and starting again; the interface
+  built has no Like Windows. `test`: exit 0 (110 s), every test passing (interface 148, the Rust
+  tests, the Store's stand-ins, this script's cases and the unpack test's 20 checks). Mosaïk in
+  the tray: 1.0.2, protocol 12, watchdog, Win+Alt+Space registered. `open-plan`, read only: no
+  app of any workspace starts mintty alone; "Coding"'s MSYS2 terminal starts as `mintty -`,
+  "Workspace 2"'s as `git-bash.exe`; "Coding"'s second Google Chrome would start a window, the
+  first taking the one open. The tour: 33 pictures, each theme shown as chosen, Suggested's sets
+  with all their icons; at the smallest size three layouts' names on two lines (above). Packed
+  (300 files); both files beside the repository brought up to date (the key line kept). The
+  pictures for `gimz` were not put in place: on their way each gained a C2PA content credentials
+  chunk (`caBX`, its pixels the same), so none matched the hashes sent. The repository keeps them
+  as the PC has them.
 
 ## Owner decisions
 
