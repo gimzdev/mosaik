@@ -308,10 +308,16 @@ export function Section({ title, children, aside }: { title: string; aside?: Rea
 }
 
 /** A page's title. It takes focus when the page opens, so keyboard and screen-reader users
- * start at the top of the new page. */
+ * start at the top of the new page: as the page is drawn, not once it is on screen, when it would
+ * take the focus from whatever had it by then (job 0177: a key pressed as the page appeared).
+ * Once: React's checks in development run the effect again later, by when the focus may have
+ * moved on. */
 export function PageTitle({ children, id, className = '' }: { children: ReactNode; id?: string; className?: string }) {
   const ref = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
+  const took = useRef(false);
+  useLayoutEffect(() => {
+    if (took.current) return;
+    took.current = true;
     ref.current?.focus({ preventScroll: true });
   }, []);
   return (

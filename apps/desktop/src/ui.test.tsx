@@ -1,8 +1,9 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { StrictMode, useEffect, useLayoutEffect, useRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { MenuButton } from './ui';
+import { MenuButton, PageTitle } from './ui';
 
 afterEach(cleanup);
 
@@ -55,5 +56,51 @@ describe('a menu', () => {
     const list = await open();
     expect(scrolled).toHaveBeenCalled();
     expect(scrolled.mock.contexts[0]).toBe(list);
+  });
+});
+
+describe('a page’s title', () => {
+  it('has the focus as the page is drawn, not a moment later', () => {
+    // Job 0177 on the PC, and 1 run in 12 here: a test pressed Home on a line of a workspace's
+    // picture as the page appeared, and the title, taking the focus a moment later (once the page
+    // was on screen), took the key. What comes after it on the page is drawn with the focus on it.
+    let seen: Element | null = null;
+    function After() {
+      useLayoutEffect(() => {
+        seen = document.activeElement;
+      });
+      return null;
+    }
+    render(
+      <main>
+        <PageTitle>Ship</PageTitle>
+        <After />
+      </main>,
+    );
+    expect(seen).toBe(screen.getByRole('heading', { name: 'Ship' }));
+  });
+
+  it('takes it once: moved on from it as the page opens, it stays where it was moved', () => {
+    // The smoke test of the keyboard, 1 run in 25 with the title focused as the page is drawn:
+    // React's checks in development run a page's effects a second time once it is on screen, and
+    // the title took the focus back from where Shift+Tab had just put it.
+    function MovedOn() {
+      const moved = useRef(false);
+      useEffect(() => {
+        if (moved.current) return;
+        moved.current = true;
+        screen.getByRole('button', { name: 'Switch workspace' }).focus();
+      }, []);
+      return <button type="button">Switch workspace</button>;
+    }
+    render(
+      <StrictMode>
+        <main>
+          <PageTitle>Ship</PageTitle>
+          <MovedOn />
+        </main>
+      </StrictMode>,
+    );
+    expect(screen.getByRole('button', { name: 'Switch workspace' })).toHaveFocus();
   });
 });
