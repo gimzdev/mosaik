@@ -401,6 +401,16 @@
     },
     {
       "elsewhere": 1,
+      "refused": [
+        {
+          "least": {
+            "height": 921,
+            "width": 902
+          },
+          "window": 66500,
+          "zone": 1
+        }
+      ],
       "reply": "preview",
       "task": "coding",
       "windows": [

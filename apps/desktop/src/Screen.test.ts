@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ArrangePreview, PreviewWindow, Rect } from './protocol';
-import { type Dropped, dropped, moved, zoneIndex } from './Screen';
+import { type Dropped, dropped, moved, refusal, zoneIndex } from './Screen';
 
 const LEFT: Rect = { left: 0, top: 0, right: 960, bottom: 1032 };
 const RIGHT: Rect = { left: 960, top: 0, right: 1920, bottom: 1032 };
@@ -101,5 +101,23 @@ describe('the picture, before Mosaïk says', () => {
       ],
       colours: ['lapis', 'verdigris'],
     });
+  });
+});
+
+describe('a drop Mosaïk could not make', () => {
+  it('is said with its reason, whatever the app', () => {
+    // The owner, on 2026-10-17: TFT Academy dragged into another zone on Home's picture "simply
+    // doesnt do anything", and no app is an exception. Mosaïk refuses a drop a zone cannot take
+    // (ADR 0033) and says which; the picture says why.
+    const refused: ArrangePreview = {
+      ...halves,
+      refused: [{ window: 2, zone: 0, least: { width: 1280, height: 720 } }],
+    };
+    expect(refusal(refused, { window: 2, zone: 0 })).toBe(
+      'Google Chrome doesn’t fit zone 1: its app keeps it at least 1280 × 720.',
+    );
+    expect(refusal(refused, { window: 1, zone: 1 })).toBeNull();
+    expect(refusal(halves, { window: 2, zone: 0 })).toBeNull();
+    expect(refusal(refused, undefined)).toBeNull();
   });
 });

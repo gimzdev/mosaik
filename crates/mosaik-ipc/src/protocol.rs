@@ -2,7 +2,7 @@
 
 use mosaik_core::classify::Verdict;
 use mosaik_core::editing::ZoneEdit;
-use mosaik_core::geometry::{RatioRect, Rect};
+use mosaik_core::geometry::{RatioRect, Rect, Size};
 use mosaik_core::journal::{HiddenWindow, HideMethod};
 use mosaik_core::layout::{SlotId, TabGroupId, WorkspaceId};
 use mosaik_core::settings::{EdgeSide, Settings};
@@ -405,6 +405,22 @@ pub struct ArrangePreview {
     /// (`None` for a layout picked, a workspace, or no windows).
     #[serde(default)]
     pub task: Option<Task>,
+    /// The user's drops the zones could not take, in the order made (ADR 0033): the picture
+    /// stays as it was, and says why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused: Vec<RefusedDrop>,
+}
+
+/// A window dropped on the picture of the main screen into a zone that cannot take it, whatever
+/// its app: its app keeps it at least `least`, more than the zones can make room for there
+/// without moving another window (ADR 0033).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefusedDrop {
+    pub window: WindowHandle,
+    /// The zone it was dropped in (its index in [`ArrangePreview::zones`]).
+    pub zone: u32,
+    /// The smallest its app lets its visible frame be.
+    pub least: Size,
 }
 
 /// A window the user moved on the picture of the main screen: into the `zone`-th of the
@@ -1401,6 +1417,11 @@ mod wire {
                 ],
                 elsewhere: 1,
                 task: Some(Task::Coding),
+                refused: vec![RefusedDrop {
+                    window: WindowHandle(0x0001_03c4),
+                    zone: 1,
+                    least: Size::new(902, 921),
+                }],
             })),
             Reply::Apps(Box::new(WorkspaceApps {
                 workspace: WorkspaceId("ship".into()),

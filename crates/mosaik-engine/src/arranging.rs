@@ -24,7 +24,9 @@ use mosaik_core::topology::Topology;
 use mosaik_core::window::{WindowFacts, WindowHandle};
 use mosaik_core::workspace::app_match;
 use mosaik_core::zone::{Zone, ZoneId};
-use mosaik_ipc::protocol::{ArrangeMove, ArrangePreview, ErrorCode, PreviewWindow, PreviewZone, Reply};
+use mosaik_ipc::protocol::{
+    ArrangeMove, ArrangePreview, ErrorCode, PreviewWindow, PreviewZone, RefusedDrop, Reply,
+};
 use mosaik_win::{apps, window};
 
 use crate::mover::{self, To};
@@ -85,6 +87,8 @@ struct Prepared {
     made: usize,
     /// The zones made, each with whether a window goes in it.
     filled: HashMap<ZoneId, bool>,
+    /// The user's drops the zones could not take, for the picture to say why.
+    refused: Vec<RefusedDrop>,
 }
 
 fn error(code: ErrorCode, message: impl Into<String>, hint: Option<&str>) -> Reply {
@@ -437,6 +441,17 @@ impl Engine {
             }
         }
         let on_monitor: Vec<usize> = units.iter().map(|u| u.monitor).collect();
+        let refused: Vec<RefusedDrop> = plan
+            .refused
+            .iter()
+            .filter_map(|r| {
+                Some(RefusedDrop {
+                    window: windows.get(r.unit)?.handle,
+                    zone: u32::try_from(r.zone).ok()?,
+                    least: units.get(r.unit)?.least,
+                })
+            })
+            .collect();
         let labels: Vec<String> = units.into_iter().map(|u| u.label).collect();
         // The main monitor's layout again is the one made for its task then, whatever task its
         // windows say now.
@@ -469,6 +484,7 @@ impl Engine {
             zoned,
             made: made.iter().flatten().count(),
             filled,
+            refused,
         })
     }
 
@@ -679,6 +695,7 @@ impl Engine {
             windows,
             elsewhere,
             task: p.task,
+            refused: p.refused.clone(),
         }))
     }
 

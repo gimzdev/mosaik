@@ -331,6 +331,19 @@ test.describe('Home', () => {
     await expect(page.getByRole('group', { name: joined })).toBeVisible();
   });
 
+  test('a window dropped into a zone too small for it stays, and the picture says why', async ({ page }) => {
+    // The owner, on 2026-10-17: TFT Academy dragged into another zone "simply doesnt do
+    // anything", and no app is an exception. Battle.net keeps its window at least 1280 x 720: in
+    // Main + side, the side zone (853 px wide) cannot take it.
+    await page.goto('/?big=1');
+    await page.getByRole('radio', { name: 'Main + side' }).check();
+    const big = page.getByRole('button', { name: 'Battle.net in zone 1' });
+    await expect(big).toBeVisible();
+    await dragInto(page, big, page.getByRole('button', { name: /in zone 2$/ }).first());
+    await expect(page.getByText('Battle.net doesn’t fit zone 2: its app keeps it at least 1280 × 720.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Battle.net in zone 1' })).toBeVisible();
+  });
+
   test('a line between zones dragged resizes them; Arrange puts the windows so, and the picture keeps them', async ({
     page,
   }) => {

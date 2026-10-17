@@ -38,6 +38,7 @@ import {
   dropped,
   moved,
   pictureWidth,
+  refusal,
   widestPicture,
   settled,
   stretched,
@@ -232,6 +233,14 @@ export function Home({
       if (choice === 'auto') setTask(reply.task ?? null);
       setEarly(null);
       setProblem(null);
+      // A drop the zones could not take (ADR 0033), whatever the app: the picture stays as it was
+      // and says why, and the drop goes, so the next one starts from the picture as it is.
+      const refused = refusal(reply, moves.at(-1));
+      if (refused) {
+        say(refused, true);
+        const gone = reply.refused ?? [];
+        setPuts((list) => list.filter((p) => !gone.some((r) => r.window === p.move.window && r.zone === p.move.zone)));
+      }
       // The zones resized are another layout's now (the windows on screen changed): let go.
       if (areas.length && reply.zones.length !== areas.length) setAreas(NO_AREAS);
     } else {

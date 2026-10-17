@@ -487,6 +487,21 @@ pub struct Plan {
     /// The plan without the user's moves, when they change it: the picture before them, whose
     /// zones' colours the zones keep ([`zone_colors`]).
     pub unmoved: Option<Box<Plan>>,
+    /// The user's moves the plan could not make, in the order they were made: each one leaves
+    /// the picture as it was, and the picture says why.
+    pub refused: Vec<Refused>,
+}
+
+/// A window dropped onto a zone that cannot take it (ADR 0033: a join moves no other window):
+/// its app keeps it larger than the zone, and the zones cannot make that room without pushing
+/// another window out of its zone or a zone under its floor; or it fits no zone of the monitor.
+/// Any window, whatever its app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Refused {
+    /// The unit dropped.
+    pub unit: usize,
+    /// The zone it was dropped onto, by its place among its monitor's zones ([`Move::zone`]).
+    pub zone: usize,
 }
 
 /// A zone of a picked layout, as the planner sees it.
@@ -1071,6 +1086,7 @@ pub fn plan_moved(
         zones: &mut new_zones,
     }
     .restack(units, monitors, &on);
+    let mut refused: Vec<Refused> = Vec::new();
 
     // 4½. The zones as the user stretched them on the picture (ADR 0031): a line dragged changes
     //    where the zones are, never which windows are in them (ADR 0033: the owner, "when
@@ -1139,6 +1155,10 @@ pub fn plan_moved(
             .all(|u| u == a || !matches!(before.0[u], Some(Goes::Zone(_))) || goes[u] == before.0[u]);
         if onto.is_none() && !(joined && others_stay) {
             (goes, stacked, order, new_zone_window, new_zones) = before;
+            refused.push(Refused {
+                unit: a,
+                zone: mv.zone,
+            });
         }
     }
     // 6. A window in a zone it no longer fits, the windows a move or the want of room sent to
@@ -1182,6 +1202,7 @@ pub fn plan_moved(
         again,
         order,
         unmoved: None,
+        refused: Vec::new(),
     };
     // The picture before the moves, for the colours its zones keep, when the moves changed it.
     if !moves.is_empty() {
@@ -1190,6 +1211,7 @@ pub fn plan_moved(
             plan.unmoved = Some(Box::new(unmoved));
         }
     }
+    plan.refused = refused;
     plan
 }
 
@@ -4493,6 +4515,77 @@ mod tests {
         assert_eq!(in_zone(&p, 0), vec![battle, spotify, slack]);
         assert!(in_zone(&p, 1).is_empty());
         assert_eq!(broken(&units, &p, false), None);
+    }
+
+    #[test]
+    fn a_drop_a_zone_cannot_take_is_refused_and_said() {
+        // The owner, on 2026-10-17: TFT Academy dropped from the left zone onto one of the right
+        // column on Home's picture "simply doesnt do anything", and no app is an exception. Its
+        // app keeps it at least 902 x 921: the right column cannot make that room without taking
+        // the other zone there under its floor (ADR 0033: a join moves no other window), so it
+        // stays where it is, and the plan says which drop it refused. As on his PC: a left zone
+        // 1114 px wide, the right column split at 568 px.
+        let left = 1114.0 / 1920.0;
+        let top = 568.0 / 1032.0;
+        let areas = [
+            RatioRect::new(0.0, 0.0, left, 1.0).unwrap(),
+            RatioRect::new(left, 0.0, 1.0, top).unwrap(),
+            RatioRect::new(left, top, 1.0, 1.0).unwrap(),
+        ];
+        let zones: Vec<KeptZone> = areas
+            .iter()
+            .enumerate()
+            .map(|(k, &area)| KeptZone {
+                monitor: 0,
+                area,
+                color: ZoneColor::nth(k),
+                arranged: true,
+                filled: true,
+            })
+            .collect();
+        let at = |k: usize, exe: &str, least: Size| {
+            let mut u = unit(exe, exe, areas[k].to_rect(WORK));
+            u.least = least;
+            u.zone = Some(k);
+            u
+        };
+        let units = [
+            at(0, "tftacademy.exe", Size::new(902, 921)),
+            at(1, "claude.exe", Size::new(600, 401)),
+            at(2, "windowsterminal.exe", Size::new(466, 96)),
+        ];
+        let (tft, terminal) = (0, 2);
+        let drop = |unit: usize, zone: usize| {
+            plan_moved(
+                &units,
+                &zones,
+                &[WORK],
+                None,
+                &[Move {
+                    unit,
+                    monitor: 0,
+                    zone,
+                    onto: None,
+                }],
+                None,
+            )
+        };
+        let base = plan_moved(&units, &zones, &[WORK], None, &[], None);
+        assert_eq!(base.again, vec![true]);
+        assert!(base.refused.is_empty());
+        for zone in [1, 2] {
+            let p = drop(tft, zone);
+            assert_eq!(
+                (p.goes.clone(), p.order.clone()),
+                (base.goes.clone(), base.order.clone()),
+                "{zone}"
+            );
+            assert_eq!(p.refused, vec![Refused { unit: tft, zone }], "{zone}");
+        }
+        // The terminal dropped onto Claude's zone joins it behind Claude: nothing refused.
+        let p = drop(terminal, 1);
+        assert_eq!(in_zone(&p, 1), vec![1, terminal]);
+        assert!(p.refused.is_empty());
     }
 
     #[test]

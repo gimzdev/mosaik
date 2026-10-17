@@ -42,6 +42,9 @@
   the same app's icon showed none of it.
 - The zone editor's picked zone: Colour and Split level, the swatches in line with the buttons.
 - At the window's smallest size every layout's name is on one line.
+- A window dropped on Home's picture into a zone that cannot take it stays where it was, and Home
+  says why ("TFT Academy doesn’t fit zone 2: its app keeps it at least 902 × 921"), whatever the
+  app: before, nothing happened.
 - Home's title, picture and layouts are one width, the button ending where the picture does.
 - Every layout is in view, in two rows beside Automatic: Halves, Thirds, Main + side, Side +
   main, Half + stack, Stack + half, Quarters and Full screen. Top + bottom and Three rows are gone

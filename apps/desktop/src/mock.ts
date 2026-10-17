@@ -22,6 +22,7 @@ import {
   type PreviewZone,
   type RatioRect,
   type Rect,
+  type RefusedDrop,
   type Reply,
   type Settings,
   type Task,
@@ -282,6 +283,8 @@ interface OnScreen {
   now: Rect;
   /** The zone of the last Move windows it is in (in `arranged.zones`), by its place there. */
   zone?: number;
+  /** The smallest its app lets it be, when it says. */
+  least?: { width: number; height: number };
 }
 
 /** What the last Move windows put on the main screen, while it is on screen (ADR 0032): the layout
@@ -299,6 +302,18 @@ let onScreen: OnScreen[] =
   params.get('nowindows') === '1'
     ? []
     : [
+        // `big=1`: an app that keeps its window large, in front (any app, as Mosaïk sees them).
+        ...(params.get('big') === '1'
+          ? [
+              {
+                window: 0x6b20,
+                label: 'Battle.net',
+                kind: 'chat' as const,
+                now: { left: 120, top: 80, right: 1500, bottom: 900 },
+                least: { width: 1280, height: 720 },
+              },
+            ]
+          : []),
         {
           window: 0x30a2,
           label: 'Visual Studio Code',
@@ -541,6 +556,7 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
   // The windows the user moved (the engine's step 5): dropped onto a window, the two trade
   // places; onto a zone, the moved one joins it, behind its windows, or takes it when it is empty
   // (ADR 0033).
+  const refused: RefusedDrop[] = [];
   for (const m of moves) {
     const a = onScreen.findIndex((s) => s.window === m.window);
     if (a < 0 || m.zone >= rects.length) continue;
@@ -551,6 +567,14 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
       continue;
     }
     if (zoneOf[a] === m.zone) continue;
+    // A zone that cannot take the window, which its app keeps larger: nothing changes, and
+    // Mosaïk says so (ADR 0033). (Mosaïk first tries to make the room; the stand-in does not.)
+    const least = onScreen[a]?.least;
+    const into = rects[m.zone];
+    if (least && into && (least.width > into.right - into.left + 2 || least.height > into.bottom - into.top + 2)) {
+      refused.push({ window: m.window, zone: m.zone, least });
+      continue;
+    }
     const qa = ownOf(a);
     if (qa !== undefined) own[qa] = undefined;
     zoneOf[a] = m.zone;
@@ -635,6 +659,7 @@ function preview(preset: Preset | undefined, moves: ArrangeMove[] = [], areas: R
     windows,
     elsewhere: 0,
     task: again ? again.task : (auto?.task ?? null),
+    ...(refused.length > 0 ? { refused } : {}),
   };
 }
 

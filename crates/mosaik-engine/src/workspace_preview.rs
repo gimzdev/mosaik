@@ -217,6 +217,7 @@ impl Engine {
             windows,
             elsewhere,
             task: None,
+            refused: Vec::new(),
         }))
     }
 

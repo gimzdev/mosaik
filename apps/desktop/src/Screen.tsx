@@ -32,7 +32,7 @@ import {
 import { LineHandle } from './editor/LineHandle';
 import { type Draft, lines } from './editor/model';
 import { AppIcon } from './icons';
-import type { ArrangePreview, PreviewTab, PreviewWindow, RatioRect, Rect, ZoneColor } from './protocol';
+import type { ArrangeMove, ArrangePreview, PreviewTab, PreviewWindow, RatioRect, Rect, ZoneColor } from './protocol';
 import { zoneChip, zoneTint } from './ui';
 
 /** The main screen's work area when Mosaïk has not said yet: a common one. */
@@ -201,6 +201,17 @@ export function moved(
       i === zone ? { ...z, color: from.color } : i === fromIndex ? { ...z, color: target.color } : z,
     ),
   };
+}
+
+/** What the picture says when Mosaïk could not make the last drop, `move` (ADR 0033): the zone
+ * cannot take the window, which its app keeps larger, whatever the app. */
+export function refusal(preview: ArrangePreview, move: ArrangeMove | undefined): string | null {
+  if (!move) return null;
+  const r = preview.refused?.find((x) => x.window === move.window && x.zone === move.zone);
+  if (!r) return null;
+  const label = preview.windows.find((w) => w.window === r.window)?.label ?? 'That window';
+  const zone = preview.zones[r.zone]?.name ?? String(r.zone + 1);
+  return `${label} doesn’t fit zone ${zone}: its app keeps it at least ${String(r.least.width)} × ${String(r.least.height)}.`;
 }
 
 /** A workspace's picture once an app is put elsewhere, before Mosaïk says: dropped onto another

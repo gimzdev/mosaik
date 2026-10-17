@@ -268,6 +268,19 @@ export interface ArrangePreview {
   /** What the main screen's windows say the user is doing, which Arrange lays it out for
    * (none for a layout picked). */
   task?: Task | null;
+  /** The drops the zones could not take, in the order made (ADR 0033): the picture stays as it
+   * was, and says why. */
+  refused?: RefusedDrop[];
+}
+
+/** A window dropped into a zone that cannot take it, whatever its app: its app keeps it at least
+ * `least`, more than the zones can make room for there without moving another window. */
+export interface RefusedDrop {
+  window: number;
+  /** The zone it was dropped in (its index in `zones`). */
+  zone: number;
+  /** The smallest its app lets its visible frame be. */
+  least: { width: number; height: number };
 }
 
 /** Apps installed that go together for a task (`sets`). */
