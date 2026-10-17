@@ -43,8 +43,8 @@
 - The zone editor's picked zone: Colour and Split level, the swatches in line with the buttons.
 - At the window's smallest size every layout's name is on one line.
 - A window dropped on Home's picture into a zone that cannot take it stays where it was, and Home
-  says why and what to do instead ("TFT Academy doesn’t fit zone 2: its app keeps it at least
-  902 × 921. Drag a line to make zone 2 bigger, or drop it in a bigger zone."), whatever the app:
+  says why and what to do instead ("TFTAcademy doesn’t fit zone 2: its app keeps it at least
+  902 × 921. Give it a bigger zone: drag a line, or choose another layout."), whatever the app:
   before, nothing happened.
 - Home's title, picture and layouts are one width, the button ending where the picture does.
 - Every layout is in view, in two rows beside Automatic: Halves, Thirds, Main + side, Side +

@@ -39,9 +39,9 @@ takes it when it is empty, as before. No other window changes zone, and every zo
 colour. When the zones cannot make room for it there without sending another window elsewhere,
 or it fits none, the drop changes nothing, and the picture says so, whatever the app (since
 2026-10-17, after "it simply doesnt do anything" with TFT Academy): the window, the zone, the
-smallest its app lets it be, and what to do instead ("Drag a line to make zone 2 bigger, or drop
-it in a bigger zone."), from `Plan::refused` and `refused` on the preview (protocol 12, an
-optional field). Dropped onto another window, the two still trade
+smallest its app lets it be, and what to do instead ("Give it a bigger zone: drag a line, or
+choose another layout.": a line may not be enough, the zones beside keeping their smallest), from
+`Plan::refused` and `refused` on the preview (protocol 12, an optional field). Dropped onto another window, the two still trade
 places (ADR 0032), as on a workspace's picture. Hints: "Drag a window into a zone to add it
 there, onto another window to swap them, or drag a line to resize zones."
 

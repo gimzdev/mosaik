@@ -109,13 +109,14 @@ describe('a drop Mosaïk could not make', () => {
     // The owner, on 2026-10-17: TFT Academy dragged into another zone on Home's picture "simply
     // doesnt do anything", and no app is an exception. Mosaïk refuses a drop a zone cannot take
     // (ADR 0033) and says which; the picture says why, and what to do instead (a failure always
-    // has a way forward).
+    // has a way forward). A line dragged may not be enough (his zone 2 could not be made 921 tall
+    // without zone 3 going under the floor), so another layout is offered too.
     const refused: ArrangePreview = {
       ...halves,
       refused: [{ window: 2, zone: 0, least: { width: 1280, height: 720 } }],
     };
     expect(refusal(refused, { window: 2, zone: 0 })).toBe(
-      'Google Chrome doesn’t fit zone 1: its app keeps it at least 1280 × 720. Drag a line to make zone 1 bigger, or drop it in a bigger zone.',
+      'Google Chrome doesn’t fit zone 1: its app keeps it at least 1280 × 720. Give it a bigger zone: drag a line, or choose another layout.',
     );
     expect(refusal(refused, { window: 1, zone: 1 })).toBeNull();
     expect(refusal(halves, { window: 2, zone: 0 })).toBeNull();

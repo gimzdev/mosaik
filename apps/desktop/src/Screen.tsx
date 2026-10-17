@@ -204,7 +204,9 @@ export function moved(
 }
 
 /** What the picture says when Mosaïk could not make the last drop, `move` (ADR 0033): the zone
- * cannot take the window, which its app keeps larger, whatever the app; and what to do instead. */
+ * cannot take the window, which its app keeps larger, whatever the app; and what to do instead. A
+ * line dragged may not make the zone big enough (the zones beside it keep their smallest), so
+ * another layout is offered with it. */
 export function refusal(preview: ArrangePreview, move: ArrangeMove | undefined): string | null {
   if (!move) return null;
   const r = preview.refused?.find((x) => x.window === move.window && x.zone === move.zone);
@@ -213,7 +215,7 @@ export function refusal(preview: ArrangePreview, move: ArrangeMove | undefined):
   const zone = preview.zones[r.zone]?.name ?? String(r.zone + 1);
   return (
     `${label} doesn’t fit zone ${zone}: its app keeps it at least ${String(r.least.width)} × ${String(r.least.height)}. ` +
-    `Drag a line to make zone ${zone} bigger, or drop it in a bigger zone.`
+    'Give it a bigger zone: drag a line, or choose another layout.'
   );
 }
 

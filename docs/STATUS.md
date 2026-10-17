@@ -1954,16 +1954,20 @@ simetric and appealing". ADR 0032.
   916x928 (`WM_GETMINMAXINFO`; its frame about 902x921): neither zone can take it, and a window
   joining a zone moves no other (ADR 0033), so the drop was refused and nothing said so. Now
   (19d6417, dcf4b2e) the plan names each drop it refuses, the preview carries it (window, zone,
-  smallest size, protocol 12, an optional field), and Home says, for any app: "TFT Academy
-  doesn't fit zone 2: its app keeps it at least 902 × 921. Drag a line to make zone 2 bigger, or
-  drop it in a bigger zone." Tests first: the core with his zones and sizes, the wire fixture,
-  the interface's message, and Playwright with a window the stand-in keeps at least 1280x720.
+  smallest size, protocol 12, an optional field), and Home says, for any app: "TFTAcademy
+  doesn't fit zone 2: its app keeps it at least 902 × 921. Give it a bigger zone: drag a line, or
+  choose another layout." (a line alone could not do it there: zone 2 made 921 tall would leave
+  zone 3 under the 200 px floor). Tests first: the core with his zones and sizes, the wire
+  fixture, the interface's message, and Playwright with a window the stand-in keeps at least
+  1280x720.
 - **On the owner's PC** (job 0207, at 19d6417): synced and packed (303 files); his `mosaik.ps1`
   in the repository: `build` exit 0 (94 s), `test` exit 0 (104 s, interface 149, every test
   passing); Mosaïk running again in the tray; the repository as committed. TFT Academy was closed
-  by then, so the check went over the windows open: zones 1152x1032 and 768x1032, each of the
-  six windows dropped in the other zone went there. The refusal on his desktop is to be seen with
-  TFT Academy open again.
+  by then: on zones 1152x1032 and 768x1032, each of the six windows open dropped in the other zone
+  went there. Job 0208 (at fc727dd, the way forward added): `build` exit 0 (87 s), `test` exit 0
+  (82 s, every test passing); TFT Academy open again, on zones 1114x1032, 806x568 and 806x464:
+  its two drops "refused, its app keeps it at least 902 x 921", the twelve drops of the six other
+  windows made.
 - **The slow site deploy** (jobs 0199, 0200 and 0205): Vercel's "Building…" was a deployment
   "Blocked" ("the commit author doesn't have permission to create deployments for this
   project"). The site's folder has no repository of its own, so the CLI took the last commit of
