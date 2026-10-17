@@ -1894,6 +1894,23 @@ simetric and appealing". ADR 0032.
   it finds and copies the four pictures, and Mosaïk's topics are set; its syntax is sound. Both
   files beside the repository brought up to date (the key line kept), and again at the commit
   recording this.
+- **The owner's notes of 00:51 to 00:58 (2026-10-17)**: "the workspace 'website' doesnt make any
+  fucking sense we need generic but not that generic ... a website and a workspace are not the
+  same thing"; the screenshots "should be site then app not mixed"; no new `gimzdev.sh`, the
+  existing one updated; older files and folders cleared, "especially all the new versions you
+  put in new files and folders"; every app's script at 1.0.0, Mosaïk's at 1.0.2 ("dropdate is v7
+  which is absolute nonsense"). Done: the sample workspaces are Client work, Side project and
+  Brand design, the tour's Client work and the site's Client work (ADR 0038; site 1.0.2); the
+  screenshots taken again, the site's first (the README: mosaïk.com, Home, a workspace, zones;
+  the portfolio: the site's top and its features, then Home, a workspace, zones), the README's
+  as the PC has them. `gimzdev1.sh` updated in place (1.0.0; Mosaïk's entry with five pictures;
+  the viewer's thumbnails kept off a phone's edges). Versions: Dropdate 7.0.0, MetaForge 1.2.2,
+  Grimoire 1.5.11 and Gimzdev 1.4.1 to 1.0.0 (each script's version and its app's
+  `package.json`; markers and saved-data keys left as they are), `mosaik1.sh` 1.11.5 to 1.0.2.
+  Deleting stays the owner's: one line for Git Bash removes `gimzdev.sh`, `metaforge1.sh`, the
+  old Grimoire installer and the Everforge prototype under `dropdate`, the old brief and Store
+  pictures, an empty repository from 2026-09-29 in `gimz\mosaik`, and the runner's jobs,
+  bundles and test profiles.
 
 ## Owner decisions
 

@@ -29,11 +29,20 @@ Your layouts stay on your computer.</p>
 <tr>
 <td align="center" width="50%">
 
+<img src="docs/screenshots/mosaik-site.png" alt="mosaïk.com: Every window, in its place" width="100%">
+
+<sub>mosaïk.com</sub>
+
+</td>
+<td align="center" width="50%">
+
 <img src="docs/screenshots/mosaik-app-home.png" alt="Mosaïk's Home: your windows laid out in numbered, coloured zones, and your workspaces beside them" width="100%">
 
 <sub>Home</sub>
 
 </td>
+</tr>
+<tr>
 <td align="center" width="50%">
 
 <img src="docs/screenshots/mosaik-app-workspace.png" alt="A workspace's page: where its apps go, and its apps, two of them tabs in one zone" width="100%">
@@ -41,20 +50,11 @@ Your layouts stay on your computer.</p>
 <sub>A workspace</sub>
 
 </td>
-</tr>
-<tr>
 <td align="center" width="50%">
 
 <img src="docs/screenshots/mosaik-app-zones.png" alt="The zone editor: a zone picked, to recolour, split or remove" width="100%">
 
 <sub>Zones</sub>
-
-</td>
-<td align="center" width="50%">
-
-<img src="docs/screenshots/mosaik-site.png" alt="mosaïk.com: Every window, in its place" width="100%">
-
-<sub>Website</sub>
 
 </td>
 </tr>
