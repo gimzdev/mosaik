@@ -302,49 +302,51 @@ export function AppsList({
   };
 
   /** One zone and its apps: its number, then a line of its colour down to its last app. Lit while
-   * an app dragged is over it. */
+   * an app dragged is over it, a little past the line between zones, which stays as wide as the
+   * list (the lines went 8 px past it on each side, the last one did not). */
   const group = (zone: AppZone | null, apps: WorkspaceApp[]) => {
     const lit = zone !== null && overZone(zone);
     return (
-      <div
-        key={zone?.id ?? 'none'}
-        ref={(el) => {
-          if (!el || !zone) return;
-          groups.current.set(zone.id, el);
-          return () => {
-            if (groups.current.get(zone.id) === el) groups.current.delete(zone.id);
-          };
-        }}
-        role="group"
-        aria-label={zone ? `Zone ${zone.name}` : 'Not in a zone'}
-        className={`-mx-2 flex gap-3 rounded-xl px-2 py-2 transition-colors duration-150 ${
-          lit ? 'outline-2 outline-offset-[-2px] outline-[var(--text)]' : ''
-        }`}
-        style={lit ? { background: `color-mix(in srgb, ${zoneTint(zone.color)} 14%, transparent)` } : undefined}
-      >
-        <div aria-hidden="true" className="flex w-7 shrink-0 flex-col items-center pt-2">
-          {zone ? (
-            <ZoneNumber zone={zone} />
+      <div key={zone?.id ?? 'none'}>
+        <div
+          ref={(el) => {
+            if (!el || !zone) return;
+            groups.current.set(zone.id, el);
+            return () => {
+              if (groups.current.get(zone.id) === el) groups.current.delete(zone.id);
+            };
+          }}
+          role="group"
+          aria-label={zone ? `Zone ${zone.name}` : 'Not in a zone'}
+          className={`-mx-2 flex gap-3 rounded-xl px-2 py-2 transition-colors duration-150 ${
+            lit ? 'outline-2 outline-offset-[-2px] outline-[var(--text)]' : ''
+          }`}
+          style={lit ? { background: `color-mix(in srgb, ${zoneTint(zone.color)} 14%, transparent)` } : undefined}
+        >
+          <div aria-hidden="true" className="flex w-7 shrink-0 flex-col items-center pt-2">
+            {zone ? (
+              <ZoneNumber zone={zone} />
+            ) : (
+              <span className="size-7 rounded-full border-2 border-dashed border-[var(--control)]" />
+            )}
+            {apps.length > 1 ? (
+              <span
+                className="mt-1.5 mb-3 w-0.5 flex-1 rounded-full forced-colors:bg-[CanvasText]"
+                style={{
+                  background: zone ? `color-mix(in srgb, ${zoneTint(zone.color)} 55%, transparent)` : 'var(--line)',
+                }}
+              />
+            ) : null}
+          </div>
+          {apps.length ? (
+            <ul className="min-w-0 flex-1">{apps.map(row)}</ul>
           ) : (
-            <span className="size-7 rounded-full border-2 border-dashed border-[var(--control)]" />
+            <p className="flex min-h-11 flex-1 items-center text-small text-[var(--muted)]">
+              {/* How to fill it, only while there is an app to drag or move. */}
+              {data.apps.length ? 'Empty. Drag an app here, or use Move.' : 'Empty'}
+            </p>
           )}
-          {apps.length > 1 ? (
-            <span
-              className="mt-1.5 mb-3 w-0.5 flex-1 rounded-full forced-colors:bg-[CanvasText]"
-              style={{
-                background: zone ? `color-mix(in srgb, ${zoneTint(zone.color)} 55%, transparent)` : 'var(--line)',
-              }}
-            />
-          ) : null}
         </div>
-        {apps.length ? (
-          <ul className="min-w-0 flex-1">{apps.map(row)}</ul>
-        ) : (
-          <p className="flex min-h-11 flex-1 items-center text-small text-[var(--muted)]">
-            {/* How to fill it, only while there is an app to drag or move. */}
-            {data.apps.length ? 'Empty. Drag an app here, or use Move.' : 'Empty'}
-          </p>
-        )}
       </div>
     );
   };

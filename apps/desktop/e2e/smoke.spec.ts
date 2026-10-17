@@ -569,6 +569,22 @@ test.describe('a workspace’s page', () => {
     }
   });
 
+  test('draws the lines between its zones as wide as its list', async ({ page }) => {
+    // They went 8 px past it on each side, the line above Add an app did not.
+    await page.goto('/');
+    await editWorkspace(page, 'Website');
+    const apps = page.getByRole('group', { name: 'Apps of “Website”' });
+    const list = await still(page, apps);
+    const lines = await apps.evaluate((g) =>
+      Array.from(g.children).map((c) => {
+        const r = c.getBoundingClientRect();
+        return [Math.round(r.left), Math.round(r.right)];
+      }),
+    );
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines) expect(line).toEqual([Math.round(list.x), Math.round(list.x + list.width)]);
+  });
+
   test('shows how it opens, lists its apps by zone, and moves, removes and adds them', async ({ page }) => {
     await page.goto('/');
     await editWorkspace(page, 'Website');
