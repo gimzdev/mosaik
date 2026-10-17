@@ -47,9 +47,15 @@ const GAP = 3;
  * out of sight in a small window (`tallest`, in percent of the window's height). What goes above
  * and below it takes the same width, so they line up with it. */
 export function pictureWidth(area: Rect | null, tallest = 44): CSSProperties {
+  return { width: `min(100%, ${widestPicture(area, tallest)})` };
+}
+
+/** The widest the picture goes: `tallest` percent of the window's height, in the screen's
+ * proportions (a CSS length). */
+export function widestPicture(area: Rect | null, tallest = 44): string {
   const a = area ?? SOME_SCREEN;
   const ratio = (a.right - a.left) / Math.max(1, a.bottom - a.top);
-  return { width: `min(100%, calc(${String(tallest)}vh * ${String(ratio)}))` };
+  return `calc(${String(tallest)}vh * ${String(ratio)})`;
 }
 
 /** The picture's size: its width (`pictureWidth`), in the screen's proportions. */

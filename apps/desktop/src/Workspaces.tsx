@@ -305,7 +305,7 @@ export function Workspaces({
     <section
       ref={column}
       aria-labelledby="workspaces-title"
-      className="flex min-w-0 flex-col self-start rounded-[22px] bg-[var(--panel)] p-2 pt-3.5"
+      className="flex min-w-0 flex-col rounded-[22px] bg-[var(--panel)] p-2 pt-3.5"
     >
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 pl-2">
         <h2 id="workspaces-title" className="font-display text-heading font-bold tracking-tight">

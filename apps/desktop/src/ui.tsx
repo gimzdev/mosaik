@@ -296,7 +296,7 @@ export function Section({ title, children, aside }: { title: string; aside?: Rea
   const id = useId();
   return (
     <section aria-labelledby={id} className="mt-7 first:mt-0">
-      <div className="mb-2 flex items-baseline justify-between gap-3 px-1">
+      <div className="mb-2 flex items-baseline justify-between gap-3">
         <h2 id={id} className="font-display text-heading font-semibold tracking-tight">
           {title}
         </h2>

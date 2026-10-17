@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { Canvas } from './editor/Canvas';
+import { CANVAS_TALLEST, Canvas } from './editor/Canvas';
 import {
   type Draft,
   PRESETS,
@@ -23,6 +23,7 @@ import { request } from './engine';
 import { errorMessage, type MonitorState } from './protocol';
 import { Glyph } from './icons';
 import { LayoutGlyph } from './Layouts';
+import { pictureWidth } from './Screen';
 import { Button, Confirm, MenuButton, PageTitle, Status, useAnnounce } from './ui';
 
 interface Loaded {
@@ -135,7 +136,13 @@ export function ZoneEditor({
   }
 
   return (
-    <article aria-labelledby="zones-title" className="mx-auto w-full max-w-[52rem]">
+    // One width, the canvas's, in the middle: the title and its buttons, the canvas and what is
+    // said below it line up on both edges, as on a workspace's page (ADR 0034).
+    <article
+      aria-labelledby="zones-title"
+      className="mx-auto max-w-[52rem]"
+      style={pictureWidth(current?.work_area ?? null, CANVAS_TALLEST)}
+    >
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="text-small font-semibold text-[var(--muted)]">Zones</p>

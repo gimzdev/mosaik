@@ -8,6 +8,10 @@ import { zoneChip, zoneTint } from '../ui';
 import { LineHandle } from './LineHandle';
 import { type Draft, lines, percent } from './model';
 
+/** The canvas at most this many percent of the window's height (the zone editor's page takes its
+ * width). */
+export const CANVAS_TALLEST = 46;
+
 export function Canvas({
   monitor,
   drafts,
@@ -32,7 +36,10 @@ export function Canvas({
         ref={area}
         className="sky relative overflow-hidden rounded-[18px] border border-[var(--line)] select-none"
         // As wide as the page, or less for a tall monitor, so the zone's details stay in view.
-        style={{ aspectRatio: `${String(w)} / ${String(h)}`, width: `min(100%, calc(46vh * ${String(w / h)}))` }}
+        style={{
+          aspectRatio: `${String(w)} / ${String(h)}`,
+          width: `min(100%, calc(${String(CANVAS_TALLEST)}vh * ${String(w / h)}))`,
+        }}
       >
         {here.length === 0 ? (
           <p className="absolute inset-0 flex items-center justify-center p-6 text-center text-small text-[var(--desk-label)]">

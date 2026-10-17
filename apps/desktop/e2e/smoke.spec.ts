@@ -96,6 +96,49 @@ test.describe('Home', () => {
     await windowDoesNotScroll(page);
   });
 
+  test('sits in the middle: the picture and the workspaces a set space apart, the panel as tall as the picture’s column', async ({
+    page,
+  }) => {
+    // The owner: "appeal balance in layout and look". The picture goes no wider than the
+    // window's height allows; the room left went between the two, a gap of 80 to 120 px.
+    for (const size of [
+      { width: 1000, height: 760 },
+      { width: 1400, height: 900 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.goto('/');
+      const picture = await still(page, page.getByRole('group', { name: AUTO }));
+      const column = await still(page, page.getByRole('region', { name: 'Your screen' }));
+      const panel = await still(page, page.getByRole('region', { name: 'Workspaces' }));
+      const main = await page.locator('main').evaluate((m) => {
+        const r = m.getBoundingClientRect();
+        return { left: r.left, right: r.left + m.clientWidth };
+      });
+      const at = `${String(size.width)} by ${String(size.height)}`;
+      expect(Math.round(panel.x - (picture.x + picture.width)), `the space between, ${at}`).toBe(40);
+      expect(
+        Math.abs(picture.x - main.left - (main.right - (panel.x + panel.width))),
+        `in the middle, ${at}`,
+      ).toBeLessThanOrEqual(2);
+      expect(Math.round(panel.y), `the panel's top, ${at}`).toBe(Math.round(column.y));
+      expect(Math.round(panel.y + panel.height), `the panel's bottom, ${at}`).toBe(
+        Math.round(column.y + column.height),
+      );
+    }
+  });
+
+  test('keeps the picture where it is when a workspace is shown, and back', async ({ page }) => {
+    await page.goto('/');
+    const top = async () => (await still(page, page.locator('.desk').first())).y;
+    const before = await top();
+    await page.locator('[data-workspace="ship"] > button, [data-workspace] > button').first().click();
+    await expect(page.getByRole('heading', { name: /^Preview of/ })).toBeVisible();
+    expect(await top()).toBe(before);
+    await page.getByRole('button', { name: 'Back to my screen' }).click();
+    await expect(page.getByRole('heading', { name: 'Your screen' })).toBeVisible();
+    expect(await top()).toBe(before);
+  });
+
   test('the layouts are all in view, in two rows beside Automatic, and a click anywhere on one chooses it', async ({
     page,
   }) => {
@@ -790,6 +833,35 @@ test.describe('the zone editor', () => {
     await expect(shown(page, 'Zones saved.')).toBeVisible();
     await accessible(page);
     await windowDoesNotScroll(page);
+  });
+
+  test('is one width, the canvas’s: its title and buttons, the canvas and what it says line up, in the middle', async ({
+    page,
+  }) => {
+    for (const size of [
+      { width: 1000, height: 760 },
+      { width: 1400, height: 1100 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.goto('/');
+      await editZones(page);
+      const canvas = await still(page, page.locator('[data-canvas] > div'));
+      const at = `${String(size.width)} by ${String(size.height)}`;
+      const title = await still(page, page.getByRole('heading', { name: 'Website', level: 1 }));
+      const save = await still(page, page.getByRole('button', { name: 'Save zones' }));
+      const said = await still(page, page.getByText('Pick a zone to recolour, split or remove it.'));
+      expect(Math.round(title.x), `the title's left, ${at}`).toBe(Math.round(canvas.x));
+      expect(Math.round(said.x), `what it says, ${at}`).toBe(Math.round(canvas.x));
+      expect(Math.round(save.x + save.width), `Save's right, ${at}`).toBe(Math.round(canvas.x + canvas.width));
+      const main = await page.locator('main').evaluate((m) => {
+        const r = m.getBoundingClientRect();
+        return { left: r.left, right: r.left + m.clientWidth };
+      });
+      expect(
+        Math.abs(canvas.x - main.left - (main.right - (canvas.x + canvas.width))),
+        `in the middle, ${at}`,
+      ).toBeLessThanOrEqual(2);
+    }
   });
 
   test('starts from the same layouts as Home', async ({ page }) => {

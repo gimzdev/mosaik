@@ -13,7 +13,7 @@
 // Esc, shows the screen again. Whatever an action did, here or in the column, is said in one line
 // under the picture.
 
-import { useCallback, useEffect, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useState } from 'react';
 
 import { request } from './engine';
 import { Glyph } from './icons';
@@ -38,6 +38,7 @@ import {
   dropped,
   moved,
   pictureWidth,
+  widestPicture,
   settled,
   stretched,
   zoneIndex,
@@ -516,7 +517,14 @@ export function Home({
       <PageTitle id="home-title" className="sr-only">
         Home
       </PageTitle>
-      <div className="grid gap-x-6 gap-y-8 min-[720px]:grid-cols-[minmax(0,1fr)_16rem]">
+      {/* The picture's column and the workspaces' side by side, in the middle of the window, a
+          set space apart, however wide the window: the picture goes no wider than the window's
+          height allows, and what is left goes to the sides rather than between the two (the
+          owner: "appeal balance in layout"). The workspaces' panel is as tall as the column. */}
+      <div
+        className="grid gap-x-10 gap-y-8 min-[720px]:grid-cols-[min(var(--picture),calc(100%_-_18.5rem))_16rem] min-[720px]:justify-center"
+        style={{ '--picture': widestPicture(picture?.work_area ?? arranged?.work_area ?? null) } as CSSProperties}
+      >
         <section aria-labelledby="arrange-title" className="min-w-0">
           {/* The title and its button, the picture, the layouts and what was done: one width, the
               picture's, so they line up (the owner: the layouts went past the picture, "it
@@ -527,7 +535,9 @@ export function Home({
           >
             <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
               <div className="min-w-0 flex-1 basis-60">
-                <div className="flex flex-wrap items-center gap-x-2">
+                {/* As tall as its Back button, with it or not: the picture stays put when a
+                    workspace is shown. */}
+                <div className="flex min-h-10 flex-wrap items-center gap-x-2">
                   <h2 id="arrange-title" className="font-display text-title font-bold tracking-tight break-words">
                     {shown ? `Preview of “${nameOf(shown)}”` : 'Your screen'}
                   </h2>

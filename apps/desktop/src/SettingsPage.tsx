@@ -287,7 +287,7 @@ export function SettingsPage({
             onClick={() => {
               setMore((m) => !m);
             }}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-1 font-display text-heading font-semibold tracking-tight hover:text-[var(--accent)]"
+            className="-ml-1 inline-flex min-h-10 items-center gap-1.5 rounded-lg px-1 font-display text-heading font-semibold tracking-tight hover:text-[var(--accent)]"
           >
             <Glyph name="next" size={14} className={`transition-transform duration-150 ${more ? 'rotate-90' : ''}`} />
             More settings
