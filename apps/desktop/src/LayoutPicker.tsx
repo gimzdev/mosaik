@@ -35,7 +35,9 @@ const CHOSEN = 'bg-[var(--raised)] text-[var(--text)] ring-1 ring-[var(--accent)
 const OTHER = 'text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--text)]';
 
 /** One layout: its picture above its name, with a radio button over the whole of it, unseen, so
- * a click anywhere on it chooses it and a screen reader's focus box is the layout, not a dot. */
+ * a click anywhere on it chooses it and a screen reader's focus box is the layout, not a dot. Its
+ * name has the room to stay on one line at the window's smallest size; zoomed in, it may take
+ * two. */
 function Option({
   group,
   choice,
@@ -56,7 +58,7 @@ function Option({
   return (
     <label
       title={title ?? choiceName(choice)}
-      className={`relative flex min-h-[54px] min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-1.5 text-caption font-semibold transition-colors duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus)] has-[:disabled]:opacity-50 ${
+      className={`relative flex min-h-[54px] min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-caption font-semibold transition-colors duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus)] has-[:disabled]:opacity-50 ${
         auto ? 'row-span-2 px-3' : ''
       } ${on ? CHOSEN : OTHER}`}
     >

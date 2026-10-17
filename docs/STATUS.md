@@ -1850,8 +1850,9 @@ simetric and appealing". ADR 0032.
   lines between a workspace's zones as wide as its list. Apps' icons no longer go missing: a
   suggested set drawn while a workspace above it was reading the same icon showed none of it
   (icons are now a store every drawing reads, told when a read comes in). The zone editor's
-  picked zone has Colour and Split level, the swatches in line with the buttons. Tests first:
-  interface 148, Playwright 45.
+  picked zone has Colour and Split level, the swatches in line with the buttons. At the window's
+  smallest size three layouts' names broke onto two lines (70 px of name in 68 of room): each has
+  its room now. Tests first: interface 148, Playwright 46.
 - **The site, 1.11.5**: "Every window shows its zone's number in its colour", as the app does
   (it said each window wears its zone's colour, which is only with Coloured borders on). The
   site's CI built `./mosaik_site` and checked nothing it ships: it builds `site/` now.

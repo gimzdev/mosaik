@@ -1010,6 +1010,21 @@ test.describe('at the smallest window size', () => {
     await expect(page.getByText('No zones on this monitor. Start from a layout.')).toBeVisible();
     await accessible(page);
   });
+
+  test('says every layout’s name on one line', async ({ page }) => {
+    // The pass over the window, 2026-10-16: Side + main, Half + stack and Stack + half broke onto
+    // two lines here (70 px of name in 68 of room), the others not.
+    await page.goto('/');
+    const fieldset = page.getByRole('group', { name: 'Layout' });
+    await expect(fieldset.getByRole('radio')).toHaveCount(9);
+    const lines = await fieldset.locator('label > span').evaluateAll((names) =>
+      names.map((n) => {
+        const height = n.getBoundingClientRect().height;
+        return `${n.textContent}: ${String(Math.round(height / parseFloat(getComputedStyle(n).lineHeight)))}`;
+      }),
+    );
+    expect(lines).toEqual(lines.map((l) => l.replace(/\d+$/, '1')));
+  });
 });
 
 test.describe('in high contrast', () => {
