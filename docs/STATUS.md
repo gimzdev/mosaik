@@ -1769,6 +1769,31 @@ simetric and appealing". ADR 0032.
   "Coding" on all ten layouts, every app kept, nothing saved. Packed (295 files); both files
   beside the repository brought up to date (the key line kept), and again at the commit recording
   this.
+- **The owner's note of 20:04**, with a picture of Home as it was on 2026-10-15 (Arrange, More
+  layouts): "why i got old version i just rebuilt the app from the mosaik/mosaik.ps1". The
+  one-file `mosaik.ps1` beside the repository builds in `mosaik-1.0.2` beside it, and that folder
+  was there, unpacked the day before by an older `mosaik.ps1` of the same version: its source a day
+  old was built. Now an unpacked folder records its source (`.mosaik-source.json`), and a
+  `mosaik.ps1` with another source brings it to its own first: the build kept, a file changed
+  there moved to `.mosaik-replaced`, a file of the person's own left (ADR 0035). Test first:
+  `installer/test-mosaik-ps1-unpack.ps1`, run by `mosaik.ps1 test`.
+- **On the owner's PC** (job 0177, at dca58a9): what was there: the Mosaïk running, built at 20:03
+  from `mosaik-1.0.2` (unpacked 2026-10-15 22:35, no record); the Store's Mosaïk 1.0.1.0 installed;
+  nothing changed by the owner in the folder. His `mosaik.ps1`, run as he runs it, brought the
+  folder to the new source (144 files), but dated them as the source inside dates every file
+  (2026-01-01), older than the build: cargo took `mosaik-ipc` for built and the build failed
+  (`Command::Arrange` has no field `areas`); the Mosaïk that had quit for it was not started again.
+  Files written are now dated as written, and a failed build starts again the Mosaïk that quit for
+  it (unpack test 16 checks, `test-mosaik-ps1.ps1` 14 cases). Its tests: one interface test failed
+  (below).
+- **A page's title took the key pressed as the page appeared** (job 0177's failing test, "Zones
+  resized." never shown; 1 run in 12 here): the title takes the focus when a page opens, and did
+  in an effect run once the page was on screen; the test had focused a line of the picture and
+  pressed Home by then, and the key went to the title. It takes the focus as the page is drawn now,
+  and once: in development React runs a page's effects a second time later, and the title took the
+  focus back from where Shift+Tab had put it (the keyboard's smoke test, 1 run in 25 with the
+  first change alone). Tests first: interface 147; the page's tests 0 failing in 30 runs, the
+  keyboard's smoke test 0 in 200; Playwright 40.
 
 ## Owner decisions
 

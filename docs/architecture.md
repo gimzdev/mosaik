@@ -301,4 +301,6 @@ The repository travels as two files that each run on their own on another machin
 Windows PowerShell 5.1 and later; `pack` makes the one-file copy, `verify` checks it) and
 `mosaik1.sh` (the website: it writes `site/`, installs it, runs it or deploys it). CI runs the
 same `mosaik.ps1` steps the owner does, and checks that `site/` is exactly what `mosaik1.sh`
-writes.
+writes. The one-file copy unpacks its source to `mosaik-<version>` beside it, with a record of
+which source that is (`.mosaik-source.json`); a copy with another source brings the folder to its
+own before working on it, keeping the build and moving a file changed there aside (ADR 0035).
