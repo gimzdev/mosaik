@@ -243,7 +243,8 @@ impl Engine {
         self.watch.canvas.as_ref().map(|_| ())
     }
 
-    /// Dark chips on tab strips: the user's choice, or Windows' app mode.
+    /// Dark chips on tab strips: the user's choice (or, for "Like Windows" before it is settled at
+    /// start, Windows' app mode).
     pub(crate) fn dark_theme(&self) -> bool {
         match self.settings.theme {
             mosaik_core::settings::Theme::Dark => true,

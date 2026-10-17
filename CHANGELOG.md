@@ -32,7 +32,8 @@
   list into a zone, which they join behind its apps, or onto another app's name to swap them, as
   on the picture. The page is one width, the picture's, in the middle.
 - A workspace's ⋯ menu on Home has Rename, right in its row; Edit zones is on its page.
-- Like Windows follows Windows' light or dark mode again.
+- Two themes, Dark and Light. Like Windows is gone: it showed one of them, as Windows did, and if
+  you had chosen it, Mosaïk keeps the one it showed.
 - Home's title, picture and layouts are one width, the button ending where the picture does.
 - Every layout is in view, in two rows beside Automatic: Halves, Thirds, Main + side, Side +
   main, Half + stack, Stack + half, Quarters and Full screen. Top + bottom and Three rows are gone

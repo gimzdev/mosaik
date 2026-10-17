@@ -47,29 +47,27 @@ export interface Saved {
 }
 export type SaveSettings = (next: Settings) => Promise<Saved>;
 
-/** The page's colours on the window's title bar, following the theme and high contrast. With
- * "Like Windows" the window's theme is left to Windows: Tauri gives the page the window's theme,
- * so a title bar made light or dark like the page kept the page so, whatever Windows said next
- * (the owner: "windows theme doesnt work"). */
+/** The page's theme and colours on the window's title bar; in a high-contrast theme, Windows' own
+ * colours. */
 function useTitleBar(theme: Settings['theme'] | undefined) {
   useEffect(() => {
-    const queries = [matchMedia('(prefers-color-scheme: dark)'), matchMedia('(forced-colors: active)')];
+    const contrast = matchMedia('(forced-colors: active)');
     const apply = () => {
-      if (queries[1]?.matches) {
+      if (contrast.matches) {
         styleTitleBar(null);
         return;
       }
       const css = getComputedStyle(document.documentElement);
       styleTitleBar({
-        dark: theme === 'system' ? null : css.colorScheme === 'dark',
+        dark: theme !== 'light',
         caption: css.getPropertyValue('--panel').trim(),
         text: css.getPropertyValue('--text').trim(),
       });
     };
     apply();
-    for (const q of queries) q.addEventListener('change', apply);
+    contrast.addEventListener('change', apply);
     return () => {
-      for (const q of queries) q.removeEventListener('change', apply);
+      contrast.removeEventListener('change', apply);
     };
   }, [theme]);
 }
@@ -144,8 +142,8 @@ export function App() {
     return onZonesToEdit(take);
   }, []);
 
-  // The theme the user picked: dark unless they chose otherwise; "Like Windows" follows Windows
-  // (and its high-contrast themes).
+  // The theme the user picked: dark unless they chose light. A high-contrast theme of Windows
+  // overrides either (styles.css).
   const theme = settings?.theme;
   useEffect(() => {
     document.documentElement.dataset.theme = theme ?? 'dark';

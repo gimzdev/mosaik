@@ -44,7 +44,7 @@ export interface ZoneEdit {
   area: RatioRect;
 }
 
-export type Theme = 'system' | 'light' | 'dark';
+export type Theme = 'light' | 'dark';
 export type HideMethod = 'shell_cloak' | 'minimize' | 'park';
 export type EdgeSide = 'left' | 'right';
 
@@ -353,7 +353,7 @@ const isBoolean = (x: unknown): x is boolean => typeof x === 'boolean';
 const isNullableString = (x: unknown): x is string | null => x === null || isString(x);
 
 const COLORS = new Set<string>(ZONE_COLORS);
-const THEMES = new Set<string>(['system', 'light', 'dark']);
+const THEMES = new Set<string>(['light', 'dark']);
 const HIDE_METHODS = new Set<string>(['shell_cloak', 'minimize', 'park']);
 const EDGE_SIDES = new Set<string>(['left', 'right']);
 

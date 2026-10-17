@@ -125,6 +125,12 @@ describe('Settings', () => {
     const save = saver();
     page(save);
     const theme = screen.getByRole('radiogroup', { name: 'Theme' });
+    // Two themes: "Like Windows" went (the owner: "is windows like necessary i feel like its
+    // basically light theme", ADR 0036).
+    const options = within(theme).getAllByRole('radio');
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveAccessibleName('Dark');
+    expect(options[1]).toHaveAccessibleName('Light');
     expect(within(theme).getByRole('radio', { name: 'Dark' })).toBeChecked();
     await userEvent.click(within(theme).getByRole('radio', { name: 'Light' }));
     expect(saved(save)).toContainEqual({ ...setUp, theme: 'light' });

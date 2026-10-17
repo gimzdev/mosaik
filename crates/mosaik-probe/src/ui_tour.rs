@@ -3,8 +3,8 @@
 //! the role and name UI Automation gives every control (what a screen reader says), controls
 //! with no name, and the order the Tab key goes through them. Home (with a workspace's ⋯ menu,
 //! and its name to rename in its row), a workspace's page, the zone editor and Settings (with Advanced and About), in dark and
-//! light, at the window's usual and smallest size, and the switcher; "Like Windows" chosen after
-//! each of them, the page following Windows' app mode. On Home, a layout is also
+//! light, at the window's usual and smallest size, and the switcher; the page read on screen
+//! after each theme is chosen, as light or dark as chosen. On Home, a layout is also
 //! chosen, so the picture shows where the windows would go; a window of the picture is dragged
 //! onto another, and a line between its zones across, each then undone with Undo changes
 //! (Move windows is never clicked: no window moves).
@@ -666,29 +666,19 @@ impl Tour {
         self.click(&c)
     }
 
-    /// "Like Windows" follows Windows' app mode, chosen after Light and after Dark (the owner:
-    /// "windows theme doesnt work": the page stayed as the theme chosen before). The page's
-    /// background, read on screen at the window's bottom left, is light when Windows' apps are.
-    fn like_windows(&mut self) -> Result<(), String> {
-        let windows_light = mosaik_win::os::apps_use_light_theme();
+    /// The page as light or dark as the theme chosen, read on screen ("Like Windows" went, ADR
+    /// 0036; the owner, of it: "windows theme doesnt work", the page stayed as chosen before).
+    fn themes_shown(&mut self) -> Result<(), String> {
         let mut seen = Vec::new();
-        for before in ["Light", "Dark"] {
-            self.theme(before)?;
-            pump_until(800, || false);
-            self.theme("Like Windows")?;
+        for (label, light) in [("Light", true), ("Dark", false)] {
+            self.theme(label)?;
             pump_until(1500, || false);
-            seen.push(json!({ "after": before, "page_light": self.page_is_light()? }));
+            let page_light = self.page_is_light()?;
+            seen.push(json!({ "theme": label, "page_light": page_light, "as_chosen": page_light == light }));
         }
-        let follows = seen
-            .iter()
-            .all(|s| s["page_light"].as_bool() == Some(windows_light));
-        let page = json!({
-            "page": "like-windows",
-            "windows_light": windows_light,
-            "seen": seen,
-            "follows_windows": follows,
-        });
-        println!("page like-windows: {page}");
+        let as_chosen = seen.iter().all(|s| s["as_chosen"].as_bool() == Some(true));
+        let page = json!({ "page": "themes", "seen": seen, "as_chosen": as_chosen });
+        println!("page themes: {page}");
         self.pages.push(page);
         Ok(())
     }
@@ -885,8 +875,8 @@ impl Tour {
             self.switcher(&format!("switcher-{theme}"))?;
         }
 
-        // Like Windows, after each of the others.
-        self.like_windows()?;
+        // Each theme on screen as chosen.
+        self.themes_shown()?;
 
         // The smallest the window goes.
         let before = window::window_rect(self.hwnd).ok_or("Mosaïk's window vanished")?;

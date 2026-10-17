@@ -159,6 +159,8 @@ impl Engine {
     /// refused with the reason; nothing is saved then.
     pub(crate) fn set_settings(&mut self, mut new: Settings) -> Reply {
         new.version = SETTINGS_VERSION;
+        // An interface from before 1.0.2 may still send "Like Windows" (ADR 0036).
+        new.settle_theme(mosaik_win::os::apps_use_light_theme());
         if let Some(problem) = new.problem() {
             return refused(problem, None);
         }

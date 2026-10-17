@@ -287,6 +287,15 @@ pub(crate) fn run(
             (Settings::default(), OnDisk::Unreadable)
         }
     };
+    // "Like Windows" went in 1.0.2 (ADR 0036): settings that chose it take the theme Windows has
+    // now, saved so; a newer Mosaïk's settings are left as they are.
+    let mut settings = settings;
+    if settings.settle_theme(mosaik_win::os::apps_use_light_theme())
+        && settings_on_disk == OnDisk::Readable
+        && let Err(e) = store.save(&settings)
+    {
+        tracing::warn!(error = %e, "the theme settled was not saved");
+    }
     let (file, file_error) = match store.load::<WorkspacesFile>() {
         Ok(loaded) => {
             notices.extend(loaded.notes);

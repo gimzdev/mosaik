@@ -76,35 +76,7 @@
   --shadow: 0 18px 40px -18px rgb(0 0 0 / 0.75);
 }
 
-/* Light: plaster and paper, ink text, lapis. Chosen in Settings, or "Like Windows" in light. */
-@media (prefers-color-scheme: light) {
-  :root[data-theme='system'] {
-    color-scheme: light;
-    --bg: #e4e7e0;
-    --panel: #f7f8f4;
-    --raised: #edefea;
-    --hover: #e6e9e2;
-    --line: #d3d8cf;
-    --control: #7a8492;
-    --text: #161b25;
-    --muted: #556070;
-    --accent: #2b44d9;
-    --accent-fill: #2b44d9;
-    --accent-fill-hover: #2237b8;
-    --on-accent: #ffffff;
-    --danger: #b82e48;
-    --ok: #12786a;
-    --focus: #2b44d9;
-    --zone-lapis: #2b44d9;
-    --zone-verdigris: #12786a;
-    --zone-saffron: #f4b13a;
-    --zone-madder: #c93450;
-    --zone-slate: #556070;
-    --on-zone: #ffffff;
-    --on-swatch: #ffffff;
-    --shadow: 0 18px 40px -22px rgb(22 27 37 / 0.45);
-  }
-}
+/* Light: plaster and paper, ink text, lapis. Chosen in Settings. */
 :root[data-theme='light'] {
   color-scheme: light;
   --bg: #e4e7e0;

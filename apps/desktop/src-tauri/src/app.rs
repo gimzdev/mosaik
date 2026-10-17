@@ -811,9 +811,7 @@ async fn rescue_windows(state: tauri::State<'_, AppState>) -> Result<String, Str
 }
 
 /// Matches a window's title bar to its page: light or dark, in the page's colours (`#rrggbb`).
-/// Without `dark` ("Like Windows", high contrast) the window's theme is Windows', and Tauri gives
-/// the page that theme too, so it follows Windows; without colours (high contrast), Windows' own
-/// colours stay.
+/// Without them (a high-contrast theme) the window's theme and colours are Windows' own.
 #[tauri::command]
 fn style_title_bar(
     window: tauri::WebviewWindow,

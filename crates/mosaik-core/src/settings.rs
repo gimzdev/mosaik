@@ -76,6 +76,17 @@ pub enum OnDisk {
 }
 
 impl Settings {
+    /// "Like Windows" chosen before it went (ADR 0036) becomes the theme Windows has now
+    /// (`windows_light`: its apps' mode is light), so nothing changes on screen. Returns whether
+    /// the theme changed, and so whether to save the settings.
+    pub fn settle_theme(&mut self, windows_light: bool) -> bool {
+        if self.theme != Theme::System {
+            return false;
+        }
+        self.theme = if windows_light { Theme::Light } else { Theme::Dark };
+        true
+    }
+
     /// Remembers that the one-time notice `key` was shown. Returns whether to save the settings
     /// now: when the key is new and the file on disk may be written.
     pub fn notice_shown(&mut self, key: &str, on_disk: OnDisk) -> bool {
@@ -246,10 +257,12 @@ impl Default for EdgeSettings {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {
-    /// Follow Windows (light, dark and high contrast).
-    System,
     Light,
     Dark,
+    /// "Like Windows", offered until 1.0.2 (ADR 0036): settings saved with it take the theme
+    /// Windows has when Mosaïk starts ([`Settings::settle_theme`]). A high-contrast theme is
+    /// followed whatever the theme.
+    System,
 }
 
 #[cfg(test)]
@@ -343,6 +356,33 @@ mod tests {
             serde_json::from_str(r#"{"version":2,"snap":{"enabled":true,"invert_shift":false,"near":48}}"#)
                 .unwrap();
         assert!(older.snap.resize_zones && older.edge.enabled);
+    }
+
+    #[test]
+    fn like_windows_chosen_before_becomes_the_theme_windows_has() {
+        // The owner, 2026-10-16: "is windows like necessary i feel like its basically light
+        // theme". It went; settings that chose it keep what they showed, Windows' mode as Mosaïk
+        // starts, and say so once saved. A theme chosen stays.
+        let like_windows = Settings {
+            theme: Theme::System,
+            ..Settings::default()
+        };
+        for (windows_light, shown) in [(true, Theme::Light), (false, Theme::Dark)] {
+            let mut s = like_windows.clone();
+            assert!(s.settle_theme(windows_light));
+            assert_eq!(s.theme, shown);
+            assert!(!s.settle_theme(!windows_light), "settled once and for all");
+        }
+        for chosen in [Theme::Light, Theme::Dark] {
+            for windows_light in [true, false] {
+                let mut s = Settings {
+                    theme: chosen,
+                    ..Settings::default()
+                };
+                assert!(!s.settle_theme(windows_light));
+                assert_eq!(s.theme, chosen);
+            }
+        }
     }
 
     #[test]

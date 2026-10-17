@@ -15,7 +15,6 @@ import { Button, PageTitle, Row, Section, Segmented, Status, Toggle, useAnnounce
 const THEMES: readonly { value: Theme; label: string }[] = [
   { value: 'dark', label: 'Dark' },
   { value: 'light', label: 'Light' },
-  { value: 'system', label: 'Like Windows' },
 ];
 
 /** Where a window shows its zone's number, when it shows it. */
