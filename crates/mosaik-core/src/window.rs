@@ -96,12 +96,29 @@ pub struct WindowFacts {
     pub dpi: u32,
     /// The process belongs to Mosaïk itself (its UI, overlays or watchdog).
     pub own_process: bool,
+    /// The command Windows' taskbar relaunches the window's app with, when the app says one:
+    /// Git Bash's mintty window says `git-bash.exe`, a Chrome profile's window
+    /// `chrome.exe --profile-directory=…` (job 0185).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relaunch: Option<String>,
 }
 
 impl WindowFacts {
     /// The invisible borders around the visible frame.
     pub fn frame_insets(&self) -> Insets {
         Insets::between(self.window_rect, self.frame_rect)
+    }
+
+    /// The program file (lower case, `git-bash.exe`) of the command that relaunches the window's
+    /// app, when it says one.
+    pub fn relaunch_program(&self) -> Option<String> {
+        match crate::layout::Launch::from_command_line(self.relaunch.as_deref()?)? {
+            crate::layout::Launch::Program { path, .. } => {
+                let name = path.rsplit(['\\', '/']).next().unwrap_or(&path);
+                Some(name.to_lowercase())
+            }
+            crate::layout::Launch::Packaged { .. } => None,
+        }
     }
 }
 

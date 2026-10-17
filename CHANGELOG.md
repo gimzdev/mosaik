@@ -32,6 +32,10 @@
   list into a zone, which they join behind its apps, or onto another app's name to swap them, as
   on the picture. The page is one width, the picture's, in the middle.
 - A workspace's ⋯ menu on Home has Rename, right in its row; Edit zones is on its page.
+- A workspace starts its apps as Windows' taskbar does: Git Bash as Git Bash (not mintty alone,
+  which asked which shell to open and was never found again, so every open started another), a
+  Chrome window with its profile. An app added from the Start menu that shows its window from
+  another program (Git Bash, Steam) is found open.
 - Two themes, Dark and Light. Like Windows is gone: it showed one of them, as Windows did, and if
   you had chosen it, Mosaïk keeps the one it showed.
 - Home's title, picture and layouts are one width, the button ending where the picture does.

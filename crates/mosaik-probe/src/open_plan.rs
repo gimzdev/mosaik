@@ -55,6 +55,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
             "aumid": f.aumid,
             "class": f.class,
             "title": f.title,
+            "relaunch": f.relaunch,
             "minimized": f.minimized,
             "cloak": format!("{:?}", f.cloak),
         })
@@ -108,6 +109,7 @@ pub fn run(args: &[String]) -> Result<Value, String> {
                 "name": s.name(),
                 "app": s.app,
                 "launch": s.launch,
+                "starts_as": s.launch_to_start(),
                 "takes": window.map(|h| format!("{:x}", h.0)),
                 "could_take": could,
             });

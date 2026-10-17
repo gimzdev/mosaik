@@ -147,9 +147,11 @@ pub fn start_apps() -> Result<Vec<StartApp>> {
     }
 }
 
-/// How to start a window's app again: packaged apps by their app id, others by their program
-/// file. Arguments are not replayed (they can hold one-off switches); apps restore their own
-/// documents and tabs.
+/// How to start a window's app again: packaged apps by their app id; others as Windows' taskbar
+/// relaunches them when the window says how (Git Bash by `git-bash.exe`, not its mintty, which
+/// alone asks which shell; a Chrome profile's window with its profile: job 0185), else by their
+/// program file. The program's own arguments are not replayed (they can hold one-off switches);
+/// apps restore their own documents and tabs.
 pub fn launch_for(w: &WindowFacts, path: Option<&str>) -> Option<Launch> {
     if let Some(aumid) = w.aumid.as_deref()
         && aumid.contains('!')
@@ -157,6 +159,9 @@ pub fn launch_for(w: &WindowFacts, path: Option<&str>) -> Option<Launch> {
         return Some(Launch::Packaged {
             aumid: aumid.to_owned(),
         });
+    }
+    if let Some(launch) = w.relaunch.as_deref().and_then(Launch::from_command_line) {
+        return Some(launch);
     }
     let path = path?;
     // Packaged programs cannot be started from their files, and the frame host shows other

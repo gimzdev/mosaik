@@ -150,7 +150,11 @@ impl AppMatch {
         }
         let mut score = 0;
         if let Some(exe) = &self.exe {
-            if !w.exe.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(exe)) {
+            // Its program, or the program that relaunches it: an app started by a launcher
+            // (Git Bash's git-bash.exe, Steam's steam.exe) shows its window from another program
+            // (mintty.exe, steamwebhelper.exe), which names the launcher (job 0185).
+            let own = w.exe.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(exe));
+            if !own && !w.relaunch_program().is_some_and(|p| p.eq_ignore_ascii_case(exe)) {
                 return None;
             }
             score += 100;
@@ -218,6 +222,26 @@ mod tests {
             title: title.into(),
             ..WindowFacts::default()
         }
+    }
+
+    #[test]
+    fn a_window_its_launcher_started_is_found_by_the_launcher() {
+        // Git Bash from the Start menu is git-bash.exe; its window is mintty's, which says
+        // git-bash.exe relaunches it (job 0185). A plain mintty window says nothing: not it.
+        let git_bash = AppMatch::exe("git-bash.exe");
+        let mut window = win(1, "mintty.exe", "mintty", "MINGW64:/c/Users/sebas");
+        window.relaunch = Some(r"C:\Program Files\Git\git-bash.exe".into());
+        assert_eq!(git_bash.score(&window), Some(100));
+        assert!(
+            git_bash
+                .score(&win(2, "mintty.exe", "mintty", "MSYS:/usr/bin"))
+                .is_none()
+        );
+        // Steam's window is its web helper's, relaunched by steam.exe; quoted, with arguments.
+        let steam = AppMatch::exe("steam.exe");
+        let mut helper = win(3, "steamwebhelper.exe", "SDL_app", "Steam");
+        helper.relaunch = Some(r#""C:\Program Files (x86)\Steam\steam.exe" -silent"#.into());
+        assert!(steam.score(&helper).is_some());
     }
 
     #[test]

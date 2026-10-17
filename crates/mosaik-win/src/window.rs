@@ -17,7 +17,7 @@ use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
     TokenIntegrityLevel,
 };
-use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
+use windows::Win32::Storage::EnhancedStorage::{PKEY_AppUserModel_ID, PKEY_AppUserModel_RelaunchCommand};
 use windows::Win32::Storage::Packaging::Appx::GetApplicationUserModelId;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
@@ -487,16 +487,32 @@ fn process_aumid(process: HANDLE) -> Option<String> {
 /// The Application User Model ID a window declares (packaged apps, and apps that set one).
 /// Needs COM initialised on the calling thread.
 pub fn aumid(hwnd: HWND) -> Option<String> {
-    // SAFETY: COM call on a valid window handle; the returned string is freed with
-    // CoTaskMemFree as the API requires.
-    unsafe {
-        let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd).ok()?;
-        let value = store.GetValue(&PKEY_AppUserModel_ID).ok()?;
-        let s = PropVariantToStringAlloc(&value).ok()?;
-        let text = s.to_string().ok();
-        CoTaskMemFree(Some(s.0 as *const c_void));
-        text.filter(|t| !t.is_empty())
-    }
+    declared(hwnd).0
+}
+
+/// What a window declares of its app: its Application User Model ID and the command Windows'
+/// taskbar relaunches it with (Git Bash's mintty window: `GitForWindows.Bash` and
+/// `git-bash.exe`, job 0185). Needs COM initialised on the calling thread.
+pub fn declared(hwnd: HWND) -> (Option<String>, Option<String>) {
+    // SAFETY: COM call on a valid window handle.
+    let Ok(store) = (unsafe { SHGetPropertyStoreForWindow::<IPropertyStore>(hwnd) }) else {
+        return (None, None);
+    };
+    let read = |key| {
+        // SAFETY: a read of one property of the store above; the string is freed with
+        // CoTaskMemFree as the API requires.
+        unsafe {
+            let value = store.GetValue(key).ok()?;
+            let s = PropVariantToStringAlloc(&value).ok()?;
+            let text = s.to_string().ok();
+            CoTaskMemFree(Some(s.0 as *const c_void));
+            text.filter(|t| !t.trim().is_empty())
+        }
+    };
+    (
+        read(&PKEY_AppUserModel_ID),
+        read(&PKEY_AppUserModel_RelaunchCommand),
+    )
 }
 
 /// Gathers facts about windows; caches per-process details while each process runs.
@@ -556,11 +572,13 @@ impl Scanner {
         let frame_rect = frame_rect(hwnd).unwrap_or(window_rect);
         let full_screen = in_full_screen(hwnd, frame_rect, maximized, style);
         let mosaik = is_mosaik(info.exe.as_deref());
+        let (aumid, relaunch) = declared(hwnd);
         Some(WindowFacts {
             handle: handle(hwnd),
             pid,
             exe: info.exe,
-            aumid: aumid(hwnd).or(info.aumid),
+            aumid: aumid.or(info.aumid),
+            relaunch,
             class: class_name(hwnd),
             title: title(hwnd),
             visible,

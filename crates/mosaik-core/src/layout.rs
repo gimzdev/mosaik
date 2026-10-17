@@ -118,7 +118,130 @@ pub enum Launch {
     Packaged { aumid: String },
 }
 
+impl Launch {
+    /// A command line, as Windows keeps one to relaunch a window's app, as a program and its
+    /// arguments: the program quoted, or up to `.exe`, or up to the first space; the arguments
+    /// as programs read them (`CommandLineToArgvW`). `None` for an empty line.
+    pub fn from_command_line(line: &str) -> Option<Launch> {
+        let line = line.trim();
+        if line.is_empty() {
+            return None;
+        }
+        let (program, rest) = if let Some(quoted) = line.strip_prefix('"') {
+            match quoted.find('"') {
+                Some(end) => (&quoted[..end], &quoted[end + 1..]),
+                None => (quoted, ""),
+            }
+        } else {
+            // Unquoted, a path can hold spaces ("C:\Program Files\Git\git-bash.exe"): it ends
+            // at ".exe" followed by a space or the end, else at the first space.
+            let lower = line.to_lowercase();
+            let exe_end = lower
+                .match_indices(".exe")
+                .map(|(i, _)| i + 4)
+                .find(|&end| line[end..].chars().next().is_none_or(char::is_whitespace));
+            let end = exe_end.unwrap_or_else(|| line.find(char::is_whitespace).unwrap_or(line.len()));
+            (&line[..end], &line[end..])
+        };
+        if program.trim().is_empty() {
+            return None;
+        }
+        Some(Launch::Program {
+            path: program.to_owned(),
+            args: split_arguments(rest),
+            working_dir: None,
+        })
+    }
+}
+
+/// Arguments after the program in a command line, as `CommandLineToArgvW` reads them:
+/// whitespace between arguments; quotes group, and do not stay; 2n backslashes before a quote
+/// are n backslashes, 2n+1 are n and a quote kept; other backslashes stay as they are.
+fn split_arguments(rest: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut started = false;
+    let mut quoted = false;
+    let mut backslashes = 0usize;
+    for c in rest.chars() {
+        match c {
+            '\\' => {
+                backslashes += 1;
+                started = true;
+            }
+            '"' => {
+                current.push_str(&"\\".repeat(backslashes / 2));
+                if backslashes % 2 == 1 {
+                    current.push('"');
+                } else {
+                    quoted = !quoted;
+                }
+                backslashes = 0;
+                started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                current.push_str(&"\\".repeat(backslashes));
+                backslashes = 0;
+                if started {
+                    args.push(std::mem::take(&mut current));
+                    started = false;
+                }
+            }
+            c => {
+                current.push_str(&"\\".repeat(backslashes));
+                backslashes = 0;
+                current.push(c);
+                started = true;
+            }
+        }
+    }
+    current.push_str(&"\\".repeat(backslashes));
+    if started {
+        args.push(current);
+    }
+    args
+}
+
 impl Slot {
+    /// How to start its app now: as saved, but never mintty.exe alone, which asks which shell
+    /// and opens one that is not the workspace's (job 0185): Git Bash, saved so by Mosaïk before
+    /// it kept the command Windows relaunches a window with, starts as `git-bash.exe` again;
+    /// another mintty with its login shell.
+    pub fn launch_to_start(&self) -> Option<Launch> {
+        let launch = self.launch.clone()?;
+        let Launch::Program {
+            path,
+            args,
+            working_dir,
+        } = &launch
+        else {
+            return Some(launch);
+        };
+        const MINTTY: &str = "\\usr\\bin\\mintty.exe";
+        let lower = path.to_lowercase();
+        if !args.is_empty() || !lower.ends_with(MINTTY) {
+            return Some(launch);
+        }
+        let git_bash = self
+            .app
+            .aumid
+            .as_deref()
+            .is_some_and(|a| a.eq_ignore_ascii_case("GitForWindows.Bash"));
+        Some(if git_bash {
+            Launch::Program {
+                path: format!("{}\\git-bash.exe", &path[..path.len() - MINTTY.len()]),
+                args: Vec::new(),
+                working_dir: working_dir.clone(),
+            }
+        } else {
+            Launch::Program {
+                path: path.clone(),
+                args: vec!["-".to_owned()],
+                working_dir: working_dir.clone(),
+            }
+        })
+    }
+
     /// What to call its app: its label, else a name made from its window or its program.
     pub fn name(&self) -> String {
         if let Some(label) = self.label.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
@@ -663,6 +786,87 @@ mod tests {
                 },
             }],
         }
+    }
+
+    #[test]
+    fn a_relaunch_command_is_a_program_and_its_arguments() {
+        // As Windows' taskbar keeps them for a window (job 0185).
+        assert_eq!(
+            Launch::from_command_line(
+                r#""C:\Program Files\Google\Chrome\Application\chrome.exe" --profile-directory="Profile 7""#
+            ),
+            Some(Launch::Program {
+                path: r"C:\Program Files\Google\Chrome\Application\chrome.exe".into(),
+                args: vec!["--profile-directory=Profile 7".into()],
+                working_dir: None,
+            })
+        );
+        assert_eq!(
+            Launch::from_command_line(r"C:\Program Files\Git\git-bash.exe"),
+            Some(Launch::Program {
+                path: r"C:\Program Files\Git\git-bash.exe".into(),
+                args: Vec::new(),
+                working_dir: None,
+            }),
+            "a path with spaces and nothing after it, unquoted, is the program"
+        );
+        assert_eq!(
+            Launch::from_command_line(r#"C:\a\b.exe -x "two words" say\"hi\" end\\"#),
+            Some(Launch::Program {
+                path: r"C:\a\b.exe".into(),
+                args: vec![
+                    "-x".into(),
+                    "two words".into(),
+                    "say\"hi\"".into(),
+                    r"end\\".into()
+                ],
+                working_dir: None,
+            })
+        );
+        assert_eq!(Launch::from_command_line("   "), None);
+    }
+
+    #[test]
+    fn mintty_alone_is_never_started_it_asks_which_shell() {
+        // Job 0185: a workspace's Git Bash, saved with mintty.exe as its program, started mintty
+        // alone, which asks which shell (MSYS2, Mingw-w64 32 bit, 64 bit) and opens one that is
+        // not the workspace's. Git Bash starts as git-bash.exe; another mintty with its login
+        // shell, asking nothing.
+        let mintty = |aumid: Option<&str>| Slot {
+            id: SlotId("s1".into()),
+            label: None,
+            app: AppMatch {
+                exe: Some("mintty.exe".into()),
+                aumid: aumid.map(str::to_owned),
+                ..AppMatch::default()
+            },
+            launch: Some(Launch::Program {
+                path: r"C:\Program Files\Git\usr\bin\mintty.exe".into(),
+                args: Vec::new(),
+                working_dir: None,
+            }),
+            place: Place::Maximized { monitor: 0 },
+        };
+        assert_eq!(
+            mintty(Some("GitForWindows.Bash")).launch_to_start(),
+            Some(Launch::Program {
+                path: r"C:\Program Files\Git\git-bash.exe".into(),
+                args: Vec::new(),
+                working_dir: None,
+            })
+        );
+        assert_eq!(
+            mintty(None).launch_to_start(),
+            Some(Launch::Program {
+                path: r"C:\Program Files\Git\usr\bin\mintty.exe".into(),
+                args: vec!["-".into()],
+                working_dir: None,
+            })
+        );
+        // A launch with its own arguments, or another program, is started as it is.
+        let mut chrome = mintty(None);
+        chrome.launch = Launch::from_command_line(r#""C:\Chrome\chrome.exe" --profile-directory=Default"#);
+        assert_eq!(chrome.launch_to_start(), chrome.launch);
     }
 
     #[test]

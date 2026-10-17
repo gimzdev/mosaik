@@ -630,8 +630,8 @@ pub fn plan_switch(
                     });
                 }
             }
-            None => match (&slot.launch, settings.launch_missing) {
-                (Some(launch), true) => plan.launch.push((slot.id.clone(), launch.clone())),
+            None => match (slot.launch_to_start(), settings.launch_missing) {
+                (Some(launch), true) => plan.launch.push((slot.id.clone(), launch)),
                 _ => plan.missing.push(slot.id.clone()),
             },
         }
