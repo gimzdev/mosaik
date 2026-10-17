@@ -1,16 +1,20 @@
 // Pictures: apps' own icons (read from Windows once per app, a few at a time; an app without one
 // shows none), and the few line drawings the window uses for its controls.
 
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useSyncExternalStore } from 'react';
 
 import { appIcons } from './engine';
 
 /** Icons read so far: a `data:` URL, or null for an app without one. */
 const cache = new Map<string, string | null>();
-/** Callers waiting for each key being read. */
-const waiting = new Map<string, ((url: string | null) => void)[]>();
+/** Keys asked for, read or being read: each is read once. */
+const asked = new Set<string>();
 /** Keys asked for and not read yet, in the order the page asked for them. */
 const queued: string[] = [];
+/** Drawings told when icons come in. Every icon drawn is told, not only the one that asked: an
+ * icon can come in between being drawn and asking (React asks after the paint), and another
+ * drawing of the same app may be the one that asked. */
+const listeners = new Set<() => void>();
 let scheduled = false;
 /** A read is under way: the next waits for it. */
 let reading = false;
@@ -28,12 +32,8 @@ function read() {
   reading = true;
   void appIcons(keys)
     .then((found) => {
-      for (const key of keys) {
-        const url = found[key] ?? null;
-        cache.set(key, url);
-        for (const done of waiting.get(key) ?? []) done(url);
-        waiting.delete(key);
-      }
+      for (const key of keys) cache.set(key, found[key] ?? null);
+      for (const told of [...listeners]) told();
     })
     .finally(() => {
       reading = false;
@@ -41,38 +41,31 @@ function read() {
     });
 }
 
-function load(key: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const list = waiting.get(key);
-    if (list) {
-      list.push(resolve);
-      return;
-    }
-    waiting.set(key, [resolve]);
-    queued.push(key);
-    if (!scheduled) {
-      scheduled = true;
-      setTimeout(read, 0);
-    }
-  });
+/** Reads the icon for `key`, unless it has been asked for already. */
+function ask(key: string) {
+  if (asked.has(key)) return;
+  asked.add(key);
+  queued.push(key);
+  if (!scheduled) {
+    scheduled = true;
+    setTimeout(read, 0);
+  }
+}
+
+function subscribe(told: () => void): () => void {
+  listeners.add(told);
+  return () => {
+    listeners.delete(told);
+  };
 }
 
 /** The icon for `key`: a URL, null when there is none, undefined while it is being read. */
 function useIcon(key: string | null): string | null | undefined {
-  // Only the answer matters, not which one: it is in the cache once it has come.
-  const [, setRead] = useState(0);
+  const url = useSyncExternalStore(subscribe, () => (key === null ? null : cache.get(key)));
   useEffect(() => {
-    if (key === null || cache.has(key)) return;
-    let live = true;
-    void load(key).then(() => {
-      if (live) setRead((n) => n + 1);
-    });
-    return () => {
-      live = false;
-    };
+    if (key !== null) ask(key);
   }, [key]);
-  if (key === null) return null;
-  return cache.get(key);
+  return url;
 }
 
 /** An app's own icon, as Windows has it, or nothing: never a made-up picture in its place.

@@ -1,4 +1,6 @@
 import { cleanup, render, waitFor } from '@testing-library/react';
+import { useLayoutEffect } from 'react';
+import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AppIcon } from './icons';
@@ -43,5 +45,62 @@ describe('apps’ icons', () => {
     expect(most).toBe(1);
     // The first ones on the page come first.
     expect(asked[0]).toEqual(keys.slice(0, 24));
+  });
+
+  it('shows an icon that came in between drawing it and asking for it', async () => {
+    // The pictures of the window for the README, 2026-10-16: Suggested's sets showed only the
+    // icons of apps no workspace above them has. A set drawn while a workspace's read of the same
+    // icon was under way, that read coming in before the set asked for it (React asks after the
+    // paint), was never drawn again: the icon stayed missing.
+    const key = 'app:Drawn.Before.Read';
+    let answer: (found: Record<string, string | null>) => void = () => undefined;
+    engine.appIcons.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    // Rendered as the window does, outside act(): effects run after the paint, not at once.
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean | undefined };
+    const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+    env.IS_REACT_ACT_ENVIRONMENT = false;
+    const box = document.createElement('div');
+    document.body.append(box);
+    const root = createRoot(box);
+    try {
+      /** The read comes in as soon as the second icon is on the page, before its effects. */
+      function ReadComesIn() {
+        useLayoutEffect(() => {
+          answer({ [key]: 'data:image/png;base64,AAAA' });
+        }, []);
+        return null;
+      }
+      const page = (second: boolean) => (
+        <>
+          <span data-row="workspace">
+            <AppIcon icon={key} />
+          </span>
+          {second ? (
+            <span data-row="set">
+              <AppIcon icon={key} />
+              <ReadComesIn />
+            </span>
+          ) : null}
+        </>
+      );
+      root.render(page(false));
+      await vi.waitFor(() => {
+        expect(engine.appIcons).toHaveBeenCalledWith([key]);
+      });
+      root.render(page(true));
+      await vi.waitFor(() => {
+        expect(box.querySelector('[data-row="workspace"] img')).not.toBeNull();
+        expect(box.querySelector('[data-row="set"] img')).not.toBeNull();
+      });
+    } finally {
+      root.unmount();
+      box.remove();
+      env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    }
   });
 });

@@ -38,6 +38,8 @@
   another program (Git Bash, Steam) is found open.
 - Two themes, Dark and Light. Like Windows is gone: it showed one of them, as Windows did, and if
   you had chosen it, Mosaïk keeps the one it showed.
+- Apps' icons no longer go missing: a suggested set drawn while a workspace above it was reading
+  the same app's icon showed none of it.
 - Home's title, picture and layouts are one width, the button ending where the picture does.
 - Every layout is in view, in two rows beside Automatic: Halves, Thirds, Main + side, Side +
   main, Half + stack, Stack + half, Quarters and Full screen. Top + bottom and Three rows are gone
