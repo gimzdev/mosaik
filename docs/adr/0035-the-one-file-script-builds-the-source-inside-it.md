@@ -1,6 +1,6 @@
 # 0035. The one-file mosaik.ps1 builds the source inside it
 
-- Status: accepted
+- Status: accepted; amended by ADR 0040 (one folder, `mosaik`, whatever the version; a repository there worked in as it is)
 - Date: 2026-10-16
 
 ## Context

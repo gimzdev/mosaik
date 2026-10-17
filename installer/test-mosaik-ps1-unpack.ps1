@@ -12,6 +12,11 @@
   aside, never lost; then nothing more on the next run. A folder unpacked by a mosaik.ps1 from
   before this check (no record of its source) is brought up to date the same way, its files
   still dated as the source inside left them taken for the old source's.
+
+  The folder is `mosaik`, whatever the version: a newer version brings the same folder up to
+  date, and none is made per version (the owner, on 2026-10-17: "one folder for site one for app
+  why a third"). Mosaik's repository there, as the owner keeps his beside his mosaik.ps1, is
+  worked in as it is and never written, and the copy says whether its source is the copy's.
 #>
 [CmdletBinding()]
 param(
@@ -46,6 +51,11 @@ function Run([string]$Copy, [string[]]$Arguments) {
   if ($LASTEXITCODE -ne 0) { throw ("{0} {1} failed: {2}" -f $Copy, ($Arguments -join ' '), ($out -join ' / ')) }
   $out
 }
+# Makes a folder a Git repository (an empty one: git tracks nothing yet), as the owner's is.
+function New-Repository([string]$Path) {
+  if (Get-Command git -ErrorAction SilentlyContinue) { & git init -q $Path; if ($LASTEXITCODE -ne 0) { throw "git init $Path failed" } }
+  else { New-Item -ItemType Directory -Force -Path (Join-Path $Path '.git') | Out-Null }
+}
 # Packs the small source; the one-file copy it makes.
 function Pack {
   Run (Join-Path $src 'mosaik.ps1') @('pack', $src) | Out-Null
@@ -77,8 +87,9 @@ try {
   $copy = Join-Path $beside 'mosaik.ps1'
   Copy-Item (Pack) $copy
   Run $copy @('unpack') | Out-Null
-  $unpacked = Join-Path $beside 'mosaik-9.9.9'
+  $unpacked = Join-Path $beside 'mosaik'
   Check ((Read-Text $unpacked 'apps/desktop/src/Home.tsx') -eq 'Arrange') 'the first source was not unpacked'
+  Check (-not (Test-Path -LiteralPath (Join-Path $beside 'mosaik-9.9.9'))) 'a folder named for the version was made'
 
   # Its build, a change of the user's and a file of the user's own.
   Put $unpacked 'target/release/build.txt' 'a build'
@@ -148,10 +159,46 @@ try {
   Check (@(Aside).Count -eq 1) 'files of a folder with no record, as the source inside dated them, were moved aside'
   Check ((Read-Text $unpacked 'notes/mine.txt') -eq 'the user''s own') 'a file of the user''s own was not left where it is (no record)'
   Check ((Recorded) -eq (Fingerprint $copy)) 'the folder with no record does not say which source it has now'
+
+  # A newer version: the same folder, brought up to date; none made for the version.
+  Put $src 'Cargo.toml' "[workspace.package]`nversion = `"9.9.10`"`n"
+  Put $src 'apps/desktop/src/Home.tsx' 'Move windows, in 9.9.10'
+  Copy-Item (Pack) $copy -Force
+  Run $copy @('pack') | Out-Null
+  Check ((Read-Text $unpacked 'apps/desktop/src/Home.tsx') -eq 'Move windows, in 9.9.10') 'a newer version did not bring the folder up to date'
+  $folders = @(Get-ChildItem -Directory -LiteralPath $beside | ForEach-Object { $_.Name })
+  Check (($folders -join ',') -eq 'mosaik') ('folders beside the copy after a newer version: {0}' -f ($folders -join ', '))
+
+  # Mosaik's repository beside a copy, with another source: worked in as it is, never written
+  # (its files as they were, no record, nothing moved aside, nothing unpacked into it, no other
+  # folder made), and said so.
+  $withRepository = Join-Path $work 'with-repository'
+  $repository = Join-Path $withRepository 'mosaik'
+  Put $repository 'Cargo.toml' "[workspace.package]`nversion = `"9.9.10`"`n"
+  Put $repository 'crates/mosaik-core/src/lib.rs' 'the repository''s own'
+  New-Repository $repository
+  $nextToRepository = Join-Path $withRepository 'mosaik.ps1'
+  Copy-Item $copy $nextToRepository
+  $said = Run $nextToRepository @('unpack')
+  Check ((Read-Text $repository 'crates/mosaik-core/src/lib.rs') -eq 'the repository''s own') 'a file of the repository was written'
+  Check ($null -eq (Read-Text $repository 'apps/desktop/src/Home.tsx')) 'the source inside was unpacked into the repository'
+  Check (-not (Test-Path -LiteralPath (Join-Path $repository '.mosaik-source.json'))) 'the repository was given a record of a source'
+  Check (-not (Test-Path -LiteralPath (Join-Path $repository '.mosaik-replaced'))) 'files of the repository were moved aside'
+  Check (@(Get-ChildItem -Directory -LiteralPath $withRepository).Count -eq 1) 'another folder was made beside the repository'
+  Check (($said -join ' ') -match 'Git repository') ('the repository not said: {0}' -f ($said -join ' / '))
+  Check (($said -join ' ') -match 'not the one inside this file') ('a repository with another source not said so: {0}' -f ($said -join ' / '))
+
+  # The same with the copy's own source in the repository: said to be the copy's.
+  $sameSource = Join-Path $work 'same-source'
+  Run $copy @('unpack', (Join-Path $sameSource 'mosaik')) | Out-Null
+  New-Repository (Join-Path $sameSource 'mosaik')
+  Copy-Item $copy (Join-Path $sameSource 'mosaik.ps1')
+  $said = Run (Join-Path $sameSource 'mosaik.ps1') @('unpack')
+  Check (($said -join ' ') -match 'is the one inside this file') ('a repository with the copy''s source not said so: {0}' -f ($said -join ' / '))
 }
 finally {
   Remove-Item -Recurse -Force -LiteralPath $work -ErrorAction SilentlyContinue
 }
 
 if ($failures.Count -gt 0) { throw ("mosaik.ps1, a new source over one unpacked before: {0}" -f ($failures -join '; ')) }
-Write-Host 'mosaik.ps1, a new source over one unpacked before (same version): files changed, added and gone, dated after the build; the build and the user''s own files kept; the user''s change kept aside; nothing on a second run; a folder with no record of its source; how many files it says: 20 checks passing.' -ForegroundColor Green
+Write-Host 'mosaik.ps1, a new source over one unpacked before (same version): files changed, added and gone, dated after the build; the build and the user''s own files kept; the user''s change kept aside; nothing on a second run; a folder with no record of its source; how many files it says; one folder whatever the version; a repository worked in as it is, never written: 31 checks passing.' -ForegroundColor Green

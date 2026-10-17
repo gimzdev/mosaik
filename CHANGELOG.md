@@ -94,6 +94,8 @@
   its build kept and a file changed there moved to `.mosaik-replaced`, never lost. A build that
   fails starts again the Mosaïk that quit for it.
 - The site's script is `mosaik.sh`, named after the app like `mosaik.ps1` (it was `mosaik1.sh`).
+- `mosaik.ps1` works in one folder, `mosaik` beside it, whatever its version (a newer one brings it
+  up to date), and in Mosaïk's repository as it is when that is the folder: no copy per version.
 
 ## 1.0.1
 

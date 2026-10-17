@@ -205,8 +205,9 @@ or deploys it.<br>
 .\mosaik.ps1 pack       # a one-file copy with this source inside (target\mosaik.ps1)
 ```
 
-A one-file copy works in `mosaik-<version>` beside it: it unpacks its source there, and brings
-the folder to its own source whenever it is another's, keeping the build.
+A one-file copy works in `mosaik` beside it, whatever its version: it unpacks its source there,
+and brings the folder to its own source whenever it is another's, keeping the build. When that
+folder is Mosaïk's Git repository, it works in the repository as it is and never writes into it.
 
 <hr>
 

@@ -7,8 +7,9 @@
 .DESCRIPTION
   Right-click this file and choose "Run with PowerShell" for a menu. From a terminal:
 
-    .\mosaik.ps1 unpack [folder]   put the source in a folder (default: mosaik-<version> beside this file;
-                                  another mosaik.ps1's source there is brought to this one's)
+    .\mosaik.ps1 unpack [folder]   put the source in a folder (default: mosaik beside this file, whatever
+                                  the version; another mosaik.ps1's source there is brought to this
+                                  one's, and Mosaik's Git repository there is worked in as it is)
     .\mosaik.ps1 check             see what building needs; offers to install what is missing (winget)
     .\mosaik.ps1 build             build the interface, then mosaik.exe, its watchdog and mosaikctl
     .\mosaik.ps1 test              run the tests and checks
@@ -39,6 +40,9 @@ $SourceSha256 = ''
 
 # Set by publish when the Store still checks the version sent before: nothing sent, exit code 3.
 $Waiting = $false
+# Set once this run has said it works in the repository beside this file (publish asks for the
+# source three times: tests, build, package).
+$RepositoryShown = $false
 
 # Paths the source inside never includes: what building makes, the site (mosaik.sh makes it),
 # the README's pictures of the site, this PC's own settings (.env.local: the Store's key), and an
@@ -66,10 +70,11 @@ function Test-Source([string]$Path) {
   $Path -and (Test-Path (Under $Path 'Cargo.toml')) -and (Test-Path (Under $Path 'crates' 'mosaik-core'))
 }
 
-# The source to work on: the folder given, the repository this file is in, or the folder this
-# file unpacks to: unpacked first if it is not yet, and brought to the source inside this file
-# when another mosaik.ps1 put its own there (the owner, building from his mosaik.ps1, got the
-# source a mosaik.ps1 of the day before had unpacked: the version had not changed, the source had).
+# The source to work on: the folder given, the repository this file is in, Mosaik's repository
+# beside it (as it is), or the folder this file unpacks to: unpacked first if it is not yet, and
+# brought to the source inside this file when another mosaik.ps1 put its own there (the owner,
+# building from his mosaik.ps1, got the source a mosaik.ps1 of the day before had unpacked: the
+# version had not changed, the source had).
 function Get-Source {
   if ($Folder) {
     if (Test-Source $Folder) { return (Resolve-Path $Folder).Path }
@@ -77,14 +82,39 @@ function Get-Source {
   }
   if (Test-Source $PSScriptRoot) { return $PSScriptRoot }
   $target = Get-DefaultFolder
+  if (Test-Repository $target) {
+    if (-not $script:RepositoryShown) { Show-Repository $target; $script:RepositoryShown = $true }
+    return (Resolve-Path $target).Path
+  }
   if (-not (Test-Source $target)) { Expand-Source $target }
   elseif ((Get-RecordedSha256 $target) -ne $SourceSha256) { Update-Source $target }
   $target
 }
 
+# The folder this file unpacks to: mosaik beside it, whatever the version, so that a newer
+# mosaik.ps1 brings the same folder up to date and none piles up per version (ADR 0040).
 function Get-DefaultFolder {
-  $name = if ($SourceVersion) { "mosaik-$SourceVersion" } else { 'mosaik' }
-  Under $PSScriptRoot $name
+  Under $PSScriptRoot 'mosaik'
+}
+
+# Mosaik's source in a Git repository (the owner keeps his beside his mosaik.ps1): worked in as it
+# is, never written by this file, which would make its files differ from what git has (ADR 0040).
+function Test-Repository([string]$Path) {
+  (Test-Source $Path) -and (Test-Path (Under $Path '.git'))
+}
+
+# Says that this file works in a repository as it is, and whether its source is the one inside.
+function Show-Repository([string]$Path) {
+  $root = (Resolve-Path $Path).Path
+  Say ("{0} is Mosaik's Git repository: this file works in it as it is, and never writes into it." -f $root) Cyan
+  $difference = Compare-Source $root
+  if ($difference.Different.Count -eq 0 -and $difference.Missing.Count -eq 0) {
+    Say ("Its source is the one inside this file ({0} files)." -f $difference.Files.Count) Green
+  }
+  else {
+    $sample = @($difference.Different + $difference.Missing | Select-Object -First 5) -join ', '
+    Say ("Its source is not the one inside this file ({0} files differ, {1} are not there; for example {2}): the repository's is the one used." -f $difference.Different.Count, $difference.Missing.Count, $sample) Yellow
+  }
 }
 
 # --- The source inside this file -----------------------------------------------------------------
@@ -178,6 +208,9 @@ function Expand-Source([string]$Target) {
 # before records has none, and its files still dated as the source inside dates them are taken
 # for the old source's (a change made since dates a file anew).
 function Update-Source([string]$Target) {
+  if (Test-Path (Under $Target '.git')) {
+    Fail "$Target is a Git repository: this file never writes into one. Work in it as it is, or unpack to another folder: .\mosaik.ps1 unpack <folder>"
+  }
   $zip = Get-Payload
   $new = Get-PayloadFiles $zip
   $record = Read-Record $Target
@@ -314,35 +347,31 @@ function Invoke-Pack {
   Say 'Take it, with mosaik.sh for the site, to any Windows PC: right-click, Run with PowerShell.'
 }
 
+# How a folder's source differs from the one inside this file: its source files, the ones whose
+# bytes differ, and the ones inside that it has not (compared file by file, since two zip
+# libraries compress the same files differently).
+function Compare-Source([string]$Root) {
+  $inside = @{}
+  $payload = Get-PayloadFiles (Get-Payload)
+  foreach ($name in $payload.Keys) { $inside[$name] = Get-Sha256 $payload[$name] }
+  $files = @(Get-SourceFiles $Root)
+  [pscustomobject]@{
+    Files = $files
+    Different = @($files | Where-Object { $inside[$_] -ne (Get-Sha256 ([IO.File]::ReadAllBytes((Under $Root $_)))) })
+    Missing = @($inside.Keys | Where-Object { $files -notcontains $_ })
+  }
+}
+
 # Checks that the source inside this file is exactly the files of a folder: the same names, the
-# same contents (compared file by file, since two zip libraries compress the same files
-# differently).
+# same contents.
 function Invoke-Verify {
   if (-not $Folder) { Fail 'Give the folder to compare with: .\mosaik.ps1 verify <folder>' }
-  $zip = Read-Payload
-  if (-not $zip) { Fail 'This copy of mosaik.ps1 carries no source.' }
-  if ((Get-Sha256 $zip) -ne $SourceSha256) { Fail 'The source inside this file is damaged.' }
-  Add-Type -AssemblyName System.IO.Compression
-  $inside = @{}
-  $archive = New-Object IO.Compression.ZipArchive((New-Object IO.MemoryStream(, $zip)), [IO.Compression.ZipArchiveMode]::Read)
-  try {
-    foreach ($entry in $archive.Entries) {
-      $buffer = New-Object IO.MemoryStream
-      $stream = $entry.Open()
-      try { $stream.CopyTo($buffer) } finally { $stream.Dispose() }
-      $inside[$entry.FullName] = Get-Sha256 $buffer.ToArray()
-    }
+  $difference = Compare-Source (Resolve-Path $Folder).Path
+  if ($difference.Different.Count -gt 0 -or $difference.Missing.Count -gt 0) {
+    $sample = @($difference.Different + $difference.Missing | Select-Object -First 5) -join ', '
+    Fail ("The source inside this file is not the source of {0} ({1} files differ, {2} are not there; for example {3}). Make it again: .\mosaik.ps1 pack" -f $Folder, $difference.Different.Count, $difference.Missing.Count, $sample)
   }
-  finally { $archive.Dispose() }
-  $root = (Resolve-Path $Folder).Path
-  $files = Get-SourceFiles $root
-  $different = @($files | Where-Object { $inside[$_] -ne (Get-Sha256 ([IO.File]::ReadAllBytes((Under $root $_)))) })
-  $extra = @($inside.Keys | Where-Object { $files -notcontains $_ })
-  if ($different.Count -gt 0 -or $extra.Count -gt 0) {
-    $sample = @($different + $extra | Select-Object -First 5) -join ', '
-    Fail ("The source inside this file is not the source of {0} ({1} files differ, {2} are not there; for example {3}). Make it again: .\mosaik.ps1 pack" -f $Folder, $different.Count, $extra.Count, $sample)
-  }
-  Say ("The source inside this file is the source of {0} ({1} files)." -f $Folder, $files.Count) Green
+  Say ("The source inside this file is the source of {0} ({1} files)." -f $Folder, $difference.Files.Count) Green
 }
 
 # --- What building needs -------------------------------------------------------------------------
@@ -738,7 +767,8 @@ function Show-Menu {
     try {
       switch ($choice) {
         '1' {
-          if (-not (Test-Source $where)) { Expand-Source $where }
+          if ($SourceSha256 -and (Test-Repository $where)) { Show-Repository $where }
+          elseif (-not (Test-Source $where)) { Expand-Source $where }
           elseif ($SourceSha256 -and (Get-RecordedSha256 $where) -ne $SourceSha256) { Update-Source $where }
           else { Say "The source is already in $where." Green }
         }
@@ -762,7 +792,8 @@ try {
     'menu' { Show-Menu }
     'unpack' {
       $target = if ($Folder) { $Folder } else { Get-DefaultFolder }
-      if ((Test-Source $target) -and (Get-RecordedSha256 $target) -ne $SourceSha256) { Update-Source $target }
+      if (Test-Repository $target) { Show-Repository $target }
+      elseif ((Test-Source $target) -and (Get-RecordedSha256 $target) -ne $SourceSha256) { Update-Source $target }
       elseif (Test-Source $target) { Say "The source is already in $target." Green }
       else { Expand-Source $target }
     }
