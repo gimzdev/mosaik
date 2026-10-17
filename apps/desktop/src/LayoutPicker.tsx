@@ -36,8 +36,7 @@ const OTHER = 'text-[var(--muted)] hover:bg-[var(--panel)] hover:text-[var(--tex
 
 /** One layout: its picture above its name, with a radio button over the whole of it, unseen, so
  * a click anywhere on it chooses it and a screen reader's focus box is the layout, not a dot. Its
- * name has the room to stay on one line at the window's smallest size; zoomed in, it may take
- * two. */
+ * name stays on one line at the window's smallest size; zoomed in, it may take two. */
 function Option({
   group,
   choice,
@@ -59,7 +58,7 @@ function Option({
     <label
       title={title ?? choiceName(choice)}
       className={`relative flex min-h-[54px] min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-caption font-semibold transition-colors duration-150 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus)] has-[:disabled]:opacity-50 ${
-        auto ? 'row-span-2 px-3' : ''
+        auto ? 'row-span-2 px-2' : ''
       } ${on ? CHOSEN : OTHER}`}
     >
       <input
@@ -78,7 +77,11 @@ function Option({
       ) : (
         <LayoutGlyph shape={presetShape(choice)} width={30} height={18} colored={on} />
       )}
-      <span className="line-clamp-2 max-w-full text-center leading-tight">{choiceName(choice)}</span>
+      {/* A size smaller where the layouts have little room (the window at its smallest), so each
+          name stays on one line: Windows draws text a little wider than the tests measure it. */}
+      <span className="line-clamp-2 max-w-full text-center leading-tight @max-[30rem]:text-[0.75rem]">
+        {choiceName(choice)}
+      </span>
     </label>
   );
 }
@@ -100,7 +103,7 @@ export function LayoutPicker({
 }) {
   const group = useId();
   return (
-    <fieldset className="min-w-0">
+    <fieldset className="@container min-w-0">
       <legend className="sr-only">Layout</legend>
       <div className="grid grid-cols-[minmax(5.5rem,auto)_repeat(4,minmax(0,1fr))] gap-1">
         {(['auto', ...LAYOUTS] as const).map((choice) => (

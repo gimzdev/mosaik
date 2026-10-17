@@ -1011,19 +1011,34 @@ test.describe('at the smallest window size', () => {
     await accessible(page);
   });
 
-  test('says every layout’s name on one line', async ({ page }) => {
+  test('says every layout’s name on one line, with room to spare', async ({ page }) => {
     // The pass over the window, 2026-10-16: Side + main, Half + stack and Stack + half broke onto
-    // two lines here (70 px of name in 68 of room), the others not.
+    // two lines here (70 px of name in 68 of room), the others not; and on the owner's PC (job
+    // 0190) still with 72, Windows drawing the same text wider and the page's scroll bar taking
+    // some of the width. Each name has 6 px to spare here.
     await page.goto('/');
     const fieldset = page.getByRole('group', { name: 'Layout' });
     await expect(fieldset.getByRole('radio')).toHaveCount(9);
-    const lines = await fieldset.locator('label > span').evaluateAll((names) =>
-      names.map((n) => {
-        const height = n.getBoundingClientRect().height;
-        return `${n.textContent}: ${String(Math.round(height / parseFloat(getComputedStyle(n).lineHeight)))}`;
+    const names = await fieldset.locator('label > span').evaluateAll((spans) =>
+      spans.map((n) => {
+        const label = n.parentElement;
+        const style = label ? getComputedStyle(label) : null;
+        const room =
+          label && style ? label.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) : 0;
+        const probe = document.createElement('span');
+        probe.style.cssText = `position:absolute;white-space:nowrap;visibility:hidden;font:${getComputedStyle(n).font}`;
+        probe.textContent = n.textContent;
+        document.body.append(probe);
+        const needs = probe.getBoundingClientRect().width;
+        probe.remove();
+        const lines = Math.round(n.getBoundingClientRect().height / parseFloat(getComputedStyle(n).lineHeight));
+        return { name: n.textContent, spare: Math.floor(room - needs), lines };
       }),
     );
-    expect(lines).toEqual(lines.map((l) => l.replace(/\d+$/, '1')));
+    for (const n of names) {
+      expect(n.lines, `${n.name}: lines`).toBe(1);
+      expect(n.spare, `${n.name}: px to spare`).toBeGreaterThanOrEqual(6);
+    }
   });
 });
 
