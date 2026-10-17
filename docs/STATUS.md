@@ -20,6 +20,7 @@ re-run before each release.
 | 8. Release | Store package, licences, one-file app and site ready (the download is the Store's installer, the owner's choice); Store submission is the owner's | [Step 8](#step-8-release) |
 | 1.0.1, first builds | (called 1.1 then) built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.0.1: first builds](#101-first-builds) |
 | 1.0.1 | (called 2.0 until 2026-10-13) built, tested and packaged on Windows (jobs 0122 to 0143): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 1.0.1.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's key is kept (the key alone asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant made, linked to the developer account, and its application "Mosaik Store publishing" made with a key on 2026-10-13 | [1.0.1: the window rebuilt](#101-the-window-rebuilt) |
+| 1.0.2 | built and tested on Windows (jobs 0146 to 0178): a workspace previewed before it opens, the picture where zones and windows change (dragged, swapped, resized), every layout in view, a workspace's page with its apps by zone, the first run with no note; the last full check every test and probe check passing (job 0175); the owner's own `mosaik.ps1` beside the repository builds and tests it, every test passing (job 0178); sending it to the Store stays the owner's (`./mosaik1.sh --deploy --app`) | [1.0.2](#102) |
 
 ## Step 1: verify assumptions
 
@@ -1794,6 +1795,17 @@ simetric and appealing". ADR 0032.
   focus back from where Shift+Tab had put it (the keyboard's smoke test, 1 run in 25 with the
   first change alone). Tests first: interface 147; the page's tests 0 failing in 30 runs, the
   keyboard's smoke test 0 in 200; Playwright 40.
+- **On the owner's PC** (job 0178, at 29868df): no Mosaïk was running (job 0177's failed build);
+  the Store's Mosaïk 1.0.1.0 is the Start menu's Mosaïk and does not start with Windows (its
+  startup task off). Every source file of `mosaik-1.0.2` dated now, once (297 files). The owner's
+  `mosaik.ps1` beside the repository, run as he runs it: `build` brought the folder to its source
+  (10 files, the build kept, nothing kept aside) and built it (exit 0, 143 s): the interface has
+  Move windows, Replace with what's on screen and Save name, neither More layouts nor the first
+  run's note, and `mosaik.exe` is newer than it and than the files. Started in the tray: 1.0.2,
+  protocol 12, watchdog, Win+Alt+Space registered; its window pictured, Home as it is now. `test`:
+  exit 0 (98 s): core 307, clippy, interface 147, the Store's stand-ins, this script's 14 cases
+  and the unpack test's 16 checks. Mosaïk left running from `mosaik-1.0.2`, its window open.
+  Packed (296 files); both files beside the repository brought up to date (the key line kept).
 
 ## Owner decisions
 
@@ -1871,3 +1883,5 @@ simetric and appealing". ADR 0032.
   zone it adds the app there ("permute when specifically dropped on another app otherwise just
   add"); the workspace's page is symmetrical; its menu has Rename and no Edit zones, which is on
   its page. ADR 0034.
+- 2026-10-16: his `mosaik.ps1` builds the source it carries, whatever an older one left beside it
+  ("lets clear all you need and do the job properly please"). ADR 0035.
