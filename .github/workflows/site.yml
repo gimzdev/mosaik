@@ -32,8 +32,10 @@ jobs:
           node-version: 24
       - name: Lint the script
         run: shellcheck mosaik1.sh
+      # Into site/ itself: run from the repository's root, the script writes ./mosaik_site, and
+      # the check below compared site/ with nothing.
       - name: Generate and build site/, as the owner does
-        run: bash mosaik1.sh --build
+        run: bash mosaik1.sh --build --dir site
       - name: site/ is exactly what mosaik1.sh writes
         run: |
           drift="$(git status --porcelain -- site ':!site/package-lock.json')"

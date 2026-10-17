@@ -58,7 +58,7 @@ PATREON_URL="https://www.patreon.com/gimzdev"
 STORE_ID="9PHR0L7S1QVD"                  # Mosaïk in the Microsoft Store: every Download button installs it
 VERCEL_PROJECT="mosaik"
 
-MK_VERSION="1.11.4"
+MK_VERSION="1.11.5"
 
 # ── Output ───────────────────────────────────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -569,7 +569,7 @@ const FEATURES = [
     id: 'zones',
     title: 'Zones give every window a home',
     body: 'One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it. Or pick one of eight layouts, or carve the screen into zones of your own, numbered by place. Before you click, Mosaïk shows where each window would go, and you can drag windows and the lines between zones until it is right.',
-    points: ['Zones belong to the project, not the monitor', 'Every window wears its zone’s colour, so you can tell at a glance', 'Works across multiple displays'],
+    points: ['Zones belong to the project, not the monitor', 'Every window shows its zone’s number in its colour, so you can tell at a glance', 'Works across multiple displays'],
     Art: ZonesArt,
   },
   {
