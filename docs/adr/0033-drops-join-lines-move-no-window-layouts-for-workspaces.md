@@ -1,7 +1,7 @@
 # 0033. A window dropped onto a zone joins it, a line dragged moves no window, and a workspace takes a layout with every app
 
 - Status: accepted
-- Date: 2026-10-16
+- Date: 2026-10-16 (a refused drop said: 2026-10-17)
 - Amends: ADR 0031 (the picture, the first run's note), 0032 (drops onto a zone, stretched zones)
 
 ## Context
@@ -37,7 +37,11 @@ window stacked in a zone made too small by the line to another zone.
 **A window dropped onto a zone itself joins it**, behind the windows there (`Placed::join`), or
 takes it when it is empty, as before. No other window changes zone, and every zone keeps its
 colour. When the zones cannot make room for it there without sending another window elsewhere,
-or it fits none, the drop changes nothing. Dropped onto another window, the two still trade
+or it fits none, the drop changes nothing, and the picture says so, whatever the app (since
+2026-10-17, after "it simply doesnt do anything" with TFT Academy): the window, the zone, the
+smallest its app lets it be, and what to do instead ("Drag a line to make zone 2 bigger, or drop
+it in a bigger zone."), from `Plan::refused` and `refused` on the preview (protocol 12, an
+optional field). Dropped onto another window, the two still trade
 places (ADR 0032), as on a workspace's picture. Hints: "Drag a window into a zone to add it
 there, onto another window to swap them, or drag a line to resize zones."
 
