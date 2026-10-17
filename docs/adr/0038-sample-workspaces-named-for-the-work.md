@@ -15,14 +15,15 @@ UI tour, "Client website" on the site.
 ## Decision
 
 Sample workspaces are named for the work done in them, generic but not vague: in the stand-in
-engine "Web development", "Side project" and "Brand design"; in the UI tour's profile "Web
-development"; on the site "Web development" (it was "Client website"), beside "Brand refresh",
-"Thesis, chapter 3" and "Friday stream". Pictures of the site are captioned "mosaïk.com", never
-"Website". The window's own link to the site, in About, keeps its name.
+engine "Client work", "Side project" and "Brand design"; in the UI tour's profile "Client work";
+on the site "Client work" (it was "Client website"), beside "Brand refresh", "Thesis, chapter 3"
+and "Friday stream". Each fits on one line in Home's list of workspaces ("Web development" did
+not). Pictures of the site are captioned "mosaïk.com", never "Website". The window's own link to
+the site, in About, keeps its name.
 
 ## Consequences
 
 - `apps/desktop/src/mock.ts`, the browser tests and `ZoneEditor.test.tsx` use the new names; the
-  tour (`crates/mosaik-probe/src/ui_tour.rs`) prepares "Web development".
+  tour (`crates/mosaik-probe/src/ui_tour.rs`) prepares "Client work".
 - The screenshots in `docs/screenshots`, `gimz/screenshots` and the portfolio were taken again with
   these names, the site's first.

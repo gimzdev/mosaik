@@ -97,7 +97,7 @@ const workspaces: Workspace[] =
     : [
         {
           id: 'ship',
-          name: 'Web development',
+          name: 'Client work',
           windows: 4,
           zones: 3,
           hotkey: 'Win+Alt+J',

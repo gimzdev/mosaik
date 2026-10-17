@@ -18,7 +18,7 @@ beforeEach(() => {
 const reply = (zones: ZoneEdit[], revision = '1'): Reply => ({
   reply: 'zones',
   workspace: 'ship',
-  name: 'Web development',
+  name: 'Client work',
   monitors: [
     {
       id: 'm1',
