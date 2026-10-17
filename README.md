@@ -23,6 +23,45 @@ Your layouts stay on your computer.</p>
 
 <hr>
 
+<h2>Screenshots</h2>
+
+<table align="center">
+<tr>
+<td align="center" width="50%">
+
+<img src="docs/screenshots/mosaik-app-home.png" alt="Mosaïk's Home: your windows laid out in numbered, coloured zones, and your workspaces beside them" width="100%">
+
+<sub>Home</sub>
+
+</td>
+<td align="center" width="50%">
+
+<img src="docs/screenshots/mosaik-app-workspace.png" alt="A workspace's page: where its apps go, and its apps, two of them tabs in one zone" width="100%">
+
+<sub>A workspace</sub>
+
+</td>
+</tr>
+<tr>
+<td align="center" width="50%">
+
+<img src="docs/screenshots/mosaik-app-zones.png" alt="The zone editor: a zone picked, to recolour, split or remove" width="100%">
+
+<sub>Zones</sub>
+
+</td>
+<td align="center" width="50%">
+
+<img src="docs/screenshots/mosaik-site.png" alt="mosaïk.com: Every window, in its place" width="100%">
+
+<sub>Website</sub>
+
+</td>
+</tr>
+</table>
+
+<hr>
+
 <h2>What it does</h2>
 
 <table align="center">
