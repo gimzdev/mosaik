@@ -1,4 +1,4 @@
-// Generated from the settings at the top of mosaik1.sh. Edit them there.
+// Generated from the settings at the top of mosaik.sh. Edit them there.
 export const site = {
   "name": "Mosaïk",
   "url": "https://xn--mosak-fta.com",

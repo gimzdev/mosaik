@@ -88,11 +88,12 @@
   when its app came forward a moment late, it covered the strip. The same when a tab is pulled out
   and when a workspace opens.
 - Sending to the Store while it still checks the version sent before waits instead of failing:
-  nothing is sent, the line says so, and `./mosaik1.sh --deploy --app` still puts the site up.
+  nothing is sent, the line says so, and `./mosaik.sh --deploy --app` still puts the site up.
 - `.\mosaik.ps1` builds the source inside it, even where another `mosaik.ps1` of the same version
   unpacked its own before (it built that older source): the folder is brought up to date first,
   its build kept and a file changed there moved to `.mosaik-replaced`, never lost. A build that
   fails starts again the Mosaïk that quit for it.
+- The site's script is `mosaik.sh`, named after the app like `mosaik.ps1` (it was `mosaik1.sh`).
 
 ## 1.0.1
 

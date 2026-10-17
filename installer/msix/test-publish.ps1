@@ -165,7 +165,7 @@ try {
   Write-Host 'publish.ps1 with the key in .env.local: sends, asks nothing, keeps nothing.' -ForegroundColor Green
 
   # 1c. The version sent before still with the Store (being checked): it is left alone, nothing is
-  #     sent, and publish.ps1 says so and ends with 3, not as a failure, so mosaik1.sh --deploy
+  #     sent, and publish.ps1 says so and ends with 3, not as a failure, so mosaik.sh --deploy
   #     --app still puts the site online; the same line sends the app once that version is out.
   $null = Use-Data 'still-with-the-store'
   $env:MOSAIK_STORE_KEY = 'test-key'
@@ -191,7 +191,7 @@ try {
   Write-Host ("publish.ps1 the first time without a key: asks for the key alone ({0}, client {1} from identity.json), keeps it encrypted, sends; the next time it sends without asking." -f $api.tenant, $api.clientId) -ForegroundColor Green
 
   # 4. No key given: nothing kept, nothing sent, a failure that says what is needed, so
-  #    mosaik1.sh --deploy --app puts nothing online either. Nothing listens where the services
+  #    mosaik.sh --deploy --app puts nothing online either. Nothing listens where the services
   #    would be: any request is an error.
   $env:MOSAIK_STORE_API = 'http://127.0.0.1:9/api'
   $env:MOSAIK_STORE_LOGIN = 'http://127.0.0.1:9/login'

@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
   Mosaik in one file: its whole source, and the steps to build, test, run and package it on any
-  Windows PC. (The site is the other file: mosaik1.sh.)
+  Windows PC. (The site is the other file: mosaik.sh.)
 
 .DESCRIPTION
   Right-click this file and choose "Run with PowerShell" for a menu. From a terminal:
@@ -40,10 +40,10 @@ $SourceSha256 = ''
 # Set by publish when the Store still checks the version sent before: nothing sent, exit code 3.
 $Waiting = $false
 
-# Paths the source inside never includes: what building makes, the site (mosaik1.sh makes it),
+# Paths the source inside never includes: what building makes, the site (mosaik.sh makes it),
 # the README's pictures of the site, this PC's own settings (.env.local: the Store's key), and an
 # unpacked folder's record of its source and the user's changes kept aside (`Update-Source`).
-$Excluded = '^(\.git|\.agent|target|site|node_modules|dist|test-results|playwright-report|\.mosaik-replaced)(/|$)|/(node_modules|dist|target|test-results|gen)/|^mosaik1\.sh$|^docs/screenshots/|(^|/)\.env[^/]*\.local$|^\.mosaik-source\.json$'
+$Excluded = '^(\.git|\.agent|target|site|node_modules|dist|test-results|playwright-report|\.mosaik-replaced)(/|$)|/(node_modules|dist|target|test-results|gen)/|^mosaik\.sh$|^docs/screenshots/|(^|/)\.env[^/]*\.local$|^\.mosaik-source\.json$'
 # An unpacked folder's record of the source in it: its fingerprint, and each file's. (Not $Record:
 # PowerShell's names know no case, and a function's $record would stand for it in what it calls.)
 $RecordFile = '.mosaik-source.json'
@@ -311,7 +311,7 @@ function Invoke-Pack {
   $content = "$code`r`n`r`n$PayloadStart`r`n$base64`r`n$PayloadEnd`r`n"
   [IO.File]::WriteAllText($out, $content, (New-Object Text.UTF8Encoding $true))
   Say ('Done: {0} ({1:N1} MB, {2} files, Mosaik {3}).' -f $out, ((Get-Item $out).Length / 1MB), $zip.Files, $version) Green
-  Say 'Take it, with mosaik1.sh for the site, to any Windows PC: right-click, Run with PowerShell.'
+  Say 'Take it, with mosaik.sh for the site, to any Windows PC: right-click, Run with PowerShell.'
 }
 
 # Checks that the source inside this file is exactly the files of a folder: the same names, the

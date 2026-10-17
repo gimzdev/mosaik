@@ -184,12 +184,12 @@ Right-click, <b>Run with PowerShell</b>.
 </td>
 <td align="center" width="50%">
 
-<h3><code>mosaik1.sh</code></h3>
+<h3><code>mosaik.sh</code></h3>
 
 The website at mosaïk.com:<br>
 writes it, installs it, runs it<br>
 or deploys it.<br>
-<code>bash mosaik1.sh</code>
+<code>bash mosaik.sh</code>
 
 </td>
 </tr>

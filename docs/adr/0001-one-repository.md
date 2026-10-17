@@ -1,6 +1,6 @@
 # 0001. One repository for the app, the site and the docs
 
-- Status: accepted
+- Status: accepted; the site script is `mosaik.sh` since ADR 0039 (it was `mosaik1.sh`)
 - Date: 2026-10-11
 
 ## Context

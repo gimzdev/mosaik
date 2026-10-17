@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 if grep -q $'\r' "$0" 2>/dev/null; then MK_SCRIPT="$0" MK_COPY="${TMPDIR:-/tmp}/mosaik-site.$$.sh"; export MK_SCRIPT MK_COPY; tr -d '\r' < "$0" > "$MK_COPY" && exec bash "$MK_COPY" "$@"; fi # Windows line endings: run a copy without them
 # ════════════════════════════════════════════════════════════════════════
-#  Mosaïk marketing site · mosaik1.sh
+#  Mosaïk marketing site · mosaik.sh
 #
 #  One file that writes the whole site, installs it and runs it:
 #    Next.js 16 (Turbopack) · React 19 · Tailwind CSS 4 · TypeScript
 #
 #  Usage
-#    ./mosaik1.sh             install or update, then start the dev server
-#    ./mosaik1.sh --deploy    type-check, then deploy to production on Vercel
-#    ./mosaik1.sh --preview   same, but to a shareable preview URL
-#    ./mosaik1.sh --prod      build and serve the production build locally
-#    ./mosaik1.sh --build     install and build only (CI)
-#    ./mosaik1.sh --no-start  install, don't start anything
-#    ./mosaik1.sh --fresh     reinstall dependencies, rebuild from scratch
-#    ./mosaik1.sh --port 4000 another port (default 3000, or the next free one)
-#    ./mosaik1.sh --dir ~/m   install somewhere else (default ./mosaik_site)
-#    ./mosaik1.sh --deploy --app   also send the app to the Microsoft Store
-#    ./mosaik1.sh --app       only send the app (Windows: it is tested, built
-#                             and packaged first)
+#    ./mosaik.sh             install or update, then start the dev server
+#    ./mosaik.sh --deploy    type-check, then deploy to production on Vercel
+#    ./mosaik.sh --preview   same, but to a shareable preview URL
+#    ./mosaik.sh --prod      build and serve the production build locally
+#    ./mosaik.sh --build     install and build only (CI)
+#    ./mosaik.sh --no-start  install, don't start anything
+#    ./mosaik.sh --fresh     reinstall dependencies, rebuild from scratch
+#    ./mosaik.sh --port 4000 another port (default 3000, or the next free one)
+#    ./mosaik.sh --dir ~/m   install somewhere else (default ./mosaik_site)
+#    ./mosaik.sh --deploy --app   also send the app to the Microsoft Store
+#    ./mosaik.sh --app       only send the app (Windows: it is tested, built
+#                            and packaged first)
 #
 #  Updating
 #    This file is the source of truth. Change the settings below and run it
@@ -75,7 +75,7 @@ trap 'printf "%s✖ Stopped at line %s: %s%s\n" "$CR" "$LINENO" "$BASH_COMMAND" 
 
 SCRIPT_PATH="${MK_SCRIPT:-${BASH_SOURCE[0]:-$0}}"
 SCRIPT_NAME="${SCRIPT_PATH##*/}"
-usage() { awk '/^#  Usage$/ { on = 1 } on && /^#$/ { exit } on { sub(/^#  ?/, ""); print }' "$0" | sed "s#\./mosaik1\.sh#./$SCRIPT_NAME#"; exit 0; }
+usage() { awk '/^#  Usage$/ { on = 1 } on && /^#$/ { exit } on { sub(/^#  ?/, ""); print }' "$0" | sed "s#\./mosaik\.sh#./$SCRIPT_NAME#"; exit 0; }
 
 # ── Options ──────────────────────────────────────────────────────────────
 APP_DIR=""; PORT="${PORT:-3000}"; PORT_SET=0; MODE="dev"; START=1; FRESH=0; DEPLOY=0; PREVIEW=0
@@ -223,14 +223,14 @@ put README.md <<'__MK_EOF__'
 
 Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4 and TypeScript. No animation library: the demo moves with CSS transitions.
 
-This folder is written by `mosaik1.sh` at the root of the repository, which is the source of truth. Never edit these files
+This folder is written by `mosaik.sh` at the root of the repository, which is the source of truth. Never edit these files
 by hand: change the script and run it again. The folder is written afresh each time; `public/`, the Vercel link, the
 installed dependencies and the last build are kept.
 
 ```bash
-./mosaik1.sh --dir site             # install or update, then start the dev server
-./mosaik1.sh --dir site --deploy    # type-check, then deploy to production on Vercel
-./mosaik1.sh --help                 # every option
+./mosaik.sh --dir site             # install or update, then start the dev server
+./mosaik.sh --dir site --deploy    # type-check, then deploy to production on Vercel
+./mosaik.sh --help                 # every option
 ```
 
 ## Where things live
@@ -244,7 +244,7 @@ installed dependencies and the last build are kept.
 
 ## Releasing
 
-Every Download button installs Mosaïk from the Microsoft Store (`STORE_ID` in `mosaik1.sh`), so deploy a version of the site
+Every Download button installs Mosaïk from the Microsoft Store (`STORE_ID` in `mosaik.sh`), so deploy a version of the site
 that offers a download only once the Store listing is live. What the site says the app does must match the release: the
 features on `/download` and the home page, the switcher shortcut (`Win+Alt+Space`) and `/conditions`.
 __MK_EOF__

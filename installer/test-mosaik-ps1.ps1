@@ -287,7 +287,7 @@ if ($failures.Count -gt 0) { throw ("mosaik.ps1 build: {0}" -f ($failures -join 
 
 # mosaik.ps1 publish: the key first, then tests, build and package, then the Store. publish.ps1
 # is stood in for by a script ending as told: 0 sent, 3 waiting for the Store (the version sent
-# before is still being checked: no failure, so mosaik1.sh --deploy --app still puts the site
+# before is still being checked: no failure, so mosaik.sh --deploy --app still puts the site
 # online), anything else a failure.
 $work = Join-Path ([IO.Path]::GetTempPath()) "mosaik-publish-step-$PID"
 $scripts = [IO.Path]::Combine($work, 'installer', 'msix')

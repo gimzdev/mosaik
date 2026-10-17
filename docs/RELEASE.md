@@ -40,17 +40,17 @@ on Windows 11 and, if one is at hand, Windows 10 22H2:
 
 ## 3. Ship it: the site and the app in one line
 
-From the folder with `mosaik1.sh` and the repository (`mosaik/`) beside it, in Git Bash:
+From the folder with `mosaik.sh` and the repository (`mosaik/`) beside it, in Git Bash:
 
 ```bash
-./mosaik1.sh --deploy --app
+./mosaik.sh --deploy --app
 ```
 
 It tests, builds and packages the app and sends it to the Microsoft Store (ADR 0026): a new
 submission copied from the last one, this package in place of the old one and "What's new"
 from `installer/msix/whats-new.txt`; nothing else of the listing changes. Then it puts the site
 online. If the app is not sent, the site is not deployed either. The Store checks the new
-version, usually within a day or two, and then updates everyone. `./mosaik1.sh --app` sends the app
+version, usually within a day or two, and then updates everyone. `./mosaik.sh --app` sends the app
 alone; `.\mosaik.ps1 publish` does the same from PowerShell.
 
 ### The Store's key, in `.env.local`
@@ -120,7 +120,7 @@ The rest of the submission, for reference (already set by submission 1):
 ## 4. After the Store has the new version
 
 - The Download buttons install from the Store's web installer; check one on a clean account.
-- The site: `./mosaik1.sh --deploy` (already done by the line in section 3).
+- The site: `./mosaik.sh --deploy` (already done by the line in section 3).
 - GitHub: from the folder above the repositories, `./deploy.sh push mosaik` force-pushes this
   repository to `master` as it is (its README included); the full `./deploy.sh` does every
   repository, and leaves Mosaïk's README as it is written here. Then, if wanted, a release

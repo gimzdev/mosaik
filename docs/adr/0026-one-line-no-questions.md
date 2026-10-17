@@ -1,6 +1,6 @@
 # 0026. One line ships both, with nothing to answer once the Store's key is kept
 
-- Status: accepted
+- Status: accepted; the site script is `mosaik.sh` since ADR 0039 (it was `mosaik1.sh`)
 - Date: 2026-10-13
 - Amends: ADR 0025
 
