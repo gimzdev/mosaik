@@ -1,16 +1,26 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Sends Mosaik's Store package to the Microsoft Store: a new submission with the package and
-  "What's new in this version", for certification. Nothing to answer once this PC has the key.
+  Sends Mosaik's Store package to the Microsoft Store: a new submission with the package, "What's
+  new in this version" and, when listing\ is beside this script, the Store listing written there
+  (description, short description, features, search terms, screenshots), for certification.
+  Nothing to answer once this PC has the key.
 
 .DESCRIPTION
   The Microsoft Store submission API (manage.devcenter.microsoft.com) does it the way Partner
   Center takes a submission: a copy of the last published one, with this package in place of the
-  old one and "What's new" from whats-new.txt (beside this script); nothing else of the listing
-  changes. The Store then checks it, usually within a day or two, and updates everyone. While it
+  old one and "What's new" from whats-new.txt (beside this script). The rest of the listing changes
+  only where listing\<language>\ beside this script says so (en-us, for one): description.txt
+  replaces the description; short-description.txt the short description shown at the top of the
+  listing; features.txt and keywords.txt, one per line, the features and the search
+  terms; the PNG files in screenshots\, in the order of their names, the screenshots, captioned by
+  the lines of screenshots\captions.txt in the same order. A part without its file stays as the
+  Store has it; without listing\, the listing is not touched. The Store then checks it, usually
+  within a day or two, and updates everyone. While it
   still checks the version sent before, it takes no other: nothing is sent, and the exit code is 3
-  (0 once sent, 1 on a failure), so a script can tell waiting from failing.
+  (0 once sent, 1 on a failure), so a script can tell waiting from failing. A version the Store
+  has already, or an older one, is never sent: it takes a version only once, even built again
+  from the same source, and an older one would reach nobody.
 
   It signs in as the Partner Center account's Microsoft Entra application, "Mosaik Store
   publishing" (docs/RELEASE.md): its tenant and client IDs are in identity.json (they are not
@@ -34,7 +44,16 @@
 
 .PARAMETER KeyOnly
   Only makes sure this PC has the key: asks for it when none is kept, keeps it, and stops without
-  sending. mosaik.ps1 publish runs this first, so its tests and build need nobody.
+  sending.
+
+.PARAMETER Check
+  Asks the Store first, sending nothing: what mosaik.ps1 publish runs before its tests and build,
+  so they need nobody and are made only for a version the Store takes. The key (asked for when
+  none is kept, as with -KeyOnly), "What's new" and the listing are checked, then the Store is
+  asked. The exit code: 0 when the Store takes this version; 3 while it still checks a version sent
+  before (nothing to do yet); 4 when the one it checks is this version (sent already: nothing to
+  do); 1 when it has this version already or a newer one (2026-10-28: the 1.0.3 built again was
+  tested, built and refused at the end), or on any other failure.
 
 .NOTES
   MOSAIK_STORE_API and MOSAIK_STORE_LOGIN point it at a stand-in of Microsoft's services, for
@@ -48,7 +67,8 @@ param(
   [string]$Package,
   [switch]$Yes,
   [switch]$NewKey,
-  [switch]$KeyOnly
+  [switch]$KeyOnly,
+  [switch]$Check
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,6 +82,9 @@ $StoreId = $Identity.storeId
 $Api = if ($env:MOSAIK_STORE_API) { $env:MOSAIK_STORE_API.TrimEnd('/') } else { 'https://manage.devcenter.microsoft.com/v1.0/my' }
 $Login = if ($env:MOSAIK_STORE_LOGIN) { $env:MOSAIK_STORE_LOGIN.TrimEnd('/') } else { 'https://login.microsoftonline.com' }
 $KeyFile = Join-Path $env:APPDATA 'Mosaik\store-key.xml'
+$ListingDir = Join-Path $Here 'listing'
+# A submission sent and not out yet: the Store keeps it until it is, and takes no other meanwhile.
+$InFlight = 'CommitStarted', 'PreProcessing', 'Certification', 'Release', 'PendingPublication', 'Publishing'
 
 function Say([string]$Text, [string]$Colour = 'Gray') { Write-Host $Text -ForegroundColor $Colour }
 function Fail([string]$Text) { throw $Text }
@@ -177,6 +200,104 @@ function Get-Token($Access) {
   $reply.access_token
 }
 
+# A text file's lines, without the spaces around them; blank lines left out unless -Blank.
+function Read-Lines([string]$File, [switch]$Blank) {
+  @(Get-Content -LiteralPath $File -Encoding UTF8 | ForEach-Object { "$_".Trim() } | Where-Object { $Blank -or $_ })
+}
+
+# The listing in listing\<language>\, one entry per language: the parts given ($null for a part
+# left as the Store has it) and the screenshots, each with its name in the ZIP (at its root, as the
+# package is: "<language>-<file>") and its caption. Checked against the Store's limits first, so a
+# listing that cannot go sends nothing.
+function Get-Listing {
+  $languages = @()
+  if (-not (Test-Path -LiteralPath $ListingDir)) { return ,$languages }
+  foreach ($dir in @(Get-ChildItem -LiteralPath $ListingDir -Directory | Sort-Object Name)) {
+    $language = $dir.Name.ToLowerInvariant()
+    $description = $null; $short = $null; $features = $null; $keywords = $null; $shots = $null
+    $file = Join-Path $dir.FullName 'description.txt'
+    if (Test-Path -LiteralPath $file) {
+      $description = "$(Get-Content -Raw -Encoding UTF8 -LiteralPath $file)".Trim()
+      if (-not $description) { Fail "$file is empty: write the description, or remove the file to keep the Store's." }
+      if ($description.Length -gt 10000) { Fail "$file is $($description.Length) characters long; the Store takes 10,000 at most." }
+    }
+    # The short description, at the top of the listing (the Store shows its first 270 characters in
+    # some views)
+    $file = Join-Path $dir.FullName 'short-description.txt'
+    if (Test-Path -LiteralPath $file) {
+      $short = "$(Get-Content -Raw -Encoding UTF8 -LiteralPath $file)".Trim()
+      if (-not $short) { Fail "$file is empty: write the short description, or remove the file to keep the Store's." }
+      if ($short.Length -gt 1000) { Fail "$file is $($short.Length) characters long; the Store takes 1,000 at most." }
+    }
+    $file = Join-Path $dir.FullName 'features.txt'
+    if (Test-Path -LiteralPath $file) {
+      $features = @(Read-Lines $file)
+      if ($features.Count -gt 20) { Fail "$file has $($features.Count) features; the Store takes 20 at most." }
+      $long = @($features | Where-Object { $_.Length -gt 200 })
+      if ($long.Count -gt 0) { Fail "$file has a feature over 200 characters, which the Store refuses: $($long[0])" }
+    }
+    $file = Join-Path $dir.FullName 'keywords.txt'
+    if (Test-Path -LiteralPath $file) {
+      $keywords = @(Read-Lines $file)
+      if ($keywords.Count -gt 7) { Fail "$file has $($keywords.Count) search terms; the Store takes 7 at most." }
+    }
+    $folder = Join-Path $dir.FullName 'screenshots'
+    if (Test-Path -LiteralPath $folder) {
+      $files = @(Get-ChildItem -LiteralPath $folder -File -Filter '*.png' | Sort-Object Name)
+      if ($files.Count -gt 10) { Fail "$folder has $($files.Count) screenshots; the Store takes 10 at most." }
+      if ($files.Count -gt 0) {
+        $captionsFile = Join-Path $folder 'captions.txt'
+        # Assigned apart from the if: an if's output of one line would be a string, not a list
+        $captions = @()
+        if (Test-Path -LiteralPath $captionsFile) { $captions = @(Read-Lines $captionsFile -Blank) }
+        $shots = @()
+        for ($i = 0; $i -lt $files.Count; $i++) {
+          $caption = if ($i -lt $captions.Count) { $captions[$i] } else { '' }
+          if ($caption.Length -gt 200) { Fail "$captionsFile, line $($i + 1): over 200 characters, which the Store refuses." }
+          $shots += [pscustomobject]@{ Path = $files[$i].FullName; FileName = ('{0}-{1}' -f $language, $files[$i].Name); Caption = $caption }
+        }
+      }
+    }
+    $languages += [pscustomobject]@{ Language = $language; Description = $description; Short = $short; Features = $features; Keywords = $keywords; Screenshots = $shots }
+  }
+  ,$languages
+}
+
+# Puts the listing read by Get-Listing in the submission; out come the screenshots it adds, to go in the ZIP.
+function Set-Listing($Submission, $Listing) {
+  $added = @()
+  foreach ($l in $Listing) {
+    $entry = @($Submission.listings.PSObject.Properties | Where-Object { $_.Name -ieq $l.Language }) | Select-Object -First 1
+    if (-not $entry) {
+      Say ("  listing\{0} left out: the Store's listing has no {0} (the package must declare that language)." -f $l.Language) Yellow
+      continue
+    }
+    $base = $entry.Value.baseListing
+    $parts = @()
+    if ($null -ne $l.Description) { Set-Field $base 'description' $l.Description; $parts += 'description' }
+    if ($null -ne $l.Short) { Set-Field $base 'shortDescription' $l.Short; $parts += 'short description' }
+    if ($null -ne $l.Features) { Set-Field $base 'features' @($l.Features); $parts += "$($l.Features.Count) features" }
+    if ($null -ne $l.Keywords) { Set-Field $base 'keywords' @($l.Keywords); $parts += "$($l.Keywords.Count) search terms" }
+    if ($null -ne $l.Screenshots) {
+      # The screenshots there before go; the other pictures (logos, promotional art) stay.
+      $before = @()
+      if ($base.PSObject.Properties['images']) { $before = @(@($base.images) | Where-Object { $null -ne $_ }) }
+      $images = @($before | ForEach-Object {
+          if ($_.PSObject.Properties['imageType'] -and $_.imageType -eq 'Screenshot') { Set-Field $_ 'fileStatus' 'PendingDelete' }
+          $_
+        })
+      foreach ($shot in $l.Screenshots) {
+        $images += [pscustomobject]@{ fileName = $shot.FileName; fileStatus = 'PendingUpload'; description = $shot.Caption; imageType = 'Screenshot' }
+        $added += $shot
+      }
+      Set-Field $base 'images' $images
+      $parts += "$($l.Screenshots.Count) screenshots"
+    }
+    if ($parts.Count -gt 0) { Say ("  Listing ({0}): {1}, from listing\{0}" -f $l.Language, ($parts -join ', ')) DarkGray }
+  }
+  $added
+}
+
 # A call to the Store's API for this app; the body, when there is one, as JSON.
 function Invoke-Store([string]$Method, [string]$Path, $Body = $null) {
   $call = @{
@@ -199,6 +320,77 @@ function Set-Field($Object, [string]$Name, $Value) {
   else { $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value }
 }
 
+# The versions of the packages a submission has (as [version]: 1.0.3.0), the ones it removes left
+# out; none when it has none yet, or the Store gives none.
+function Get-PackageVersions($Submission) {
+  $packages = @()
+  if ($Submission -and $Submission.PSObject.Properties['applicationPackages']) { $packages = @(@($Submission.applicationPackages) | Where-Object { $null -ne $_ }) }
+  foreach ($p in $packages) {
+    if ($p.PSObject.Properties['fileStatus'] -and $p.fileStatus -eq 'PendingDelete') { continue }
+    if (-not $p.PSObject.Properties['version']) { continue }
+    $v = $null
+    if ([version]::TryParse([string]$p.version, [ref]$v)) { $v }
+  }
+}
+
+# A package's version as Cargo.toml writes it (1.0.3.0 is 1.0.3).
+function Format-Version([version]$Version) {
+  if ($Version.Revision -le 0 -and $Version.Build -ge 0) { '{0}.{1}.{2}' -f $Version.Major, $Version.Minor, $Version.Build }
+  else { "$Version" }
+}
+
+# Where the Store stands for $Version (Cargo.toml's; its package is $Version.0). State: 'go' when
+# it takes it; 'wait' while it still checks a submission sent before, and 'sent' when that one is
+# this version. Pending: a submission not sent (left in Partner Center, or refused), which the
+# next one replaces; Published: the version the Store has. A failure when the Store has this
+# version already or a newer one: it takes a version only once, even built again from the same
+# source (2026-10-28: "two packages with the full name Gimzdev.Mosak_1.0.3.0_X64_ which have
+# different contents"), and an older one would reach nobody.
+function Get-StoreState([string]$Version) {
+  $new = [version]"$Version.0"
+  $state = [pscustomobject]@{ State = 'go'; Status = ''; Pending = ''; Published = '' }
+  $app = Invoke-Store GET ''
+  $pending = if ($app.PSObject.Properties['pendingApplicationSubmission']) { $app.pendingApplicationSubmission } else { $null }
+  if ($pending -and $pending.PSObject.Properties['id'] -and $pending.id) {
+    $state.Status = "$((Invoke-Store GET "/submissions/$($pending.id)/status").status)"
+    if ($state.Status -in $InFlight) {
+      # Its version only says which it is: when it cannot be read, it is the version sent before
+      $sent = @()
+      try { $sent = @(Get-PackageVersions (Invoke-Store GET "/submissions/$($pending.id)")) }
+      catch { Write-Verbose "The submission with the Store was not read: $($_.Exception.Message)" }
+      $state.State = if ($sent -contains $new) { 'sent' } else { 'wait' }
+      return $state
+    }
+    $state.Pending = "$($pending.id)"
+  }
+  $last = if ($app.PSObject.Properties['lastPublishedApplicationSubmission']) { $app.lastPublishedApplicationSubmission } else { $null }
+  if ($last -and $last.PSObject.Properties['id'] -and $last.id) {
+    # Not read, the version the Store has stops nothing: the Store itself refuses one it has
+    $versions = @()
+    try { $versions = @(Get-PackageVersions (Invoke-Store GET "/submissions/$($last.id)") | Sort-Object -Descending) }
+    catch { Say ("  The version the Store has could not be read ({0}); it refuses this one itself if it has it." -f $_.Exception.Message) Yellow }
+    if ($versions.Count -gt 0) {
+      $state.Published = Format-Version $versions[0]
+      if ($new -le $versions[0]) {
+        Fail ("The Store has Mosaik {0} already: it takes a version only once, even built again from the same source, and an older one would reach nobody. Give Mosaik its next version first (docs/RELEASE.md says where), then run this again. Nothing was sent." -f $state.Published)
+      }
+    }
+  }
+  $state
+}
+
+# What is said when the Store still checks a submission sent before, or has this version already.
+function Show-Waiting($State, [string]$Version, [string]$Nothing) {
+  if ($State.State -eq 'sent') {
+    $text = "Mosaik {0} is with the Store already ({1}): nothing to send. It is usually checked within a day or two; then everyone gets it. {2}" -f $Version, $State.Status, $Nothing
+    Say $text.TrimEnd() Green
+  }
+  else {
+    $text = "The Store is still checking the version sent before ({0}): Mosaik {1} waits for it. Run the same line again once it is out, usually within a day or two. {2}" -f $State.Status, $Version, $Nothing
+    Say $text.TrimEnd() Yellow
+  }
+}
+
 try {
   # TLS 1.2 for Windows PowerShell 5.1 on older .NET defaults.
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -207,17 +399,34 @@ try {
   Remove-TypeData -TypeName System.Array -ErrorAction SilentlyContinue
 
   if ($KeyOnly) {
+    # The listing checked too, so one the Store would refuse stops mosaik.ps1 publish before its build
+    $null = Get-Listing
     $null = Get-Access
     Say "The Store's key is ready: sending asks nothing." Green
     exit 0
   }
 
   $version = Get-Version
-  if (-not $Package) { $Package = Join-Path $Root "target\msix\Mosaik_$version.0_x64.msix" }
-  if (-not (Test-Path -LiteralPath $Package)) { Fail "There is no package to send ($Package). Make it first: .\mosaik.ps1 package" }
   $notesFile = Join-Path $Here 'whats-new.txt'
   $notes = if (Test-Path $notesFile) { (Get-Content -Raw -Encoding UTF8 $notesFile).Trim() } else { '' }
   if (-not $notes) { Fail "Write what is new in $version in $notesFile first: the Store shows it as `"What's new in this version`"." }
+  $listing = Get-Listing
+
+  if ($Check) {
+    # Before mosaik.ps1 publish tests and builds: the Store is asked, and nothing is sent.
+    $script:Token = Get-Token (Get-Access)
+    $state = Get-StoreState $version
+    if ($state.State -ne 'go') {
+      Show-Waiting $state $version 'Nothing was tested, built or sent.'
+      exit $(if ($state.State -eq 'sent') { 4 } else { 3 })
+    }
+    $has = if ($state.Published) { " (it has $($state.Published))" } else { '' }
+    Say ("The Store takes Mosaik {0}{1}, and its key is ready: sending asks nothing." -f $version, $has) Green
+    exit 0
+  }
+
+  if (-not $Package) { $Package = Join-Path $Root "target\msix\Mosaik_$version.0_x64.msix" }
+  if (-not (Test-Path -LiteralPath $Package)) { Fail "There is no package to send ($Package). Make it first: .\mosaik.ps1 package" }
 
   $access = Get-Access
   Say ''
@@ -226,17 +435,15 @@ try {
 
   $script:Token = Get-Token $access
   Say '  Starting a submission (a copy of the last one published)' DarkGray
-  $app = Invoke-Store GET ''
-  $pending = if ($app.PSObject.Properties['pendingApplicationSubmission']) { $app.pendingApplicationSubmission } else { $null }
-  if ($pending -and $pending.id) {
-    $before = (Invoke-Store GET "/submissions/$($pending.id)/status").status
-    # Sent and not out yet: the Store keeps it until it is, and takes no other meanwhile.
-    if ($before -in 'CommitStarted', 'PreProcessing', 'Certification', 'Release', 'PendingPublication', 'Publishing') {
-      Say ("The Store is still checking the version sent before ({0}): Mosaik {1} waits for it. Run the same line again once it is out, usually within a day or two. Nothing was sent." -f $before, $version) Yellow
-      exit 3
-    }
-    Say ("  A submission waiting in Partner Center ({0}, {1}) is replaced by this one." -f $pending.id, $before) Yellow
-    $null = Invoke-Store DELETE "/submissions/$($pending.id)"
+  $state = Get-StoreState $version
+  if ($state.State -ne 'go') {
+    # This very version with the Store already: done, as when it is sent
+    Show-Waiting $state $version $(if ($state.State -eq 'sent') { '' } else { 'Nothing was sent.' })
+    exit $(if ($state.State -eq 'sent') { 0 } else { 3 })
+  }
+  if ($state.Pending) {
+    Say ("  A submission waiting in Partner Center ({0}, {1}) is replaced by this one." -f $state.Pending, $state.Status) Yellow
+    $null = Invoke-Store DELETE "/submissions/$($state.Pending)"
   }
   $submission = Invoke-Store POST '/submissions'
 
@@ -248,19 +455,35 @@ try {
   $languages = @($submission.listings.PSObject.Properties)
   if ($languages.Count -eq 0) { Fail 'The submission has no listing to put "What''s new" in.' }
   foreach ($language in $languages) { Set-Field $language.Value.baseListing 'releaseNotes' $notes }
+  $shots = @(Set-Listing $submission $listing)
   $upload = $submission.fileUploadUrl
   $id = $submission.id
   $null = Invoke-Store PUT "/submissions/$id" $submission
 
-  Say '  Uploading the package' DarkGray
+  Say $(if ($shots.Count -gt 0) { "  Uploading the package and $($shots.Count) screenshots" } else { '  Uploading the package' }) DarkGray
   $zip = Join-Path ([IO.Path]::GetTempPath()) "mosaik-store-$version-$PID.zip"
+  # The screenshots under their names in the ZIP, at its root: no folders, whose separators
+  # Windows PowerShell's Compress-Archive writes as backslashes.
+  $stage = Join-Path ([IO.Path]::GetTempPath()) "mosaik-store-$version-$PID"
   Remove-Item -LiteralPath $zip -ErrorAction SilentlyContinue
-  Compress-Archive -LiteralPath $Package -DestinationPath $zip
   try {
+    $inZip = @($Package)
+    if ($shots.Count -gt 0) {
+      New-Item -ItemType Directory -Force -Path $stage | Out-Null
+      foreach ($shot in $shots) {
+        $copy = Join-Path $stage $shot.FileName
+        Copy-Item -LiteralPath $shot.Path -Destination $copy
+        $inZip += $copy
+      }
+    }
+    Compress-Archive -LiteralPath $inZip -DestinationPath $zip
     $null = Invoke-WebRequest -Method Put -Uri $upload -InFile $zip -Headers @{ 'x-ms-blob-type' = 'BlockBlob' } -ContentType 'application/zip' -UseBasicParsing
   }
   catch { Fail ("The package could not be uploaded: {0}" -f $_.Exception.Message) }
-  finally { Remove-Item -LiteralPath $zip -ErrorAction SilentlyContinue }
+  finally {
+    Remove-Item -LiteralPath $zip -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+  }
 
   Say '  Sending it for certification' DarkGray
   $null = Invoke-Store POST "/submissions/$id/commit"

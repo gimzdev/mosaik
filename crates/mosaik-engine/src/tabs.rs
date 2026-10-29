@@ -459,7 +459,11 @@ impl Engine {
                 drop_at,
                 Stack::Above(above.0.cast_signed_isize()),
             ) {
-                Ok(()) => true,
+                // Whether it is on screen, not only whether it was drawn: a band with no room (a
+                // window not yet settled in its group's place) draws nothing, and a group whose
+                // strip is not on screen must keep its tabs showing, or the window behind looks
+                // gone (the owner, 1.0.2: a window dropped on a tag, "no tab strip appears").
+                Ok(()) => bar.is_shown(),
                 Err(e) => {
                     tracing::warn!(error = %e, "tab strip not drawn");
                     false
@@ -856,15 +860,23 @@ impl Engine {
     }
 
     /// Puts strips and frames back above their windows in a moment, twice: soon after a window
-    /// was raised, and again in case its app was slow.
+    /// was raised, and again in case its app was slow. A strip that should be on screen and is
+    /// not is drawn then too.
     pub(crate) fn restack_soon(&mut self) {
         self.watch.stack_passes = 2;
         self.set_timer(timer::STACK, STACK_FIRST_MS);
     }
 
-    /// One of the passes of [`Engine::restack_soon`].
+    /// One of the passes of [`Engine::restack_soon`]. The pass right after a window was dropped
+    /// on a tag (or a tab was picked) can run before the window has settled in its group's place,
+    /// or the strip's first draw can fail; nothing else would draw the strip again until the next
+    /// change of tabs, so a missing strip is drawn here, and its group's other tabs hide.
     pub(crate) fn stack_tick(&mut self) {
         self.kill_timer(timer::STACK);
+        if self.strip_missing() {
+            tracing::info!("tab strip missing after a raise: tabs synced again");
+            self.sync_tabs();
+        }
         self.restack_overlays();
         self.watch.stack_passes = self.watch.stack_passes.saturating_sub(1);
         if self.watch.stack_passes > 0 {
@@ -887,6 +899,31 @@ impl Engine {
             }
         }
         self.restack_frames();
+    }
+
+    /// Whether a group's strip belongs on screen and is not there, or could not be drawn before
+    /// (its group showing all its tabs meanwhile): two tabs or more, the visible one on screen in
+    /// a place with room for a band, and no drag going on (a dragged tab has no strip).
+    fn strip_missing(&mut self) -> bool {
+        if self.watch.drag.is_some() || self.watch.bar_drag.is_some() || self.watch.band_press.is_some() {
+            return false;
+        }
+        for g in self.groups_now() {
+            let Some((_, visible)) = g.visible().cloned() else {
+                continue;
+            };
+            if g.open.len() < 2 || self.hiding.hidden.contains_key(&visible) {
+                continue;
+            }
+            let shown = self.watch.bars.get(&g.id).is_some_and(TabBar::is_shown);
+            if shown && !self.watch.strip_broken.contains(&g.id) {
+                continue;
+            }
+            if matches!(self.strip_spot(&g.id, visible), Spot::At { .. }) {
+                return true;
+            }
+        }
+        false
     }
 
     /// The tab after the one showing (the "+N" chip of a crowded strip).

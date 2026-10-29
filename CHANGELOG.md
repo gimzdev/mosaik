@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.4
+
+- The same app as 1.0.3, sent again to go with the Store listing's new screenshots and their
+  captions. The Store takes a package of a version only once: 1.0.3 was out already, and the 1.0.3
+  built again was refused ("Appx packages ... must be uniquely identified by their full names").
+- `.\mosaik.ps1 publish` (and `./mosaik.sh --app`) asks the Store before its tests and build:
+  while the Store still checks the version sent before, or when it has this version already or a
+  newer one, it says so and nothing is tested, built or sent. The 1.0.3 built again had been
+  tested, built and sent, and refused only then. It runs the tests only on code they have not
+  passed on yet: a new version number, the notes, the docs and the Store listing do not count, so
+  the same code sent again goes straight to its build (`.\mosaik.ps1 test` always runs them). The
+  engine tests print a dot per test instead of a line, and a file Smart App Control refuses is
+  said not to be the code.
+
+## 1.0.3
+
+- A window dropped on another window's tag becomes its tab with the strip above them at once. In
+  1.0.2 the strip could stay away (the dropped window not yet settled in its place, or the strip's
+  first draw refused) while the window behind was hidden all the same, so it looked gone until
+  something else changed the tabs. A group now keeps all its tabs on screen while its strip is not,
+  and the passes that put strips back above a window after it is raised draw a missing strip, its
+  group's other tabs hiding then.
+- The Store listing's short description goes with the app too, from
+  `installer/msix/listing/en-us/short-description.txt` (1,000 characters at most), like the
+  description, features and search terms.
+- `.\mosaik.ps1` builds on when Smart App Control refuses a file again on the run that makes the
+  first one again: each file it refuses is made again, six runs at most. It tried only one run
+  more, so a build stopped when that run had another file refused (`serde_derive`, then
+  `yoke_derive`).
+
 ## 1.0.2
 
 - Click a workspace on Home and the picture shows it as it will open: its apps glide to their

@@ -1,0 +1,7 @@
+window manager
+tabs
+snap windows
+workspaces
+tiling
+multitasking
+productivity

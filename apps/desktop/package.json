@@ -1,7 +1,7 @@
 {
   "name": "mosaik-desktop",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.4",
   "description": "Mosaïk's window: Home, a workspace's page, the zone editor and Settings.",
   "license": "CC0-1.0",
   "type": "module",

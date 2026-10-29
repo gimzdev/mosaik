@@ -21,6 +21,8 @@ re-run before each release.
 | 1.0.1, first builds | (called 1.1 then) built, tested and packaged on Windows (jobs 0094 to 0118: every test, the Store package); zones that follow a resize, Arrange laid out for the task with three windows to a view, zones that make room for a window too big for them, and its undo, the home page with every workspace and its ⋯ menu, Settings with More settings and About, a workspace's apps, windows edge to edge without rings, tab strips in one place and back above after a click, no window moved when brought forward, the quick menu where the pointer stops and never for a game, all measured with the mouse; sets of apps read from the owner's Start menu, every app started once and placed as soon as it shows; opening a set on the owner's screen not run by a job (it starts apps) | [1.0.1: first builds](#101-first-builds) |
 | 1.0.1 | (called 2.0 until 2026-10-13) built, tested and packaged on Windows (jobs 0122 to 0143): the window rebuilt around the screen and Arrange, dark by default, apps by their own icons (11 of 11 in the suggested sets), toasts instead of alerts, the side menu, windows dragged onto each other in Home's picture; every test and every probe check passing; the Store package 1.0.1.0 ready; `./mosaik1.sh --deploy --app` tests, builds, packages and sends it to the Store with nothing to answer once the Store's key is kept (the key alone asked on the first run, ADR 0026), then deploys the site; the owner's Microsoft Entra tenant made, linked to the developer account, and its application "Mosaik Store publishing" made with a key on 2026-10-13 | [1.0.1: the window rebuilt](#101-the-window-rebuilt) |
 | 1.0.2 | built and tested on Windows (jobs 0146 to 0207; since 0196 in the repository itself): a workspace previewed before it opens, the picture where zones and windows change (dragged, swapped, resized), every layout in view, a workspace's page with its apps by zone, the first run with no note, two themes, apps started as the taskbar starts them; the last full check every test and probe check passing (job 0175); the owner's own `mosaik.ps1` beside the repository builds and tests it, every test passing (jobs 0178, 0190, 0196 and 0207); sending it to the Store stays the owner's (`./mosaik.sh --deploy --app`) | [1.0.2](#102) |
+| 1.0.3 | in the Store since 2026-10-28 (the Store's catalog: Gimzdev.Mosak_1.0.3.0_x64, changed 06:51 UTC), built and sent from the owner's PC: the tab strip after a drop (a group keeps all its tabs on screen while its strip is not, and the passes after a raise draw a missing strip), and the short description sent with the listing | [1.0.3](#103) |
+| 1.0.4 | 1.0.3 again, for the listing's new screenshots: the Store refused 1.0.3 built again (another package of a version it has) | [1.0.4](#104) |
 
 ## Step 1: verify assumptions
 
@@ -1176,6 +1178,87 @@ edge, where the pointer stops).
   `.mosaik-site`): a folder of notes, and one with a `Cargo.toml`, refused with nothing removed.
   `--app` checked with stand-ins for `powershell.exe` and `winpty`: the same command in Git
   Bash's own window and elsewhere, and a failed send stops everything with nothing deployed.
+
+## 1.0.4
+
+The Store listing's six new screenshots and their captions (ADR 0041, amended 2026-10-28) were to
+go with the next send. `./mosaik.sh --app` on 2026-10-28 at 18:31 tested, built and packaged
+1.0.3 again and sent it, but the Store refused the commit (CommitFailed): "InvalidParameterValue:
+Appx packages (including previously published and currently uploaded) must be uniquely
+identified by their full names. You have provided two packages with the full name
+Gimzdev.Mosak_1.0.3.0_X64_ which have different contents." 1.0.3 had been out since 06:51 UTC that
+day, and a build is never byte for byte the one before. No source has changed since 1.0.3 (its
+last change, `crates/mosaik-engine/src/tabs.rs`, is from before it was sent), so 1.0.4 is the same
+app with the next number: `Cargo.toml`, `Cargo.lock`, `apps/desktop/package.json` and its lock,
+the changelog, and "What's new" saying nothing changes in the app.
+
+`./mosaik.sh --app` with 1.0.4 (18:53) had Smart App Control refuse the engine's `budget` test
+program ("error: 1 target failed: `-p mosaik-engine --test budget`"); `Invoke-Cargo` made it again
+and ran the tests again, as it should. Since then `mosaik.ps1 publish` asks the Store first
+(`publish.ps1 -Check`, before the tests and the build): the key, "What's new" and the listing,
+then the Store's state. 0 when it takes this version (saying the version it has); 3 while it
+still checks the version sent before, nothing done (publish waits, as before, but without the
+minutes of tests and build); 4 when that one is this version, nothing to do; 1 when it has this
+version or a newer one. The send checks the same before replacing anything. `test-publish.ps1`
+has the five cases against the stand-in, which now answers for the published submission and the
+one made before with their packages' versions, and the send refusing a version the Store has;
+`test-mosaik-ps1.ps1` has publish's six orders of steps. Both pass on PowerShell 7 (Linux), a
+mutation (the version check turned off) failing the first; Windows PowerShell 5.1 runs them in the
+next `mosaik.ps1 test`. The engine tests run with libtest's `--quiet`: a dot per test, each test
+program's count and every failure as before (381 Rust tests: core 325, 13 of them properties,
+IPC 23, Win32 19, overlay 8, engine 4, probe 2).
+
+Then the owner (19:52): "why are we running a thousand test when deploy is it really necessary".
+Publish runs them only on code they have not passed on: a run of `mosaik.ps1 test` (or of
+publish's own) that passes whole writes `target\mosaik-tested.txt`, the fingerprint of the code
+it ran on and when, and removes it as it starts; publish compares it with the code's fingerprint
+(`Get-CodeFingerprint`: the files git has and the new ones it does not ignore, or every file
+outside the excluded folders, but the docs, every .md, "What's new", the Store listing and what
+tools leave, with Mosaïk's own version left out of `Cargo.toml`, `Cargo.lock` and the interface's
+`package.json` and its lock) and, when they match, says when they passed and builds. On the
+repository's own four version files a bump to 1.0.5 keeps the fingerprint, and moving the six
+other crates at 1.0.4 in `Cargo.lock` changes it. `test-mosaik-ps1.ps1` has publish's eight
+orders of steps and nineteen checks of the fingerprint and the record (mutations: the version
+kept in `Cargo.lock`, every version there left out, the docs counted, no record written, the
+record kept after a failing run, publish never skipping; each fails it).
+
+## 1.0.3
+
+What the launch kit found while recording on 2026-10-26 (Mosaïk 1.0.2 from the Store, Windows 11
+25H2, a 2560x1440 virtual display): Calculator dragged by its title bar onto Paint's zone tag
+showed the strip as it should while it hovered ("+ Drop to add"), but after the drop no band or
+strip appeared and Paint was gone behind Calculator, for the remaining two minutes in one take; in
+the other the strip came 87 seconds later, when another window was dropped into a zone (turning
+Coloured borders off and on brought it back too). Recordings: `Videos\2026-10-26 03-00-40.mp4`
+(drop at 0:30) and `Videos\2026-10-26 02-51-29.mp4` (drop at 0:30, strip at 1:57).
+
+- **Why**: a drop draws its group's strip in the syncs it runs at once; the two passes after the
+  dropped window is raised only lift a strip already shown. When that first draw puts nothing on
+  screen, nothing draws it again until the next change of tabs. And a draw with no room for the
+  band (a window not yet settled in its group's place) hid the strip yet answered "on screen", so
+  the group hid its other tabs with no strip to reach them: the window behind looked gone.
+- **The fix** (`crates/mosaik-engine/src/tabs.rs`): `draw_strip` answers whether the strip is on
+  screen (`TabBar::is_shown`), so a group whose strip is not keeps all its tabs showing (the rule
+  of `mosaik_core::tabs`); each pass after a raise first looks for a group of two tabs or more
+  whose strip belongs on screen (the visible tab in a place with room for a band, no drag going
+  on) and is not there or could not be drawn, and syncs the tabs again, which draws the strip and
+  hides the other tabs. A line in the log says when it happens ("tab strip missing after a
+  raise").
+- **Checked so far**, in the cloud: `cargo check` and `cargo clippy --all-targets --all-features
+  -D warnings` of `mosaik-engine` for `x86_64-pc-windows-msvc` (the standard library built from
+  its 1.97.0 source), `cargo fmt --check`. To do on Windows: `.\mosaik.ps1 test`, then the drop by
+  hand (Calculator, or any window, onto another's tag: the strip at once, the window behind a tab
+  of it) and `mosaik-probe workspace --drag`.
+- **The listing**: `installer/msix/listing/en-us/short-description.txt` goes as the listing's
+  short description (ADR 0041, amended). `test-publish.ps1` passes in full under PowerShell 7 on
+  Linux, its case 1d now sending a short description and refusing one of 1,001 characters.
+- Version 1.0.3 (`Cargo.toml`, `Cargo.lock`, `apps/desktop/package.json` and its lock), the
+  changelog and "What's new" (`installer/msix/whats-new.txt`).
+- **The first build of 1.0.3 on the owner's PC** (2026-10-28) stopped: Smart App Control refused
+  `serde_derive`'s library, and on the run that made it again `yoke_derive`'s, while
+  `Invoke-Cargo` ran cargo only once more. It now runs cargo again while each failure comes with
+  files refused during that run (Code Integrity's events since that run began), six runs at most,
+  and the last one's refused files are removed too, so running the command again makes them again.
 
 ## 1.0.2
 

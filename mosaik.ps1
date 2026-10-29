@@ -522,20 +522,30 @@ function Get-RefusedFiles([string]$Source, [datetime]$Since) {
 
 # Runs cargo. When it fails because Windows refused a file the build had just made (rustc then
 # "can't find crate", or a test program does not start), those files are removed and cargo runs
-# once more: a file made again is judged again, and is let through (ADR 0008; job 0094).
+# again: a file made again is judged again, and is let through (ADR 0008; job 0094). That run can
+# have another file refused (2026-10-28: serde_derive's library, then yoke_derive's), so cargo runs
+# again while each failure comes with files refused during that run, six runs at most.
 function Invoke-Cargo([string]$In, [string[]]$Arguments) {
+  $runs = 6
   $since = (Get-Date).AddSeconds(-5)
-  try { Invoke-Tool $In 'cargo' $Arguments; return }
-  catch {
-    $refused = @(Get-RefusedFiles $In $since)
-    if ($refused.Count -eq 0) { throw }
-    Say ("Windows (Smart App Control) refused {0} file(s) this build made: {1}. Making them again." -f $refused.Count, (($refused | ForEach-Object { Split-Path -Leaf $_ }) -join ', ')) Yellow
-    foreach ($f in $refused) {
-      # The file with every companion the build made beside it (.pdb, .d, .lib, .exp).
-      $stem = [IO.Path]::GetFileNameWithoutExtension($f)
-      Get-ChildItem -LiteralPath (Split-Path -Parent $f) -Filter "$stem.*" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+  for ($run = 1; ; $run++) {
+    try { Invoke-Tool $In 'cargo' $Arguments; return }
+    catch {
+      $failure = $_
+      $refused = @(Get-RefusedFiles $In $since)
+      if ($refused.Count -eq 0) { throw $failure }
+      $names = ($refused | ForEach-Object { Split-Path -Leaf $_ }) -join ', '
+      if ($run -lt $runs) { Say ("Windows (Smart App Control) refused {0} file(s) this build had just made, so cargo could not use them: {1}. Not the code: they are made again, and cargo runs again (run {2} of {3})." -f $refused.Count, $names, ($run + 1), $runs) Yellow }
+      else { Say ("Windows (Smart App Control) refused files in each of {0} runs, the last: {1}. Run the same command again: what was built is kept, and those are made again." -f $runs, $names) Yellow }
+      foreach ($f in $refused) {
+        # The file with every companion the build made beside it (.pdb, .d, .lib, .exp).
+        $stem = [IO.Path]::GetFileNameWithoutExtension($f)
+        Get-ChildItem -LiteralPath (Split-Path -Parent $f) -Filter "$stem.*" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+      }
+      if ($run -ge $runs) { throw $failure }
+      # Only what Windows refuses from now on is the next run's
+      $since = Get-Date
     }
-    Invoke-Tool $In 'cargo' $Arguments
   }
 }
 
@@ -690,12 +700,81 @@ function Start-Again([string]$Source) {
   }
 }
 
+# --- The tests once per code ------------------------------------------------------------------
+
+# The code the tests run on, as one fingerprint: every file of the source (in a repository, the
+# ones git has and the new ones it does not ignore; else every file outside the excluded folders)
+# but the ones that cannot change what the tests find: the docs and every .md (the changelog, the
+# README), "What's new", the Store listing, and what tools leave behind. The version is left out
+# of Cargo.toml, Cargo.lock and the interface's package files: Mosaik sent again under its next
+# number is the same code (1.0.4 is 1.0.3 under the next number, for the Store's new screenshots).
+function Get-CodeFingerprint([string]$Source) {
+  $notCode = '\.md$|^docs/|^installer/msix/whats-new\.txt$|^installer/msix/listing/|\.tsbuildinfo$|(^|/)npm-debug\.log|(^|/)\.DS_Store$'
+  $files = $null
+  if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Under $Source '.git'))) {
+    # What git says on stderr is no failure here (Windows PowerShell 5.1 would stop at it when the
+    # output is redirected): without its list, every file outside the excluded folders is read.
+    $stop = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = 'Continue'
+      $files = & git -C $Source -c core.quotepath=off ls-files --cached --others --exclude-standard 2>$null
+      if ($LASTEXITCODE -ne 0) { $files = $null }
+    }
+    catch { $files = $null }
+    finally { $ErrorActionPreference = $stop }
+  }
+  if (-not $files) { $files = Get-TreeFiles $Source }
+  $lines = foreach ($file in @($files | Where-Object { $_ -and $_ -notmatch $Excluded -and $_ -notmatch $notCode } | Sort-Object -Unique -CaseSensitive)) {
+    $path = Under $Source $file
+    # A file git has that is gone: its name left out is the change
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+    $bytes = [IO.File]::ReadAllBytes($path)
+    $version = switch ($file) {
+      'Cargo.toml' { '(?ms)(^\[workspace\.package\][^\[]*?^version\s*=\s*")[^"]*(")' }
+      'Cargo.lock' { '(?m)(^name = "mosaik-[^"]*"\r?\nversion = ")[^"]*(")' }
+      'apps/desktop/package.json' { '(?m)(^  "version":\s*")[^"]*(")' }
+      'apps/desktop/package-lock.json' { '("name":\s*"mosaik-desktop",\s*"version":\s*")[^"]*(")' }
+      default { $null }
+    }
+    if ($version) { $bytes = [Text.Encoding]::UTF8.GetBytes([regex]::Replace([Text.Encoding]::UTF8.GetString($bytes), $version, '${1}*${2}')) }
+    '{0} {1}' -f (Get-Sha256 $bytes), $file
+  }
+  Get-Sha256 ([Text.Encoding]::UTF8.GetBytes((@($lines) -join "`n")))
+}
+
+# The record of the last run of the tests that all passed: the fingerprint of the code they ran
+# on, and when. In target\, which git and the source packed in a one-file copy leave out.
+function Get-TestedFile([string]$Source) { Under $Source 'target' 'mosaik-tested.txt' }
+
+# When every test last passed on this code (its fingerprint), as said then ("2026-10-28 19:58");
+# $null when they have not, or ran on other code since, or are running or failed (a run of them
+# begins by removing the record).
+function Get-TestedAt([string]$Source, [string]$Code) {
+  $file = Get-TestedFile $Source
+  if (-not (Test-Path -LiteralPath $file)) { return $null }
+  $lines = @(Get-Content -LiteralPath $file -ErrorAction SilentlyContinue)
+  if ($lines.Count -ge 2 -and "$($lines[0])".Trim() -eq $Code) { return "$($lines[1])".Trim() }
+  $null
+}
+
+function Set-Tested([string]$Source, [string]$Code) {
+  $file = Get-TestedFile $Source
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $file) | Out-Null
+  Set-Content -LiteralPath $file -Value @($Code, (Get-Date -Format 'yyyy-MM-dd HH:mm')) -Encoding ASCII
+}
+
+# Every test and check. When they all pass, the record says which code they passed on, and
+# publish does not run them again for that code (`test` always runs them).
 function Invoke-Test {
   $source = Get-Source
   Use-Cargo
   $ui = Under $source 'apps' 'desktop'
+  # The code they run on, read first; no record of a pass until they all pass on it
+  $code = Get-CodeFingerprint $source
+  Remove-Item -LiteralPath (Get-TestedFile $source) -Force -ErrorAction SilentlyContinue
   Step 'Engine tests'
-  Invoke-Cargo $source @('test', '--no-fail-fast', '--all-features', '-p', 'mosaik-core', '-p', 'mosaik-ipc', '-p', 'mosaik-win', '-p', 'mosaik-overlay', '-p', 'mosaik-engine', '-p', 'mosaik-probe')
+  # A dot per test (--quiet), not a line: the failures, and each test program's count, as before
+  Invoke-Cargo $source @('test', '--no-fail-fast', '--all-features', '-p', 'mosaik-core', '-p', 'mosaik-ipc', '-p', 'mosaik-win', '-p', 'mosaik-overlay', '-p', 'mosaik-engine', '-p', 'mosaik-probe', '--', '--quiet')
   Step 'Lints (clippy)'
   Invoke-Cargo $source @('clippy', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings')
   Step 'Interface checks and tests'
@@ -708,6 +787,7 @@ function Invoke-Test {
   Step 'This script: a new source over one unpacked before'
   & (Under $source 'installer' 'test-mosaik-ps1-unpack.ps1') -Script $PSCommandPath
   Say 'Every test passed.' Green
+  Set-Tested $source $code
 }
 
 function Invoke-Run {
@@ -724,17 +804,35 @@ function Invoke-Package {
 }
 
 # Tests, builds and packages Mosaik, then sends the package to the Microsoft Store with
-# installer\msix\publish.ps1. The Store's key comes first (asked once, then kept: docs/RELEASE.md),
-# so the minutes of tests and build that follow need nobody. While the Store still checks the
-# version sent before, nothing is sent and $script:Waiting says so: no failure (publish ends with 3).
+# installer\msix\publish.ps1. The Store is asked first (publish.ps1 -Check: its key, asked once
+# and then kept, docs/RELEASE.md; "What's new" and the listing; whether it takes this version), so
+# the minutes of tests and build that follow need nobody, and are spent only on a version the Store
+# takes (2026-10-28: the 1.0.3 built again was tested, built and sent, then refused as one it had).
+# While the Store still checks the version sent before, nothing is done and $script:Waiting says
+# so: no failure (publish ends with 3); when that one is this version, there is nothing to do.
+# The tests run only on code they have not passed on yet (Get-CodeFingerprint): a version, notes
+# or docs changed since a run that passed are not a reason to run them again ("why are we running
+# a thousand test when deploy").
 function Invoke-Publish {
   $source = Get-Source
   $publish = Under $source 'installer' 'msix' 'publish.ps1'
-  Step "The Store's key"
-  & $publish -KeyOnly
-  if ($LASTEXITCODE -ne 0) { Fail "Nothing was built or sent: the Store's key is needed first (the lines above say where it is)." }
-  Invoke-Test
-  Invoke-Build -Installed
+  Step 'The Store first: its key, and whether it takes this version'
+  & $publish -Check
+  $ready = $LASTEXITCODE
+  if ($ready -eq 3) { $script:Waiting = $true; return }
+  if ($ready -eq 4) { return }
+  if ($ready -ne 0) { Fail 'Nothing was tested, built or sent; the lines above say why.' }
+  $tested = Get-TestedAt $source (Get-CodeFingerprint $source)
+  if ($tested) {
+    Step 'Tests'
+    Say ("They passed on this same code on {0} (the version, notes and docs aside): not run again." -f $tested) Green
+    Invoke-Build
+  }
+  else {
+    Say 'The tests run: the code changed since they last passed here. Once they pass, the same code is not tested again.' DarkGray
+    Invoke-Test
+    Invoke-Build -Installed
+  }
   Invoke-Package
   Step 'Sending it to the Microsoft Store'
   & $publish

@@ -1,25 +1,28 @@
 # Releasing Mosaïk
 
 Everything up to the package is automated, and sending it is one line; publishing stays the
-owner's (the Store submission, the GitHub push, the site deploy). Version 1.0.2 is set in
+owner's (the Store submission, the GitHub push, the site deploy). Version 1.0.4 is set in
 `Cargo.toml` and `apps/desktop/package.json`; `CHANGELOG.md` says what is in it, and
 `installer/msix/whats-new.txt` is what the Store shows as "What's new in this version". The
 version stays 1.0 (the owner): each release takes the next third number (1.0.2, 1.0.3...), as the
-Store takes only a higher version than the one it has.
+Store takes only a higher version than the one it has. A version it has had once is never taken
+again, even built again from the same source: a listing sent after its version is out goes with
+the next number (1.0.4 is 1.0.3 with the listing's new screenshots).
 
 ## 1. Build, test and package (on Windows)
 
 ```powershell
 .\mosaik.ps1 build      # interface + release binaries (about 3 minutes the first time)
 .\mosaik.ps1 test       # every test, clippy and the interface checks
-.\mosaik.ps1 package    # target\msix\Mosaik_1.0.2.0_x64.msix
+.\mosaik.ps1 package    # target\msix\Mosaik_1.0.4.0_x64.msix
 ```
 
 A Mosaïk running from the same folder quits for the build (every window it hid comes back) and
 starts again after. Smart App Control can refuse a new build's files for a while: when it refuses
 `mosaikctl.exe`, which asks Mosaïk to quit, Mosaïk is stopped instead (its watchdog first) and
 the watchdog's quiet rescue brings back its windows; when it refuses the new `mosaik.exe`, the
-build says so and `.\mosaik.ps1 run` starts it later.
+build says so and `.\mosaik.ps1 run` starts it later. The files it refuses while building are made
+again until it lets them through, six runs at most.
 
 ## 2. Check by hand on real machines
 
@@ -46,12 +49,17 @@ From the folder with `mosaik.sh` and the repository (`mosaik/`) beside it, in Gi
 ./mosaik.sh --deploy --app
 ```
 
-It tests, builds and packages the app and sends it to the Microsoft Store (ADR 0026): a new
-submission copied from the last one, this package in place of the old one and "What's new"
-from `installer/msix/whats-new.txt`; nothing else of the listing changes. Then it puts the site
-online. If the app is not sent, the site is not deployed either. The Store checks the new
-version, usually within a day or two, and then updates everyone. `./mosaik.sh --app` sends the app
-alone; `.\mosaik.ps1 publish` does the same from PowerShell.
+It asks the Store first (`publish.ps1 -Check`): while the Store still checks the version sent
+before, or when it has this version already or a newer one, it says so and nothing is tested,
+built or sent. Otherwise it tests the code (only when the tests have not passed on it yet here:
+a new version number, the changelog, docs, "What's new" and the listing do not count, and
+`.\mosaik.ps1 test` always runs them), builds and packages the app and sends it to the Microsoft
+Store (ADR 0026): a new submission copied from the last one, this package in place of the old
+one, "What's new" from `installer/msix/whats-new.txt`, and the listing written in
+`installer/msix/listing` (below, ADR 0041); nothing else of the listing changes. Then it puts the site online. If the app is not
+sent, the site is not deployed either. The Store checks the new version, usually within a day or
+two, and then updates everyone. `./mosaik.sh --app` sends the app alone; `.\mosaik.ps1 publish`
+does the same from PowerShell.
 
 ### The Store's key, in `.env.local`
 
@@ -82,6 +90,27 @@ How it was set up, on 2026-10-13:
 Keys expire: Partner Center shows when. Make a new one the same way (step 3) and give it with
 `.\installer\msix\publish.ps1 -NewKey`.
 
+### The Store listing, in `installer/msix/listing`
+
+What the Store shows goes with the app, from files beside `publish.ps1`: one folder per language
+of the listing (`en-us`). Each file replaces that part of the listing; a part without its file
+stays as Partner Center has it, and without the folder only the package and "What's new" change.
+
+- `description.txt`: the description (10,000 characters at most).
+- `short-description.txt`: the short description at the top of the listing (1,000 characters at
+  most; some views show its first 270).
+- `features.txt`: the features, one per line (20 at most, 200 characters each).
+- `keywords.txt`: the search terms, one per line (7 at most).
+- `screenshots/*.png`: the screenshots, in the order of their names (10 at most), captioned by
+  the lines of `screenshots/captions.txt` in the same order. They replace the listing's
+  screenshots; its other pictures (logos, promotional art) stay. With no PNG there, the
+  screenshots stay as they are.
+
+A folder for a language the listing has not (one the package does not declare) is left out, saying
+so, and a listing the Store would refuse sends nothing. `en-us` has the description, features and
+search terms of 2026-10-26, the short description of 2026-10-28 and no screenshots, so the Store
+keeps the ones it has.
+
 ### The submission, for reference
 
 Apps and games, Mosaïk (Store ID `9PHR0L7S1QVD`). 1.0.0 was published on 2026-10-12; each new
@@ -97,7 +126,8 @@ The rest of the submission, for reference (already set by submission 1):
   "Mosaïk is a desktop app that arranges the windows of the user's other apps (moves, resizes,
   groups them into tabs) and registers one global keyboard shortcut. It needs full trust to see
   and move those windows. It makes no network requests."
-- **Store listing** (English):
+- **Store listing** (English): in `installer/msix/listing/en-us` since 2026-10-26 (ADR 0041).
+  Submission 1 had:
   - *Description*: "Mosaïk gives every project its own workspace: your apps and windows arranged
     and ready in one click. See your screen as it will be before anything moves: Arrange lays
     it out for what you are doing, or pick one of eight layouts. Carve the screen into named,

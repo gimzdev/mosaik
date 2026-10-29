@@ -2,22 +2,34 @@
 // Store submission API, as Microsoft documents them), for test-publish.ps1: it answers like them,
 // checks every request publish.ps1 makes, and writes what it saw to a report.
 //
-//   node store-standin.mjs <port> <report.json> <expected package name> <whats-new.txt> <tenant> <client> <key> [<status>]
+//   node store-standin.mjs <port> <report.json> <expected package name> <whats-new.txt> <tenant> <client> <key> [<status>] [<listing.json>] [<published version>] [<pending version>]
 //
 // <status> is where the submission made before stands (PendingCommit when left out: made, never
 // sent). Sent and still with the Store (Certification...), it cannot be deleted, as with Microsoft.
+// <listing.json>, when given (not ''), is the listing publish.ps1 should send from its listing folder:
+// { language, description, shortDescription?, features, keywords, screenshots: [{ fileName, description }] }
+// (no shortDescription: the listing's stays as it was); without it, the listing must stay as it was
+// (but for "What's new").
+// <published version> is the version of the package the Store has (1.0.0.0 when left out), and
+// <pending version> the one in the submission made before (1.0.0.1).
 // It ends by itself once the new submission's status has been read twice, soon after a submission
-// still with the Store was looked at, or after a minute.
+// still with the Store was looked at, or after a minute. The report is written again with every
+// answer, so a run that ends sooner (publish.ps1 -Check asks and sends nothing) can stop it.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
-const [port, reportPath, packageName, whatsNewFile, tenant, client, key, pendingStatus = 'PendingCommit'] =
+const [port, reportPath, packageName, whatsNewFile, tenant, client, key, pendingStatus = 'PendingCommit', listingFile = '', publishedArg = '', pendingArg = ''] =
   process.argv.slice(2);
+const publishedVersion = publishedArg || '1.0.0.0';
+const pendingVersion = pendingArg || '1.0.0.1';
+const publishedPackage = `Mosaik_${publishedVersion}_x64.msix`;
+const expected = listingFile ? JSON.parse(readFileSync(listingFile, 'utf8').replace(/^\uFEFF/, '')) : null;
 // Sent, and not out yet: Microsoft refuses to delete such a submission.
 const IN_FLIGHT = ['CommitStarted', 'PreProcessing', 'Certification', 'Release', 'PendingPublication', 'Publishing'];
 const inFlight = IN_FLIGHT.includes(pendingStatus);
 const whatsNew = readFileSync(whatsNewFile, 'utf8').replace(/^\uFEFF/, '').trim();
 const APP = '9PHR0L7S1QVD';
+const PUBLISHED = '1152921505000000000';
 const PENDING = '1152921505000000001';
 const NEW = '1152921505000000002';
 const seen = [];
@@ -42,6 +54,7 @@ const published = () => ({
         supportContact: '',
         websiteUrl: '',
         description: 'Mosaïk gives every project its own workspace.',
+        shortDescription: '',
         features: ['Zones that belong to the project, not the monitor'],
         releaseNotes: '',
         images: [{ fileName: 'shot1.png', fileStatus: 'Uploaded', id: '1', description: '', imageType: 'Screenshot' }],
@@ -64,10 +77,10 @@ const published = () => ({
   fileUploadUrl: `http://127.0.0.1:${port}/upload/submission-${NEW}?sv=2026-01-01&sig=standin`,
   applicationPackages: [
     {
-      fileName: 'Mosaik_1.0.0.0_x64.msix',
+      fileName: publishedPackage,
       fileStatus: 'Uploaded',
       id: '1152921504621465124',
-      version: '1.0.0.0',
+      version: publishedVersion,
       architecture: 'X64',
       languages: ['en-us'],
       capabilities: ['runFullTrust'],
@@ -84,8 +97,19 @@ const published = () => ({
   trailers: [],
 });
 
+// Written only when it changed: once publish.ps1 has its last answer, the report is never being
+// written, so a test may stop the stand-in at any time after.
+let saved = '';
+const save = () => {
+  const text = JSON.stringify({ checks, seen }, null, 2);
+  if (text !== saved) {
+    writeFileSync(reportPath, text);
+    saved = text;
+  }
+};
+
 function finish() {
-  writeFileSync(reportPath, JSON.stringify({ checks, seen }, null, 2));
+  save();
   server.close();
   setTimeout(() => process.exit(0), 50);
 }
@@ -100,6 +124,12 @@ const server = createServer((req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
     const path = url.pathname;
     seen.push(`${req.method} ${path}`);
+    // What was seen so far, in the report before each answer
+    const end = res.end.bind(res);
+    res.end = (...args) => {
+      save();
+      return end(...args);
+    };
     const json = (code, value) => {
       res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(value === undefined ? '' : JSON.stringify(value));
@@ -125,9 +155,21 @@ const server = createServer((req, res) => {
         id: APP,
         primaryName: 'Mosaïk',
         packageFamilyName: 'Gimzdev.Mosak_yjd3d5zpwkx98',
-        lastPublishedApplicationSubmission: { id: '1152921505000000000', resourceLocation: `applications/${APP}/submissions/1152921505000000000` },
+        lastPublishedApplicationSubmission: { id: PUBLISHED, resourceLocation: `applications/${APP}/submissions/${PUBLISHED}` },
         pendingApplicationSubmission: { id: PENDING, resourceLocation: `applications/${APP}/submissions/${PENDING}` },
       });
+    }
+    // The submissions themselves: the one published, with the package the Store has, and the one
+    // made before, with the package it was given.
+    if (req.method === 'GET' && path === `${base}/submissions/${PUBLISHED}`) {
+      checks.published_read = true;
+      return json(200, { ...published(), id: PUBLISHED, status: 'Published', fileUploadUrl: '' });
+    }
+    if (req.method === 'GET' && path === `${base}/submissions/${PENDING}`) {
+      checks.pending_read = true;
+      const made = published();
+      made.applicationPackages = [{ ...made.applicationPackages[0], fileName: `Mosaik_${pendingVersion}_x64.msix`, id: '1152921504621465125', version: pendingVersion }];
+      return json(200, { ...made, id: PENDING, status: pendingStatus, fileUploadUrl: '' });
     }
     if (req.method === 'GET' && path === `${base}/submissions/${PENDING}/status`) {
       checks.pending_status_read = true;
@@ -164,15 +206,33 @@ const server = createServer((req, res) => {
       const packages = sent.applicationPackages;
       checks.update_json = true;
       checks.packages_are_an_array = isArray(packages);
-      checks.old_package_removed = isArray(packages) && packages.some((p) => p.fileName === 'Mosaik_1.0.0.0_x64.msix' && p.fileStatus === 'PendingDelete');
+      checks.old_package_removed = isArray(packages) && packages.some((p) => p.fileName === publishedPackage && p.fileStatus === 'PendingDelete');
       checks.new_package_added = isArray(packages) && packages.some((p) => p.fileName === packageName && p.fileStatus === 'PendingUpload');
       const listing = sent.listings?.['en-us']?.baseListing;
       checks.whats_new = listing?.releaseNotes === whatsNew;
-      checks.listing_kept =
-        listing?.title === 'Mosaïk' &&
-        listing?.description === 'Mosaïk gives every project its own workspace.' &&
-        isArray(listing?.keywords) && listing.keywords.length === 5 &&
-        isArray(listing?.features) && isArray(listing?.images);
+      const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      if (!expected) {
+        checks.listing_kept =
+          listing?.title === 'Mosaïk' &&
+          listing?.description === 'Mosaïk gives every project its own workspace.' &&
+          listing?.shortDescription === '' &&
+          isArray(listing?.keywords) && listing.keywords.length === 5 &&
+          isArray(listing?.features) && isArray(listing?.images) && same(listing.images, published().listings['en-us'].baseListing.images);
+      } else {
+        const images = isArray(listing?.images) ? listing.images : [];
+        const added = images.filter((i) => i.fileStatus === 'PendingUpload');
+        checks.listing_set =
+          listing?.title === 'Mosaïk' &&
+          listing?.description === expected.description &&
+          listing?.shortDescription === (expected.shortDescription ?? '') &&
+          same(listing?.features, expected.features) &&
+          same(listing?.keywords, expected.keywords);
+        checks.old_screenshots_removed = images.some((i) => i.fileName === 'shot1.png' && i.fileStatus === 'PendingDelete');
+        checks.new_screenshots_added =
+          added.length === expected.screenshots.length &&
+          expected.screenshots.every((e, n) => added[n]?.fileName === e.fileName && added[n]?.description === e.description && added[n]?.imageType === 'Screenshot');
+        checks.only_the_listing_languages = same(Object.keys(sent.listings ?? {}), ['en-us']);
+      }
       checks.pricing_kept = sent.pricing?.priceId === 'Free';
       return json(200, sent);
     }
@@ -180,6 +240,10 @@ const server = createServer((req, res) => {
       checks.blob_type = req.headers['x-ms-blob-type'] === 'BlockBlob';
       checks.upload_is_a_zip = body.length > 22 && body[0] === 0x50 && body[1] === 0x4b;
       checks.zip_has_the_package = body.includes(Buffer.from(packageName, 'utf8'));
+      if (expected) {
+        // Each at the ZIP's root: no folder, so no separator in its name
+        checks.zip_has_the_screenshots = expected.screenshots.every((e) => body.includes(Buffer.from(e.fileName, 'utf8')) && !e.fileName.includes('/') && !e.fileName.includes('\\'));
+      }
       checks.upload_after_update = checks.update_json === true;
       res.writeHead(201);
       return res.end();
@@ -191,11 +255,9 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && path === `${base}/submissions/${NEW}/status`) {
       statusReads += 1;
       const status = statusReads === 1 ? 'CommitStarted' : 'PreProcessing';
+      if (statusReads >= 2) checks.status_read_until_taken = true;
       json(200, { status, statusDetails: { errors: [], warnings: [], certificationReports: [] } });
-      if (statusReads >= 2) {
-        checks.status_read_until_taken = true;
-        finish();
-      }
+      if (statusReads >= 2) finish();
       return undefined;
     }
     checks.unexpected = `${req.method} ${path}`;
