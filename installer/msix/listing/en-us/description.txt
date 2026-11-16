@@ -1,0 +1,14 @@
+Mosaïk gives every project its own workspace: your apps and windows, arranged and ready in one click.
+
+Zones give every window a home. One click reads what you are working on: the window you work in gets the most room, a terminal goes under your editor, and the windows that help sit beside it. Or pick one of eight layouts, or carve the screen into zones of your own. Before anything moves, Mosaïk shows where each window will go.
+
+Tabs for any app, not only the browser. Drop a window on another's number and they share a tab strip: an editor, a terminal, Paint, a chat. Pull a tab out and it is a window again.
+
+Switch projects, not just windows. Save a workspace and bring it back from the tray, the edge of the screen or Win+Alt+Space. Positions, sizes and tabs return together, and apps that are not open start on their own.
+
+Made for real desktops:
+• Zones belong to the project, not the monitor, and fit every display and scaling
+• Apps that cannot shrink to a zone are left alone and explained, never forced
+• If Mosaïk ever stops, a watchdog brings every hidden window back
+
+No account, no telemetry, no network requests: your layouts stay on your PC. Free and open source: github.com/gimzdev/mosaik

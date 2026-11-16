@@ -116,11 +116,15 @@ export function App() {
     const collect = () => {
       void takeNotices().then((fresh) => {
         if (fresh.length === 0) return;
-        const shown = fresh.map((n) => {
-          noteCount.current += 1;
-          return { ...n, id: noteCount.current };
-        });
-        setNotes((n) => [...shown.reverse(), ...n]);
+        // The newest first, numbered as they came. Turned round here, not inside the update,
+        // which React may run twice: a second turn would put them back oldest first.
+        const shown = fresh
+          .map((n) => {
+            noteCount.current += 1;
+            return { ...n, id: noteCount.current };
+          })
+          .reverse();
+        setNotes((n) => [...shown, ...n]);
       });
     };
     collect();

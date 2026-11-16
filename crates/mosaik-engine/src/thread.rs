@@ -296,9 +296,12 @@ pub(crate) fn run(
     {
         tracing::warn!(error = %e, "the theme settled was not saved");
     }
+    // What reading the workspaces has to say (zones numbered, a workspace mended, the copy of
+    // the file used) is said of the workspaces, not under "Mosaïk's settings".
+    let mut workspace_notices = Vec::new();
     let (file, file_error) = match store.load::<WorkspacesFile>() {
         Ok(loaded) => {
-            notices.extend(loaded.notes);
+            workspace_notices.extend(loaded.notes);
             (loaded.value, None)
         }
         Err(e) => (WorkspacesFile::default(), Some(e)),
@@ -359,6 +362,9 @@ pub(crate) fn run(
     engine.start_apps.refresh();
     for n in notices {
         engine.notice("Mosaïk's settings", n);
+    }
+    for n in workspace_notices {
+        engine.notice("Your workspaces", n);
     }
     if let Some(problem) = &file_error {
         engine.file_locked(problem);

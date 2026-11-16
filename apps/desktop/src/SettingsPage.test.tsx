@@ -228,9 +228,11 @@ describe('Settings', () => {
     expect(screen.getByRole('radio', { name: 'Dark' })).toBeDisabled();
   });
 
-  it('ends with About: the version, Patreon, and rescuing windows', async () => {
+  it('ends with About: the version, rating Mosaïk, Patreon, and rescuing windows', async () => {
     page(saver());
     expect(await screen.findByText('Mosaïk 1.2.0')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Rate Mosaïk' }));
+    expect(engine.openLink).toHaveBeenCalledWith('review');
     await userEvent.click(screen.getByRole('button', { name: 'Support on Patreon' }));
     expect(engine.openLink).toHaveBeenCalledWith('patreon');
     await userEvent.click(screen.getByRole('button', { name: 'Rescue windows' }));

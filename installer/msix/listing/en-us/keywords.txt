@@ -1,0 +1,7 @@
+window manager
+snap windows
+split screen
+window tabs
+workspaces
+tiling window manager
+window layouts

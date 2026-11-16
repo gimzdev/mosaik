@@ -127,13 +127,17 @@ async function attempt(action: () => Promise<unknown>, failed: string): Promise<
   }
 }
 
-/** The pages Mosaïk links to. Only these open, in the default browser. */
-export type Link = 'patreon' | 'site' | 'source' | 'privacy';
+/** The pages Mosaïk links to. Only these open: in the default browser, and `review` (Mosaïk's
+ * rating page) in the Microsoft Store. */
+export type Link = 'patreon' | 'site' | 'source' | 'privacy' | 'review';
 
-/** Opens a page in the default browser; resolves to an error message, or null. */
+/** Opens a page in the default browser (or the Store); resolves to an error message, or null. */
 export function openLink(link: Link): Promise<string | null> {
   if (!inMosaik) return Promise.resolve(null);
-  return attempt(() => invoke('open_link', { link }), 'The browser did not open.');
+  return attempt(
+    () => invoke('open_link', { link }),
+    link === 'review' ? 'The Microsoft Store did not open.' : 'The browser did not open.',
+  );
 }
 
 /** Opens the licences of the open-source software Mosaïk is built with (a text file beside

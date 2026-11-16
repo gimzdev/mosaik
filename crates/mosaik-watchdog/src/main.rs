@@ -70,7 +70,15 @@ mod windows_main {
             log.line(&format!("watching process {pid}"));
             match Process::open(pid) {
                 Ok(p) => {
-                    while !p.wait(u32::MAX) {}
+                    // The wait ends when the process does. Should the wait itself fail (it
+                    // answers at once then), this looks again every second rather than turn
+                    // without rest, a processor busy for good and no window ever restored.
+                    while !p.wait(u32::MAX) {
+                        if p.exit_code().is_some() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
                     ended_with = p.exit_code();
                     log.line(&format!("process {pid} ended with code {ended_with:?}"));
                 }

@@ -134,8 +134,11 @@ impl Launch {
             }
         } else {
             // Unquoted, a path can hold spaces ("C:\Program Files\Git\git-bash.exe"): it ends
-            // at ".exe" followed by a space or the end, else at the first space.
-            let lower = line.to_lowercase();
+            // at ".exe" followed by a space or the end, else at the first space. Lower case for
+            // ASCII only, so that a place in `lower` is the same place in `line`: other letters
+            // can change length ('İ' is two bytes, three in lower case), and a place found past
+            // them cut the line off a character, or past its end (a panic).
+            let lower = line.to_ascii_lowercase();
             let exe_end = lower
                 .match_indices(".exe")
                 .map(|(i, _)| i + 4)
@@ -308,17 +311,47 @@ fn spaced(name: &str) -> String {
     out
 }
 
-/// Which of two zones, each a monitor and an area on it, is read first: monitor by monitor, then
-/// row by row from the top, then from the left. A zone whose top is within 2% of another's is
-/// in its row, so zones a few pixels apart still read across.
-pub fn reading_order(a: (usize, RatioRect), b: (usize, RatioRect)) -> std::cmp::Ordering {
-    a.0.cmp(&b.0).then_with(|| {
-        if (a.1.top() - b.1.top()).abs() < 0.02 {
-            a.1.left().total_cmp(&b.1.left())
-        } else {
-            a.1.top().total_cmp(&b.1.top())
+/// How far below the top of its row's first zone a zone's top may be, as a share of the
+/// monitor's height, and still be in that row.
+const SAME_ROW: f64 = 0.02;
+
+/// The order zones are read in, each given as its monitor and its area there: monitor by
+/// monitor, then row by row from the top, then from the left. A row starts at the highest zone
+/// not yet in one and takes every zone whose top is within 2% of that one's, so zones a few
+/// pixels apart still read across. Returns the zones' indices, the first read first.
+///
+/// The rows are worked out over all the zones at once. Asked of two zones at a time ("is this
+/// one's top within 2% of that one's?"), it was not an order: of three zones each a step lower,
+/// the first and the second were in a row, the second and the third too, the first and the
+/// third not. The numbers then depended on the order the zones came in, and Rust's sort may
+/// stop the program when what it sorts by is not an order.
+pub fn reading_order(zones: &[(usize, RatioRect)]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..zones.len()).collect();
+    order.sort_by(|&a, &b| {
+        zones[a]
+            .0
+            .cmp(&zones[b].0)
+            .then_with(|| zones[a].1.top().total_cmp(&zones[b].1.top()))
+    });
+    // The row of each zone, counted from the first monitor's first row.
+    let mut row = vec![0usize; zones.len()];
+    let mut first: Option<(usize, f64)> = None;
+    let mut rows = 0usize;
+    for &i in &order {
+        let (monitor, top) = (zones[i].0, zones[i].1.top());
+        let in_the_row = first.is_some_and(|(m, t)| m == monitor && top - t < SAME_ROW);
+        if !in_the_row {
+            first = Some((monitor, top));
+            rows += 1;
         }
-    })
+        row[i] = rows;
+    }
+    order.sort_by(|&a, &b| {
+        row[a]
+            .cmp(&row[b])
+            .then_with(|| zones[a].1.left().total_cmp(&zones[b].1.left()))
+    });
+    order
 }
 
 impl Layout {
@@ -327,16 +360,13 @@ impl Layout {
     }
 
     /// Names the zones 1, 2, 3... in reading order: monitor by monitor, then row by row from the
-    /// top, then from the left (a zone whose top is within 2% of another's is in its row). A
+    /// top, then from the left (a zone whose top is within 2% of its row's first is in that row:
+    /// [`reading_order`]). A
     /// zone's name says where it is, never what it holds (the owner: "names like assistant code
     /// zone etc are absolute bullshit they should be 1 2 3 4 5 6"). Its id and colour stay.
     pub fn number_zones(&mut self) {
-        let mut order: Vec<usize> = (0..self.zones.len()).collect();
-        order.sort_by(|&a, &b| {
-            let (za, zb) = (&self.zones[a], &self.zones[b]);
-            reading_order((za.monitor, za.area), (zb.monitor, zb.area))
-        });
-        for (n, i) in order.into_iter().enumerate() {
+        let places: Vec<(usize, RatioRect)> = self.zones.iter().map(|z| (z.monitor, z.area)).collect();
+        for (n, i) in reading_order(&places).into_iter().enumerate() {
             self.zones[i].name = (n + 1).to_string();
         }
     }
@@ -487,6 +517,100 @@ impl Layout {
         let before = self.tab_groups.len();
         self.tab_groups.retain(|g| !broken.contains(&g.id));
         before - self.tab_groups.len()
+    }
+
+    /// Mends what [`Layout::problems`] still finds once the tab groups are mended
+    /// ([`Layout::repair_tabs`], called first), so that a workspace from a file edited by hand
+    /// works whole and is told once, where it was skipped in part and told at every start. A
+    /// part whose id another part has already takes a new one: the first keeps the id, with
+    /// what points at it, and a tab under such an id becomes a window of its own in its group's
+    /// place. A zone or an app on a monitor the workspace does not know goes to its first one;
+    /// when it knows none, one is made up, which stands for the main screen (a remembered main
+    /// monitor lands on the main one connected, whatever its size). An app whose zone is gone
+    /// opens maximised there, as the windows of a tab group whose place is damaged do. Returns
+    /// the problems mended, as they were found.
+    pub fn repair_places(&mut self) -> Vec<LayoutProblem> {
+        let found: Vec<LayoutProblem> = self
+            .problems()
+            .into_iter()
+            .filter(|p| {
+                !matches!(
+                    p,
+                    LayoutProblem::TabGroupMismatch(_) | LayoutProblem::TabGroupBroken(_)
+                )
+            })
+            .collect();
+        if found.is_empty() {
+            return found;
+        }
+        if self.monitors.is_empty() {
+            let screen = crate::geometry::Rect::new(0, 0, 1920, 1080);
+            self.monitors.push(MonitorRef {
+                id: crate::topology::MonitorId::new("main"),
+                name: "Main screen".to_owned(),
+                bounds: screen,
+                work_area: screen,
+                dpi: crate::geometry::BASE_DPI,
+                primary: true,
+            });
+        }
+        let monitors = self.monitors.len();
+        let mut taken: std::collections::HashSet<String> =
+            self.zones.iter().map(|z| z.id.0.clone()).collect();
+        let mut seen = std::collections::HashSet::new();
+        for z in &mut self.zones {
+            if !seen.insert(z.id.0.clone()) {
+                let id = crate::workspace::next_id("z", &taken);
+                taken.insert(id.clone());
+                seen.insert(id.clone());
+                z.id = ZoneId(id);
+            }
+            if z.monitor >= monitors {
+                z.monitor = 0;
+            }
+        }
+        let mut taken: std::collections::HashSet<String> =
+            self.slots.iter().map(|s| s.id.0.clone()).collect();
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..self.slots.len() {
+            if seen.insert(self.slots[i].id.0.clone()) {
+                continue;
+            }
+            let id = crate::workspace::next_id("s", &taken);
+            taken.insert(id.clone());
+            seen.insert(id.clone());
+            self.slots[i].id = SlotId(id);
+            // Its group lists the id once, for the first of the two: this one is a window of
+            // its own, where the group is.
+            let group = match &self.slots[i].place {
+                Place::Tab { group } => Some(group.clone()),
+                _ => None,
+            };
+            if let Some(group) = group {
+                self.slots[i].place = self
+                    .tab_group(&group)
+                    .map(|g| g.place.clone())
+                    .filter(|p| self.place_usable(p))
+                    .unwrap_or(Place::Maximized { monitor: 0 });
+            }
+        }
+        for i in 0..self.slots.len() {
+            let mended = match &self.slots[i].place {
+                Place::Zone { zone } if self.zone(zone).is_none() => Some(Place::Maximized { monitor: 0 }),
+                Place::Free { monitor, area } if *monitor >= monitors => Some(Place::Free {
+                    monitor: 0,
+                    area: *area,
+                }),
+                Place::Maximized { monitor } if *monitor >= monitors => Some(Place::Maximized { monitor: 0 }),
+                _ => None,
+            };
+            if let Some(place) = mended {
+                self.slots[i].place = place;
+            }
+        }
+        // Zones moved to another monitor read in another order.
+        self.number_zones();
+        found
     }
 }
 
@@ -739,6 +863,30 @@ pub enum LayoutProblem {
     TabGroupBroken(TabGroupId),
 }
 
+impl LayoutProblem {
+    /// The problem once [`Layout::repair_places`] has mended it: what it was, and what was done.
+    pub fn mended(&self) -> String {
+        match self {
+            LayoutProblem::DuplicateId(id) => {
+                format!("two of its parts shared the id \u{201c}{id}\u{201d} (one has another id now)")
+            }
+            LayoutProblem::ZoneMonitorMissing(_) => {
+                "a zone was on a monitor the workspace does not know (it is on its first monitor now)"
+                    .to_owned()
+            }
+            LayoutProblem::SlotZoneMissing(_) => {
+                "an app's zone was gone (the app opens maximized now)".to_owned()
+            }
+            LayoutProblem::SlotMonitorMissing(_) => {
+                "an app was on a monitor the workspace does not know (it is on its first monitor now)"
+                    .to_owned()
+            }
+            // Mended with their groups, which say so themselves.
+            LayoutProblem::TabGroupMismatch(_) | LayoutProblem::TabGroupBroken(_) => self.to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -789,6 +937,99 @@ mod tests {
     }
 
     #[test]
+    fn what_a_file_edited_by_hand_can_hold_is_mended_whole() {
+        // Each of these was skipped when its workspace opened and told at every start. Mended,
+        // the layout has no problem left and loses nothing: every zone and every app is there.
+        let app = |id: &str, place: Place| Slot {
+            id: SlotId(id.into()),
+            label: None,
+            app: AppMatch::exe("notepad.exe"),
+            launch: None,
+            place,
+        };
+        let in_zone = |zone: &str| Place::Zone {
+            zone: ZoneId::new(zone),
+        };
+        let mut l = layout();
+        // A second zone under the first one's id, on a monitor the layout does not know.
+        l.zones.push(Zone {
+            monitor: 7,
+            area: RatioRect::new(0.6, 0.0, 1.0, 1.0).unwrap(),
+            ..l.zones[0].clone()
+        });
+        // A third app under the id of the group's first tab, said to be a tab of it too; one in
+        // a zone that is gone; one on a monitor the layout does not know; one maximised there.
+        l.slots.push(app(
+            "s1",
+            Place::Tab {
+                group: TabGroupId("g1".into()),
+            },
+        ));
+        l.slots.push(app("s3", in_zone("gone")));
+        l.slots.push(app(
+            "s4",
+            Place::Free {
+                monitor: 3,
+                area: RatioRect::FULL,
+            },
+        ));
+        l.slots.push(app("s5", Place::Maximized { monitor: 9 }));
+        assert_eq!(l.repair_tabs(), 0, "the group itself is sound");
+        let mended = l.repair_places();
+        assert_eq!(mended.len(), 6, "{mended:?}");
+        assert_eq!(l.problems(), vec![]);
+        assert_eq!(l.repair_places(), vec![], "mended once");
+        assert_eq!(l.zones.len(), 2);
+        assert_eq!(
+            (l.zones[0].id.0.as_str(), l.zones[1].id.0.as_str()),
+            ("z1", "z2"),
+            "the first keeps its id"
+        );
+        assert_eq!(l.zones[1].monitor, 0, "on the layout's first monitor");
+        assert_eq!(
+            (l.zones[0].name.as_str(), l.zones[1].name.as_str()),
+            ("1", "2"),
+            "numbered by place again"
+        );
+        let ids: Vec<&str> = l.slots.iter().map(|s| s.id.0.as_str()).collect();
+        assert_eq!(ids, ["s1", "s2", "s6", "s3", "s4", "s5"]);
+        assert_eq!(l.tab_groups[0].tabs, [SlotId("s1".into()), SlotId("s2".into())]);
+        assert_eq!(
+            l.slots[2].place,
+            in_zone("z1"),
+            "not a tab: a window of its own where the group is"
+        );
+        assert_eq!(l.slots[3].place, Place::Maximized { monitor: 0 });
+        assert_eq!(
+            l.slots[4].place,
+            Place::Free {
+                monitor: 0,
+                area: RatioRect::FULL
+            }
+        );
+        assert_eq!(l.slots[5].place, Place::Maximized { monitor: 0 });
+
+        // A layout that knows no monitor at all: one stands for the main screen.
+        let mut none = layout();
+        none.monitors.clear();
+        none.tab_groups.clear();
+        none.slots.truncate(1);
+        none.slots[0].place = in_zone("z1");
+        assert!(!none.problems().is_empty());
+        none.repair_tabs();
+        assert_eq!(none.repair_places().len(), 1);
+        assert_eq!(none.problems(), vec![]);
+        assert_eq!(none.monitors.len(), 1);
+        assert!(none.monitors[0].primary);
+        assert_eq!(none.slots[0].place, in_zone("z1"), "its zone is kept");
+
+        // A sound layout is left as it is.
+        let mut sound = layout();
+        assert_eq!(sound.repair_places(), vec![]);
+        assert_eq!(sound, layout());
+    }
+
+    #[test]
     fn a_relaunch_command_is_a_program_and_its_arguments() {
         // As Windows' taskbar keeps them for a window (job 0185).
         assert_eq!(
@@ -824,6 +1065,39 @@ mod tests {
             })
         );
         assert_eq!(Launch::from_command_line("   "), None);
+    }
+
+    #[test]
+    fn a_relaunch_command_with_letters_that_change_length_in_lower_case_is_read() {
+        // 'İ' (a Turkish user's folder) is two bytes and three in lower case; the Kelvin sign is
+        // three and one. Where ".exe" ends was looked for in the line in lower case and used in
+        // the line as it is: one byte past the end of the first line here, which stopped Mosaïk
+        // (a panic; every window's command is read when windows are matched to a workspace).
+        let program = |path: &str, args: &[&str]| {
+            Some(Launch::Program {
+                path: path.to_owned(),
+                args: args.iter().map(|a| (*a).to_owned()).collect(),
+                working_dir: None,
+            })
+        };
+        assert_eq!(
+            Launch::from_command_line("C:\\Users\\İbrahim\\AppData\\Local\\App\\app.exe"),
+            program("C:\\Users\\İbrahim\\AppData\\Local\\App\\app.exe", &[])
+        );
+        assert_eq!(
+            Launch::from_command_line("C:\\Users\\İbrahim Çelik\\App\\app.exe --profile ı"),
+            program("C:\\Users\\İbrahim Çelik\\App\\app.exe", &["--profile", "ı"]),
+            "the program still ends at .exe, spaces before it or not"
+        );
+        assert_eq!(
+            Launch::from_command_line("D:\\Lab \u{212a}\\Tool.EXE -x"),
+            program("D:\\Lab \u{212a}\\Tool.EXE", &["-x"]),
+            ".exe is found whatever its case"
+        );
+        assert_eq!(
+            Launch::from_command_line("C:\\İİİ\\é.exe\u{00a0}"),
+            program("C:\\İİİ\\é.exe", &[])
+        );
     }
 
     #[test]
@@ -898,6 +1172,77 @@ mod tests {
             named,
             vec![("d", "4"), ("e", "5"), ("c", "3"), ("b", "2"), ("a", "1")]
         );
+    }
+
+    #[test]
+    fn zones_a_step_lower_each_are_numbered_the_same_whatever_order_they_come_in() {
+        // Three zones, each 1.5% lower than the one to its right. Compared two at a time, a and b
+        // were in a row, b and c too, a and c not: the numbers depended on the order the zones
+        // came in (c, b, a gave c the number 1, though it is the lowest). A row starts at the
+        // highest zone left and takes those within 2% of it: a and b, then c.
+        let zone = |id: &str, left: f64, top: f64| Zone {
+            id: ZoneId::new(id),
+            name: String::new(),
+            color: ZoneColor::Lapis,
+            monitor: 0,
+            area: RatioRect::new(left, top, left + 0.3, top + 0.4).unwrap(),
+        };
+        let (a, b, c) = (zone("a", 0.6, 0.0), zone("b", 0.3, 0.015), zone("c", 0.0, 0.03));
+        let numbered = |zones: Vec<Zone>| {
+            let mut l = layout();
+            l.zones = zones;
+            l.number_zones();
+            let mut named: Vec<(String, String)> =
+                l.zones.iter().map(|z| (z.id.0.clone(), z.name.clone())).collect();
+            named.sort();
+            named
+        };
+        let expected: Vec<(String, String)> = [("a", "2"), ("b", "1"), ("c", "3")]
+            .iter()
+            .map(|(id, name)| ((*id).to_owned(), (*name).to_owned()))
+            .collect();
+        assert_eq!(numbered(vec![a.clone(), b.clone(), c.clone()]), expected);
+        assert_eq!(numbered(vec![c.clone(), b.clone(), a.clone()]), expected);
+        assert_eq!(numbered(vec![b, c, a]), expected);
+    }
+
+    #[test]
+    fn many_zones_in_steps_are_numbered_each_once() {
+        // 64 zones, each 1.5% lower than the one before it and further left, over two monitors:
+        // what Rust's sort is allowed to stop the program on when it is given, to sort by, a
+        // comparison that is not an order. Every zone gets a number, each number once, the
+        // first monitor's zones before the second's.
+        let mut l = layout();
+        l.monitors.push(l.monitors[0].clone());
+        l.zones = (0..64u32)
+            .map(|i| {
+                let top = (0.015 * f64::from(i)) % 0.6;
+                let left = 0.9 - 0.9 * f64::from(i) / 64.0;
+                Zone {
+                    id: ZoneId::new(format!("z{i}")),
+                    name: String::new(),
+                    color: ZoneColor::Lapis,
+                    monitor: usize::from(i % 3 == 0),
+                    area: RatioRect::new(left, top, left + 0.05, top + 0.3).unwrap(),
+                }
+            })
+            .collect();
+        l.number_zones();
+        let mut numbers: Vec<(usize, u32)> = l
+            .zones
+            .iter()
+            .map(|z| (z.monitor, z.name.parse::<u32>().unwrap()))
+            .collect();
+        numbers.sort_unstable();
+        let on_first = l.zones.iter().filter(|z| z.monitor == 0).count();
+        for (n, (monitor, number)) in numbers.iter().enumerate() {
+            assert_eq!(*number, u32::try_from(n).unwrap() + 1, "each number once");
+            assert_eq!(
+                *monitor,
+                usize::from(n >= on_first),
+                "the first monitor's zones first"
+            );
+        }
     }
 
     #[test]

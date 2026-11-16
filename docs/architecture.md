@@ -292,7 +292,10 @@ Settings, workspaces and the journal of hidden windows are in `%APPDATA%\Mosaik`
 `MOSAIK_DATA` names another folder for both: a Mosaïk with files of its own that still sees the
 account's Start menu. A program started with `APPDATA` and `LOCALAPPDATA` changed sees only its
 packaged apps there (35 of 139 on the owner's PC, for Windows' own `Get-StartApps` too; job
-0111).
+0111). Settings and workspaces each have a copy beside them, one change behind: each save
+keeps the file it replaces (`*.last-good.json`). A file that cannot be read is kept as
+`<name>.damaged-<time>`, the copy stands in for it and is written back, and Mosaïk says so once;
+the journal of hidden windows keeps no copy (ADR 0044).
 
 ## Two files
 

@@ -65,3 +65,20 @@ The picture draws each zone once, empty ones too, with its windows' title bars i
 each window where it lands (two of one zone were drawn over each other), and a workspace's apps
 and zones are changed on it, saved at once. A workspace's page lists its apps zone by zone, each
 with Move and ×, instead of a row of dots for each.
+
+## Amended 2026-11-15 (1.0.6): a row starts at its highest zone
+
+"A zone within 2% of another's top is in its row" was asked of two zones at a time
+(`reading_order`, the comparison the zones were sorted by). That is not an order: of three zones
+each 1.5% lower than the one beside it, the first and the second are in a row, the second and
+the third too, the first and the third not. The numbers then depended on the order the zones
+were listed in: given lowest first, the lowest of the three was number 1. And Rust's sort may
+stop the program when what it sorts by is not an order; the release build stops on a panic.
+With more than 20 zones in steps it did, in a test on the code before: "user-provided
+comparison function does not correctly implement a total order".
+
+The rows are now worked out over all the zones at once: a row starts at the highest zone not yet
+in one and takes every zone whose top is within 2% of that one's; rows read from the top, a
+row's zones from the left. Zones in plain rows, which is what the layouts make, are numbered as
+before. A workspace saved with zones in steps can get other numbers once, when its file is next
+read, with the note that zones are numbered by place.

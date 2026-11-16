@@ -504,8 +504,13 @@ export function MenuButton({
           close();
         } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
-          const next = all[(at + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length];
+          // From the button itself (none of the items has the focus: `at` is -1), Down goes to the
+          // first item and Up to the last; before, Up went to the one before the last.
+          const next = e.key === 'ArrowDown' ? all[(at + 1) % all.length] : all[(at <= 0 ? all.length : at) - 1];
           next?.focus();
+        } else if (e.key === 'Home' || e.key === 'End') {
+          e.preventDefault();
+          (e.key === 'Home' ? all[0] : all[all.length - 1])?.focus();
         }
       }}
       onBlur={(e) => {

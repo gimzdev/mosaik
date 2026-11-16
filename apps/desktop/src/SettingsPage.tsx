@@ -80,7 +80,12 @@ function About() {
             on this PC.
           </p>
         </div>
-        <Button onClick={link('patreon')}>Support on Patreon</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button tone="quiet" onClick={link('review')}>
+            Rate Mosaïk
+          </Button>
+          <Button onClick={link('patreon')}>Support on Patreon</Button>
+        </div>
       </div>
       <div className="flex flex-wrap gap-1 py-3">
         <Button tone="quiet" size="sm" onClick={link('site')}>

@@ -1181,12 +1181,8 @@ pub fn plan_moved(
     // New zones are numbered in reading order, after the zones kept on the monitors before
     // theirs: a zone's name says where it is, never what it holds (`Layout::number_zones`
     // numbers a workspace's zones the same way once they join it).
-    let mut reading: Vec<usize> = (0..new_zones.len()).collect();
-    reading.sort_by(|&a, &b| {
-        let (za, zb) = (&new_zones[a], &new_zones[b]);
-        reading_order((za.monitor, za.area), (zb.monitor, zb.area))
-    });
-    for (n, i) in reading.into_iter().enumerate() {
+    let places: Vec<(usize, RatioRect)> = new_zones.iter().map(|z| (z.monitor, z.area)).collect();
+    for (n, i) in reading_order(&places).into_iter().enumerate() {
         let m = new_zones[i].monitor;
         let kept_before = zones
             .iter()

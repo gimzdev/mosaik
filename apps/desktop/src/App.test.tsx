@@ -23,7 +23,7 @@ const engine = vi.hoisted(() => ({
   appIcons: vi.fn((keys: string[]) => Promise.resolve(Object.fromEntries(keys.map((k) => [k, null])))),
   showSwitcher: vi.fn(),
   takeNotices: vi.fn<() => Promise<Notice[]>>(() => Promise.resolve([])),
-  onNotices: vi.fn(() => () => undefined),
+  onNotices: vi.fn<(callback: () => void) => () => void>(() => () => undefined),
   onWorkspacesChanged: vi.fn<(callback: () => void) => () => void>(() => () => undefined),
   openLink: vi.fn(() => Promise.resolve(null)),
   openLogs: vi.fn(() => Promise.resolve(null)),
@@ -273,6 +273,36 @@ describe('Mosaïk’s window', () => {
       within(screen.getByRole('region', { name: 'Notes' })).getByRole('button', { name: 'Clear all' }),
     );
     expect(screen.queryByRole('button', { name: /Notes from Mosaïk/ })).not.toBeInTheDocument();
+  });
+
+  it('says a note that arrives to screen readers: that there is one, and its title', async () => {
+    // The toast is drawn by the engine and the count by the bell is a picture: neither is read
+    // out. The rest of the note waits behind the button, as for everyone.
+    engine.takeNotices.mockResolvedValue([{ title: 'FancyZones is running', body: 'It moves windows too.' }]);
+    let arrived: () => void = () => undefined;
+    engine.onNotices.mockImplementation((callback) => {
+      arrived = callback;
+      return () => undefined;
+    });
+    answer(setUp);
+    render(<App />);
+    await screen.findByRole('button', { name: 'Notes from Mosaïk: 1' });
+    const said = screen.getByRole('status');
+    await waitFor(() => {
+      expect(said).toHaveTextContent('New note from Mosaïk: FancyZones is running');
+    });
+    expect(said).not.toHaveTextContent('It moves windows too.');
+    // Two more at once: how many, and the latest.
+    engine.takeNotices.mockResolvedValue([
+      { title: 'A tab could not be hidden', body: 'Windows would not hide it.' },
+      { title: 'Mosaïk cannot move this window', body: 'Task Manager runs as administrator.' },
+    ]);
+    arrived();
+    await screen.findByRole('button', { name: 'Notes from Mosaïk: 3' });
+    await waitFor(() => {
+      expect(said).toHaveTextContent('2 new notes from Mosaïk. The latest: Mosaïk cannot move this window');
+    });
+    engine.onNotices.mockImplementation(() => () => undefined);
   });
 
   it('opens the switcher from its bar, with the shortcut that really opens it', async () => {

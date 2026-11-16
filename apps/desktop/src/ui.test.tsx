@@ -57,6 +57,31 @@ describe('a menu', () => {
     expect(scrolled).toHaveBeenCalled();
     expect(scrolled.mock.contexts[0]).toBe(list);
   });
+
+  it('goes through its items with the arrows, from its button too, and to its ends with Home and End', async () => {
+    place(100, 180, 600);
+    await open();
+    const item = (name: string) => screen.getByRole('button', { name });
+    expect(item('Change its apps…')).toHaveFocus();
+    await userEvent.keyboard('{ArrowUp}');
+    expect(item('Delete…')).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}');
+    expect(item('Edit zones')).toHaveFocus();
+    await userEvent.keyboard('{End}');
+    expect(item('Delete…')).toHaveFocus();
+    await userEvent.keyboard('{Home}');
+    expect(item('Change its apps…')).toHaveFocus();
+    // Back on the button with the menu still open: Up is the last item, where it was the one
+    // before it.
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(screen.getByRole('button', { name: 'More for “Ship”' })).toHaveFocus();
+    await userEvent.keyboard('{ArrowUp}');
+    expect(item('Delete…')).toHaveFocus();
+    await userEvent.keyboard('{Shift>}{Tab}{Tab}{Tab}{Tab}{Tab}{/Shift}');
+    expect(screen.getByRole('button', { name: 'More for “Ship”' })).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}');
+    expect(item('Change its apps…')).toHaveFocus();
+  });
 });
 
 describe('a page’s title', () => {

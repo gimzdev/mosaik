@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 
 use crate::journal::{JOURNAL_VERSION, Journal};
-use crate::layout::{Workspace, WorkspaceId};
+use crate::layout::{LayoutProblem, Workspace, WorkspaceId};
 use crate::settings::{SETTINGS_VERSION, Settings};
 
 pub const WORKSPACES_VERSION: u32 = 1;
@@ -64,6 +64,12 @@ impl Default for WorkspacesFile {
 pub trait Saved: Serialize + DeserializeOwned + Default {
     const FILE: &'static str;
     const VERSION: u32;
+    /// Whether a copy of the file is kept beside it to fall back on (`*.last-good.json`): the
+    /// file as it last read well, when it was loaded or right before a save replaced it. Not
+    /// the journal of hidden windows: it lists what is hidden now, a copy from another moment
+    /// would bring other windows back to places they have left, and every hidden window
+    /// carries its own marker for when the journal is lost (ADR 0006).
+    const KEEPS_COPY: bool = true;
 
     /// Moves the JSON of an older version `from` to the current version in one move, with what
     /// the user should know about it, if anything: the changes they will see, in one note (a
@@ -196,19 +202,29 @@ impl Saved for WorkspacesFile {
                 ));
             }
         }
+        // What else a file edited by hand can hold (an id used twice, a zone or an app on a
+        // monitor it does not know, an app whose zone is gone) is mended too, and said once:
+        // left as it was, the workspace was skipped in part and told again at every start.
+        for w in &mut self.workspaces {
+            let mended = w.layout.repair_places();
+            if !mended.is_empty() {
+                notes.push(format!(
+                    "Workspace \u{201c}{}\u{201d} had {}, mended: {}.",
+                    w.name,
+                    counted(mended.len()),
+                    said_once(mended.iter().map(LayoutProblem::mended)).join("; ")
+                ));
+            }
+        }
+        // Nothing should be left; what is, Mosaïk works around, and says.
         for w in &self.workspaces {
             let problems = w.layout.problems();
             if !problems.is_empty() {
-                let said: Vec<String> = problems.iter().map(ToString::to_string).collect();
                 notes.push(format!(
                     "Workspace \u{201c}{}\u{201d} has {} Mosaïk will skip over: {}.",
                     w.name,
-                    if problems.len() == 1 {
-                        "1 problem".to_owned()
-                    } else {
-                        format!("{} problems", problems.len())
-                    },
-                    said.join("; ")
+                    counted(problems.len()),
+                    said_once(problems.iter().map(ToString::to_string)).join("; ")
                 ));
             }
         }
@@ -238,9 +254,38 @@ impl Saved for WorkspacesFile {
     }
 }
 
+/// "1 problem", "3 problems".
+fn counted(problems: usize) -> String {
+    if problems == 1 {
+        "1 problem".to_owned()
+    } else {
+        format!("{problems} problems")
+    }
+}
+
+/// Sentences in the order they came, the same one met again counted rather than said again
+/// ("…, twice", "…, 3 times"): three apps under one id said the same sentence twice in a row.
+fn said_once(sentences: impl Iterator<Item = String>) -> Vec<String> {
+    let mut met: Vec<(String, usize)> = Vec::new();
+    for text in sentences {
+        match met.iter_mut().find(|(t, _)| *t == text) {
+            Some((_, times)) => *times += 1,
+            None => met.push((text, 1)),
+        }
+    }
+    met.into_iter()
+        .map(|(text, times)| match times {
+            1 => text,
+            2 => format!("{text}, twice"),
+            n => format!("{text}, {n} times"),
+        })
+        .collect()
+}
+
 impl Saved for Journal {
     const FILE: &'static str = crate::journal::FILE;
     const VERSION: u32 = JOURNAL_VERSION;
+    const KEEPS_COPY: bool = false;
 }
 
 #[derive(Debug, Error)]
@@ -334,9 +379,13 @@ impl Store {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // A missing file with a backup means something removed it: recover rather than
                 // start over.
-                return match fs::read(&backup) {
-                    Ok(b) => {
-                        let (value, notes, _) = decode::<T>(&b, &backup)?;
+                return match Self::copy_of::<T>(&backup) {
+                    Some(b) => {
+                        let (value, mut notes, _) =
+                            decode::<T>(&b).map_err(|e| e.at::<T>(backup.clone(), backup.clone()))?;
+                        notes.push(format!("{} was missing. {COPY_USED}", T::FILE));
+                        // Written back, like a file mended: the copy is used, and said, once.
+                        let _ = self.save(&value);
                         Ok(Loaded {
                             value,
                             source: Source::LastGood {
@@ -346,7 +395,7 @@ impl Store {
                             notes,
                         })
                     }
-                    Err(_) => Ok(Loaded {
+                    None => Ok(Loaded {
                         value: T::default(),
                         source: Source::Default,
                         notes: Vec::new(),
@@ -355,11 +404,17 @@ impl Store {
             }
             Err(source) => return Err(StoreError::Io { path, source }),
         };
-        match decode::<T>(&bytes, &path) {
+        match decode::<T>(&bytes) {
             Ok((value, notes, changed)) => {
-                // Keep a copy of the file as it was when it last loaded cleanly.
-                if fs::read(&backup).ok().as_deref() != Some(bytes.as_slice()) {
-                    write_atomic(&backup, &bytes)?;
+                // Keep a copy of the file as it was when it last loaded cleanly. A copy that
+                // cannot be written (a full disk, a file another program holds) is no reason to
+                // refuse the file itself, which was read: Mosaïk would start on its defaults, with
+                // no workspace, beside files that are sound.
+                if !T::KEEPS_COPY {
+                    // One left by a version that kept a copy of every file: of another moment.
+                    let _ = fs::remove_file(&backup);
+                } else if fs::read(&backup).ok().as_deref() != Some(bytes.as_slice()) {
+                    let _ = write_atomic(&backup, &bytes);
                 }
                 // A file moved forward or mended is written back as it is now, so the move or the
                 // mending happens once and its note is said once (job 0094: the note of a move
@@ -374,23 +429,40 @@ impl Store {
                     notes,
                 })
             }
-            Err(e @ StoreError::Newer { .. }) => Err(e),
-            Err(e) => {
-                let reason = e.to_string();
+            Err(Unusable::Newer(found)) => Err(StoreError::Newer {
+                path,
+                found,
+                supported: T::VERSION,
+            }),
+            Err(Unusable::Damaged(reason)) => {
                 let kept = self.dir.join(format!("{}.damaged-{}", T::FILE, unix_seconds()));
                 fs::rename(&path, &kept).map_err(|source| StoreError::Io {
                     path: path.clone(),
                     source,
                 })?;
-                match fs::read(&backup).ok().map(|b| decode::<T>(&b, &backup)) {
-                    Some(Ok((value, notes, _))) => Ok(Loaded {
-                        value,
-                        source: Source::LastGood {
-                            damaged_kept_as: Some(kept),
-                            reason,
-                        },
-                        notes,
-                    }),
+                match Self::copy_of::<T>(&backup).map(|b| decode::<T>(&b)) {
+                    Some(Ok((value, mut notes, _))) => {
+                        // Said, as this module promises: the user's last changes are not in the
+                        // copy, and nothing else would tell them why.
+                        notes.push(format!(
+                            "{} could not be read: {reason}. {COPY_USED} The file as it was is kept as {}.",
+                            T::FILE,
+                            kept.file_name().map_or_else(
+                                || kept.display().to_string(),
+                                |name| name.to_string_lossy().into_owned()
+                            ),
+                        ));
+                        // Written back: the copy is used, and said, once.
+                        let _ = self.save(&value);
+                        Ok(Loaded {
+                            value,
+                            source: Source::LastGood {
+                                damaged_kept_as: Some(kept),
+                                reason,
+                            },
+                            notes,
+                        })
+                    }
                     _ => Err(StoreError::Damaged { path, reason, kept }),
                 }
             }
@@ -405,7 +477,45 @@ impl Store {
         let mut json =
             serde_json::to_vec_pretty(value).map_err(|_| StoreError::Encode(T::FILE.to_owned()))?;
         json.push(b'\n');
-        write_atomic(&self.path(T::FILE), &json)
+        let path = self.path(T::FILE);
+        if T::KEEPS_COPY {
+            self.keep_copy::<T>(&path, &json);
+        }
+        write_atomic(&path, &json)
+    }
+
+    /// The copy of a file to fall back on, when its kind keeps one and it is there. A copy
+    /// left by a version that kept one of every file (the journal's) is removed: it is of
+    /// another moment.
+    fn copy_of<T: Saved>(backup: &Path) -> Option<Vec<u8>> {
+        if T::KEEPS_COPY {
+            fs::read(backup).ok()
+        } else {
+            let _ = fs::remove_file(backup);
+            None
+        }
+    }
+
+    /// Before the file at `path` is replaced by `next`: the file as it is becomes the copy to
+    /// fall back on, when it reads well and is not the copy already. The copy is then one
+    /// change behind the file at most; made only when the file was loaded, it was as old as
+    /// Mosaïk's last start, and everything saved since was lost with a file that went bad. A
+    /// file that does not read well (damaged by hand since it was loaded) is not kept: the
+    /// copy before it stays. Nothing here can fail the save: the copy is a convenience.
+    fn keep_copy<T: Saved>(&self, path: &Path, next: &[u8]) {
+        let Ok(now) = fs::read(path) else {
+            return;
+        };
+        if now == next {
+            return;
+        }
+        let backup = self.last_good(T::FILE);
+        if fs::read(&backup).ok().as_deref() == Some(now.as_slice()) {
+            return;
+        }
+        if decode::<T>(&now).is_ok() {
+            let _ = write_atomic(&backup, &now);
+        }
     }
 }
 
@@ -413,56 +523,89 @@ impl Store {
 /// forward from an older version, or mended.
 type Decoded<T> = (T, Vec<String>, bool);
 
-fn decode<T: Saved>(bytes: &[u8], path: &Path) -> Result<Decoded<T>, StoreError> {
-    let damaged = |reason: String| StoreError::Damaged {
-        path: path.to_owned(),
-        reason,
-        kept: path.to_owned(),
+/// What is said when the copy kept of a file stands in for it: the file as it was before the
+/// last change saved (`Store::keep_copy`), or as it was loaded when nothing was saved since.
+const COPY_USED: &str =
+    "Mosaïk went back to the copy it keeps from before the last change saved; that change may not be in it.";
+
+/// Why a file's bytes cannot be used.
+enum Unusable {
+    /// Saved by a newer Mosaïk, in this format version.
+    Newer(u32),
+    /// Not a file this version reads, and why, in a few words ("not valid JSON (…)").
+    Damaged(String),
+}
+
+impl Unusable {
+    /// As the error of the file at `path`, which was left or put aside as `kept`.
+    fn at<T: Saved>(self, path: PathBuf, kept: PathBuf) -> StoreError {
+        match self {
+            Unusable::Newer(found) => StoreError::Newer {
+                path,
+                found,
+                supported: T::VERSION,
+            },
+            Unusable::Damaged(reason) => StoreError::Damaged { path, reason, kept },
+        }
+    }
+}
+
+/// The byte order mark some editors and Windows PowerShell 5.1 put before UTF-8 text.
+const BYTE_ORDER_MARK: &[u8] = b"\xEF\xBB\xBF";
+
+fn decode<T: Saved>(bytes: &[u8]) -> Result<Decoded<T>, Unusable> {
+    // A file saved by hand with a byte order mark is still the user's file: read without it,
+    // and written back without it (JSON has none), rather than put aside as damaged.
+    let (bytes, marked) = match bytes.strip_prefix(BYTE_ORDER_MARK) {
+        Some(rest) => (rest, true),
+        None => (bytes, false),
     };
     let mut value: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|e| damaged(format!("not valid JSON ({e})")))?;
+        serde_json::from_slice(bytes).map_err(|e| Unusable::Damaged(format!("not valid JSON ({e})")))?;
     let found = value
         .get("version")
         .and_then(serde_json::Value::as_u64)
         .and_then(|v| u32::try_from(v).ok())
-        .ok_or_else(|| damaged("no format version".to_owned()))?;
+        .ok_or_else(|| Unusable::Damaged("no format version".to_owned()))?;
     if found > T::VERSION {
-        return Err(StoreError::Newer {
-            path: path.to_owned(),
-            found,
-            supported: T::VERSION,
-        });
+        return Err(Unusable::Newer(found));
     }
     let mut notes = Vec::new();
     if found < T::VERSION {
-        let (moved, note) = T::migrate(value, found).map_err(damaged)?;
+        let (moved, note) = T::migrate(value, found).map_err(Unusable::Damaged)?;
         value = moved;
         notes.extend(note);
     }
     if let Some(v) = value.get_mut("version") {
         *v = serde_json::Value::from(T::VERSION);
     }
-    let mut parsed: T = serde_json::from_value(value).map_err(|e| damaged(e.to_string()))?;
+    let mut parsed: T = serde_json::from_value(value).map_err(|e| Unusable::Damaged(e.to_string()))?;
     let mended = parsed.repair();
-    let changed = found < T::VERSION || !mended.is_empty();
+    let changed = marked || found < T::VERSION || !mended.is_empty();
     notes.extend(mended);
     Ok((parsed, notes, changed))
 }
 
 /// Writes `bytes` to a temporary file next to `path`, flushes it to disk, then renames it over
-/// `path`. A crash or power loss leaves either the old file or the new one, never half of each.
+/// `path`. A crash or power loss leaves either the old file or the new one, never half of each;
+/// a write that fails leaves the old file, and no temporary file beside it.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
-    let io = |source| StoreError::Io {
-        path: path.to_owned(),
-        source,
-    };
-    let tmp = path.with_extension("json.tmp");
-    {
-        let mut f = fs::File::create(&tmp).map_err(io)?;
-        f.write_all(bytes).map_err(io)?;
-        f.sync_all().map_err(io)?;
+    fn write_then_rename(tmp: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        let mut f = fs::File::create(tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        // Closed before it is renamed.
+        drop(f);
+        fs::rename(tmp, path)
     }
-    fs::rename(&tmp, path).map_err(io)
+    let tmp = path.with_extension("json.tmp");
+    write_then_rename(&tmp, path, bytes).map_err(|source| {
+        let _ = fs::remove_file(&tmp);
+        StoreError::Io {
+            path: path.to_owned(),
+            source,
+        }
+    })
 }
 
 fn unix_seconds() -> u64 {
@@ -561,6 +704,163 @@ mod tests {
         fs::remove_file(d.0.join("workspaces.json")).unwrap();
         let loaded = store.load::<WorkspacesFile>().unwrap();
         assert!(matches!(loaded.source, Source::LastGood { .. }));
+    }
+
+    #[test]
+    fn a_damaged_file_says_why_once() {
+        // The reason given was the whole error of the first reading, so the message held itself:
+        // "… is damaged and there is no good copy to fall back on: … is damaged and there is no
+        // good copy to fall back on: not valid JSON (…). The damaged file was kept as
+        // …\workspaces.json.. The damaged file was kept as …", naming the file itself as the copy
+        // kept, before the real one.
+        let d = TempDir::new("says-once");
+        fs::write(d.0.join("workspaces.json"), b"not json").unwrap();
+        let err = Store::new(&d.0).load::<WorkspacesFile>().unwrap_err();
+        let StoreError::Damaged { reason, kept, .. } = &err else {
+            panic!("{err}")
+        };
+        assert!(reason.starts_with("not valid JSON ("), "{reason}");
+        assert!(kept.exists(), "the damaged file is kept for the user");
+        let said = err.to_string();
+        assert_eq!(said.matches("is damaged").count(), 1, "{said}");
+        assert_eq!(said.matches("kept as").count(), 1, "{said}");
+        assert!(!said.contains(".."), "{said}");
+        assert!(
+            said.ends_with(&format!("The damaged file was kept as {}.", kept.display())),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn going_back_to_the_last_good_copy_is_said_once_and_written_back() {
+        // "The user is told", this module says of a file that cannot be read: nothing told them.
+        // Mosaïk started on the copy from its start before, the workspaces saved since gone
+        // without a word. One note says it, with the name the unreadable file is kept under; the
+        // copy becomes the file again, so the next start reads it and says nothing.
+        let d = TempDir::new("copy-said");
+        let store = Store::new(&d.0);
+        let s = Settings {
+            onboarding_done: true,
+            ..Settings::default()
+        };
+        store.save(&s).unwrap();
+        store.load::<Settings>().unwrap(); // makes the last-good copy
+        fs::write(
+            d.0.join("settings.json"),
+            b"{\"version\": 6, \"theme\": \"blue\"}",
+        )
+        .unwrap();
+        let loaded = store.load::<Settings>().unwrap();
+        assert_eq!(loaded.value, s);
+        let Source::LastGood {
+            damaged_kept_as: Some(kept),
+            reason,
+        } = &loaded.source
+        else {
+            panic!("{:?}", loaded.source)
+        };
+        assert!(
+            reason.contains("blue"),
+            "the reason is the reading's own: {reason}"
+        );
+        let name = kept.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("settings.json.damaged-"), "{name}");
+        assert_eq!(loaded.notes.len(), 1, "{:?}", loaded.notes);
+        let note = &loaded.notes[0];
+        assert!(note.starts_with("settings.json could not be read: "), "{note}");
+        assert!(
+            note.contains("went back to the copy it keeps from before the last change saved"),
+            "{note}"
+        );
+        assert!(
+            note.ends_with(&format!("The file as it was is kept as {name}.")),
+            "{note}"
+        );
+        assert!(!note.contains("no good copy"), "{note}");
+        let again = store.load::<Settings>().unwrap();
+        assert_eq!(again.source, Source::File, "the copy was written back");
+        assert_eq!(again.value, s);
+        assert!(again.notes.is_empty(), "said once: {:?}", again.notes);
+    }
+
+    #[test]
+    fn a_missing_file_with_a_copy_is_said_once_and_written_back() {
+        // Deleting settings.json to start afresh brought the old settings back from the copy,
+        // without a word.
+        let d = TempDir::new("missing-said");
+        let store = Store::new(&d.0);
+        let w = WorkspacesFile::default();
+        store.save(&w).unwrap();
+        store.load::<WorkspacesFile>().unwrap();
+        fs::remove_file(d.0.join("workspaces.json")).unwrap();
+        let loaded = store.load::<WorkspacesFile>().unwrap();
+        assert!(matches!(
+            loaded.source,
+            Source::LastGood {
+                damaged_kept_as: None,
+                ..
+            }
+        ));
+        assert_eq!(loaded.notes.len(), 1, "{:?}", loaded.notes);
+        assert!(
+            loaded.notes[0].starts_with("workspaces.json was missing. Mosa\u{ef}k went back to the copy"),
+            "{:?}",
+            loaded.notes
+        );
+        let again = store.load::<WorkspacesFile>().unwrap();
+        assert_eq!(again.source, Source::File);
+        assert!(again.notes.is_empty(), "said once: {:?}", again.notes);
+    }
+
+    #[test]
+    fn a_copy_that_cannot_be_written_does_not_stop_the_file_from_loading() {
+        // The copy kept beside a file that loads is a convenience. When it could not be written
+        // (a full disk, the copy held by another program), the load itself failed: Mosaïk started
+        // on its default settings and showed no workspace, beside files that were sound.
+        let d = TempDir::new("copy-refused");
+        let store = Store::new(&d.0);
+        let s = Settings {
+            onboarding_done: true,
+            ..Settings::default()
+        };
+        store.save(&s).unwrap();
+        // A folder where the copy goes: it cannot be read as a file, nor replaced by one.
+        fs::create_dir(d.0.join("settings.last-good.json")).unwrap();
+        let loaded = store.load::<Settings>().unwrap();
+        assert_eq!(loaded.source, Source::File);
+        assert_eq!(loaded.value, s);
+        assert!(loaded.notes.is_empty(), "{:?}", loaded.notes);
+        assert!(
+            !d.0.join("settings.last-good.json.tmp").exists(),
+            "a write that failed leaves no temporary file"
+        );
+        assert!(write_atomic(&d.0.join("settings.last-good.json"), b"{}").is_err());
+    }
+
+    #[test]
+    fn a_file_saved_with_a_byte_order_mark_is_read() {
+        // Windows PowerShell 5.1 (`Set-Content -Encoding UTF8`) and some editors put a byte order
+        // mark before the text. JSON has none, so the file was "not valid JSON": put aside as
+        // damaged, the edit made by hand gone. It is the user's file: read, and written back
+        // without the mark.
+        let d = TempDir::new("marked");
+        let mut bytes = b"\xEF\xBB\xBF".to_vec();
+        bytes.extend_from_slice(br#"{"version":6,"theme":"light","onboarding_done":true}"#);
+        let loaded = load_settings(&d, &bytes);
+        assert_eq!(loaded.source, Source::File);
+        assert_eq!(loaded.value.theme, crate::settings::Theme::Light);
+        assert!(loaded.value.onboarding_done);
+        assert!(loaded.notes.is_empty(), "{:?}", loaded.notes);
+        let written = fs::read(d.0.join("settings.json")).unwrap();
+        assert!(written.starts_with(b"{"), "written back without the mark");
+        assert!(
+            !fs::read_dir(&d.0).unwrap().any(|f| f
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("damaged")),
+            "nothing was put aside"
+        );
     }
 
     /// Writes `json` as the settings file in `d` and loads it.
@@ -763,30 +1063,162 @@ mod tests {
         assert_eq!(again.value, loaded.value);
     }
 
+    /// A workspaces file with one workspace, "Email", on one monitor: its zones and its apps
+    /// as given (JSON).
+    fn email(d: &TempDir, zones: &str, slots: &str) {
+        let json = format!(
+            r#"{{"version":1,"workspaces":[{{"id":"w","name":"Email","layout":{{
+                "monitors":[{{"id":"m","name":"M","bounds":{{"left":0,"top":0,"right":1920,"bottom":1080}},
+                  "work_area":{{"left":0,"top":0,"right":1920,"bottom":1032}},"dpi":96,"primary":true}}],
+                "zones":[{zones}],
+                "slots":[{slots}],
+                "tab_groups":[]}}}}],"active":null}}"#
+        );
+        fs::write(d.0.join("workspaces.json"), json).unwrap();
+    }
+
+    const ZONE_1: &str = r#"{"id":"z1","name":"1","color":"lapis","monitor":0,
+        "area":{"left":0.0,"top":0.0,"right":1.0,"bottom":1.0}}"#;
+
     #[test]
-    fn a_workspace_with_problems_is_told_in_words() {
+    fn a_workspace_with_problems_is_mended_and_told_in_words_once() {
         // An app whose zone is gone: said as such, not as Rust's debug output
-        // ("[SlotZoneMissing(SlotId(\"s1\"))]").
+        // ("[SlotZoneMissing(SlotId(\"s1\"))]"). It was skipped when the workspace opened and
+        // told again at every start, for good: nothing in Mosaïk's window could put it right. It
+        // is mended as a damaged tab group's windows are (maximised), said once, and the file
+        // written back, so the next start has nothing to say.
         let d = TempDir::new("problems");
-        fs::write(
-            d.0.join("workspaces.json"),
-            br#"{"version":1,"workspaces":[{"id":"w","name":"Email","layout":{
-                "monitors":[{"id":"m","name":"M","bounds":{"left":0,"top":0,"right":1920,"bottom":1080},
-                  "work_area":{"left":0,"top":0,"right":1920,"bottom":1032},"dpi":96,"primary":true}],
-                "zones":[],
-                "slots":[{"id":"s1","app":{"exe":"outlook.exe"},"place":{"kind":"zone","zone":"gone"}}],
-                "tab_groups":[]}}],"active":null}"#,
+        email(
+            &d,
+            "",
+            r#"{"id":"s1","app":{"exe":"outlook.exe"},"place":{"kind":"zone","zone":"gone"}}"#,
+        );
+        let store = Store::new(&d.0);
+        let loaded = store.load::<WorkspacesFile>().unwrap();
+        assert_eq!(
+            loaded.notes,
+            [
+                "Workspace \u{201c}Email\u{201d} had 1 problem, mended: an app's zone was gone (the app opens maximized now)."
+            ]
+        );
+        let layout = &loaded.value.workspaces[0].layout;
+        assert_eq!(layout.problems(), vec![]);
+        assert_eq!(
+            layout.slots[0].place,
+            crate::layout::Place::Maximized { monitor: 0 }
+        );
+        let again = store.load::<WorkspacesFile>().unwrap();
+        assert!(again.notes.is_empty(), "said once: {:?}", again.notes);
+        assert_eq!(again.value, loaded.value);
+    }
+
+    #[test]
+    fn a_problem_met_again_is_counted_not_said_again() {
+        // Three apps under one id, and one whose zone is gone: "2 problems … two of its parts
+        // share the id “s1”; two of its parts share the id “s1”" was the same sentence twice in
+        // a row. Each app has an id of its own afterwards: the first keeps it.
+        let d = TempDir::new("problems-again");
+        email(
+            &d,
+            ZONE_1,
+            r#"{"id":"s1","app":{"exe":"outlook.exe"},"place":{"kind":"zone","zone":"z1"}},
+               {"id":"s1","app":{"exe":"notepad.exe"},"place":{"kind":"zone","zone":"z1"}},
+               {"id":"s1","app":{"exe":"mspaint.exe"},"place":{"kind":"zone","zone":"z1"}},
+               {"id":"s2","app":{"exe":"calc.exe"},"place":{"kind":"zone","zone":"gone"}}"#,
+        );
+        let loaded = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
+        assert_eq!(
+            loaded.notes,
+            [
+                "Workspace \u{201c}Email\u{201d} had 3 problems, mended: two of its parts shared the id \u{201c}s1\u{201d} (one has another id now), twice; an app's zone was gone (the app opens maximized now)."
+            ]
+        );
+        let layout = &loaded.value.workspaces[0].layout;
+        assert_eq!(layout.problems(), vec![]);
+        let ids: Vec<&str> = layout.slots.iter().map(|s| s.id.0.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["s1", "s3", "s4", "s2"],
+            "the first keeps its id, the others take free ones"
+        );
+    }
+
+    #[test]
+    fn the_copy_is_one_change_behind_the_file_not_a_whole_session() {
+        // The copy was made when the file was loaded, and only then: a file that went bad took
+        // with it everything saved since Mosaïk last started (it can run for weeks). Each save
+        // now keeps the file it replaces, when that reads well.
+        let d = TempDir::new("copy-follows");
+        let store = Store::new(&d.0);
+        let named = |name: &str| WorkspacesFile {
+            workspaces: vec![crate::layout::Workspace {
+                id: WorkspaceId("w".into()),
+                name: name.into(),
+                hotkey: None,
+                layout: crate::layout::Layout::default(),
+            }],
+            ..WorkspacesFile::default()
+        };
+        store.save(&named("One")).unwrap();
+        store.load::<WorkspacesFile>().unwrap(); // Mosaïk starts
+        store.save(&named("Two")).unwrap();
+        store.save(&named("Three")).unwrap();
+        fs::write(d.0.join("workspaces.json"), b"{").unwrap();
+        let loaded = store.load::<WorkspacesFile>().unwrap();
+        assert!(matches!(loaded.source, Source::LastGood { .. }));
+        assert_eq!(
+            loaded.value.workspaces[0].name, "Two",
+            "the file before the last change saved, not the one of the last start"
+        );
+        assert!(
+            loaded.notes[0].contains("that change may not be in it"),
+            "{:?}",
+            loaded.notes
+        );
+        // A file that does not read well is never kept as the copy.
+        fs::write(d.0.join("workspaces.json"), b"edited by hand, badly").unwrap();
+        store.save(&named("Four")).unwrap();
+        fs::write(d.0.join("workspaces.json"), b"{").unwrap();
+        let loaded = store.load::<WorkspacesFile>().unwrap();
+        assert_eq!(
+            loaded.value.workspaces[0].name, "Two",
+            "the copy before the bad file stayed"
+        );
+    }
+
+    #[test]
+    fn the_journal_of_hidden_windows_keeps_no_copy() {
+        // A copy of the journal is a list of what was hidden at another moment: used when the
+        // journal was missing, it would bring back windows that are no longer hidden, to places
+        // they have left (minimised ones restored, parked ones moved). Without a journal the
+        // marker on each window is what a rescue goes by (ADR 0006). A copy left by 1.0.5 goes.
+        let d = TempDir::new("journal");
+        let store = Store::new(&d.0);
+        let mut journal = Journal::new(7);
+        journal.record(crate::journal::HiddenWindow {
+            handle: crate::window::WindowHandle(1),
+            pid: 42,
+            method: crate::journal::HideMethod::Park,
+            restore_rect: crate::geometry::Rect::new(0, 0, 800, 600),
+            was_maximized: false,
+            exe: None,
+            title: String::new(),
+        });
+        store.save(&journal).unwrap();
+        assert_eq!(store.load::<Journal>().unwrap().value, journal);
+        store.save(&Journal::new(7)).unwrap();
+        assert!(!d.0.join("hidden-windows.last-good.json").exists());
+        // One left by an earlier version, and the journal gone: nothing is hidden, as far as
+        // the journal goes, and the copy is removed.
+        fs::rename(
+            d.0.join("hidden-windows.json"),
+            d.0.join("hidden-windows.last-good.json"),
         )
         .unwrap();
-        let loaded = Store::new(&d.0).load::<WorkspacesFile>().unwrap();
-        let said = loaded.notes.join(" ");
-        assert!(
-            said.contains(
-                "Workspace \u{201c}Email\u{201d} has 1 problem Mosaïk will skip over: an app's zone is gone."
-            ),
-            "{said}"
-        );
-        assert!(!said.contains("SlotZoneMissing"), "{said}");
+        let loaded = store.load::<Journal>().unwrap();
+        assert_eq!(loaded.source, Source::Default);
+        assert!(loaded.value.hidden.is_empty());
+        assert!(!d.0.join("hidden-windows.last-good.json").exists());
     }
 
     #[test]

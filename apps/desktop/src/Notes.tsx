@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { Glyph } from './icons';
 import type { Notice } from './protocol';
+import { useAnnounce } from './ui';
 
 export interface Note extends Notice {
   id: number;
@@ -24,6 +25,23 @@ export function Notes({
   const id = useId();
   const box = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+
+  // A note that arrives is said to screen readers, which see neither the toast nor the count
+  // by the bell change: that there is one, and its title; the rest waits behind the button, as
+  // for everyone. Notes are numbered as they come, the newest first.
+  const announce = useAnnounce();
+  const heard = useRef(0);
+  const newest = notes[0];
+  useEffect(() => {
+    if (!newest || newest.id <= heard.current) return;
+    const fresh = notes.filter((n) => n.id > heard.current).length;
+    heard.current = newest.id;
+    announce(
+      fresh === 1
+        ? `New note from Mosaïk: ${newest.title}`
+        : `${String(fresh)} new notes from Mosaïk. The latest: ${newest.title}`,
+    );
+  }, [newest, notes, announce]);
 
   useEffect(() => {
     if (!open) return;

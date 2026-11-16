@@ -1,0 +1,11 @@
+One click gives every open window a numbered, coloured zone
+See where every window will go before anything moves
+Eight layouts, or zones of your own, dragged into place
+Tabs for any app: drop a window on another's number
+Workspaces bring back positions, sizes and tabs in one click
+Apps that are not open start when their workspace opens
+Switch workspaces with Win+Alt+Space, the tray or the screen's edge
+Works across monitors and display scalings
+Dark and light themes
+No account, no telemetry, no network requests
+Free and open source

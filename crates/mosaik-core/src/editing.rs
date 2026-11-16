@@ -475,8 +475,11 @@ pub fn with_layout(ws: &Workspace, monitor: usize, areas: &[RatioRect]) -> Works
     for g in &mut layout.tab_groups {
         rehome(&mut g.place);
     }
-    // A zone left empty takes the app at the back of the zone with the most apps.
-    loop {
+    // A zone left empty takes the app at the back of the zone with the most apps. Each pass
+    // fills one empty zone, so there are as many passes as zones at most: counted, because two
+    // apps under one id (a file edited by hand) sent the same app back and forth between two
+    // zones for good, each left empty in turn.
+    for _ in 0..made.len() {
         let ranks = layout.ranks();
         // Each zone's apps, with their places front to back: a window of its own, or a tab group
         // as one.
@@ -1328,6 +1331,43 @@ mod tests {
             .map(|s| s.id.0.as_str())
             .collect();
         assert_eq!(right, ["s2", "s3", "s4", "s5", "s6"]);
+    }
+
+    #[test]
+    fn a_layout_picked_for_a_workspace_with_two_apps_under_one_id_ends() {
+        // A workspace file edited by hand, or damaged: three apps under one id (Mosaïk says so
+        // when it reads the file, and goes on). A layout picked for it never ended: the zone
+        // left empty took "the app at the back" of the fullest zone, found by its id as the
+        // first of the three, the one alone in its own zone, which that left empty in turn, and
+        // so on between the two, the engine's thread busy for good and Mosaïk answering nothing
+        // (found by trying layouts made at random). Each empty zone is filled at most once.
+        let t = fixtures::uhd_200_plus_1080p_100();
+        let mut ws = coding(&t, false);
+        ws.layout.zones.retain(|z| z.monitor == 0);
+        ws.layout.slots.truncate(3);
+        let places = ["z1", "z2", "z2"];
+        for (s, zone) in ws.layout.slots.iter_mut().zip(places) {
+            s.id = sid("s1");
+            s.place = Place::Zone {
+                zone: ZoneId::new(zone),
+            };
+        }
+        assert!(
+            !ws.layout.problems().is_empty(),
+            "the file's own fault, said on load"
+        );
+        // z3 is empty, z2 holds two: the same zones again, as Half + stack keeps them.
+        let areas: Vec<RatioRect> = ws.layout.zones.iter().map(|z| z.area).collect();
+        let out = with_layout(&ws, 0, &areas);
+        assert_eq!(out.layout.slots.len(), 3, "no app is lost");
+        assert_eq!(out.layout.zones.len(), 3);
+        for s in &out.layout.slots {
+            assert!(
+                matches!(&s.place, Place::Zone { zone } if out.layout.zone(zone).is_some()),
+                "every app is still in a zone: {:?}",
+                s.place
+            );
+        }
     }
 
     #[test]

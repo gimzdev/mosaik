@@ -1,5 +1,95 @@
 # Changelog
 
+## 1.0.6
+
+- Mosaïk no longer stops when a window's app says how to start it again with a path that holds a
+  letter such as İ and no quotes (a Turkish user's folder: `C:\Users\İbrahim\…\app.exe`). Where
+  `.exe` ends was looked for in the command in lower case and used in the command as it is: İ is
+  one byte longer in lower case, so the place fell past the end of the line. Every window's
+  command is read when windows are matched to a workspace, so Mosaïk stopped whenever such a
+  window was open.
+- A layout picked for a workspace whose file holds two apps under one id (a file edited by hand,
+  or damaged) no longer leaves Mosaïk busy for good, answering nothing: the zone left empty took
+  the same app back and forth with another zone. Each empty zone is now filled once.
+- A workspace with a problem that only a file edited by hand can have (an id used twice, an app
+  whose zone is gone, a zone or an app on a monitor the workspace does not know) is mended when
+  the file is read, and said once, under "Your workspaces": what the problem was and what was
+  done (the app opens maximized, the part has another id, the zone is on the first monitor). It
+  was skipped in part each time the workspace opened and told again at every start, the same
+  sentence twice in a row when the problem came twice; that is counted now ("…, twice").
+- Zones each a little lower than the one beside them are numbered row by row, whatever order
+  the workspace's file lists them in. Whether a zone is in another's row (its top within 2% of
+  the other's) was asked of two zones at a time, which gives no order to three zones in steps:
+  the lowest could be number 1, and Mosaïk could stop while numbering a workspace of more than
+  20 such zones. A row now starts at its highest zone and takes the zones within 2% of it
+  (ADR 0028, amended). Zones in plain rows keep their numbers.
+- When `settings.json` or `workspaces.json` cannot be read and Mosaïk goes back to the copy it
+  keeps, it says so, once: which file, why, that the last change saved may not be in the copy,
+  and the name the unreadable file is kept under. Nothing said it before. The copy becomes the
+  file again, so the next start says nothing. A file removed while its copy is there is said the
+  same way (ADR 0044).
+- That copy is now one change behind the file at most: each save keeps the file it replaces,
+  when it reads well. It was made only when Mosaïk started, so a file that went bad took with it
+  everything saved since, which can be weeks.
+- The message for a file that cannot be read and has no copy says why once. It held itself ("… is
+  damaged and there is no good copy to fall back on: … is damaged and there is no good copy to
+  fall back on: not valid JSON …") and named the file itself as the one kept.
+- A settings or workspaces file that reads well is no longer refused because its copy could not
+  be written (a full disk, the copy held by another program): Mosaïk started on its default
+  settings and showed no workspace.
+- A settings or workspaces file saved with a byte order mark (Windows PowerShell 5.1's
+  `Set-Content -Encoding UTF8`, some editors) is read, and written back without it. It was put
+  aside as damaged.
+- The journal of hidden windows keeps no copy any more. With the journal missing, a rescue went
+  by a copy of it from another moment, which could bring back windows that were no longer hidden,
+  to places they had left; it goes by the marker each hidden window carries, as it does when
+  there is no journal at all. Asking Mosaïk for its state (`mosaikctl state`) no longer writes a
+  file.
+- Screen readers hear a note when it arrives: that there is one, and its title. The toast and the
+  count by the bell were not read out.
+- In a menu (a workspace's ⋯), Up from the menu's button goes to the last item (it went to the one
+  before it), and Home and End go to the first and the last.
+- The watchdog's wait for Mosaïk to end cannot turn without rest, should Windows ever refuse the
+  wait.
+- "Background tabs are minimized": spelled as everywhere else in the app.
+
+## 1.0.5
+
+- Rate Mosaïk, in About and in the tray menu beside Support on Patreon: it opens Mosaïk's page in
+  the Microsoft Store, where a rating or a review can be left (ADR 0043). Windows opens the Store
+  app; Mosaïk itself still makes no network request.
+
+## 1.0.4
+
+- The same app as 1.0.3, sent again to go with the Store listing's new screenshots and their
+  captions. The Store takes a package of a version only once: 1.0.3 was out already, and the 1.0.3
+  built again was refused ("Appx packages ... must be uniquely identified by their full names").
+- `.\mosaik.ps1 publish` (and `./mosaik.sh --app`) asks the Store before its tests and build:
+  while the Store still checks the version sent before, or when it has this version already, it
+  says so and nothing is tested, built or sent, and the site still goes up with `--deploy --app`
+  (a newer version in the Store stops it). The 1.0.3 built again had been
+  tested, built and sent, and refused only then. It runs the tests only on code they have not
+  passed on yet: a new version number, the notes, the docs and the Store listing do not count, so
+  the same code sent again goes straight to its build (`.\mosaik.ps1 test` always runs them). The
+  engine tests print a dot per test instead of a line, and a file Smart App Control refuses is
+  said not to be the code.
+
+## 1.0.3
+
+- A window dropped on another window's tag becomes its tab with the strip above them at once. In
+  1.0.2 the strip could stay away (the dropped window not yet settled in its place, or the strip's
+  first draw refused) while the window behind was hidden all the same, so it looked gone until
+  something else changed the tabs. A group now keeps all its tabs on screen while its strip is not,
+  and the passes that put strips back above a window after it is raised draw a missing strip, its
+  group's other tabs hiding then.
+- The Store listing's short description goes with the app too, from
+  `installer/msix/listing/en-us/short-description.txt` (1,000 characters at most), like the
+  description, features and search terms.
+- `.\mosaik.ps1` builds on when Smart App Control refuses a file again on the run that makes the
+  first one again: each file it refuses is made again, six runs at most. It tried only one run
+  more, so a build stopped when that run had another file refused (`serde_derive`, then
+  `yoke_derive`).
+
 ## 1.0.2
 
 - Click a workspace on Home and the picture shows it as it will open: its apps glide to their

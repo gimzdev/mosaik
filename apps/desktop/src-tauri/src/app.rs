@@ -28,6 +28,9 @@ const PATREON: &str = "https://www.patreon.com/gimzdev";
 const SITE: &str = "https://xn--mosak-fta.com";
 const PRIVACY: &str = "https://xn--mosak-fta.com/conditions";
 const SOURCE: &str = "https://github.com/gimzdev/mosaik";
+/// Mosaïk's page in the Microsoft Store, to rate it (About and the tray menu): Windows opens the
+/// Store app on it. Mosaïk itself sends nothing.
+const REVIEW: &str = "ms-windows-store://review/?ProductId=9PHR0L7S1QVD";
 /// How long the interface waits for the engine before showing "busy".
 const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long Mosaïk, asked to quit, waits for its interface to end it before it quits from its
@@ -568,7 +571,7 @@ fn workspaces(engine: &Engine) -> (Vec<WorkspaceSummary>, Option<mosaik_core::la
 }
 
 /// The tray menu: the saved workspaces first (a click opens one; the open one is checked), then
-/// the switcher, settings, rescue, Patreon and quit.
+/// the switcher, settings, rescue, rating Mosaïk, Patreon and quit.
 fn tray_menu(
     app: &AppHandle,
     workspaces: &[WorkspaceSummary],
@@ -597,6 +600,7 @@ fn tray_menu(
         &PredefinedMenuItem::separator(app)?,
         &MenuItem::with_id(app, "rescue", "Rescue windows", true, None::<&str>)?,
         &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "review", "Rate Mosaïk", true, None::<&str>)?,
         &MenuItem::with_id(app, "patreon", "Support on Patreon", true, None::<&str>)?,
         &MenuItem::with_id(app, "quit", "Quit Mosaïk", true, None::<&str>)?,
     ])?;
@@ -647,6 +651,11 @@ fn build_tray(app: &AppHandle, engine: &Engine) -> tauri::Result<()> {
             "switcher" => ask_engine(app, Command::ShowSwitcher),
             "settings" => show_settings(app),
             "rescue" => ask_engine(app, Command::Rescue),
+            "review" => {
+                if let Err(e) = mosaik_win::process::shell_open(REVIEW, "") {
+                    tracing::error!(error = %e, "Store not opened");
+                }
+            }
             "patreon" => {
                 if let Err(e) = mosaik_win::process::shell_open(PATREON, "") {
                     tracing::error!(error = %e, "browser not opened");
@@ -839,7 +848,8 @@ fn style_title_bar(
     Ok(())
 }
 
-/// Opens one of Mosaïk's pages in the default browser. Only these can be opened.
+/// Opens one of Mosaïk's pages in the default browser, or its rating page in the Store. Only
+/// these can be opened.
 #[tauri::command]
 fn open_link(link: String) -> Result<(), String> {
     let url = match link.as_str() {
@@ -847,9 +857,15 @@ fn open_link(link: String) -> Result<(), String> {
         "site" => SITE,
         "privacy" => PRIVACY,
         "source" => SOURCE,
+        "review" => REVIEW,
         _ => return Err(format!("unknown link: {link}")),
     };
-    mosaik_win::process::shell_open(url, "").map_err(|e| format!("The browser did not open: {e}"))
+    let opener = if link == "review" {
+        "The Microsoft Store"
+    } else {
+        "The browser"
+    };
+    mosaik_win::process::shell_open(url, "").map_err(|e| format!("{opener} did not open: {e}"))
 }
 
 /// Opens the licences of the open-source software Mosaïk is built with: THIRD-PARTY-NOTICES.txt,

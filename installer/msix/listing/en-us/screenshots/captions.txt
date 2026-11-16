@@ -1,0 +1,6 @@
+Every window, in its place: one click gives every open window a numbered, coloured zone.
+See where every window goes before anything moves: an automatic layout for what you are working on, or one of eight.
+Tabs for any app, not only the browser: drop a window on another window's number and they share a tab strip.
+Switch projects, not just windows: a workspace brings back positions, sizes and tabs in one click, and Win + Alt + Space switches from any app.
+Zones of your own: drag a line to resize, split a zone in two, give each one its colour.
+Free and open source, with no account, no telemetry and no network requests. Dark and light themes.
